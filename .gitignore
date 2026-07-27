@@ -1,0 +1,43 @@
+# Local environment and credentials
+.env
+.env.*
+!.env.example
+*.kubeconfig
+kubeconfig
+kubeconfig.*
+*.key
+*.pem
+*.p12
+*.pfx
+credentials.json
+service-account*.json
+
+# Runtime data
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.sqlite-*
+*.wal
+*.shm
+*.log
+logs/
+cache/
+runtime/
+
+# Dependencies, builds and test output
+node_modules/
+dist/
+build/
+bin/
+coverage/
+*.out
+
+# Local binaries
+/kubePeep
+/kubePeep.exe
+
+# Editors and operating systems
+.DS_Store
+.idea/
+.vscode/
