@@ -1,0 +1,16 @@
+$ GOTOOLCHAIN=go1.25.0 go test ./control -run 'Test(NativeControlLifecycleBlackBox|ControlProbeSIGTERMCleansStateAndReleasesLock)$' -count=1 -v
+=== RUN   TestNativeControlLifecycleBlackBox
+=== RUN   TestNativeControlLifecycleBlackBox/wrong_token
+=== RUN   TestNativeControlLifecycleBlackBox/foreign_host
+=== RUN   TestNativeControlLifecycleBlackBox/browser_origin
+--- PASS: TestNativeControlLifecycleBlackBox (0.40s)
+    --- PASS: TestNativeControlLifecycleBlackBox/wrong_token (0.00s)
+    --- PASS: TestNativeControlLifecycleBlackBox/foreign_host (0.00s)
+    --- PASS: TestNativeControlLifecycleBlackBox/browser_origin (0.00s)
+=== RUN   TestControlProbeSIGTERMCleansStateAndReleasesLock
+--- PASS: TestControlProbeSIGTERMCleansStateAndReleasesLock (0.33s)
+PASS
+ok  	github.com/fvmoraes/kubepeep/spikes/phase1/control	0.733s
+
+$ GOTOOLCHAIN=go1.25.0 go test ./control -run 'TestNativeControlLifecycleBlackBox$' -count=20
+ok  	github.com/fvmoraes/kubepeep/spikes/phase1/control	6.873s

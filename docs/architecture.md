@@ -1,0 +1,506 @@
+# Arquitetura do Kube Peep
+
+> **Status:** revisado com as decisões da Fase 1
+>
+> **Regra de uso:** este documento incorpora os ADRs 0001–0004 e as evidências reproduzíveis em `docs/research/`.
+>
+> **Fontes:** [prompt inicial](../plan/initial_prompt.md), [plano](../plan/README.md), [Fase 1](../plan/01-descoberta.md) e [Fase 2](../plan/02-especificacao.md).
+
+## 1. Direcionadores
+
+1. Ginger v1.4.4 é a camada principal de aplicação e HTTP.
+2. Cobra expõe a experiência CLI.
+3. Handlers não acessam clientsets, SQLite ou filesystem diretamente.
+4. A API Kubernetes é a autoridade final para dados e autorização.
+5. Todo trabalho remoto pertence a um contexto cancelável e a uma geração de seleção.
+6. O produto funciona em loopback, em um único processo local e sem dependência própria em runtime.
+7. Falhas parciais permanecem isoladas.
+8. Streams e sessões têm owner, limite, cancelamento e cleanup.
+9. Dados Kubernetes são convertidos para DTOs próprios.
+10. Decisões que complementam Ginger são justificadas por spike e ADR.
+
+## 2. Contexto do sistema
+
+```text
+┌──────────────────┐       loopback HTTP/SSE/WS       ┌──────────────────────┐
+│ Browser do       │ <──────────────────────────────> │ Processo Kube Peep   │
+│ usuário          │                                  │ Cobra + Ginger       │
+└──────────────────┘                                  └──────┬───────┬───────┘
+                                                               │       │
+                                          arquivos permitidos  │       │ client-go
+                                                               │       │
+                                                        ┌──────▼───┐ ┌─▼─────────────┐
+                                                        │ SQLite / │ │ Kubernetes API │
+                                                        │ runtime  │ │ e Metrics API  │
+                                                        └──────────┘ └──────┬────────┘
+                                                                           │
+                                                              plugins exec │
+                                                                           ▼
+                                                                  processo externo
+                                                                  do ambiente
+```
+
+### 2.1 Fronteiras de confiança
+
+- **Browser ↔ API local:** fronteira não confiável; páginas externas podem tentar atingir loopback.
+- **Processo ↔ filesystem:** paths e permissões precisam de validação por plataforma.
+- **Processo ↔ kubeconfig/plugin `exec`:** entrada e erros podem conter segredos.
+- **Processo ↔ Kubernetes API:** TLS e credenciais são controlados pelo kubeconfig; RBAC decide.
+- **Processo ↔ SQLite/log local:** persistência é allowlisted e pode sobreviver ao processo.
+
+As contramedidas estão em [security.md](security.md).
+
+## 3. Containers e componentes
+
+O MVP possui dois containers lógicos no mesmo artefato:
+
+1. **Frontend React:** assets imutáveis embutidos, cliente HTTP e estado de apresentação.
+2. **Backend Go:** CLI, lifecycle, HTTP, aplicação, adapters e persistência.
+
+### 3.1 Componentes backend
+
+```text
+cmd/kubePeep
+  └─ commands (Cobra)
+      └─ bootstrap/lifecycle
+          ├─ Ginger app/router/config/logger/response/errors/health
+          ├─ API handlers + middleware
+          ├─ application services
+          ├─ ports
+          ├─ adapters Kubernetes/SQLite/filesystem/browser/process
+          ├─ session + watch registries
+          └─ embedded web + migrations
+```
+
+Essa organização foi confrontada com o scaffold Ginger `--service`. Cobra e os
+adapters locais serão integrados manualmente, sem importar a estrutura
+exclusiva do template `--cli`.
+
+## 4. Regra hexagonal
+
+Dependências apontam para dentro:
+
+```text
+HTTP/CLI/UI adapter
+       │
+       ▼
+application service ───► port
+                          ▲
+                          │
+                  infrastructure adapter
+```
+
+Regras verificáveis:
+
+- Handler conhece DTO, serviço de aplicação e utilitários HTTP; não importa `kubernetes.Clientset`.
+- Serviço de aplicação coordena ports e políticas; não importa router ou banco concreto.
+- Adapter Kubernetes implementa ports e retorna modelos internos/DTO inputs, nunca objetos crus ao handler.
+- Adapter SQLite não recebe objetos Kubernetes.
+- Revalidação de ações usa o mesmo `AuthorizationService` da Fase 4; não existe serviço paralelo.
+- Frontend nunca é autoridade de autorização.
+
+Um teste arquitetural futuro deve falhar se `internal/api/handlers` importar `k8s.io/client-go/kubernetes` ou o adapter SQLite concreto.
+
+## 5. Ports
+
+As assinaturas Go serão fechadas após o scaffold, mas a semântica é definida aqui.
+
+| Port | Responsabilidade | Entradas mínimas | Saídas/garantias |
+| --- | --- | --- | --- |
+| `KubeconfigLoader` | resolver conjunto ordenado de arquivos e contexto | flags, env, default, contexto | descritor sem credenciais e factory segura |
+| `ContextService` | listar/selecionar contexto e criar geração | profile e nome | contexto ativo, cluster sanitizado, generation ID |
+| `NamespaceService` | listar namespaces e gerenciar escopos | contexto, modo, entrada em massa | escopo validado e cobertura |
+| `AuthorizationService` | capability tri-state e revalidação | contexto, namespace, group, resource, subresource, verb, resourceName | `allowed`, `denied` ou `unknown`, razão segura |
+| `WorkloadService` | listar/detalhar/classificar workloads | escopo, filtros, cursor | DTOs, cursor, cobertura e falhas parciais |
+| `PodService` | listar/detalhar/classificar pods | escopo, filtros, cursor | DTOs compactos e condições reais |
+| `LogService` | logs atuais, anteriores, follow e scan limitado | alvo, limites, contexto | stream/resultado sanitizado, nunca persistido |
+| `EventService` | listar/agrupar eventos | escopo, filtros, cursor | timestamps/count preservados |
+| `NetworkService` | listar/detalhar Services, Ingresses e EndpointSlices | escopo, filtros, cursor | DTOs de rede, YAML autorizado e cobertura |
+| `ConfigResourceService` | listar/detalhar ConfigMaps e metadata de Secrets | escopo, filtros, cursor | DTO allowlisted; Secret nunca vira objeto genérico |
+| `MetricsService` | discovery e métricas opcionais | escopo e autorização | dados ou estado opcional indisponível |
+| `PreferenceService` | ler/substituir preferências allowlisted | schema versionado e snapshot completo | transação local, defaults e rejeição de sensível |
+| `ActionService` | confirmar, revalidar e executar restart/scale/delete | alvo, capability, precondition, idempotência | resultado aceito ou erro autoritativo |
+| `PortForwardService` | criar/consultar/encerrar sessão | pod, portas, geração | sessão loopback registrada e cancelável |
+| `ExecService` | executar protocolo remoto seguro | pod, container, argv, TTY | sessão bidirecional limitada e cancelável |
+| `DashboardService` | orquestrar blocos independentes | seleção, budgets | blocos com `complete`, `truncated` e erros parciais |
+
+Todos os métodos remotos recebem `context.Context`. Operações de lista recebem um objeto de seleção imutável contendo profile, contexto, escopo e generation ID.
+
+## 6. Composição do processo
+
+### 6.1 Estado desejado
+
+O processo possui um coordenador de lifecycle, único owner de:
+
+- lock de instância;
+- listener efetivamente adquirido;
+- arquivos de runtime;
+- banco e migrations;
+- servidor HTTP;
+- registro de cancelamentos por geração;
+- watch manager;
+- sessões de stream, port-forward e `exec`;
+- abertura do navegador;
+- shutdown e cleanup.
+
+### 6.2 Sequência de startup desejada
+
+```text
+parse CLI/config
+  → resolver diretório e adquirir lock
+  → abrir SQLite e aplicar migrations embutidas
+  → montar serviços/adapters/router
+  → adquirir listener loopback por bind real
+  → iniciar HTTP e comprovar `/health` na própria instância
+  → gravar estado privado temporário com PID/porta/identidade
+  → publicar `instance.json` por substituição atômica
+  → abrir browser, se permitido
+  → aguardar sinal/erro/comando de parada
+```
+
+Não se faz “descoberta de porta livre” separada do bind. A porta publicada é
+obtida do listener adquirido. PID e porta permanecem apenas em memória até o
+health local responder; ambos aparecem juntos no estado versionado, nunca em
+arquivos parcialmente atualizados ou antes da prontidão.
+
+### 6.3 Sequência de shutdown desejada
+
+```text
+cancelar root context
+  → recusar novas sessões
+  → cancelar geração ativa, watches e scans
+  → encerrar port-forwards e exec
+  → encerrar HTTP até deadline
+  → forçar fechamento seguro do restante
+  → fechar SQLite
+  → remover arquivos transitórios/liberar lock
+```
+
+Cleanup deve rodar mesmo se o shutdown HTTP atingir timeout.
+
+### 6.4 Decisão de lifecycle
+
+Os ADRs 0001 e 0004 escolheram lifecycle HTTP próprio usando `app.New` e os
+componentes Ginger, sem `app.Run()`/`OnStop`. Cobra é o único owner de sinais e
+do contexto raiz; o modo inicial é foreground. O coordenador adquire o listener,
+instala o mux externo mínimo de health, publica prontidão e executa seu registro
+LIFO de cleanup em cancelamento, erro de Serve e timeout.
+
+Os spikes F1 comprovaram esses caminhos e fecharam F1-44 com blackbox nativo no
+Linux e no Windows 10 Pro amd64, incluindo lock, fingerprint, identidade,
+`status`/`stop` autenticados e cleanup. Essa prova valida a decisão, não fornece
+código de produção: a Fase 3 reimplementa o adapter e repete sua matriz; a Fase
+8 executa os binários já empacotados nos runners nativos de release.
+
+## 7. Contrato operacional CLI
+
+| Comando | Contrato fixado | Evidência/implementação |
+| --- | --- | --- |
+| `kubePeep` | equivalente a `kubePeep start` | provado no spike; implementar na Fase 3 |
+| `start` | foreground, contexto Cobra e lifecycle próprio | ADR 0001; implementar na Fase 3 |
+| `stop` | request autenticado e prova de instance ID/PID/fingerprint antes de cancelar o contexto | probe isolado F1; reimplementação de produção F3-B |
+| `status` | request autenticado, prova da identidade completa e detecção segura de runtime obsoleto | probe isolado F1; reimplementação de produção F3-B |
+| `version` | imprimir version, commit e build date | sem spike bloqueante |
+| `doctor` | checks sanitizados e códigos definidos em `implementation-plan.md` | contrato F2; implementação F3 |
+| `update` | troca verificada e atômica; concluída na Fase 8 | testes por plataforma F8 |
+
+O endpoint interno usado pelos comandos `status` e `stop` é distinto de
+`/api/v1/status`: ambos os comandos de controle apresentam o token privado e
+exigem a mesma prova de identidade. A Fase 8 não reaproveita o probe F1; ela
+valida o comando F3 dentro dos archives e instaladores reais.
+
+Flags de contexto, kubeconfig e namespace são aceitas na Fase 3 e ligadas ao
+bootstrap Kubernetes na Fase 4. A precedência confirmada é flag explícita,
+lista ordenada de `KUBECONFIG` e arquivo padrão. O descritor persiste apenas
+paths, nunca conteúdo, fingerprints ou credenciais. Fingerprints de modificação
+existem somente em memória para invalidar o clientset.
+
+## 8. Seleção, geração e cancelamento
+
+### 8.1 Generation ID
+
+Cada combinação ativa de profile/contexto/escopo produz uma geração monotônica em memória. Toda query, cursor, watch e sessão registra a geração de origem.
+
+Ao trocar contexto ou escopo:
+
+1. criar a próxima geração;
+2. cancelar o contexto da anterior;
+3. fechar watches e sessões vinculados;
+4. invalidar caches que dependem da seleção;
+5. rejeitar respostas/cursors da geração anterior.
+
+O frontend também associa requests à geração e descarta respostas obsoletas, mesmo se o cancelamento de rede não chegar a tempo.
+
+### 8.2 Hierarquia de contextos
+
+```text
+process context
+  └─ selection generation
+      ├─ page/query
+      │   └─ Kubernetes request
+      ├─ dashboard refresh
+      │   ├─ events block
+      │   └─ log scan
+      ├─ watch subscription
+      ├─ log follow
+      ├─ port-forward session
+      └─ exec session
+```
+
+Cancelar um filho não cancela irmãos. Cancelar a geração cancela todos os filhos.
+
+## 9. Caches
+
+### 9.1 Clientset
+
+Chave lógica:
+
+```text
+ordered normalized kubeconfig paths + context
+```
+
+Invalidações:
+
+- mudança do conjunto/caminho;
+- mudança de contexto;
+- modificação observada de qualquer arquivo;
+- erro de autenticação classificado como reconstruível;
+- encerramento do processo.
+
+Credenciais e `rest.Config` existem somente em memória. A persistência mantém apenas paths ordenados e contexto.
+
+### 9.2 RBAC
+
+Chave completa:
+
+```text
+selection generation
++ namespace
++ apiGroup
++ resource
++ subresource
++ verb
++ resourceName (quando a consulta é sobre objeto específico)
+```
+
+- TTL configurável entre 30 e 60 segundos; baseline inicial: 45 segundos.
+- Deduplicação de consultas simultâneas para a mesma chave.
+- `SelfSubjectRulesReview` pode preencher dicas de UI, nunca conceder uma ação.
+- `SelfSubjectAccessReview` decide capability quando disponível.
+- Resposta incompleta, timeout ou erro produz `unknown`, não 403 inventado.
+- Mutação/upgrade sempre revalida e a chamada Kubernetes continua sendo autoridade final.
+
+### 9.3 Dados do cluster
+
+O MVP não mantém cache persistente de dados Kubernetes. TanStack Query pode manter dados apenas em memória durante a sessão, respeitando `no-store` e sem persister/service worker.
+
+### 9.4 Timeouts, concorrência e backoff
+
+Defaults iniciais do backend:
+
+| Operação | Timeout/limite |
+| --- | --- |
+| conectividade/discovery Kubernetes | 5 s |
+| SAR individual | 5 s |
+| GET/LIST de uma página/origem | 10 s |
+| bloco comum do dashboard | 12 s |
+| consulta individual de log no scan | 8 s |
+| scan completo | 30 s |
+| prontidão local antes de abrir browser | 5 s |
+| fan-out de namespaces | concorrência 4 |
+| fan-out de kinds | concorrência 3 |
+| blocos simultâneos do dashboard | concorrência 6 |
+| tentativas automáticas de leitura idempotente | no máximo 2 |
+
+Mutação, port-forward e `exec` não são repetidos automaticamente. O shutdown
+gracioso terá default de 10 s, seguido de fechamento forçado e cleanup; o valor
+é configurável dentro de limites e será exercitado com relógio reduzido nos
+testes.
+
+Backoff de watch/reconexão começa em 500 ms, dobra até 30 s, aplica jitter de ±20% e reinicia após 60 s estáveis. `Retry-After`, quando seguro, prevalece. Troca de geração cancela o backoff imediatamente.
+
+## 10. Listas, cursor e fan-out
+
+### 10.1 Cursor externo
+
+O cursor público é opaco, assinado ou autenticado contra adulteração e ligado a:
+
+- versão do schema;
+- hash da query/filtros;
+- generation ID;
+- contexto e escopo;
+- kinds/namespaces pendentes;
+- tokens `continue` por origem;
+- posição de merge;
+- expiração.
+
+### 10.2 Semântica
+
+- `single`: normalmente encapsula um token Kubernetes.
+- `all`: exige `list namespaces`; para cada recurso, usa lista global quando
+  autorizada e, caso contrário, faz fan-out limitado somente pelos namespaces
+  descobertos e autorizados;
+- `list`: pode exigir fan-out limitado e cursor composto por namespace.
+- múltiplos kinds usam merge determinístico por chave documentada.
+- cursor de outra query/geração retorna `CURSOR_MISMATCH`;
+- token malformado, adulterado ou assinado por outra instância retorna
+  `CURSOR_INVALID`;
+- cursor cujo TTL terminou retorna `CURSOR_EXPIRED`/HTTP 410.
+
+Busca e ordenação globais só são anunciadas quando podem ser cumpridas sem coleta ilimitada. Caso contrário, a API restringe campos a selectors suportados ou declara ordenação local da página. O contrato detalhado está em [api.md](api.md).
+
+O spike de F1-33 aprovou JSON versionado, base64url e HMAC-SHA-256 com chave
+aleatória por processo. Adulteração, expiração e mudança de query/geração são
+rejeitadas. O DTO público continua opaco.
+
+## 11. Watches e atualização em tempo real
+
+Fluxo desejado:
+
+1. executar LIST inicial e capturar `resourceVersion`;
+2. verificar separadamente `list` e `watch`;
+3. iniciar watch compartilhado por contexto/escopo/GVR/seletor;
+4. multiplexar eventos para subscribers compatíveis;
+5. usar bookmarks quando suportados;
+6. em `410 Gone`, relistar e reiniciar;
+7. aplicar backoff com jitter;
+8. cair para refresh HTTP quando watch for negado ou inviável.
+
+Limites:
+
+- máximo de watchers, subscribers e buffer por conexão configurado no backend;
+- nenhum watcher por componente React;
+- cliente lento é desconectado conforme contrato;
+- troca de geração encerra tudo.
+
+SSE é o transporte preferencial para atualizações unidirecionais. Conforme o
+ADR 0003, usa `HandleRaw`, writer original, request ID/recovery próprios,
+Host/Origin guard, `WriteTimeout=0`, budgets por rota e cancelamento pelo
+contexto.
+
+## 12. Logs e transporte bidirecional
+
+### 12.1 Logs
+
+- leitura comum por HTTP;
+- follow por SSE raw;
+- limite por linha, resposta, container, stream e tempo;
+- backpressure finita;
+- conteúdo sanitizado antes do DTO;
+- zero persistência interna.
+
+### 12.2 Exec
+
+Exec requer transporte bidirecional, argv como lista, streams stdin/stdout/stderr, TTY opcional, resize, heartbeat, limite de payload, timeout idle e cleanup.
+
+O POST protegido cria um ticket one-shot; o upgrade GET consome esse ticket
+pelo subprotocolo WebSocket e repete Origin, geração e autorização. O token não
+aparece em URL. O ADR 0003 rejeitou `pkg/ws` para esse caminho e fixou
+`github.com/coder/websocket v1.8.15`, com Origin, masking, opcodes,
+fragmentação, ping/pong, limites, deadlines e desconexão cobertos antes de
+habilitar `exec`.
+
+## 13. Dashboard progressivo
+
+O frontend dispara queries independentes para:
+
+- summary;
+- problems;
+- restarts;
+- events;
+- log scan;
+- metrics.
+
+Cada resposta agregada contém:
+
+- `complete`;
+- `truncated`;
+- namespaces consultados;
+- namespaces omitidos/negados;
+- instante e generation ID;
+- erros parciais sanitizados.
+
+O `DashboardService` coordena ports já usados pelas telas de recursos. A Fase 5 cria apenas a fatia mínima; a Fase 6 estende as mesmas interfaces, evitando implementações duplicadas.
+
+## 14. Health e status
+
+### 14.1 `/health`
+
+Representa prontidão local e separa:
+
+- aplicação;
+- SQLite;
+- kubeconfig;
+- contexto;
+- cluster.
+
+Falha de aplicação ou SQLite pode tornar o health não saudável. Kubeconfig ausente, contexto inválido ou cluster offline produzem estado externo degradado sem transformar automaticamente toda a aplicação em 503.
+
+O payload e a semântica HTTP estão em [api.md](api.md) e no ADR 0002.
+`health.Checker` é preservado como contrato, mas wrappers próprios fornecem
+timeout, recover e erro público sanitizado.
+
+### 14.2 `/api/v1/status`
+
+É um endpoint de produto, não um probe. Inclui versão, commit, build date, porta, componentes e seleção sanitizada. Pode fornecer diagnóstico degradado mais rico que `/health`.
+
+## 15. Observabilidade
+
+Todo evento operacional estruturado usa, quando aplicável:
+
+```text
+timestamp, level, component, operation, request_id,
+context, namespace, resource, duration, error_code
+```
+
+O tipo `logger.Logger` envolverá um `slog.Logger` com handler próprio do Kube
+Peep, JSON line em stdout/arquivo rotativo e sanitização recursiva antes dos
+sinks. A política de conteúdo está fixada em [security.md](security.md):
+payloads, credenciais, logs Kubernetes e comandos de `exec` não entram no log.
+
+OpenTelemetry é opt-in, desativado por padrão e não pode ser dependência necessária do core. Sem configuração explícita, nenhum exporter ou tráfego é iniciado.
+
+## 16. Decisões confirmadas
+
+| Tema | Decisão |
+| --- | --- |
+| Framework | Ginger service v1.4.4 + Cobra manual; sem Gin |
+| CLI | foreground; raiz=`start`; stop/status por controle autenticado e identidade |
+| HTTP | lifecycle próprio, loopback, bind real e raw middleware seguro |
+| Persistência | modernc SQLite sem CGO, migrations/frontend embutidos |
+| Health | crítico local separado de dependências externas degradadas |
+| SSE | `pkg/sse` em `HandleRaw`, limites/cancelamento próprios |
+| Exec | `coder/websocket`; `pkg/ws` rejeitado para terminal |
+| Logging | tipo Ginger com handler/sink/redactor próprios |
+| Cursor | HMAC, query/generation bound e expiração |
+| Kubeconfig | loader oficial, lista ordenada multi-arquivo e plugins `exec` |
+
+## 17. Rastreabilidade F2
+
+| Tarefas | Seções |
+| --- | --- |
+| F2-08–10 | contexto, containers, regra hexagonal e ports |
+| F2-11 | composição e lifecycle |
+| F2-12 | geração e cancelamento |
+| F2-13 | caches, concorrência e invalidação |
+| F2-14 | watches, SSE e exec |
+| F2-15 | dashboard progressivo |
+| F2-42 | contrato operacional CLI |
+| F2-46 | OpenTelemetry |
+| F2-49 | cursor composto |
+| F2-50 | health |
+| F2-51 | schema observável |
+| F2-57 | LIST/watch |
+| F2-58 | conjunto ordenado de kubeconfigs |
+
+## 18. Critérios de revisão
+
+- [x] ADRs 0001–0004 substituem os gates arquiteturais sem contradição.
+- [x] Diagramas e documentos usam os mesmos nomes de ports.
+- [x] Nenhum handler depende de clientset ou adapter concreto.
+- [x] Startup/shutdown possui um único owner; runtime nativo por plataforma é
+  evidência final do desenho F1, a ser reimplementado em F3 e novamente
+  exercitado como artefato de release em F8.
+- [x] Toda sessão é alcançável por um contexto de cancelamento.
+- [x] Cursor e geração rejeitam retomada obsoleta.
+- [x] Health externo degradado não mascara falha local nem derruba o shell útil.

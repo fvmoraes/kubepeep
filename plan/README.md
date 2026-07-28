@@ -16,11 +16,20 @@ Princípio de produto que governa todas as decisões:
 - [Ginger v1.4.4](https://github.com/fvmoraes/ginger/tree/v1.4.4): framework obrigatório do backend.
 - [Documentação do Ginger v1.4.4](https://pkg.go.dev/github.com/fvmoraes/ginger@v1.4.4): API pública fixada para o projeto.
 
-A baseline externa usada para preparar o plano indica que os templates do Ginger para serviço HTTP e CLI Cobra são mutuamente exclusivos e que `ginger generate command` não se aplica a um projeto `service`. A estratégia preliminar é manter `project.type: service` e integrar Cobra manualmente; o spike e o ADR da Fase 1 devem reproduzir essa conclusão e guardar a evidência no repositório antes do scaffold definitivo.
+A Fase 1 confirmou que os templates do Ginger para serviço HTTP e CLI Cobra
+são mutuamente exclusivos e que `ginger generate command` não se aplica a um
+projeto `service`. A decisão aceita é manter `project.type: service`, integrar
+Cobra manualmente e usar lifecycle próprio com os componentes Ginger.
 
-O snapshot usado para preparar este plano foi o `main` do DWYT no commit `a9386823272b928f2289c9020a9ae5951389e0f1`. A Fase 1 deve refazer a inspeção reproduzível e registrar qualquer mudança posterior.
+O DWYT foi analisado no commit imutável
+`a9386823272b928f2289c9020a9ae5951389e0f1`, com licença e limites de cópia
+registrados.
 
-O Ginger foi consultado na tag `v1.4.4`, commit `6073543b6281be01e4bc97d001dd6e11512f70db`. A execução externa preliminar de seus testes passou, mas a Fase 1 deve reproduzir e registrar o resultado; isso também não substitui os testes de integração do Kube Peep.
+O Ginger foi reproduzido na tag `v1.4.4`, commit
+`6073543b6281be01e4bc97d001dd6e11512f70db`. Scaffolds, diagnósticos,
+cross-builds, lifecycle e controle local nativo Linux/Windows estão rastreados
+em [Evidências da Fase 1](../docs/research/phase1-evidence.md). O probe isolado
+confirma a arquitetura; não substitui os testes da implementação de produção.
 
 ## Sequência e gates
 
@@ -40,6 +49,9 @@ As fases seguem a ordem determinada pelo prompt. Para evitar duplicação, a Fas
 | [6 — Recursos](06-recursos.md) | Consultas somente leitura e streaming | Navegação completa pelos recursos permitidos |
 | [7 — Ações](07-acoes.md) | Restart, scale, delete, port-forward e exec | Ações autorizadas, confirmadas e canceláveis |
 | [8 — Distribuição](08-distribuicao.md) | Releases, instaladores, CI e aceite | MVP multiplataforma publicável |
+
+Estado atual: **Fase 1 concluída (F1-01–F1-44)**; Fase 2 é o gate ativo. Código
+de produção só começa depois da revisão conjunta dos contratos da Fase 2.
 
 O acompanhamento dos critérios finais está em [Matriz de aceite do MVP](matriz-aceite-mvp.md).
 
@@ -91,14 +103,20 @@ Uma tarefa funcional somente pode ser marcada como concluída quando, conforme a
 - O banco não armazena snapshots do cluster. Preferências persistidas usam uma allowlist e nunca recebem credenciais, Secrets ou conteúdo de logs.
 - Respostas com dados Kubernetes, logs ou permissões usam política `no-store`; somente assets estáticos versionados podem receber cache longo.
 - “Sem dependências de runtime” significa não instalar dependências próprias do Kube Peep. Um plugin `exec` já referenciado pelo kubeconfig continua sendo responsabilidade do ambiente do usuário.
+- A SPA usa History API. O servidor entrega `index.html` apenas como fallback de
+  GET/HEAD que aceita HTML; `/api/v1`, `/health` e endpoints internos nunca
+  caem no fallback.
+- Instaladores, scripts auxiliares e downloads usam tag/commit ou asset de
+  release com versão exata e checksum; `raw/main`, `latest` e branch mutável não
+  são fontes de instalação.
 
 ## Riscos que atravessam as fases
 
 | Risco | Tratamento planejado |
 | --- | --- |
-| Integração do lifecycle bloqueante do Ginger com Cobra | Spike na Fase 1 e ADR antes do scaffold definitivo |
-| `pkg/app` fixar timeout de escrita enquanto SSE/WS precisam ser duradouros | Teste acima de 15 segundos e estratégia documentada para limpar/ajustar deadlines |
-| `app.Run()` não aceitar listener/contexto e poder pular hooks após falha de shutdown | Lifecycle próprio com componentes Ginger ou alternativa provada antes da Fase 3 |
+| Integração do lifecycle bloqueante do Ginger com Cobra | Spike/ADR F1 aprovados; reimplementar o coordenador no módulo F3 |
+| `pkg/app` fixar timeout de escrita enquanto SSE/WS precisam ser duradouros | F1 provou stream acima de 15 s; F3 aplica `WriteTimeout=0` e budgets por rota |
+| `app.Run()` não aceitar listener/contexto e poder pular hooks após falha de shutdown | ADR escolheu lifecycle próprio com componentes Ginger; repetir matriz de cleanup em F3 |
 | Defaults do Ginger aceitarem bind não-loopback | Sobrescrever e testar `127.0.0.1`/`::1`; falhar fechado em configuração insegura |
 | Health do Ginger transformar todo checker falho em 503 e serializar seu erro | Registrar apenas checks locais críticos; status externo separado e sanitizado |
 | Middleware padrão remover `Flusher`/`Hijacker` | Rotas raw com middlewares próprios e testes de interface/segurança |
@@ -112,13 +130,17 @@ Uma tarefa funcional somente pode ser marcada como concluída quando, conforme a
 | Goroutines ou conexões sobreviverem à troca de contexto | Contextos hierárquicos, registro de sessões e testes de cancelamento |
 | Fake clientset não representar RBAC real | Casos simples com fake e cenários restritos em Kind/K3d |
 | Diferenças de processos e paths entre sistemas | Adapters por plataforma e smoke tests dos artefatos reais |
-| PID/sinal não implementarem stop seguro no Windows | Lock/identidade real e mecanismo nativo testado |
-| SQLite ou dependências quebrarem builds sem CGO | Validar `modernc.org/sqlite` e cross-builds já na Fase 3 |
+| PID/sinal não implementarem stop seguro no Windows | Probe F1 nativo validou lock/identidade/controle; reimplementar e repetir em F3 e nos archives F8 |
+| SQLite ou dependências quebrarem builds sem CGO | F1 validou `modernc.org/sqlite`; repetir a matriz com o módulo definitivo na Fase 3 |
 | Reuso do DWYT virar cópia indevida de negócio | Inventário explícito do que pode e não pode ser reaproveitado |
 
-## Estado inicial
+## Estado do plano
 
-Todos os itens do plano começam pendentes. Marcar um checkbox somente quando a implementação e a evidência correspondente existirem no repositório.
+A Fase 1 está concluída com 44 tarefas comprovadas e
+[matriz rastreável](../docs/research/phase1-evidence.md). As tarefas das fases
+seguintes permanecem pendentes até sua implementação e evidência próprias.
+Marcar um checkbox somente quando o resultado correspondente existir no
+repositório; evidência de spike não antecipa checkbox de produção ou release.
 
 ## Convenção de nomes
 

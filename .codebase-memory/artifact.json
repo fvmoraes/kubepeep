@@ -1,0 +1,11 @@
+{
+    "schema_version": 2,
+    "commit": "587a1c1fd0fbf4b5c6b98ca5e24e1cbaecb340b7",
+    "indexed_at": "2026-07-27T23:36:13Z",
+    "project": "kubepeep",
+    "nodes": 974,
+    "edges": 1591,
+    "original_size": 2555904,
+    "compressed_size": 420873,
+    "compression_level": 9
+}
