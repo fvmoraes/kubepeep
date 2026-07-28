@@ -1,0 +1,7 @@
+environment: PATH=<GO_BIN>:$PATH
+resolved executable: <GO_BIN>/ginger
+command: ginger version
+exit_code: 0
+stdout: ginger 1.4.4
+build module: github.com/fvmoraes/ginger v1.4.4
+build module checksum: h1:qRfcD0zhOTbFBVB/ackBwykvr4MtLKky4+d5TowSaZ0=

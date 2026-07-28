@@ -36,7 +36,7 @@ Converter os requisitos do prompt e as descobertas técnicas em especificações
 
 - [ ] **F2-08** Desenhar contexto, containers e componentes do processo local.
 - [ ] **F2-09** Fixar a regra de dependência hexagonal: handlers dependem de ports/services e nunca do clientset.
-- [ ] **F2-10** Especificar as interfaces `KubeconfigLoader`, `ContextService`, `NamespaceService`, `AuthorizationService`, `WorkloadService`, `PodService`, `LogService`, `EventService`, `MetricsService`, `PortForwardService`, `ExecService` e `DashboardService`.
+- [ ] **F2-10** Especificar as interfaces `KubeconfigLoader`, `ContextService`, `NamespaceService`, `AuthorizationService`, `WorkloadService`, `PodService`, `LogService`, `EventService`, `NetworkService`, `ConfigResourceService`, `MetricsService`, `PreferenceService`, `ActionService`, `PortForwardService`, `ExecService` e `DashboardService`.
 - [ ] **F2-11** Definir composição do entrypoint Cobra, bootstrap Ginger, ownership do listener/HTTP, SQLite, browser, sinais, cleanup e arquivos de runtime.
 - [ ] **F2-12** Definir ownership e cancelamento ao trocar contexto/escopo, fechar página ou substituir refresh.
 - [ ] **F2-13** Especificar cache de clientsets, cache RBAC, invalidações, limites de concorrência e política de timeout/backoff.
@@ -46,7 +46,7 @@ Converter os requisitos do prompt e as descobertas técnicas em especificações
 ### Segurança
 
 - [ ] **F2-16** Produzir threat model para aplicação local, kubeconfig, plugins `exec`, API HTTP, browser, SQLite, logs, port-forward e exec.
-- [ ] **F2-17** Definir bind exclusivo em loopback e proteções contra Host header/DNS rebinding, Origin indevida e CSRF em operações mutáveis.
+- [ ] **F2-17** Definir bind exclusivo em loopback e proteções contra Host header/DNS rebinding, Origin indevida e CSRF em operações mutáveis, incluindo `GET /api/v1/session`, TTL/rotação do nonce e rebootstrap após mudança de geração.
 - [ ] **F2-18** Criar classificação de dados: persistível, apenas em memória, sensível e proibido.
 - [ ] **F2-19** Definir redaction por chave e conteúdo, sinks/rotação do arquivo local e sanitização de tokens, JWTs, senhas, chaves privadas, connection strings, headers e erros de plugins.
 - [ ] **F2-20** Especificar consulta e cache de RBAC por contexto, namespace, API group, recurso, subresource e verbo.
@@ -56,7 +56,7 @@ Converter os requisitos do prompt e as descobertas técnicas em especificações
 
 ### Dados
 
-- [ ] **F2-24** Especificar tabelas, tipos, chaves, timestamps, índices e foreign keys de `cluster_profiles`, `namespace_scopes`, `namespace_scope_items` e `preferences`.
+- [ ] **F2-24** Especificar tabelas, tipos, chaves, timestamps, índices e foreign keys de `cluster_profiles`, `namespace_scopes`, `namespace_scope_items` e `preferences`; scopes incluem `context_name` e unicidade por profile/contexto, e profiles são reconciliados somente pelo bootstrap a partir dos paths resolvidos.
 - [ ] **F2-25** Definir migrations versionadas, transações e estratégia de rollback/backup durante upgrade.
 - [ ] **F2-26** Definir constraints de `single`, `list`, `all`, namespace padrão e índice único de item.
 - [ ] **F2-27** Garantir que `all` seja atributo e nunca o namespace `*`.
@@ -69,8 +69,8 @@ Converter os requisitos do prompt e as descobertas técnicas em especificações
 - [ ] **F2-31** Fixar envelopes Ginger para sucesso e erros e definir DTO cursor próprio para paginação Kubernetes.
 - [ ] **F2-32** Definir `limit`, `continue`, `search`, `namespace`, `status`, `sort` e `order`, incluindo limites máximos e token opaco.
 - [ ] **F2-33** Definir códigos de erro estáveis e decoding JSON estrito para validação, RBAC, cluster offline, contexto inválido, timeout, cancelamento, campo desconhecido, body excedente e conflito.
-- [ ] **F2-34** Especificar contratos de contexto, escopos, permissões, dashboard, recursos, logs, ações e sessões.
-- [ ] **F2-35** Especificar rotas raw, eventos SSE, transporte de exec, validação de Origin, limites de frame/payload, reconexão, backpressure, heartbeat e encerramento.
+- [ ] **F2-34** Especificar contratos de profile sanitizado, contexto, escopos, permissões, dashboard, recursos, logs, ações e sessões, incluindo lifecycle de geração/CSRF ao atualizar ou excluir o scope ativo.
+- [ ] **F2-35** Especificar rotas raw, eventos SSE e o fluxo único de exec: `ExecInit` completo no POST, ticket one-shot ligado ao request e WebSocket apenas para frames tipados; incluir validação de Origin, limites de frame/payload, reconexão, backpressure, heartbeat e encerramento.
 - [ ] **F2-36** Definir idempotência onde aplicável e semântica de requests cancelados.
 
 ### Plano de implementação
