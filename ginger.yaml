@@ -1,0 +1,21 @@
+project:
+  type: service
+  root: .
+structure:
+  cmd: cmd/kubePeep
+  api: internal/api
+  handlers: internal/api/handlers
+  middlewares: internal/api/middlewares
+  models: internal/models
+  services: internal/services
+  repositories: internal/repositories
+  ports: internal/ports
+  adapters: internal/adapters
+  config: internal/config
+  docs: docs
+  tests: tests
+  migrations: internal/migrations
+rules:
+  overwrite: false
+  create_missing_dirs: true
+  require_plan_before_apply: true

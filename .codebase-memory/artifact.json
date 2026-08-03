@@ -1,11 +1,11 @@
 {
     "schema_version": 2,
-    "commit": "587a1c1fd0fbf4b5c6b98ca5e24e1cbaecb340b7",
-    "indexed_at": "2026-07-27T23:36:13Z",
-    "project": "kubepeep",
-    "nodes": 974,
-    "edges": 1591,
-    "original_size": 2555904,
-    "compressed_size": 420873,
-    "compression_level": 9
+    "commit": "0bb1264c2e9a762d06c7e3e9a8c953e2ebc15a0a",
+    "indexed_at": "2026-08-03T14:59:19Z",
+    "project": "home-fvmoraes-Documents-Pessoal-kubepeep",
+    "nodes": 1964,
+    "edges": 5403,
+    "original_size": 7798784,
+    "compressed_size": 1332693,
+    "compression_level": 3
 }

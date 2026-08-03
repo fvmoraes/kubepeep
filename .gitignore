@@ -21,9 +21,9 @@ service-account*.json
 *.wal
 *.shm
 *.log
-logs/
-cache/
-runtime/
+/logs/
+/cache/
+/runtime/
 
 # Dependencies, builds and test output
 node_modules/
@@ -31,6 +31,8 @@ dist/
 build/
 bin/
 coverage/
+/web/playwright-report/
+/web/test-results/
 *.out
 
 # Local binaries
@@ -41,3 +43,8 @@ coverage/
 .DS_Store
 .idea/
 .vscode/
+
+# dwyt start
+*mcp.json
+*opencode.json
+# dwyt end

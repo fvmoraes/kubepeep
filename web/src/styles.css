@@ -1,0 +1,71 @@
+@import "tailwindcss";
+
+:root {
+  --ctp-mauve: #cba6f7;
+  --ctp-red: #f38ba8;
+  --ctp-peach: #fab387;
+  --ctp-yellow: #f9e2af;
+  --ctp-green: #a6e3a1;
+  --ctp-sky: #89dceb;
+  --ctp-text: #cdd6f4;
+  --ctp-subtext: #bac2de;
+  --ctp-overlay1: #7f849c;
+  --ctp-surface0: #313244;
+  --ctp-base: #1e1e2e;
+  --ctp-mantle: #181825;
+  --ctp-crust: #11111b;
+  color: var(--ctp-text);
+  background: var(--ctp-base);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; min-height: 100vh; background: var(--ctp-base); }
+button, a { font: inherit; }
+a:focus-visible, button:focus-visible { outline: 2px solid var(--ctp-mauve); outline-offset: 3px; }
+
+.app-shell { min-height: 100vh; display: grid; grid-template-columns: 220px minmax(0, 1fr); }
+.sidebar { background: var(--ctp-mantle); border-right: 1px solid var(--ctp-surface0); padding: 18px 12px; }
+.brand { min-height: 52px; display: flex; align-items: center; gap: 10px; padding: 0 8px 16px; }
+.brand-mark { width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid #6c568a; border-radius: 9px; color: var(--ctp-mauve); background: #2a2238; font-weight: 700; }
+.brand strong, .brand small { display: block; }
+.brand small { color: var(--ctp-overlay1); font-size: 11px; margin-top: 2px; }
+nav { display: grid; gap: 3px; }
+nav a { min-height: 40px; display: flex; align-items: center; gap: 10px; padding: 9px 10px; border: 1px solid transparent; border-radius: 8px; color: var(--ctp-subtext); text-decoration: none; font-size: 13px; }
+nav a:hover { background: #242436; color: var(--ctp-text); }
+nav a.active { color: var(--ctp-mauve); background: #2a263b; border-color: #514363; }
+.workspace { min-width: 0; }
+.topbar { min-height: 70px; display: flex; justify-content: space-between; align-items: center; gap: 20px; padding: 12px 24px; border-bottom: 1px solid var(--ctp-surface0); background: rgba(24, 24, 37, .72); }
+.topbar strong, .eyebrow { display: block; }
+.topbar strong { margin-top: 3px; font-size: 13px; }
+.eyebrow { color: var(--ctp-overlay1); font-size: 10px; text-transform: uppercase; letter-spacing: .12em; }
+.status-badge { padding: 6px 9px; border: 1px solid var(--ctp-surface0); border-radius: 999px; font-size: 11px; white-space: nowrap; }
+.status-badge--healthy { color: var(--ctp-green); border-color: #405b43; }
+.status-badge--degraded { color: var(--ctp-yellow); border-color: #625d3e; }
+.status-badge--unhealthy { color: var(--ctp-red); border-color: #65404c; }
+.status-badge--unknown { color: var(--ctp-overlay1); }
+main { padding: clamp(18px, 4vw, 40px); }
+.state-panel { max-width: 760px; min-height: 180px; display: grid; grid-template-columns: 12px 1fr; gap: 16px; padding: 24px; border: 1px solid var(--ctp-surface0); border-radius: 12px; background: #202031; box-shadow: 0 14px 40px rgba(0, 0, 0, .16); }
+.state-panel h2 { margin: 0 0 10px; color: var(--ctp-text); font-size: clamp(17px, 3vw, 22px); }
+.state-copy { color: var(--ctp-subtext); line-height: 1.65; font-size: 13px; }
+.state-action { margin-top: 18px; }
+.state-dot { width: 9px; height: 9px; margin-top: 7px; border-radius: 50%; background: var(--ctp-overlay1); }
+.state-dot--loading { background: var(--ctp-sky); animation: pulse 1.4s ease-in-out infinite; }
+.state-dot--offline, .state-dot--error { background: var(--ctp-red); }
+.state-dot--unavailable { background: var(--ctp-yellow); }
+.state-dot--empty { background: var(--ctp-mauve); }
+
+@keyframes pulse { 50% { opacity: .35; transform: scale(.75); } }
+@media (prefers-reduced-motion: reduce) { .state-dot--loading { animation: none; } }
+@media (max-width: 760px) {
+  .app-shell { grid-template-columns: 1fr; padding-bottom: 64px; }
+  .sidebar { position: fixed; z-index: 10; inset: auto 0 0; padding: 6px; border: 0; border-top: 1px solid var(--ctp-surface0); overflow-x: auto; }
+  .brand { display: none; }
+  nav { display: flex; width: max-content; }
+  nav a { min-width: 52px; justify-content: center; }
+  nav a span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); }
+  .topbar { padding: 10px 14px; }
+  main { padding: 16px; }
+}

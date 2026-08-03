@@ -1,0 +1,13 @@
+app:
+  name: kubePeep
+  env: production
+  version: 0.1.0
+
+http:
+  host: 127.0.0.1
+  port: 2748
+  shutdown_timeout: 10
+
+log:
+  level: info
+  format: json
