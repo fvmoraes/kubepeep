@@ -55,12 +55,12 @@ Implementar navegação paginada, detalhes, YAML seguro e streams para os recurs
 - [ ] **F6-21** Implementar seleção de namespace, pod e container condicionada a RBAC.
 - [ ] **F6-22** Implementar logs atuais com timestamps, tail, since e `LimitBytes`, complementados por reader limitado.
 - [ ] **F6-23** Implementar logs anteriores quando o container possuir instância anterior.
-- [ ] **F6-24** Implementar follow com `pkg/sse` sobre rota raw, cadeia que preserve `http.Flusher`, tamanho máximo de evento e cancelamento por `request.Context()`, aplicando a estratégia validada para streams acima do timeout padrão do Ginger.
+- [ ] **F6-24** Implementar follow com `pkg/sse` sobre rota raw e wire contract fixo: meta/line/heartbeat/error/end, sem `Last-Event-ID`, linha 64 KiB, evento 68 KiB, buffer 1 MiB/1.000, heartbeat 15 s, duração 4 h e cancelamento por `request.Context()`.
 - [ ] **F6-25** Definir buffer/ring buffer, limite de bytes e backpressure; encerrar cliente lento conforme contrato.
 - [ ] **F6-26** Implementar busca local, pausa visual, wrap, cópia e download apenas por ação explícita.
 - [ ] **F6-27** Não registrar nem persistir conteúdo de logs.
 - [ ] **F6-28** Encerrar stream ao sair da página, trocar seleção/contexto ou conforme a política explícita de revalidação; não prometer notificação instantânea de revogação RBAC.
-- [ ] **F6-29** Implementar `GET /api/v1/pods/{namespace}/{name}/logs` e `GET /api/v1/pods/{namespace}/{name}/logs/stream` com erros padronizados.
+- [ ] **F6-29** Implementar `GET /api/v1/pods/{namespace}/{name}/logs` e `GET /api/v1/pods/{namespace}/{name}/logs/stream` com guards antes dos headers e eventos terminais depois do início do SSE.
 
 ### Events
 
@@ -71,31 +71,31 @@ Implementar navegação paginada, detalhes, YAML seguro e streams para os recurs
 
 ### Network
 
-- [ ] **F6-34** Implementar Services com ports, selectors, type, cluster IP e external endpoints permitidos.
+- [ ] **F6-34** Implementar o port `NetworkService` e seu adapter para Services com ports, selectors, type, cluster IP e external endpoints permitidos.
 - [ ] **F6-35** Implementar Ingresses `networking.k8s.io/v1` com hosts, paths e backends.
-- [ ] **F6-36** Implementar EndpointSlices ou Endpoints conforme discovery/capability do cluster.
-- [ ] **F6-37** Implementar `GET /api/v1/services`, `GET /api/v1/ingresses`, a rota aprovada de EndpointSlices e suas rotas/telas de detalhe.
+- [ ] **F6-36** Implementar somente EndpointSlices `discovery.k8s.io/v1`; se indisponível, retornar `FEATURE_UNAVAILABLE`, sem fallback implícito para Endpoints.
+- [ ] **F6-37** Implementar list/detail/YAML de `services`, `ingresses` e `endpoint-slices` exatamente nas rotas de `docs/api.md`, com as respectivas telas de detalhe.
 - [ ] **F6-38** Reservar a área de sessões de port-forward para a Fase 7 sem simular sessões.
 
 ### Config
 
-- [ ] **F6-39** Listar ConfigMaps por resposta metadata-only; buscar conteúdo completo apenas no detalhe e quando `get` for permitido.
+- [ ] **F6-39** Implementar o port `ConfigResourceService`: listar ConfigMaps por resposta metadata-only e buscar conteúdo completo apenas no detalhe e quando `get` for permitido.
 - [ ] **F6-40** Listar Secrets apenas via `PartialObjectMetadata`/metadata API e allowlist aprovada, excluindo annotations, managedFields e qualquer campo não enumerado.
 - [ ] **F6-41** Impedir que conversor genérico ou YAML exponha `data`, `stringData`, annotations, managedFields ou valores equivalentes de Secret.
-- [ ] **F6-42** Implementar `GET /api/v1/configmaps`, a rota aprovada de metadados de Secrets e suas telas de detalhe com mensagens claras de limitação.
+- [ ] **F6-42** Implementar list/detail/YAML de `configmaps` e list/detail metadata-only de `secrets` exatamente nas rotas de `docs/api.md`; Secret não possui YAML e a UI explica a limitação.
 
 ### Atualização em tempo real
 
 - [ ] **F6-43** Criar manager backend com LIST inicial + resourceVersion e watch por contexto, escopo, GVR e seletor.
 - [ ] **F6-44** Compartilhar watch entre consumidores compatíveis; nunca criar um watcher por componente React.
 - [ ] **F6-45** Tratar `resourceVersion`, permissão `watch` distinta, encerramento, `410 Gone` com relist, bookmarks, timeoutSeconds, reconexão e backoff.
-- [ ] **F6-46** Multiplexar atualizações simples por SSE quando o benefício superar HTTP manual.
-- [ ] **F6-47** Limitar subscribers, buffers e watchers e expor métricas/logs operacionais.
+- [ ] **F6-46** Implementar `/api/v1/stream` com a allowlist exata de sete tópicos e sua matriz GVR/DTO: exigir 1–7 sem duplicata/desconhecido, proibir Secrets, autorizar list+watch all-or-nothing e aplicar IDs/binding, chunks, eventos, replay, heartbeat e terminal do wire contract.
+- [ ] **F6-47** Limitar oito streams, evento serializado de 64 KiB, snapshot ao primeiro entre 10.000 items/10 MiB e ring/fila ao menor entre 1 MiB e 1.000 eventos; snapshot excedente envia `snapshot_too_large` e todos os chunks são descartados, nunca apresentados como truncamento utilizável; expor somente métricas/logs operacionais sem payload.
 - [ ] **F6-48** Cancelar todo watch e descartar eventos SSE enfileirados por generation ID ao trocar contexto/escopo ou encerrar o processo.
 
 ### Settings, preferências e fechamento
 
-- [ ] **F6-49** Implementar adapter/service e `GET/PUT /api/v1/preferences` com allowlist, validação, versionamento e escrita transacional.
+- [ ] **F6-49** Implementar o port `PreferenceService`, seu adapter e `GET/PUT /api/v1/preferences` com allowlist, validação, versionamento e escrita transacional; a partir daqui persistir as chaves preparadas na F5.
 - [ ] **F6-50** Implementar a tela Settings para opções locais aprovadas, sem aceitar kubeconfig, token, Secret ou configuração arbitrária.
 - [ ] **F6-51** Implementar filtros salvos para telas suportadas, vinculados ao contexto/escopo quando necessário.
 - [ ] **F6-52** Aplicar `Cache-Control: no-store` a respostas de API com recursos, permissões, YAML e logs.
@@ -104,17 +104,17 @@ Implementar navegação paginada, detalhes, YAML seguro e streams para os recurs
 - [ ] **F6-55** Implementar as rotas de YAML sob demanda definidas na Fase 2, sem incluir YAML em respostas de lista.
 - [ ] **F6-56** Estender o harness restrito com workloads, logs atuais/anteriores, Service, Ingress, ConfigMap e Secret sintético.
 - [ ] **F6-57** Executar E2E lista → detalhe → YAML/logs nos caminhos permitido e negado.
-- [ ] **F6-58** Revalidar ou encerrar streams longos segundo a política RBAC definida, sem prometer detecção instantânea de mudança de permissão.
+- [ ] **F6-58** Revalidar ou encerrar streams longos segundo a política RBAC definida e testar cada tópico/GVR, cardinalidade/duplicata/desconhecido, Secret proibido, list/watch negado all-or-nothing, descarte de snapshot excedente, resume válido, ID malformado, ring expirado, slow consumer, 410/relist em nova conexão, generation change e cada evento terminal, sem prometer detecção instantânea de mudança de permissão.
 - [ ] **F6-59** Testar cursor composto com namespaces em páginas diferentes, autorização parcial, retomada e ordenação determinística.
 - [ ] **F6-60** Executar e registrar `ginger inspect`, `ginger doctor`, testes, lint e build no fechamento da fase.
 
 ### Robustez final
 
-- [ ] **F6-61** Rejeitar cursor expirado, de outra query/coleção/context generation ou usado depois de troca de escopo; nunca registrar seu conteúdo.
+- [ ] **F6-61** Emitir cursor com TTL fixo não deslizante de 5 min e rejeitar cursor expirado, de outra query/coleção/context generation ou usado depois de troca de escopo; nunca registrar seu conteúdo.
 - [ ] **F6-62** Tratar `410 ResourceExpired` também em LIST paginada e reiniciar de modo explícito, sem combinar snapshots inconsistentes silenciosamente.
 - [ ] **F6-63** Implementar fallback para refresh HTTP quando `list` for permitido e `watch` negado.
 - [ ] **F6-64** Proibir LIST/watch de objetos completos de Secret e provar que seus valores nunca entram na memória da aplicação.
-- [ ] **F6-65** Testar linha de log gigante, stream sem newline, cliente lento e ring buffer frontend no limite.
+- [ ] **F6-65** Testar linha gigante/escaping/truncamento até 68 KiB serializados, cumulativo follow de 10 MiB, stream sem newline, heartbeat, `Last-Event-ID` rejeitado, cada `end.reason`, erro após headers, duração, cliente lento e ring buffer frontend no limite.
 - [ ] **F6-66** Quando watch global for negado, aplicar SAR e fan-out por namespace com limite rígido; acima do limite, usar refresh HTTP explícito.
 - [ ] **F6-67** Expor `complete/truncated`, cobertura e erros parciais em listas fan-out; nunca apresentar página parcial como coleção global completa.
 

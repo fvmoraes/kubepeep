@@ -30,6 +30,15 @@ O diretório `runtime/` conterá:
 - `instance.json`: schema versionado com instance ID aleatório, PID, fingerprint
   de início, porta, versão de protocolo e token de controle aleatório.
 
+O schema, entropia, tree canônica, parsing estrito e resultados/exit codes dos
+comandos são normativos em
+[`../architecture.md`](../architecture.md#72-tree-e-estado-de-instância).
+
+O root que contém `runtime/`, banco, configuração, logs e cache é
+`~/.kubePeep/` em Unix e `%LOCALAPPDATA%\kubePeep\` em Windows. O adapter
+Windows usa `FOLDERID_LocalAppData`; dados locais e locks não são colocados no
+perfil Roaming.
+
 PID e porta são publicados juntos em `instance.json`; arquivos independentes
 não são autoridade e não podem expor estado parcial. O estado será gravado por
 `temp + flush + substituição atômica`, com modo `0600`/`0700` em Unix e DACL
@@ -43,15 +52,17 @@ O lock usará adapters com primitives do sistema operacional:
 
 ### Bind e prontidão
 
-1. tentar `net.Listen` diretamente em `127.0.0.1:2748`;
-2. em `address in use`, tentar a próxima porta dentro do limite configurado;
-3. nunca fazer probe e fechar antes do bind definitivo;
-4. manter PID, porta e identidade somente em memória;
-5. iniciar HTTP usando o listener adquirido;
-6. sondar `/health` pela instância recém-criada;
-7. gravar o estado privado temporário, fazer flush e substituir
+1. sem porta explícita, tentar `net.Listen` diretamente em
+   `127.0.0.1:2748` e até 49 sucessoras, terminando em 2797;
+2. avançar somente em `address in use`; outro erro falha imediatamente;
+3. com `--port N` ou config explícito, validar 1024–65535 e tentar exatamente N;
+4. nunca fazer probe e fechar antes do bind definitivo;
+5. manter PID, porta e identidade somente em memória;
+6. iniciar HTTP usando o listener adquirido;
+7. sondar `/health` pela instância recém-criada;
+8. gravar o estado privado temporário, fazer flush e substituir
    `instance.json` atomicamente;
-8. publicar prontidão e só então abrir o navegador.
+9. publicar prontidão e só então abrir o navegador.
 
 ### `status` e `stop`
 
@@ -73,6 +84,13 @@ Essa estratégia é igual em Unix e Windows e evita tratar sinais ou `taskkill`
 como caminho normal. SIGINT/SIGTERM recebidos pelo próprio processo foreground
 também cancelam seu contexto, mas o controlador nunca sinaliza o PID lido do
 estado.
+
+O wire contract é fixo: `GET /_kubepeep/control/v1/status` e
+`POST /_kubepeep/control/v1/stop`, header privado
+`X-KubePeep-Control-Token`, request vazio e `ControlIdentityDTO` de seis campos.
+Paths, guards, códigos HTTP, timeout e headers estão especificados em
+[`../api.md`](../api.md#83-canal-interno-de-controle); a implementação F3 não
+escolhe variantes novas.
 
 ### Cleanup
 

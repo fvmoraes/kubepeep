@@ -26,7 +26,7 @@ Transformar o projeto testado em artefatos reprodutíveis para Linux, macOS e Wi
 
 ### Build reprodutível
 
-- [ ] **F8-01** Fixar versões de Go, Node, package manager e GoReleaser usadas na CI.
+- [ ] **F8-01** Reproduzir Go 1.25, Node 24.18.0 e npm 11.16.0 já fixados e fixar uma versão GoReleaser v2 exata na CI/release antes do primeiro snapshot.
 - [ ] **F8-02** Criar pipeline determinístico: instalar frontend com lockfile, testar, compilar assets e só então compilar Go.
 - [ ] **F8-03** Fazer o build falhar claramente quando os assets necessários ao `go:embed` estiverem ausentes.
 - [ ] **F8-04** Embutir frontend, migrations e assets sem versionar binários compilados no Git.
@@ -54,7 +54,7 @@ Transformar o projeto testado em artefatos reprodutíveis para Linux, macOS e Wi
 
 ### E2E restritivo
 
-- [ ] **F8-20** Consolidar e recriar do zero o cluster Kind/K3d incremental das Fases 4 a 7.
+- [ ] **F8-20** Consolidar e recriar do zero o cluster Kind canônico incremental das Fases 4 a 7; K3d permanece apenas alternativa local equivalente.
 - [ ] **F8-21** Validar novamente namespace permitido/negado e Role/RoleBinding restritos.
 - [ ] **F8-22** Validar novamente Deployment saudável/degradado, pod com restart e logs sintéticos.
 - [ ] **F8-23** Validar novamente evento `Warning`, Service, Ingress e recursos necessários a cada ação.
@@ -77,7 +77,7 @@ Transformar o projeto testado em artefatos reprodutíveis para Linux, macOS e Wi
 
 - [ ] **F8-35** Implementar `kubePeep update` com descoberta de versão, download, checksum obrigatório e troca atômica.
 - [ ] **F8-36** Tratar binário em uso no Windows com helper pós-exit/mecanismo aprovado, checksum, rollback e teste nativo; não depender de rename do processo em execução.
-- [ ] **F8-37** Definir e implementar a experiência de remoção aprovada na Fase 2.
+- [ ] **F8-37** Implementar exatamente a experiência aprovada na Fase 2: `install.sh --uninstall`/`install.ps1 -Uninstall`, dados preservados por default e purge separado com confirmação/path/lock/reparse validados.
 - [ ] **F8-38** Distinguir remoção do binário de remoção opcional dos dados locais; nunca apagar dados sem confirmação explícita.
 
 ### Release
@@ -121,7 +121,7 @@ Os instaladores nunca devem solicitar um archive que a release não publica.
 - integração Go/SQLite/Kubernetes;
 - frontend unitário e de interação;
 - race detector onde aplicável;
-- E2E restritivo em Kind/K3d;
+- E2E restritivo no Kind canônico;
 - cross-build de toda a matriz;
 - execução dos archives reais;
 - instalação limpa e upgrade em Unix/Windows;

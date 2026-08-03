@@ -55,13 +55,13 @@ Checkout executado:
 rtk mktemp -d -t kubepeep-dwyt.XXXXXX
 rtk git clone --filter=blob:none --no-checkout \
   https://github.com/fvmoraes/dwyt.git \
-  /tmp/kubepeep-dwyt.3uHg41/repo
-rtk git -C /tmp/kubepeep-dwyt.3uHg41/repo \
+  <temporary-dir>/repo
+rtk git -C <temporary-dir>/repo \
   fetch --depth=1 origin a9386823272b928f2289c9020a9ae5951389e0f1
-rtk git -C /tmp/kubepeep-dwyt.3uHg41/repo \
+rtk git -C <temporary-dir>/repo \
   checkout --detach a9386823272b928f2289c9020a9ae5951389e0f1
-rtk git -C /tmp/kubepeep-dwyt.3uHg41/repo rev-parse HEAD
-rtk git -C /tmp/kubepeep-dwyt.3uHg41/repo status --short
+rtk git -C <temporary-dir>/repo rev-parse HEAD
+rtk git -C <temporary-dir>/repo status --short
 ```
 
 Resultado:
@@ -433,8 +433,8 @@ Esse alcance não deve ser copiado. A remoção do Kube Peep deve:
 | `rtk npm ci` em `core/web/` | sucesso: 167 pacotes; npm informou 6 vulnerabilidades, sendo 1 baixa e 5 altas |
 | `rtk npm run build` | sucesso: 41 módulos; JS 292,57 kB (89,81 kB gzip), CSS 12,27 kB (3,70 kB gzip) |
 | `rtk npm run lint` | sucesso |
-| `rtk go build -trimpath -o /tmp/kubepeep-dwyt.3uHg41/dwyt-smoke .` | sucesso |
-| `rtk proxy /tmp/kubepeep-dwyt.3uHg41/dwyt-smoke version` | `dwyt dev — Don't Waste Your Tokens` |
+| `rtk go build -trimpath -o <temporary-dir>/dwyt-smoke .` | sucesso |
+| `rtk proxy <temporary-dir>/dwyt-smoke version` | `dwyt dev — Don't Waste Your Tokens` |
 | `rtk git ... status --short` após os builds | sem diferenças rastreadas |
 
 O smoke test HTTP do binário recém-compilado não pôde ser isolado porque

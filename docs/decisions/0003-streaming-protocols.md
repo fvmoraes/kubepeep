@@ -43,6 +43,11 @@ uma cadeia própria que:
 O servidor terá `WriteTimeout=0`; deadlines e budgets serão aplicados por rota,
 não por uma duração global incompatível com streams.
 
+O wire contract de `/api/v1/stream`, incluindo ID opaco, snapshot em chunks,
+replay ring, payloads de update, heartbeat e eventos terminais `reset`/`error`,
+está fixado em [`../api.md`](../api.md#182-atualizações-de-recursos). Nenhum
+evento ou cursor SSE é persistido.
+
 ### Exec
 
 Exec usará `github.com/coder/websocket v1.8.15` entre browser e Kube Peep.
@@ -77,6 +82,12 @@ URL, query e logs também não o contêm.
 
 O backend continuará usando as bibliotecas oficiais Kubernetes para o stream
 remoto; o WebSocket local não altera nem amplia RBAC.
+
+O wire contract não fica a cargo da implementação: encoding binário dos três
+streams, JSON de controle, sequência `ready`/`exit`, limites, heartbeat,
+backpressure e close codes estão fixados em
+[`../api.md`](../api.md#191-encoding-e-schemas-de-frames). Compressão WebSocket
+permanece desabilitada.
 
 ### Port-forward
 

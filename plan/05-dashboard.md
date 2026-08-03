@@ -44,23 +44,23 @@ Entregar um overview rápido e orientado a problemas. Cada bloco deve carregar i
 - [ ] **F5-14** Calcular restarts de containers normais, init containers e containers efêmeros separadamente.
 - [ ] **F5-15** Resolver workload proprietário sem inventar relação quando o owner não estiver disponível.
 - [ ] **F5-16** Ordenar de forma determinística por total decrescente e retornar top 10 por padrão, ou todos quando existirem menos de dez.
-- [ ] **F5-17** Implementar níveis `0`, `1–2`, `3–9` e `10+` como configuração de apresentação.
+- [ ] **F5-17** Implementar os thresholds fixos do MVP `0`, `1–2`, `3–9` e `10+`; configurabilidade fica explicitamente pós-MVP.
 - [ ] **F5-18** Expor namespace, pod, owner, container, total, status, último motivo, idade e ações para abrir detalhe e logs.
 
 ### Pods problemáticos
 
 - [ ] **F5-19** Detectar CrashLoopBackOff, ImagePullBackOff, ErrImagePull, CreateContainerConfigError e RunContainerError.
-- [ ] **F5-20** Detectar OOMKilled, Evicted, Failed, containers não prontos e Pending prolongado.
-- [ ] **F5-21** Correlacionar falhas de probe e scheduling apenas quando eventos/condições reais fornecerem o motivo.
+- [ ] **F5-20** Detectar OOMKilled, Evicted, Failed, containers não prontos após a graça de 2 min e Pending por pelo menos 5 min, segundo a tabela fechada de `docs/api.md`.
+- [ ] **F5-21** Correlacionar falhas de probe/scheduling somente por Pod kind+namespace+name+UID, timestamp normalizado na janela de 15 min e desempate timestamp/count/reason/UID; condition real precede Event equivalente.
 - [ ] **F5-22** Preservar reason/message reais do Kubernetes e diferenciar ausência de diagnóstico.
-- [ ] **F5-23** Testar prioridade quando um pod possui múltiplos problemas.
+- [ ] **F5-23** Produzir no máximo um resultado por Pod e testar prioridade, severidade, desempates por `containerType`/nome e boundaries exatos de 2 min, 5 min e 15 min.
 
 ### Workloads degradados
 
-- [ ] **F5-24** Classificar Deployment com réplicas indisponíveis.
-- [ ] **F5-25** Classificar StatefulSet incompleto e DaemonSet indisponível.
-- [ ] **F5-26** Classificar Job falhando e CronJob com falhas recentes segundo regra documentada.
-- [ ] **F5-27** Produzir DTO uniforme com namespace, kind, nome, ready, desired, available, updated, status e idade.
+- [ ] **F5-24** Implementar a tabela fechada de `WorkloadDTO.status` de `docs/api.md`, inclusive observedGeneration e `Healthy`, `Progressing`, `Degraded`, `Suspended`, `Completed`, `Failed`, `Unknown` aplicáveis.
+- [ ] **F5-25** Classificar Deployment, StatefulSet e DaemonSet exatamente pelos contadores, defaults e prioridade da tabela, sem marcar campo ausente/stale como saudável.
+- [ ] **F5-26** Classificar Job falhando e CronJob cujo Job pertencente mais recente falhou dentro da janela exata de 24 h de `docs/api.md`.
+- [ ] **F5-27** Produzir DTO uniforme com namespace, kind, nome, ready, desired, available, updated, status e idade usando o mapeamento numérico por kind de `docs/api.md`.
 - [ ] **F5-28** Não marcar recurso como saudável quando campos necessários foram negados ou não coletados.
 
 ### Eventos Warning
@@ -76,7 +76,7 @@ Entregar um overview rápido e orientado a problemas. Cada bloco deve carregar i
 - [ ] **F5-34** Verificar `get pods/log` para cada namespace/subrecurso necessário.
 - [ ] **F5-35** Aplicar defaults: 15 minutos, 200 linhas, até 20 pods, concorrência 4 e timeout de 8 segundos, além dos limites de bytes por linha/container/scan definidos na Fase 2.
 - [ ] **F5-36** Permitir apenas janelas configuradas de 15 min, 30 min, 1 h e 4 h, com limites máximos backend.
-- [ ] **F5-37** Buscar padrões case-insensitive e reconhecer logs JSON nos campos definidos na especificação.
+- [ ] **F5-37** Buscar a lista case-insensitive fechada e reconhecer somente os campos/níveis JSON definidos em `docs/api.md`, com prioridade determinística de reason code, semântica de vazio/coerção de `error` e seleção canônica do excerpt.
 - [ ] **F5-38** Classificar o motivo do match sem afirmar que o trecho é um erro confirmado.
 - [ ] **F5-39** Mascarar bearer tokens, JWTs longos, senhas, chaves, authorization headers e connection strings.
 - [ ] **F5-40** Nunca persistir linhas, resultados ou downloads do scan.
@@ -100,7 +100,7 @@ Entregar um overview rápido e orientado a problemas. Cada bloco deve carregar i
 - [ ] **F5-52** Carregar blocos com queries/cancelamentos independentes.
 - [ ] **F5-53** Mostrar erro específico no bloco afetado e manter os demais utilizáveis.
 - [ ] **F5-54** Atualizar dados manualmente sem polling agressivo nem duplicação de requests.
-- [ ] **F5-55** Persistir somente preferências allowlisted do dashboard, como janela de scan, sem persistir resultados coletados.
+- [ ] **F5-55** Manter somente preferências allowlisted do dashboard, como janela de scan, em memória nesta fase; preparar as chaves para persistência posterior pelo `PreferenceService` da Fase 6 e nunca persistir resultados coletados.
 - [ ] **F5-56** Estender o harness restrito com pod em restart, workload degradado, evento `Warning`, logs sintéticos e Metrics API ausente.
 - [ ] **F5-57** Testar parsing e ordenação de `resource.Quantity` para CPU/memória, incluindo unidades distintas.
 - [ ] **F5-58** Distinguir visualmente “scan ainda não executado”, zero correspondências, acesso negado e falha parcial.
@@ -116,13 +116,13 @@ Entregar um overview rápido e orientado a problemas. Cada bloco deve carregar i
 
 - cálculo de restarts para os três tipos de containers;
 - ordenação determinística e níveis visuais;
-- cada motivo de pod problemático e caso sem diagnóstico;
-- cada kind de workload degradado;
+- cada motivo de pod problemático, one-result-per-Pod, desempates e boundaries de 2/5/15 min, além do caso sem diagnóstico;
+- cada status por kind de workload, observedGeneration stale/ausente, campos incompletos, defaults, prioridade e boundary CronJob de 24 h;
 - agrupamento e contador de eventos;
 - scan respeitando pods, linhas, janela, concorrência e timeout;
 - scan respeitando bytes por linha/container/scan e total de containers;
 - cancelamento antes e durante leitura de logs;
-- detecção de texto e JSON;
+- detecção de texto e JSON, incluindo tipos/vazios de `error`, múltiplos candidatos e excerpt determinístico;
 - redaction de cada classe sensível;
 - ausência de persistência de logs no SQLite;
 - acesso negado a logs;

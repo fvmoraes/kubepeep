@@ -102,10 +102,12 @@ conforme esta taxonomia, não como uma categoria única.
 
 ### 7.1 Bind
 
-- Escutar somente em endereço loopback validado (`127.0.0.1` e/ou `::1`).
+- Escutar/publicar somente `127.0.0.1` no MVP.
 - Falhar fechado se configuração pedir endereço não loopback.
-- Adquirir a porta por bind real, começando em `2748` e avançando dentro do
-  limite configurado; não confiar em uma checagem separada de “porta livre”.
+- Sem porta explícita, adquirir por bind real uma das 50 portas consecutivas
+  `2748–2797`; avançar somente em `address in use`. `--port N`/config explícito,
+  entre 1024 e 65535, exige exatamente N e não faz fallback. Nunca usar uma
+  checagem separada de “porta livre”.
 - Port-forward também escuta somente em loopback.
 
 O listener e a prontidão seguem o lifecycle aceito no ADR 0004: o processo
@@ -115,7 +117,8 @@ privado, publica `instance.json` por substituição atômica e abre o browser.
 
 ### 7.2 Host e DNS rebinding
 
-- Aceitar apenas `Host` correspondente à origem efetivamente publicada: `localhost:<porta>`, `127.0.0.1:<porta>` e/ou `[::1]:<porta>`, conforme listener.
+- Aceitar somente o Host exato `127.0.0.1:<porta>` da origem publicada; não
+  tratar `localhost`, outro alias ou IPv6 como equivalente implícito.
 - Rejeitar IP não loopback, hostname arbitrário, host vazio fora do protocolo permitido e porta divergente.
 - Não usar wildcard CORS.
 - Não refletir `Origin` ou `Host` em headers.
@@ -136,6 +139,11 @@ privado, publica `instance.json` por substituição atômica e abre o browser.
 - `Sec-Fetch-Site` diferente de `same-origin` pode ser usado como defesa adicional, nunca como única defesa.
 - Ausência ou erro produz `CSRF_REJECTED` sem revelar o token esperado.
 
+Essa regra cobre rotas da API/browser. O canal CLI separado de ADR 0004 é o
+carve-out explícito: `POST /_kubepeep/control/v1/stop` proíbe body/query e
+Origin, não usa CSRF/Content-Type JSON e exige peer loopback, Host exato e
+`X-KubePeep-Control-Token`.
+
 O endpoint interno `GET /api/v1/session` fornece o token de sessão ao frontend
 com `Cache-Control: no-store`; ele não é persistido nem logado. Esse token é
 distinto do token de controle do processo descrito no ADR 0004. O token de
@@ -154,7 +162,7 @@ Content-Security-Policy:
   script-src 'self';
   style-src 'self';
   img-src 'self' data:;
-  connect-src 'self' ws://localhost:* ws://127.0.0.1:* ws://[::1]:*;
+  connect-src 'self' ws://127.0.0.1:<porta-publicada>;
   object-src 'none';
   base-uri 'none';
   frame-ancestors 'none'
@@ -180,8 +188,12 @@ Service worker, Cache Storage, IndexedDB e persistência TanStack Query não pod
 
 ## 8. Kubeconfig e plugins `exec`
 
-- Precedência: flag explícita, `KUBECONFIG` como lista de paths com o separador
-  da plataforma e, por fim, arquivo padrão.
+- Precedência de source: flag explícita, `KUBECONFIG` como lista de paths com o
+  separador da plataforma, profile persistido `is_default` e, por fim, path
+  recomendado. Precedência de contexto: `--context`, `context_name` persistido
+  e `current-context` somente no primeiro reconcile.
+- Fonte/contexto escolhido e inválido nunca cai silenciosamente para o próximo;
+  a aplicação local continua em HTTP 200 degradado e expõe erro sanitizado.
 - Persistir somente conjunto ordenado de paths e contexto; nunca bytes do arquivo.
 - Normalizar paths sem seguir uma troca inesperada de alvo entre validação e leitura.
 - Usar loaders oficiais do client-go para certificados, tokens referenciados e plugins `exec`.
@@ -324,6 +336,7 @@ Contrato inicial de máximos:
 | bytes retornados por leitura/scan | 10 MiB |
 | buffer por stream SSE | menor entre 1 MiB e 1.000 eventos |
 | streams SSE simultâneos por processo | 8 |
+| duração absoluta de logs follow | 4 h |
 | sessões port-forward simultâneas | 8 |
 | sessões `exec` simultâneas | 2 |
 | frame de dados `exec` | 64 KiB |
@@ -386,18 +399,38 @@ pois o tipo do Ginger permite essa composição. O handler aplica allowlist,
 sanitização por conteúdo, stdout e arquivo rotativo; `logger.New`, que fixa
 stdout e seu formato, não será usado no runtime de produção.
 
+Política inicial fechada do arquivo local:
+
+- `logs/kubePeep.log` e stdout recebem JSON Lines UTF-8 somente depois da mesma
+  sanitização central;
+- rotacionar ao atingir 10 MiB, mantendo no máximo cinco backups e removendo
+  qualquer backup com mais de 14 dias; backups não são comprimidos;
+- nomear backup com timestamp UTC e sequência, criar/abrir sempre no mesmo
+  diretório privado e aplicar `0600` ou DACL equivalente antes de escrever;
+- criação segura do sink é gate de startup: falha de path, owner ou permissão
+  impede prontidão com erro local sanitizado;
+- falha de rotação depois da prontidão mantém stdout, marca logging/aplicação
+  como degradado, emite aviso sanitizado com rate limit e tenta novamente com
+  backoff; nunca desabilita redaction nem grava em path alternativo;
+- teste de carga força duas rotações, verifica limite/retention/permissões e
+  inspeciona arquivo atual e backups contra o corpus sensível.
+
 OpenTelemetry:
 
 - desativado por padrão;
 - sem exporter, socket ou tráfego quando não configurado;
 - payloads sensíveis não viram atributo/evento;
 - falha do exporter nunca afeta o core;
-- ativação explícita e documentada.
+- ativação explícita somente pelo schema fechado de
+  [architecture.md §7.1](architecture.md#71-configuração-operacional-local),
+  sem headers/tokens configuráveis.
 
 ## 13. SQLite e filesystem
 
 - Diretórios e arquivos têm permissões mínimas permitidas pela plataforma.
-- Unix usa `~/.kubePeep/`; Windows usa o diretório de dados do usuário definido pelo adapter.
+- Unix usa `~/.kubePeep/`; Windows usa
+  `%LOCALAPPDATA%\kubePeep\`, resolvido pelo adapter via
+  `FOLDERID_LocalAppData`, nunca pelo diretório Roaming.
 - Uma instância possui lock; PID é evidência publicada, nunca autoridade
   suficiente para sinalizar ou encerrar processo.
 - `status` e `stop` usam o mesmo token privado, comparação em tempo constante,
@@ -407,6 +440,9 @@ OpenTelemetry:
 - WAL/journal, backups e temporários recebem a mesma inspeção de dados proibidos.
 - Migrations e update fazem backup/rollback sem copiar credenciais que não deveriam existir.
 - Preferências usam chaves e schemas allowlisted.
+- `config.yaml`, tree e `InstanceStateV1` seguem os schemas estritos de
+  [architecture.md §7](architecture.md#7-contrato-operacional-cli); estado
+  desconhecido/adulterado falha fechado.
 - Erro de path não inclui conteúdo do arquivo.
 - O estado temporário recebe proteção e validação antes da publicação; PID e
   porta só se tornam visíveis depois do health e da substituição atômica.
@@ -447,8 +483,10 @@ O request repete esses campos e inclui `confirmed: true`. O backend não confia 
 ### 14.2 Replay e concorrência
 
 - Restart e criação de port-forward exigem `Idempotency-Key` por tentativa.
-- A chave é ligada ao hash do corpo e retida em memória por TTL curto.
-- Reuso com corpo diferente retorna conflito.
+- A chave é ligada a método, path/alvo canônico, profile, geração e hash do body,
+  com TTL terminal de 10 minutos somente em memória.
+- Duplicata concorrente idêntica aguarda/reproduz a única execução; reuso com
+  qualquer identidade diferente retorna `IDEMPOTENCY_CONFLICT`.
 - Scale usa versão/precondition e PUT idempotente para o mesmo alvo/valor.
 - Delete usa UID/resourceVersion precondition quando suportado.
 - `exec` não é retomado/reproduzido; uma desconexão exige nova autorização e sessão.
@@ -513,7 +551,7 @@ Assinatura de artefatos além de SHA-256 é melhoria futura, salvo decisão post
 | --- | --- |
 | SSE | `pkg/sse` somente em rota raw endurecida, com budgets e cancelamento |
 | WebSocket de `exec` | `coder/websocket` v1.8.15; `pkg/ws` rejeitado |
-| kubeconfig | loaders oficiais, flag > `KUBECONFIG` > path padrão |
+| kubeconfig | loaders oficiais, flag > `KUBECONFIG` > profile default > path recomendado |
 | bind e lifecycle | listener real, foreground, controle autenticado e cleanup LIFO |
 | logging | handler `slog` próprio envolvido por `logger.Logger` |
 | health | composição própria; somente falha local crítica controla HTTP 503 |
