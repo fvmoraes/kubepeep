@@ -189,7 +189,7 @@ Baseline exata aprovada em 2026-08-03:
 
 | Grupo | Pacotes fixados |
 | --- | --- |
-| runtime web | `react`/`react-dom` 19.2.8; `react-router-dom` 7.18.2; `@tanstack/react-query` 5.101.4; `lucide-react` 1.28.0 |
+| runtime web | `react`/`react-dom` 19.2.8; `react-router` 8.3.0; `@tanstack/react-query` 5.101.4; `lucide-react` 1.28.0 |
 | build/style | `typescript` 6.0.3; `vite` 8.2.0; `@vitejs/plugin-react` 6.0.5; `tailwindcss`/`@tailwindcss/vite` 4.3.3 |
 | testes | `vitest` 4.1.10; `@testing-library/react` 16.3.2; `@testing-library/dom` 10.4.1; `@testing-library/jest-dom` 7.0.0; `jsdom` 30.0.1; `@playwright/test` 1.62.1 |
 | tipos/lint | `@types/react` 19.2.18; `@types/react-dom` 19.2.4; `@types/node` 24.13.3; `eslint` 10.8.0; `typescript-eslint` 8.65.0; `eslint-plugin-react-hooks` 7.1.1; `eslint-plugin-react-refresh` 0.5.3; `globals` 17.9.0 |
@@ -198,6 +198,12 @@ Versões são exatas, sem `^`/`~`, e somente um lockfile é aceito. Playwright,
 Vitest e Testing Library são dependências de desenvolvimento justificadas por
 testes de interação/cancelamento, nunca dependências de runtime. A escolha de
 TypeScript 6.0.3 preserva o peer range de `typescript-eslint` 8.65.0.
+
+O React Router foi atualizado da baseline 7.18.2 para 8.3.0 devido ao advisory
+[GHSA-qwww-vcr4-c8h2](https://github.com/advisories/GHSA-qwww-vcr4-c8h2),
+identificado durante a instalação da Fase 3. A correção oficial está disponível
+em 8.3.0, que mantém as APIs declarativas usadas pelo SPA; esta decisão substitui
+a baseline 7.18.2 inicialmente auditada.
 
 ## 5. Estratégia de testes
 
