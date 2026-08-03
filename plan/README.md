@@ -50,8 +50,9 @@ As fases seguem a ordem determinada pelo prompt. Para evitar duplicação, a Fas
 | [7 — Ações](07-acoes.md) | Restart, scale, delete, port-forward e exec | Ações autorizadas, confirmadas e canceláveis |
 | [8 — Distribuição](08-distribuicao.md) | Releases, instaladores, CI e aceite | MVP multiplataforma publicável |
 
-Estado atual: **Fase 1 concluída (F1-01–F1-44)**; Fase 2 é o gate ativo. Código
-de produção só começa depois da revisão conjunta dos contratos da Fase 2.
+Estado atual: **Fases 1 e 2 concluídas**; a **Fase 3 está em execução desde
+2026-08-03**. O fechamento documental está registrado em
+[Evidências da Fase 2](../docs/research/phase2-validation.md).
 
 O acompanhamento dos critérios finais está em [Matriz de aceite do MVP](matriz-aceite-mvp.md).
 
@@ -89,9 +90,9 @@ Uma tarefa funcional somente pode ser marcada como concluída quando, conforme a
 
 - Ginger v1.4.4 é a camada principal de aplicação HTTP; Gin e frameworks equivalentes estão fora de escopo.
 - O frontend usa componentes próprios e pequenos; Electron, Material UI, Ant Design e kits visuais pesados estão fora de escopo.
-- A API deve escutar somente em loopback por padrão. Proteções de `Host`, `Origin` e requisições mutáveis devem ser definidas no threat model antes das ações da Fase 7.
+- A API escuta/publica somente `127.0.0.1` no MVP. Proteções de `Host`, `Origin` e requisições mutáveis seguem o threat model antes das ações da Fase 7.
 - Rotas SSE/WS não podem usar cegamente a cadeia padrão do Ginger v1.4.4, que não preserva `http.Flusher`/`http.Hijacker`; elas exigem `HandleRaw` e uma cadeia segura que preserve as interfaces.
-- `pkg/ws` não pode sustentar `exec` enquanto os gaps de Origin, payload, frames e heartbeat não estiverem resolvidos e testados no ADR de streaming.
+- `pkg/ws` não sustenta `exec`; o ADR 0003 fixou `coder/websocket v1.8.15` e o wire contract endurecido.
 - `SelfSubjectRulesReview` pode otimizar a exibição, mas não substitui `SelfSubjectAccessReview` nem a autorização da operação real.
 - O Kube Peep não faz impersonation, não pede credenciais adicionais e não cria autorização paralela ao Kubernetes.
 - O modo `all` significa apenas os namespaces retornados pela API para a identidade atual; nunca significa `*`.
@@ -117,18 +118,18 @@ Uma tarefa funcional somente pode ser marcada como concluída quando, conforme a
 | Integração do lifecycle bloqueante do Ginger com Cobra | Spike/ADR F1 aprovados; reimplementar o coordenador no módulo F3 |
 | `pkg/app` fixar timeout de escrita enquanto SSE/WS precisam ser duradouros | F1 provou stream acima de 15 s; F3 aplica `WriteTimeout=0` e budgets por rota |
 | `app.Run()` não aceitar listener/contexto e poder pular hooks após falha de shutdown | ADR escolheu lifecycle próprio com componentes Ginger; repetir matriz de cleanup em F3 |
-| Defaults do Ginger aceitarem bind não-loopback | Sobrescrever e testar `127.0.0.1`/`::1`; falhar fechado em configuração insegura |
+| Defaults do Ginger aceitarem bind não-loopback | Sobrescrever e testar somente `127.0.0.1`; falhar fechado em configuração insegura |
 | Health do Ginger transformar todo checker falho em 503 e serializar seu erro | Registrar apenas checks locais críticos; status externo separado e sanitizado |
 | Middleware padrão remover `Flusher`/`Hijacker` | Rotas raw com middlewares próprios e testes de interface/segurança |
 | Logger do Ginger escrever apenas em stdout e redigir só por nome da chave | Estratégia explícita de arquivo/rotação e sanitização por conteúdo antes de logar |
 | Paginação Ginger ser page/per-page, diferente de `continue` | DTO cursor próprio mantendo o envelope `data` |
 | Cursor Kubernetes não cobrir fan-out multi-namespace/kind | Cursor composto ligado à query/generation, merge limitado e estado truncado explícito |
 | Resultado incompleto de `SelfSubjectRulesReview` | Cache apenas como dica; SAR e chamada Kubernetes continuam sendo autoridade |
-| Revisão RBAC indisponível ser confundida com negação | Capability tri-state; 403 somente por negação explícita/operação real |
+| Revisão RBAC indisponível ser confundida com negação | Capability tri-state; `FORBIDDEN` somente por negação explícita/operação real |
 | Plugins `exec` vazarem dados em erros | Sanitização central, allowlist de campos de log e testes com mensagens sensíveis |
 | Scan de logs causar carga ou expor segredo | Limites rígidos, concorrência controlada, redaction e nenhuma persistência |
 | Goroutines ou conexões sobreviverem à troca de contexto | Contextos hierárquicos, registro de sessões e testes de cancelamento |
-| Fake clientset não representar RBAC real | Casos simples com fake e cenários restritos em Kind/K3d |
+| Fake clientset não representar RBAC real | Casos simples com fake e cenários restritos no Kind canônico |
 | Diferenças de processos e paths entre sistemas | Adapters por plataforma e smoke tests dos artefatos reais |
 | PID/sinal não implementarem stop seguro no Windows | Probe F1 nativo validou lock/identidade/controle; reimplementar e repetir em F3 e nos archives F8 |
 | SQLite ou dependências quebrarem builds sem CGO | F1 validou `modernc.org/sqlite`; repetir a matriz com o módulo definitivo na Fase 3 |
@@ -147,6 +148,7 @@ repositório; evidência de spike não antecipa checkbox de produção ou releas
 - Produto e textos de marca: **Kube Peep**.
 - Executável e comando literal: `kubePeep`.
 - Diretório Unix literal: `~/.kubePeep/`.
+- Diretório Windows literal: `%LOCALAPPDATA%\kubePeep\`.
 - Repositório e módulo Go: `github.com/fvmoraes/kubepeep`.
 - Nomes de telas e ações podem permanecer em inglês conforme o prompt; a documentação do plano permanece em português.
 

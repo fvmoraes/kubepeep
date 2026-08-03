@@ -21,6 +21,7 @@ O Kube Peep complementa `kubectl` e ferramentas administrativas. Ele não tenta 
 | Produto e textos de marca | **Kube Peep** |
 | Executável e comando | `kubePeep` |
 | Diretório Unix | `~/.kubePeep/` |
+| Diretório Windows | `%LOCALAPPDATA%\kubePeep\` |
 | Repositório e módulo Go | `github.com/fvmoraes/kubepeep` |
 | Termos literais da API Kubernetes | Mantidos em inglês e entre crases |
 | Navegação | Rótulos em inglês definidos neste documento; uma futura localização não altera as rotas |
@@ -178,14 +179,21 @@ válida. Chamadas do frontend usam caminhos relativos de mesma origem sob
 5. O navegador abre, salvo `--no-browser`.
 6. A tela distingue aplicação local saudável de kubeconfig/contexto/cluster degradado.
 
+Quando fornecido, `--namespace` escolhe uma vez um scope `single` efêmero no
+primeiro contexto válido. O nome é validado, nunca pode ser `*`, não é
+persistido e deixa de ter precedência após a primeira seleção explícita de scope
+na UI.
+
 Estados obrigatórios: primeira execução, instância já ativa, porta pedida ocupada, kubeconfig ausente, contexto inválido, cluster offline e falha local crítica.
 
 Critérios relacionados: **MVP-01–04**, **MVP-22**, **MVP-24**.
 
 O comando raiz e `start` permanecem em foreground. A porta é adquirida por bind
-real a partir de 2748, o browser só abre depois da prontidão e `status`/`stop`
-usam o canal de controle autenticado da instância, não PID como autoridade. O
-cleanup continua mesmo após timeout de shutdown, conforme ADR 0004.
+real. Sem `--port`/config explícito, o processo tenta no máximo 50 portas
+consecutivas, de 2748 a 2797; com `--port N`, tenta exatamente N e falha se ela
+estiver ocupada. O browser só abre depois da prontidão e `status`/`stop` usam o
+canal de controle autenticado da instância, não PID como autoridade. O cleanup
+continua mesmo após timeout de shutdown, conforme ADR 0004.
 
 ### 7.2 Seleção de contexto
 
@@ -233,10 +241,12 @@ Critérios relacionados: **MVP-07–09**, **MVP-22**.
 
 O RBAC nativo autoriza a operação de coleção; o produto não promete filtrar objetos `Namespace` depois de um `list` autorizado. A autorização de recursos continua sendo avaliada separadamente.
 
-Selecionar qualquer scope salvo cria uma nova geração e cancela queries,
-streams e sessões da anterior. Para `all`, a seleção revalida `list namespaces`;
-se a permissão foi removida, mantém o scope/generation anterior e oferece a
-lista manual.
+Selecionar qualquer scope salvo do profile/contexto ativo cria uma nova geração
+e cancela queries, streams e sessões da anterior. Um scope de outra origem
+exige selecionar primeiro seu profile/contexto; tentativa direta retorna
+`SELECTION_MISMATCH` sem mudança implícita. Para `all`, a seleção revalida
+`list namespaces`; se a permissão foi removida, mantém o scope/generation
+anterior e oferece a lista manual.
 
 Critério relacionado: **MVP-10**, **MVP-21**.
 
@@ -292,6 +302,22 @@ Settings permite apenas chaves versionadas e allowlisted, incluindo:
 
 Não aceita tokens, certificados, headers, paths arbitrários fora do contrato, conteúdo de logs, comandos de `exec` ou objetos Kubernetes.
 
+### 7.10 Update e remoção
+
+`kubePeep update` é sempre explícito: mostra versão atual/alvo, baixa somente
+assets da tag resolvida, exige SHA-256, troca o binário atomicamente e restaura o
+backup se a verificação pós-update falhar. Não altera SQLite/config/logs/cache e
+não existe auto-update silencioso.
+
+Os mesmos instaladores oferecem remoção (`install.sh --uninstall` e
+`install.ps1 -Uninstall`). Por default removem somente binário e entrada de PATH
+que eles próprios criaram, preservam dados e mostram o root preservado. Purge é
+uma opção separada (`--purge-data`/`-PurgeData`) com segunda confirmação que
+exibe o path canônico; modo não interativo exige também confirmação explícita.
+Antes de apagar, o script prova que a instância não mantém o lock, resolve o
+root exato por plataforma e recusa symlink/reparse/path amplo. Nunca remove
+kubeconfig ou arquivo externo ao root do Kube Peep.
+
 ## 8. Estados de interface
 
 | Estado | Significado | Representação | Ação disponível |
@@ -306,7 +332,11 @@ Não aceita tokens, certificados, headers, paths arbitrários fora do contrato, 
 | Truncado | budget/limite encerrou a coleta | indicador `truncated` e cobertura | refinar filtro ou solicitar próxima página |
 | Obsoleto | há dado anterior durante refresh | dado marcado com instante, sem misturar gerações | aguardar ou cancelar |
 
-HTTP 403 é reservado a negação explícita. Falha de `SelfSubjectAccessReview`, timeout ou resposta incompleta produz capacidade `unknown` e falha fechada.
+O código `FORBIDDEN` é reservado a negação autoritativa do Kubernetes ou da
+operação real. HTTP 403 também pode representar a rejeição local
+`CSRF_REJECTED`; o frontend distingue sempre pelo código estável. Falha de
+`SelfSubjectAccessReview`, timeout ou resposta incompleta produz capability
+`unknown` e falha fechada.
 
 ### 8.1 Cobertura por fluxo
 

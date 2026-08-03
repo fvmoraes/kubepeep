@@ -1,15 +1,14 @@
 # Plano de implementação e validação
 
-> **Status:** revisado com as evidências e ADRs da Fase 1
+> **Status:** Fases 1 e 2 concluídas; Fase 3 em execução
 >
-> **Escopo desta entrega:** sequência de produção, comandos estáveis a criar e
-> evidências já obtidas no spike da Fase 1.
+> **Escopo desta entrega:** sequência de produção autorizada pelos contratos
+> fechados e evidências dos gates F1/F2.
 >
-> **Bloqueio atual:** a Fase 1 está concluída, inclusive com prova nativa do
-> probe isolado de controle em Linux e Windows. O scaffold definitivo aguarda
-> agora somente o gate documental da Fase 2. O probe valida o desenho; F3-B
-> deve reimplementar e repetir a integração no módulo de produção, e F8 deve
-> testar os archives/instaladores reais.
+> **Gate atual:** a auditoria documental da Fase 2 foi aprovada em 2026-08-03 e
+> o scaffold definitivo da Fase 3 está autorizado. O probe F1 valida o desenho;
+> F3-B deve reimplementar e repetir a integração no módulo de produção, e F8
+> deve testar os archives/instaladores reais.
 
 ## 1. Estratégia
 
@@ -52,12 +51,14 @@ próprios de F3/F8, não pendências retroativas de F1.
 
 ### 2.2 Gate da Fase 2
 
-- [ ] [product-spec.md](product-spec.md), [architecture.md](architecture.md), [security.md](security.md), [data-model.md](data-model.md), [api.md](api.md) e este documento revisados em conjunto;
-- [ ] toda pendência restante está ligada a um ID F1/ADR, não a um “a decidir” solto;
-- [ ] nomes de ports, DTOs, rotas e estados coincidem;
-- [ ] cada MVP possui teste futuro e owner de fase;
-- [ ] threat model revisado antes de qualquer rota mutável;
-- [ ] nenhuma dependência nova sem justificativa.
+- [x] [product-spec.md](product-spec.md), [architecture.md](architecture.md), [security.md](security.md), [data-model.md](data-model.md), [api.md](api.md) e este documento revisados em conjunto;
+- [x] toda pendência restante está ligada a um ID F1/ADR, não a um “a decidir” solto;
+- [x] nomes de ports, DTOs, rotas e estados coincidem;
+- [x] cada MVP possui teste futuro e owner de fase;
+- [x] threat model revisado antes de qualquer rota mutável;
+- [x] nenhuma dependência nova sem justificativa.
+
+Evidência: [validação e auditorias da Fase 2](research/phase2-validation.md).
 
 ## 3. Sequência de entrega
 
@@ -89,7 +90,8 @@ Não conectar a cluster real nesta fase. Flags Kubernetes podem ser parseadas, m
 | F4-G Permissions | matriz textual e capabilities | frontend + integração |
 | F4-H hardening | JSON estrito, DTOs, redaction, inspeção DB/log | adversarial |
 
-O harness Kind/K3d começa aqui; RBAC real não é postergado para a Fase 8.
+O harness Kind canônico começa aqui; K3d é apenas alternativa local e RBAC real
+não é postergado para a Fase 8.
 
 ### 3.3 Fase 5 — Dashboard
 
@@ -162,7 +164,7 @@ O repositório deve oferecer uma interface estável por Makefile. A implementaç
 | `make test-unit` | unitários Go e frontend |
 | `make test-integration` | HTTP, SQLite e Kubernetes controlado |
 | `make test-race` | race detector onde suportado |
-| `make test-e2e` | Kind/K3d + browser/CLI |
+| `make test-e2e` | Kind canônico + browser/CLI |
 | `make test` | unitário + integração, sem E2E caro |
 | `make web-build` | instalar via lockfile e compilar assets |
 | `make build` | gerar binário local com frontend/migrations |
@@ -177,10 +179,25 @@ Ferramentas subjacentes iniciais:
 - Go: `gofmt`, `go vet`, `go test`;
 - frontend: Vite, TypeScript, Vitest e Testing Library;
 - E2E browser: Playwright;
-- Kubernetes real: Kind preferencial, K3d equivalente se a matriz F1 justificar;
+- Kubernetes real: Kind canônico no CI/E2E; K3d somente como alternativa local equivalente;
 - release: GoReleaser v2.
 
-O package manager frontend e suas versões são fixados depois do inventário F1-07; apenas um lockfile é aceito. Playwright/Vitest são dependências de desenvolvimento justificadas por testes de interação e cancelamento, nunca dependências de runtime.
+O package manager é npm 11.16.0, registrado como
+`"packageManager": "npm@11.16.0"`, com `package-lock.json` lockfileVersion 3.
+Build/CI usam Node.js 24.18.0; Node.js não é dependência do binário distribuído.
+Baseline exata aprovada em 2026-08-03:
+
+| Grupo | Pacotes fixados |
+| --- | --- |
+| runtime web | `react`/`react-dom` 19.2.8; `react-router-dom` 7.18.2; `@tanstack/react-query` 5.101.4; `lucide-react` 1.28.0 |
+| build/style | `typescript` 6.0.3; `vite` 8.2.0; `@vitejs/plugin-react` 6.0.5; `tailwindcss`/`@tailwindcss/vite` 4.3.3 |
+| testes | `vitest` 4.1.10; `@testing-library/react` 16.3.2; `@testing-library/dom` 10.4.1; `@testing-library/jest-dom` 7.0.0; `jsdom` 30.0.1; `@playwright/test` 1.62.1 |
+| tipos/lint | `@types/react` 19.2.18; `@types/react-dom` 19.2.4; `@types/node` 24.13.3; `eslint` 10.8.0; `typescript-eslint` 8.65.0; `eslint-plugin-react-hooks` 7.1.1; `eslint-plugin-react-refresh` 0.5.3; `globals` 17.9.0 |
+
+Versões são exatas, sem `^`/`~`, e somente um lockfile é aceito. Playwright,
+Vitest e Testing Library são dependências de desenvolvimento justificadas por
+testes de interação/cancelamento, nunca dependências de runtime. A escolha de
+TypeScript 6.0.3 preserva o peer range de `typescript-eslint` 8.65.0.
 
 ## 5. Estratégia de testes
 
@@ -222,7 +239,7 @@ Fake clientset não comprova RBAC.
 - sem armazenamento browser de dados;
 - acessibilidade com queries semânticas e auditoria automatizada.
 
-### 5.4 Kind/K3d
+### 5.4 Kind canônico
 
 Executado incrementalmente desde F4:
 
@@ -284,7 +301,8 @@ Marcadores de segurança são aleatórios por execução e inspecionados depois.
 | `namespace-lister` | `list namespaces` cluster-scoped + leitura limitada | recursos em `kp-denied` | `all` usa resposta real, recursos continuam RBAC |
 | `logs-reader` | view + `get pods/log` em allowed | exec/port-forward | logs positivos |
 | `no-logs` | view pods | `pods/log` | MVP-16 |
-| `scaler` | view + update/patch `deployments/scale`, `statefulsets/scale` | delete pods | scale |
+| `restarter` | view + patch deployments | scale/delete pods | restart |
+| `scaler` | view + update `deployments/scale`, `statefulsets/scale` | patch `scale`/delete pods | scale exclusivamente por `UpdateScale` |
 | `pod-deleter` | view + delete pod | scale/restart | delete |
 | `port-forwarder` | view + create `pods/portforward` | exec | sessão port-forward |
 | `executor` | view + create `pods/exec` | demais mutações conforme fixture | exec |
@@ -311,9 +329,34 @@ Doctor não imprime conteúdo do kubeconfig, plugin stderr, token, certificado o
 ### 8.2 Formato
 
 - padrão humano, uma linha por check;
-- `--json` usa schema versionado;
+- `--json` emite exatamente um objeto JSON estrito, sem envelope HTTP nem
+  trailing content, com o schema v1 abaixo;
 - estados `pass`, `warn`, `fail`, `skip`;
 - todo achado possui código estável e mensagem sanitizada.
+
+```json
+{
+  "schema": 1,
+  "overall": "warn",
+  "checks": [
+    {
+      "group": "cluster",
+      "name": "connection",
+      "status": "warn",
+      "code": "CLUSTER_UNAVAILABLE",
+      "message": "The cluster is temporarily unavailable."
+    }
+  ]
+}
+```
+
+`overall` é `pass`, `warn` ou `fail`. `checks` sempre existe, ordenado pela
+ordem dos grupos da §8.1 e depois por `name`; cada objeto possui exatamente os
+cinco campos mostrados. `group` pertence à lista da §8.1, `name`/`code` são
+identificadores ASCII estáveis e `message` é pública, sanitizada e limitada a
+1 KiB. `skip` não eleva `overall`; qualquer `fail` produz `fail`, senão qualquer
+`warn` produz `warn`. Falha interna antes de construir o relatório escreve um
+erro mínimo sanitizado em stderr e usa exit 4.
 
 ### 8.3 Códigos de saída
 
@@ -326,6 +369,8 @@ Doctor não imprime conteúdo do kubeconfig, plugin stderr, token, certificado o
 | 4 | falha interna inesperada do doctor |
 
 Metrics API ausente é `warn` ou `skip`, nunca falha local. O comportamento dos helpers Ginger é evidência complementar, não substitui estes checks.
+Nos demais comandos, os mesmos códigos-base e cada caso operacional estão
+fixados em [architecture.md §7.3](architecture.md#73-resultados-dos-comandos).
 
 ## 9. Evidência planejada dos 27 MVPs
 
@@ -423,7 +468,7 @@ Também exigem evidência:
 | Dependência | Motivo | Condição |
 | --- | --- | --- |
 | Ginger v1.4.4 | framework obrigatório | pin exato |
-| Cobra | CLI híbrida | composição aprovada no ADR |
+| github.com/spf13/cobra v1.10.2 | CLI híbrida | composição e versão aprovadas no ADR/matriz F1 |
 | client-go/api/apimachinery v0.35.7 | integração Kubernetes oficial | minor alinhada e Go 1.25 |
 | k8s.io/metrics v0.35.7 | Metrics API opcional | adapter isolado |
 | modernc.org/sqlite v1.54.0 | SQLite sem CGO | cross-build F1; comportamento F3 |
@@ -547,7 +592,8 @@ Procedimento:
 8. depois de F1, atualizar e aprovar os seis documentos;
 9. somente então abrir a Fase 3.
 
-F2-40 é fechado quando o checklist de §2.2 e a auditoria automatizada dos seis
-documentos estiverem verdes. A prova Windows do probe isolado fechou F1-44;
+F2-40 foi fechado em 2026-08-03 com o checklist de §2.2 e as auditorias de
+[contrato, plano e conteúdo estático](research/phase2-validation.md) verdes. A
+prova Windows do probe isolado fechou F1-44;
 portabilidade do módulo de produção e dos artefatos continua sendo revalidada
 em F3/F8 e não pode ser inferida do spike.

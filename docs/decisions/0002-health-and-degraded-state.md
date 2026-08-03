@@ -24,11 +24,11 @@ checkers compatíveis com `pkg/health`, mas aplicando deadline e sanitização:
   "data": {
     "status": "healthy",
     "components": {
-      "application": {"status": "healthy", "code": "OK"},
-      "sqlite": {"status": "healthy", "code": "OK"},
-      "kubeconfig": {"status": "unknown", "code": "NOT_CHECKED"},
-      "context": {"status": "unknown", "code": "NOT_SELECTED"},
-      "cluster": {"status": "unknown", "code": "NOT_CHECKED"}
+      "application": {"status": "healthy", "code": "OK", "message": "Application is ready.", "checkedAt": "2026-07-27T12:00:00Z"},
+      "sqlite": {"status": "healthy", "code": "OK", "message": "SQLite is available.", "checkedAt": "2026-07-27T12:00:00Z"},
+      "kubeconfig": {"status": "unknown", "code": "NOT_CHECKED", "message": "Kubeconfig has not been checked.", "checkedAt": null},
+      "context": {"status": "unknown", "code": "NOT_SELECTED", "message": "No context is selected.", "checkedAt": null},
+      "cluster": {"status": "unknown", "code": "NOT_CHECKED", "message": "The cluster has not been checked.", "checkedAt": null}
     }
   }
 }

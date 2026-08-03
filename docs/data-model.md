@@ -59,8 +59,9 @@ O nome do profile é único localmente. Contextos iguais podem existir em profil
 Trocar o profile default ocorre em uma transação: zerar o anterior, marcar o novo e verificar que existe exatamente um default quando há profiles.
 
 Profiles não são criados nem recebem paths por uma rota web no MVP. No
-bootstrap, o adapter resolve o conjunto ordenado de paths pela precedência
-canônica, normaliza-o e o reconcilia em uma transação:
+bootstrap, o adapter resolve o conjunto ordenado pela precedência
+`--kubeconfig` > `KUBECONFIG` > profile `is_default` persistido > path
+recomendado da plataforma, normaliza-o e o reconcilia em uma transação:
 
 1. procurar um profile cujo conjunto ordenado de filhos seja exatamente igual;
 2. reutilizá-lo sem persistir fingerprint ou conteúdo;
@@ -69,8 +70,13 @@ canônica, normaliza-o e o reconcilia em uma transação:
    houver contexto, acrescentando sufixo numérico em caso de conflito;
 5. tornar o primeiro profile criado o default; alterações posteriores de
    default são sempre explícitas;
-6. atualizar `context_name` somente depois de validar que o contexto pertence
-   ao conjunto de kubeconfigs.
+6. resolver contexto por `--context` > `context_name` persistido >
+   `current-context` somente no primeiro reconcile e atualizar `context_name`
+   apenas depois de validar que pertence ao conjunto.
+
+Fonte/contexto escolhido e inválido não cai para a alternativa seguinte e não
+corrompe o profile: o shell inicia degradado com erro sanitizado. Sem profile
+persistido e sem path recomendado existente, não é criado profile vazio.
 
 Duas inicializações concorrentes não podem criar profiles para o mesmo conjunto
 ordenado. Essa unicidade, que envolve várias linhas, é garantida pelo serviço
@@ -100,9 +106,10 @@ Regras:
 - não expandir conteúdo, token ou certificado;
 - `~` pode ser expandido antes de persistir para evitar ambiguidade;
 - o comportamento de separadores, deduplicação e merge reproduz o loader
-  oficial do `client-go v0.35.7`: flag explícita seleciona um único arquivo;
-  `KUBECONFIG` usa a lista de paths nativa preservando precedência; na ausência
-  de ambos, usa o path recomendado da plataforma.
+  oficial do `client-go v0.35.7`: flag explícita seleciona um único arquivo e
+  `KUBECONFIG` usa a lista de paths nativa preservando precedência; somente na
+  ausência dessas fontes o produto consulta profile default e path recomendado
+  conforme a regra de bootstrap acima.
 
 ### 3.3 `namespace_scopes`
 
@@ -235,8 +242,8 @@ metrics
       "id": "local-id",
       "name": "Problemáticos em payments",
       "query": {
-        "namespace": "payments",
-        "status": ["problematic"],
+        "namespace": ["payments"],
+        "problematic": true,
         "search": ""
       }
     }
@@ -249,6 +256,9 @@ Regras:
 - `id` é local e opaco;
 - `name` tem 1–80 caracteres;
 - somente campos de filtro documentados para a tela;
+- tipos, enums e cardinalidade são exatamente os de `api.md` §5.3; arrays são
+  usados para `namespace`, `status` e `kind`, e cursor/`continue`/`limit` são
+  proibidos;
 - strings individuais até 256 bytes;
 - JSON total por chave até 64 KiB;
 - sem headers, cookies, kubeconfig, token, certificado, Secret, YAML, log, comando ou saída de `exec`;
@@ -276,6 +286,7 @@ Não criar tabelas ou colunas para:
 - logs, scan de logs ou downloads;
 - eventos/watch cache;
 - métricas;
+- scope `single` efêmero criado por `--namespace`;
 - stdin/stdout/stderr ou command argv de `exec`;
 - tráfego de port-forward;
 - sessões históricas;
@@ -317,6 +328,9 @@ COMMIT
 ```
 
 Qualquer erro faz rollback integral. A API recebe a lista inteira; não há uma requisição por namespace.
+PUT/DELETE entram no coordenador de seleção, exigem `expectedGeneration` e
+releem o vínculo ativo imediatamente antes do `BEGIN IMMEDIATE`; mudança de
+geração ou versão aborta antes de qualquer escrita.
 
 ### 6.3 Selecionar contexto/profile default
 

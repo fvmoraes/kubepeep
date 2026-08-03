@@ -23,10 +23,10 @@ Adicionar restart, scale, exclusão de pod, port-forward e exec sem criar uma au
 
 - [ ] **F7-01** Mapear para cada ação grupo de API, recurso, subresource e verbo exatos.
 - [ ] **F7-02** Reutilizar e estender o `AuthorizationService`/helper da Fase 4 para revalidar SAR, sem criar uma autorização paralela nem confiar no resultado antigo da interface.
-- [ ] **F7-03** Aplicar proteção de Origin/CSRF definida na Fase 2 a todas as requisições mutáveis e upgrades.
-- [ ] **F7-04** Criar DTO de confirmação com contexto, namespace, kind, nome, ação e consequência.
-- [ ] **F7-05** Exigir confirmação explícita para operações destrutivas e impedir replay conforme contrato.
-- [ ] **F7-06** Criar registro em memória para sessões, limites de concorrência, cancelamento e cleanup.
+- [ ] **F7-03** Reutilizar os guards/decoder instalados nas Fases 3–4: Host/Origin, CSRF, `Content-Type: application/json`, JSON estrito e body limit em toda rota mutável; CSRF via `fetch` em SSE; no upgrade WebSocket, Host/Origin, ticket one-shot, geração e SAR (o browser não envia header CSRF no construtor WebSocket).
+- [ ] **F7-04** Implementar o port `ActionService` e o DTO de confirmação comum com contexto, namespace, kind, nome, ação e consequência.
+- [ ] **F7-05** Exigir `ActionTargetDTO`, confirmação/consequência explícitas e impedir replay; no registry idempotente, ligar a chave a método, path/alvo, profile, geração e hash canônico do body por 10 minutos.
+- [ ] **F7-06** Implementar os ports `PortForwardService` e `ExecService` sobre registros em memória com owner, generation ID, limites de concorrência, cancelamento e cleanup.
 - [ ] **F7-07** Registrar somente metadados operacionais: nunca conteúdo de terminal, comando, log, token ou stream.
 - [ ] **F7-08** Padronizar forbidden, conflict, timeout, cancelamento, alvo inexistente e cluster offline.
 - [ ] **F7-09** Atualizar capabilities após sucesso, negação ou mudança de contexto.
@@ -34,16 +34,16 @@ Adicionar restart, scale, exclusão de pod, port-forward e exec sem criar uma au
 ## Ação 1 — Restart de Deployment
 
 - [ ] **F7-10** Confirmar permissão necessária para o patch de Deployment.
-- [ ] **F7-11** Implementar restart por patch mínimo da pod template conforme ADR, preservando campos não relacionados.
-- [ ] **F7-12** Implementar endpoint `POST /api/v1/workloads/{kind}/{namespace}/{name}/restart` restrito ao kind suportado no MVP.
+- [ ] **F7-11** Implementar restart de Deployment pelo strategic merge patch mínimo definido em `docs/api.md`, alterando apenas `kubectl.kubernetes.io/restartedAt`, preservando campos não relacionados e aplicando a precondition de resourceVersion.
+- [ ] **F7-12** Implementar endpoint `POST /api/v1/workloads/{kind}/{namespace}/{name}/restart` restrito ao kind suportado no MVP, exigindo `Idempotency-Key` ligada à identidade canônica completa e TTL terminal de 10 minutos.
 - [ ] **F7-13** Exibir confirmação, progresso e resultado sem afirmar que o rollout terminou antes da condição real.
-- [ ] **F7-14** Testar permitido, negado, conflito de versão, alvo removido e request cancelado.
+- [ ] **F7-14** Testar permitido, negado, conflito de versão, alvo removido, request cancelado, duplicata concorrente sem segundo patch e `IDEMPOTENCY_CONFLICT` ao mudar body, path/alvo, profile ou geração com a mesma chave.
 
 ## Ação 2 — Scale
 
-- [ ] **F7-15** Verificar `update`/`patch` no subresource `scale` conforme contrato e comportamento do cluster.
+- [ ] **F7-15** Usar e testar SAR `update apps/deployments/scale` ou `update apps/statefulsets/scale`, com `resourceName`; não usar `patch` no MVP.
 - [ ] **F7-16** Validar réplica mínima/máxima e representar a consequência de escalar para zero.
-- [ ] **F7-17** Implementar scale para Deployment e StatefulSet via subresource, sem substituir o objeto completo.
+- [ ] **F7-17** Implementar scale para Deployment e StatefulSet via `UpdateScale`, sem substituir o workload completo.
 - [ ] **F7-18** Implementar `PUT /api/v1/workloads/{kind}/{namespace}/{name}/scale`.
 - [ ] **F7-19** Testar permitido, negado, valor inválido, conflito, cancelamento e atualização da interface.
 
@@ -57,26 +57,26 @@ Adicionar restart, scale, exclusão de pod, port-forward e exec sem criar uma au
 
 ## Ação 4 — Port-forward
 
-- [ ] **F7-25** Derivar o verbo de `pods/portforward` do método do transporte escolhido — normalmente `create` para POST — e testar o atributo SAR exato.
-- [ ] **F7-26** Validar pod, bind loopback e faixas das portas remota/local, sem exigir container nem `containerPort` declarado.
-- [ ] **F7-27** Escutar somente em loopback e escolher porta local disponível quando omitida.
-- [ ] **F7-28** Implementar `POST /api/v1/pods/{namespace}/{name}/port-forward`, `GET /api/v1/port-forwards` e `DELETE /api/v1/port-forwards/{id}`.
-- [ ] **F7-29** Exibir sessões ativas na área Network, com contexto, namespace, pod, portas e estado.
-- [ ] **F7-30** Encerrar sessão em ação do usuário, troca de contexto, término do pod ou shutdown.
-- [ ] **F7-31** Limitar quantidade de sessões e evitar goroutines/sockets órfãos.
-- [ ] **F7-32** Testar permitido, negado, porta ocupada, conexão interrompida, cancelamento e cleanup.
+- [ ] **F7-25** Usar e testar o atributo SAR exato `create pods/portforward`; não derivar o verbo do método HTTP local.
+- [ ] **F7-26** Validar pod, `remotePort` 1–65535 e `localPort` null ou 1024–65535, sem exigir container nem `containerPort` declarado.
+- [ ] **F7-27** Escutar somente em loopback; quando a porta local for omitida, adquirir diretamente `127.0.0.1:0` e manter o listener, sem probe separado.
+- [ ] **F7-28** Implementar `POST /api/v1/pods/{namespace}/{name}/port-forward`, exigindo `Idempotency-Key` ligada a método + path/Pod + profile + geração + hash do body por 10 minutos, além de `GET /api/v1/port-forwards` e `DELETE /api/v1/port-forwards/{id}`.
+- [ ] **F7-29** Exibir sessões ativas e terminais retidas por 10 min na área Network, com contexto, namespace, pod, portas, `createdAt`, `expiresAt`, `endedAt`, status e razão, sem tráfego.
+- [ ] **F7-30** Encerrar sessão em ação do usuário, qualquer troca de geração (contexto ou scope), evidência upstream de término do pod, duração absoluta de 8 h ou shutdown.
+- [ ] **F7-31** Limitar exatamente oito sessões port-forward ativas e evitar goroutines/sockets órfãos.
+- [ ] **F7-32** Testar permitido, negado, limites/faixas, bind `:0`, porta ocupada, todos os códigos públicos, expiração de 8 h, Pod gone, retenção terminal de 10 min, conexão interrompida, cancelamento, cleanup, duplicata concorrente sem segundo listener/sessão e `IDEMPOTENCY_CONFLICT` ao mudar body, Pod/path, profile ou geração com a mesma chave.
 
 ## Ação 5 — Exec
 
-- [ ] **F7-33** Derivar o verbo de `pods/exec` do método do transporte escolhido e revalidar o atributo SAR imediatamente antes do upgrade.
+- [ ] **F7-33** Usar `create pods/exec` no POST e revalidar exatamente o mesmo atributo SAR imediatamente antes do upgrade GET; o verbo Kubernetes não é derivado do método HTTP local.
 - [ ] **F7-34** Validar namespace, pod, container e estado executável do alvo.
-- [ ] **F7-35** Aprovar o transporte do client-go; usar `pkg/ws` apenas se o spike provar ou complementar com segurança Origin, masking, opcodes, fragmentação, ping/pong, limites e deadlines.
-- [ ] **F7-36** Definir stdin, stdout, stderr, TTY, resize, heartbeat e encerramento no contrato.
-- [ ] **F7-37** Validar command/argv como lista, limites de sessões/mensagens, timeout de idle e cancelamento, sem concatenação de shell.
-- [ ] **F7-38** Implementar `POST /api/v1/pods/{namespace}/{name}/exec` e o transporte aprovado, sem registrar comando nem saída.
+- [ ] **F7-35** Usar `github.com/coder/websocket v1.8.15` entre browser e backend, manter as bibliotecas oficiais Kubernetes no stream remoto e não usar `pkg/ws` do Ginger no caminho de `exec`; aplicar Origin, masking, opcodes, fragmentação, ping/pong, limites e deadlines do ADR 0003.
+- [ ] **F7-36** Implementar os schemas wire, encoding, stdin, stdout, stderr, TTY, resize, heartbeat e encerramento fixados em `docs/api.md`.
+- [ ] **F7-37** Validar command/argv como lista, duas sessões, mensagens de dados/controle, fila, heartbeat, idle de 30 min, duração de 4 h e cancelamento, sem concatenação de shell.
+- [ ] **F7-38** Implementar `POST /api/v1/pods/{namespace}/{name}/exec`, que cria ticket one-shot de 10 s, e a rota interna `GET /api/v1/exec/{sessionId}/stream`; exigir os subprotocolos `kubepeep.exec.v1` + `kp-ticket.*`, consumir uma vez, selecionar na resposta somente `kubepeep.exec.v1`, desabilitar compressão e nunca registrar ticket/comando/saída.
 - [ ] **F7-39** Fechar a sessão em troca de contexto/escopo, perda do socket, término do container ou shutdown.
 - [ ] **F7-40** Criar interface de terminal somente após revisão de segurança e justificativa de qualquer dependência adicional.
-- [ ] **F7-41** Testar permitido, negado, container inválido, resize, desconexão abrupta, backpressure e cleanup.
+- [ ] **F7-41** Testar permitido, negado, container inválido, ticket válido/vencido/reusado/outra geração, lista/seleção de subprotocolos, compressão desabilitada, `ready`/`exit`, stdout/stderr com e sem TTY, resize, fragmentação, masking, heartbeat iniciado pelo backend/ecoado pelo browser e cada mapeamento causa → terminal → close code, além de desconexão abrupta, backpressure e cleanup.
 - [ ] **F7-42** Testar argv adversarial, ausência de shell implícito e ausência de comando/saída nos logs.
 
 ### E2E e fechamento
@@ -95,6 +95,9 @@ Antes de iniciar a ação seguinte, a atual precisa comprovar:
 - ação ausente/desabilitada para usuário negado;
 - SAR revalidado no backend;
 - confirmação contextual quando aplicável;
+- idempotência/replay conforme o contrato da ação;
+- preconditions e generation ID validados quando o contrato exigir;
+- Content-Type, JSON estrito, campos desconhecidos, trailing data e body limit testados;
 - resultado e erro padronizados;
 - timeout e cancelamento;
 - cleanup sem sessão/goroutine órfã;
@@ -110,7 +113,7 @@ Antes de iniciar a ação seguinte, a atual precisa comprovar:
 | Scale perder atualização concorrente | Subresource e tratamento de conflito |
 | Delete induzir falsa promessa | Mostrar owner e consequência real |
 | Port-forward expor porta na rede | Bind somente em loopback |
-| WebSocket Ginger aceitar frames/Origins inseguros | Gate adversarial; não liberar exec com `pkg/ws` sem hardening comprovado |
+| Transporte WebSocket aceitar frames/Origins inseguros | `coder/websocket` configurado pelo contrato e gate adversarial; `pkg/ws` não entra no caminho de `exec` |
 | Exec vazar comando ou saída | Nenhum log de payload e testes de observabilidade |
 | Sessões ficarem órfãs | Registry, contextos e cleanup no shutdown/troca |
 

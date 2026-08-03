@@ -5,7 +5,7 @@ Esta matriz liga os 27 critérios do prompt às fases responsáveis e à evidên
 | ID | Status | Critério | Fase | Tarefas responsáveis | Evidência mínima esperada |
 | --- | --- | --- | --- | --- | --- |
 | MVP-01 | [ ] | `kubePeep` inicia a aplicação local | 3 | F3-06, F3-12–15, F3-49 | Teste E2E do comando raiz e processo saudável |
-| MVP-02 | [ ] | O navegador abre automaticamente | 3 | F3-14, F3-41 | Teste do adapter de browser e smoke test por plataforma |
+| MVP-02 | [ ] | O navegador abre automaticamente | 3 e 8 | F3-14, F3-41, F8-41 | Teste do adapter de browser e smoke test nativo por plataforma |
 | MVP-03 | [ ] | O frontend está embutido no binário | 3 | F3-36–37, F3-41 | Teste do asset embutido e rota SPA no binário compilado |
 | MVP-04 | [ ] | Não há Node.js em runtime | 3 e 8 | F3-41, F8-41 | Execução do artefato em ambiente sem Node.js |
 | MVP-05 | [ ] | O usuário pode selecionar um contexto | 4 | F4-10–14, F4-51 | Testes de API, serviço e interface de seleção |
@@ -23,8 +23,8 @@ Esta matriz liga os 27 critérios do prompt às fases responsáveis e à evidên
 | MVP-17 | [ ] | O scan de logs possui limites de segurança | 5 | F5-33–43, F5-61 | Testes de janela, linhas, bytes, pods, containers, concorrência e cancelamento |
 | MVP-18 | [ ] | Metrics API indisponível não quebra o dashboard | 5 | F5-44–48, F5-56, F5-59 | Integração sem `metrics.k8s.io` e interface degradada utilizável |
 | MVP-19 | [ ] | Ações não autorizadas ficam ocultas ou desabilitadas | 4 e 7 | F4-38–39, F7-01–09, F7-43–45 | Testes de capabilities na interface para cada ação |
-| MVP-20 | [ ] | O backend valida novamente toda ação | 7 | F7-01–03, F7-10, F7-15, F7-20, F7-25, F7-33 | SAR e negação imediatamente antes de cada mutação/upgrade |
-| MVP-21 | [ ] | O produto funciona sem `cluster-admin` | 4 e 8 | F4-48–50, F8-20–25 | E2E com Role/RoleBinding restritos em Kind/K3d |
+| MVP-20 | [ ] | O backend valida novamente toda ação | 7 | F7-01–03, F7-10, F7-15, F7-20, F7-25, F7-33, F7-44 | SAR e negação imediatamente antes de cada mutação/upgrade, inclusive após revogação |
+| MVP-21 | [ ] | O produto funciona sem `cluster-admin` | 4 e 8 | F4-48–50, F8-20–25 | E2E com Role/RoleBinding restritos no Kind canônico |
 | MVP-22 | [ ] | SQLite não armazena credenciais | 3 e 4 | F3-22–26, F3-53, F4-03, F4-43, F4-54 | Inspeção do DB/journal/backup e testes de persistência |
 | MVP-23 | [ ] | Os testes principais passam | Todas | F3-43, F4-55, F5-60, F6-60, F7-47, F8-47 | Pipeline verde com unitários, integração, frontend e E2E |
 | MVP-24 | [ ] | `ginger doctor` não apresenta problema não documentado | 3 a 8 | F3-43, F4-55, F5-60, F6-60, F7-47, F8-47 | Saída anexada ao gate de cada fase |
@@ -36,10 +36,10 @@ Esta matriz liga os 27 critérios do prompt às fases responsáveis e à evidên
 
 Antes de considerar a matriz completa:
 
-- [ ] o commit/tag exato analisado do DWYT está registrado;
+- [x] o commit/tag exato analisado do DWYT está registrado;
 - [ ] a dependência `github.com/fvmoraes/ginger v1.4.4` está fixada no `go.mod`;
-- [ ] os seis documentos da Fase 2 estão atualizados;
-- [ ] as decisões arquiteturais relevantes possuem ADR;
+- [x] os seis documentos da Fase 2 estão atualizados;
+- [x] as decisões arquiteturais relevantes possuem ADR;
 - [ ] nenhum teste usa credencial real;
 - [ ] nenhum fixture contém Secret, token ou kubeconfig real;
 - [ ] o cenário E2E inclui namespace permitido e negado;

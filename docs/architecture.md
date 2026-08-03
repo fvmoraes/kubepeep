@@ -146,8 +146,9 @@ O processo possui um coordenador de lifecycle, único owner de:
 ### 6.2 Sequência de startup desejada
 
 ```text
-parse CLI/config
-  → resolver diretório e adquirir lock
+parse CLI e resolver o data root canônico
+  → criar/proteger o root e ler `config.yaml` estritamente
+  → compor opções efetivas e adquirir lock
   → abrir SQLite e aplicar migrations embutidas
   → montar serviços/adapters/router
   → adquirir listener loopback por bind real
@@ -210,10 +211,121 @@ exigem a mesma prova de identidade. A Fase 8 não reaproveita o probe F1; ela
 valida o comando F3 dentro dos archives e instaladores reais.
 
 Flags de contexto, kubeconfig e namespace são aceitas na Fase 3 e ligadas ao
-bootstrap Kubernetes na Fase 4. A precedência confirmada é flag explícita,
-lista ordenada de `KUBECONFIG` e arquivo padrão. O descritor persiste apenas
-paths, nunca conteúdo, fingerprints ou credenciais. Fingerprints de modificação
-existem somente em memória para invalidar o clientset.
+bootstrap Kubernetes na Fase 4. A precedência de source é `--kubeconfig`, lista
+ordenada de `KUBECONFIG`, profile persistido `is_default` e path recomendado da
+plataforma; a precedência de contexto é `--context`, `context_name` persistido e
+`current-context` somente no primeiro reconcile. Fonte escolhida inválida não
+faz fallback silencioso: o shell permanece localmente saudável e Kubernetes
+fica degradado. O descritor persiste apenas paths, nunca conteúdo, fingerprints
+ou credenciais. Fingerprints de modificação existem somente em memória para
+invalidar o clientset.
+
+`--namespace` é somente uma seleção inicial: um scope `single` efêmero aplicado
+uma vez ao primeiro contexto válido, sem linha no SQLite. Depois que a UI
+seleciona um scope, essa intenção explícita substitui o valor CLI já consumido.
+
+O root de dados é `~/.kubePeep/` em Unix e
+`%LOCALAPPDATA%\kubePeep\` em Windows. O adapter Windows resolve
+`FOLDERID_LocalAppData` diretamente para manter banco, logs, cache e runtime
+fora do perfil Roaming; todos os arquivos permitidos ficam sob esse único root.
+
+### 7.1 Configuração operacional local
+
+`config.yaml` é um único documento YAML estrito, UTF-8, máximo 64 KiB, sem
+aliases, anchors, tags, duplicate keys ou campos desconhecidos. Ausência cria o
+arquivo com defaults por escrita privada/atômica; arquivo inválido impede
+prontidão e retorna erro sanitizado. Schema v1 completo:
+
+```yaml
+version: 1
+server:
+  port: null
+  openBrowser: true
+  shutdownTimeout: 10s
+observability:
+  otel:
+    enabled: false
+    endpoint: null
+    protocol: http/protobuf
+    insecure: false
+```
+
+`server.port` é null ou inteiro 1024–65535. `shutdownTimeout` usa inteiro
+positivo seguido de `s`, entre 1s e 30s. O endpoint OTel é obrigatório somente
+quando `enabled=true`: URL absoluta HTTP(S), máximo 2.048 bytes, sem userinfo,
+query ou fragment; HTTP exige host loopback e `insecure=true`. O protocolo do
+MVP é somente `http/protobuf`; headers/tokens não são configuráveis. Com
+`enabled=false`, endpoint precisa ser null e nenhuma resolução, socket ou
+exporter é iniciado.
+
+Precedência operacional é `flag CLI explicitamente presente > config.yaml >
+default embutido`. `--port` substitui `server.port`; `--no-browser` força
+`openBrowser=false`. Contexto, kubeconfig e namespace não existem no YAML e
+mantêm a precedência Kubernetes documentada abaixo. Host, data root, paths de
+arquivo, CORS/CSRF, política de logs e limites de segurança não são
+configuráveis; `host` é campo desconhecido e o listener permanece exatamente
+`127.0.0.1`.
+
+### 7.2 Tree e estado de instância
+
+```text
+<data-root>/
+├── config.yaml
+├── kubePeep.db
+├── logs/
+│   └── kubePeep.log
+├── runtime/
+│   ├── kubePeep.lock
+│   └── instance.json
+└── cache/
+```
+
+Backups rotacionados do log e arquivos SQLite `-wal`/`-shm` são derivados
+permitidos; temporários de escrita/backup existem somente durante a operação.
+Não há arquivo PID, porta ou token paralelo. `InstanceStateV1`, gravado em
+`instance.json`, existe somente
+depois da prontidão e durante uma instância publicada. Ele é JSON estrito,
+máximo 64 KiB, sem trailing content, e possui exatamente:
+
+```json
+{
+  "schema": 1,
+  "instance_id": "inst_base64url128",
+  "pid": 12345,
+  "fingerprint": "platform-start-fingerprint",
+  "port": 2748,
+  "protocol": "kubepeep-control/v1",
+  "control_token": "base64url-256-bit-token"
+}
+```
+
+`instance_id` usa 128 bits aleatórios e `control_token` 256 bits, ambos
+base64url sem padding e gerados pelo CSPRNG. PID é positivo, porta 1024–65535,
+fingerprint é opaco não vazio até 256 bytes e protocolo é a literal mostrada.
+O token é enviado apenas no header privado do canal de controle; o
+`ControlIdentityDTO` deliberadamente omite o sétimo campo.
+
+### 7.3 Resultados dos comandos
+
+Exit codes comuns: 0 sucesso/estado desejado, 1 argumento ou config inválida, 2
+falha operacional local, 3 estado consultado indisponível/degradado e 4 falha
+interna inesperada. Saída humana vai para stdout em sucesso/estado; erro
+sanitizado vai para stderr.
+
+| Caso | Resultado |
+| --- | --- |
+| `start`/raiz encontra identidade ativa comprovada | não cria processo; abre a URL existente salvo `--no-browser`; exit 0 |
+| lock livre + `instance.json` obsoleto comprovado | remove somente o estado obsoleto e inicia normalmente |
+| lock ocupado sem identidade comprovável ou estado corrompido/adulterado | fail-closed, não sinaliza/não remove; exit 2 |
+| porta explícita ocupada ou qualquer erro de bind não elegível a avanço | sem fallback; exit 2 |
+| SIGINT/SIGTERM, `stop` ou encerramento normal com cleanup completo | exit 0 |
+| erro de Serve, timeout ou falha de qualquer hook de cleanup | cleanup restante continua; exit 2 |
+| `status` prova identidade ativa | imprime `running`, PID/porta/protocolo sem token; exit 0 |
+| `status` sem estado ou com obsolescência comprovada | imprime `not running`, limpa apenas estado comprovadamente stale; exit 3 |
+| `status` encontra estado inseguro/corrompido | não remove/não sinaliza; exit 2 |
+| `stop` ativo recebe prova válida | cancelamento aceito; exit 0 sem aguardar término ilimitado |
+| `stop` sem instância ou com obsolescência comprovada | sucesso idempotente; exit 0 |
+| `stop` encontra identidade divergente/estado inseguro | não encerra PID nem remove estado; exit 2 |
 
 ## 8. Seleção, geração e cancelamento
 
@@ -230,6 +342,13 @@ Ao trocar contexto ou escopo:
 5. rejeitar respostas/cursors da geração anterior.
 
 O frontend também associa requests à geração e descarta respostas obsoletas, mesmo se o cancelamento de rede não chegar a tempo.
+
+Um coordenador monotônico único serializa `contexts/select`, `scopes/select` e
+todo PUT/DELETE de scope. Cada operação recebe sequência, cancela a intenção
+anterior, compara `expectedGeneration` e relê seleção/scope sob o mesmo lock
+lógico imediatamente antes do commit. Só a sequência mais nova pode publicar
+generation/nonce; isso inclui update/delete cujo alvo se tornou ativo durante a
+request.
 
 ### 8.2 Hierarquia de contextos
 
@@ -317,7 +436,9 @@ gracioso terá default de 10 s, seguido de fechamento forçado e cleanup; o valo
 é configurável dentro de limites e será exercitado com relógio reduzido nos
 testes.
 
-Backoff de watch/reconexão começa em 500 ms, dobra até 30 s, aplica jitter de ±20% e reinicia após 60 s estáveis. `Retry-After`, quando seguro, prevalece. Troca de geração cancela o backoff imediatamente.
+Watch/reconexão usa somente a sequência fechada da §11 (250 ms até teto de 10
+s, jitter ±20% e reset após 60 s estáveis). Troca de geração cancela o backoff
+imediatamente.
 
 ## 10. Listas, cursor e fan-out
 
@@ -366,9 +487,18 @@ Fluxo desejado:
 7. aplicar backoff com jitter;
 8. cair para refresh HTTP quando watch for negado ou inviável.
 
+Cada watch solicita `timeoutSeconds=300` e bookmarks. Timeout limpo reinicia a
+partir do último `resourceVersion`; `410 Gone` sempre força novo LIST. Falha de
+rede, 429 ou 5xx usa backoff exponencial de 250 ms, 500 ms, 1 s, 2 s, 4 s, 8 s
+e teto de 10 s, com jitter uniforme de ±20%; 60 s estáveis zeram a sequência.
+Não se repete erro de autenticação/autorização. Quando `list` é permitido mas
+`watch` é negado, a tela usa LIST ao entrar, mudar filtros/seleção ou receber
+refresh explícito; não inicia polling periódico implícito.
+
 Limites:
 
-- máximo de watchers, subscribers e buffer por conexão configurado no backend;
+- `timeoutSeconds`, backoff, tópicos, máximo de oito streams e buffer por
+  conexão são os valores fechados de `api.md` §18, não configuração do browser;
 - nenhum watcher por componente React;
 - cliente lento é desconectado conforme contrato;
 - troca de geração encerra tudo.
