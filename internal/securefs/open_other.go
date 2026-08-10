@@ -10,3 +10,7 @@ import (
 func platformOpenRegular(path string, flag int, perm fs.FileMode) (*os.File, error) {
 	return os.OpenFile(path, flag, perm)
 }
+
+func platformCreateTemp(directory, pattern string) (*os.File, error) {
+	return os.CreateTemp(directory, pattern)
+}
