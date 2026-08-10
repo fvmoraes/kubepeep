@@ -15,6 +15,13 @@ import (
 	"time"
 )
 
+const runtimeLifecycleTestTimeout = 15 * time.Second
+
+type runtimeTestOutcome struct {
+	result RunResult
+	err    error
+}
+
 func availablePort(t *testing.T) int {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -48,26 +55,28 @@ func healthyFactory(cleaned *atomic.Bool) ServiceFactory {
 func TestRunForegroundPublishesAfterHealthAndStopsThroughControl(t *testing.T) {
 	runtimeDirectory := filepath.Join(t.TempDir(), "runtime")
 	port := availablePort(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	ready := make(chan ControlIdentityDTO, 1)
 	var cleaned atomic.Bool
-	resultChannel := make(chan RunResult, 1)
-	errorChannel := make(chan error, 1)
+	finished := make(chan runtimeTestOutcome, 1)
 	go func() {
-		result, err := RunForeground(context.Background(), RunOptions{
+		result, err := RunForeground(ctx, RunOptions{
 			DataRoot:         filepath.Dir(runtimeDirectory),
 			RuntimeDirectory: runtimeDirectory,
 			Port:             &port,
 			Factory:          healthyFactory(&cleaned),
 			OnReady:          func(identity ControlIdentityDTO) { ready <- identity },
 		})
-		resultChannel <- result
-		errorChannel <- err
+		finished <- runtimeTestOutcome{result: result, err: err}
 	}()
 
 	var identity ControlIdentityDTO
 	select {
 	case identity = <-ready:
-	case <-time.After(5 * time.Second):
+	case got := <-finished:
+		t.Fatalf("runtime exited before readiness: result=%#v error=%v", got.result, got.err)
+	case <-time.After(runtimeLifecycleTestTimeout):
 		t.Fatal("runtime did not publish readiness")
 	}
 	if identity.Port != port {
@@ -84,15 +93,15 @@ func TestRunForegroundPublishesAfterHealthAndStopsThroughControl(t *testing.T) {
 		t.Fatalf("stop proof = %#v, active=%v", proved, active)
 	}
 	select {
-	case result := <-resultChannel:
-		if !result.Started || result.Existing || result.Identity != identity {
-			t.Fatalf("run result = %#v", result)
+	case got := <-finished:
+		if got.err != nil {
+			t.Fatal(got.err)
 		}
-	case <-time.After(5 * time.Second):
+		if !got.result.Started || got.result.Existing || got.result.Identity != identity {
+			t.Fatalf("run result = %#v", got.result)
+		}
+	case <-time.After(runtimeLifecycleTestTimeout):
 		t.Fatal("runtime did not stop")
-	}
-	if err := <-errorChannel; err != nil {
-		t.Fatal(err)
 	}
 	if !cleaned.Load() {
 		t.Fatal("service cleanup did not run")
@@ -138,12 +147,19 @@ func TestRunForegroundDoesNotPublishBeforeHealth(t *testing.T) {
 	close(healthAllowed)
 	select {
 	case <-ready:
-	case <-time.After(5 * time.Second):
+	case err := <-done:
+		t.Fatalf("runtime exited before readiness: %v", err)
+	case <-time.After(runtimeLifecycleTestTimeout):
 		t.Fatal("runtime did not become ready")
 	}
 	cancel()
-	if err := <-done; err != nil {
-		t.Fatal(err)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(runtimeLifecycleTestTimeout):
+		t.Fatal("runtime did not stop after cancellation")
 	}
 }
 
@@ -167,7 +183,7 @@ func TestRunForegroundReturnsExistingAuthenticatedInstance(t *testing.T) {
 	case want = <-ready:
 	case err := <-firstDone:
 		t.Fatalf("first runtime exited before readiness: %v", err)
-	case <-time.After(15 * time.Second):
+	case <-time.After(runtimeLifecycleTestTimeout):
 		t.Fatal("first runtime did not publish readiness")
 	}
 	got, err := RunForeground(context.Background(), RunOptions{
@@ -185,7 +201,7 @@ func TestRunForegroundReturnsExistingAuthenticatedInstance(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-	case <-time.After(15 * time.Second):
+	case <-time.After(runtimeLifecycleTestTimeout):
 		t.Fatal("first runtime did not stop after cancellation")
 	}
 }
@@ -336,11 +352,7 @@ func TestRunForegroundRawTimeoutAndHookFailureStillCleanAllState(t *testing.T) {
 			},
 		}, nil
 	})
-	type outcome struct {
-		result RunResult
-		err    error
-	}
-	finished := make(chan outcome, 1)
+	finished := make(chan runtimeTestOutcome, 1)
 	go func() {
 		result, err := RunForeground(parent, RunOptions{
 			RuntimeDirectory: runtimeDirectory,
@@ -349,10 +361,17 @@ func TestRunForegroundRawTimeoutAndHookFailureStillCleanAllState(t *testing.T) {
 			ShutdownTimeout:  time.Second,
 			OnReady:          func(identity ControlIdentityDTO) { ready <- identity },
 		})
-		finished <- outcome{result: result, err: err}
+		finished <- runtimeTestOutcome{result: result, err: err}
 	}()
 
-	identity := <-ready
+	var identity ControlIdentityDTO
+	select {
+	case identity = <-ready:
+	case got := <-finished:
+		t.Fatalf("runtime exited before readiness: result=%#v error=%v", got.result, got.err)
+	case <-time.After(runtimeLifecycleTestTimeout):
+		t.Fatal("runtime did not publish readiness")
+	}
 	go func() {
 		response, err := http.Get(identity.URL() + "/raw")
 		if err == nil {
@@ -363,12 +382,14 @@ func TestRunForegroundRawTimeoutAndHookFailureStillCleanAllState(t *testing.T) {
 	}()
 	select {
 	case <-rawEntered:
+	case got := <-finished:
+		t.Fatalf("runtime exited before the raw route became active: result=%#v error=%v", got.result, got.err)
 	case <-time.After(3 * time.Second):
 		t.Fatal("raw route did not become active")
 	}
 	cancel()
 
-	var got outcome
+	var got runtimeTestOutcome
 	select {
 	case got = <-finished:
 	case <-time.After(4 * time.Second):
