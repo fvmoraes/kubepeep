@@ -50,8 +50,8 @@ As fases seguem a ordem determinada pelo prompt. Para evitar duplicação, a Fas
 | [7 — Ações](07-acoes.md) | Restart, scale, delete, port-forward e exec | Ações autorizadas, confirmadas e canceláveis |
 | [8 — Distribuição](08-distribuicao.md) | Releases, instaladores, CI e aceite | MVP multiplataforma publicável |
 
-Estado atual: **Fases 1 e 2 concluídas**; a **Fase 3 concluiu os gates locais**
-e aguarda a execução nativa macOS/Windows do workflow. O fechamento documental da Fase 2 está registrado em
+Estado atual: **Fases 1, 2 e 3 concluídas**; o workflow nativo da Fase 3 passou
+em Linux, macOS e Windows no run `31392541114`. A Fase 4 está em execução. O fechamento documental da Fase 2 está registrado em
 [Evidências da Fase 2](../docs/research/phase2-validation.md).
 
 O acompanhamento dos critérios finais está em [Matriz de aceite do MVP](matriz-aceite-mvp.md).
@@ -138,8 +138,9 @@ Uma tarefa funcional somente pode ser marcada como concluída quando, conforme a
 ## Estado do plano
 
 A Fase 1 está concluída com 44 tarefas comprovadas e
-[matriz rastreável](../docs/research/phase1-evidence.md). As tarefas das fases
-seguintes permanecem pendentes até sua implementação e evidência próprias.
+[matriz rastreável](../docs/research/phase1-evidence.md); as Fases 2 e 3 também
+estão concluídas com evidências próprias. As tarefas das fases seguintes
+permanecem pendentes até sua implementação e evidência próprias.
 Marcar um checkbox somente quando o resultado correspondente existir no
 repositório; evidência de spike não antecipa checkbox de produção ou release.
 

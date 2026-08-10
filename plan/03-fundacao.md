@@ -1,6 +1,6 @@
 # Fase 3 — Fundação
 
-**Estado:** implementação local concluída; gates nativos macOS/Windows pendentes
+**Estado:** concluída; gates locais e nativos Linux/macOS/Windows aprovados
 
 **Dependências:** Fases 1 e 2 concluídas
 **Gate seguinte:** a integração Kubernetes começa somente após existir um binário local testado e observável.
@@ -88,10 +88,10 @@ Construir a base executável do produto: CLI Cobra, aplicação Ginger, configur
 - [x] **F3-43** Executar `ginger inspect`, `ginger doctor`, testes, linters e build; corrigir ou documentar todo diagnóstico.
 - [x] **F3-44** Testar a infraestrutura raw com `Flusher`/`Hijacker`, Origin/Host guards e deadline superior a 15 segundos, sem expor endpoint de teste no build final.
 - [x] **F3-45** Forçar ao menos duas rotações e verificar path, JSONL, 10 MiB, cinco backups, retenção, permissões, degradação/fallback stdout em falha e remoção de valores sensíveis no arquivo atual e backups, inclusive sob chave `error`.
-- [ ] **F3-46** Aplicar `0700`/`0600` em Unix e DACL protegida e herdável limitada ao SID do usuário atual em Windows; no teste nativo elevado, distinguir esse SID de `TOKEN_OWNER`, proteger e validar temporários antes do replace e filhos após herança, rejeitar reparse points/objetos adulterados por handle quando a API permitir e falhar fechado.
+- [x] **F3-46** Aplicar `0700`/`0600` em Unix e DACL protegida e herdável limitada ao SID do usuário atual em Windows; no teste nativo elevado, distinguir esse SID de `TOKEN_OWNER`, proteger e validar temporários antes do replace e filhos após herança, rejeitar reparse points/objetos adulterados por handle quando a API permitir e falhar fechado.
 - [x] **F3-47** Garantir que OpenTelemetry não seja inicializado, não abra exporter/rede nem seja exigido por padrão; qualquer modo opt-in permanece separado.
 - [x] **F3-48** Criar CI mínima de pull request com formatação, testes Go, typecheck/testes frontend e build do binário embutido.
-- [ ] **F3-49** Testar o modo de processo aprovado, incluindo retorno, publicação pós-prontidão, lock, identidade completa de `instance.json`, token privado, métodos/paths/guards/códigos do canal `status`/`stop`, prova estrita/trailing JSON e lifecycle em Unix e Windows.
+- [x] **F3-49** Testar o modo de processo aprovado, incluindo retorno, publicação pós-prontidão, lock, identidade completa de `instance.json`, token privado, métodos/paths/guards/códigos do canal `status`/`stop`, prova estrita/trailing JSON e lifecycle em Unix e Windows.
 - [x] **F3-50** Implementar `doctor` local para runtime, paths, permissões, banco, porta e integridade do frontend, deixando diagnósticos Kubernetes para a Fase 4.
 - [x] **F3-51** Testar presença, tipo e ausência segura de cada campo de observabilidade, inclusive em sucesso, erro e request sem contexto Kubernetes.
 - [x] **F3-52** Testar shutdown com rota raw ativa, timeout forçado e falha de hook, comprovando cleanup e código de saída.
