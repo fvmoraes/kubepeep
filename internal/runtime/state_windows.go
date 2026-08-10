@@ -53,7 +53,7 @@ func protectRuntimeDirectory(path string) error {
 	if err := setCurrentUserDACLHandle(handle, true); err != nil {
 		return err
 	}
-	return validateCurrentUserDACL(handle, true)
+	return validateCurrentUserDACL(handle, true, true)
 }
 
 func validateRuntimeDirectory(path string, _ os.FileInfo) error {
@@ -65,7 +65,7 @@ func validateRuntimeDirectory(path string, _ os.FileInfo) error {
 	if err := rejectWindowsHandleReparsePoint(handle); err != nil {
 		return err
 	}
-	return validateCurrentUserDACL(handle, true)
+	return validateCurrentUserDACL(handle, true, true)
 }
 
 func protectStateFile(path string, file *os.File) error {
@@ -75,14 +75,14 @@ func protectStateFile(path string, file *os.File) error {
 	if err := setCurrentUserDACL(path, false); err != nil {
 		return err
 	}
-	return validateCurrentUserDACL(windows.Handle(file.Fd()), false)
+	return validateCurrentUserDACL(windows.Handle(file.Fd()), false, true)
 }
 
 func validatePrivateState(_ string, file *os.File, _ os.FileInfo) error {
 	if err := rejectHandleReparsePoint(file); err != nil {
 		return fmt.Errorf("%w: %v", ErrUnsafeState, err)
 	}
-	return validateCurrentUserDACL(windows.Handle(file.Fd()), false)
+	return validateCurrentUserDACL(windows.Handle(file.Fd()), false, false)
 }
 
 func rejectHandleReparsePoint(file *os.File) error {
@@ -129,8 +129,8 @@ func setCurrentUserDACLHandle(handle windows.Handle, directory bool) error {
 	return winacl.SetHandle(handle, directory)
 }
 
-func validateCurrentUserDACL(handle windows.Handle, directory bool) error {
-	if err := winacl.Validate(handle, directory, true); err != nil {
+func validateCurrentUserDACL(handle windows.Handle, directory, requireProtected bool) error {
+	if err := winacl.Validate(handle, directory, requireProtected); err != nil {
 		return fmt.Errorf("%w: %v", ErrUnsafeState, err)
 	}
 	return nil

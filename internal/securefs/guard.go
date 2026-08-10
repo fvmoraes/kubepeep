@@ -66,7 +66,7 @@ func ValidatePrivateRegular(path string) error {
 // CreateExclusive creates one private regular file and fails if any object is
 // already present at path.
 func CreateExclusive(path string) (*Guard, error) {
-	file, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
+	file, err := platformOpenRegular(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +87,7 @@ func CreateExclusive(path string) (*Guard, error) {
 // CreateTemp creates a private same-directory temporary file and returns it
 // already guarded.
 func CreateTemp(directory, pattern string) (*Guard, error) {
-	file, err := os.CreateTemp(directory, pattern)
+	file, err := platformCreateTemp(directory, pattern)
 	if err != nil {
 		return nil, err
 	}

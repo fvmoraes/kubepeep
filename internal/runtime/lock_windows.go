@@ -39,7 +39,7 @@ func acquirePlatformLock(path string) (*os.File, error) {
 		_ = file.Close()
 		return nil, err
 	}
-	if err := validateCurrentUserDACL(handle, false); err != nil {
+	if err := validateCurrentUserDACL(handle, false, true); err != nil {
 		_ = file.Close()
 		return nil, err
 	}
