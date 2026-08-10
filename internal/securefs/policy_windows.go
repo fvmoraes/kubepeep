@@ -8,6 +8,7 @@ import (
 	"os"
 	"unsafe"
 
+	"github.com/fvmoraes/kubepeep/internal/winacl"
 	"golang.org/x/sys/windows"
 )
 
@@ -15,8 +16,6 @@ type fileAttributeTagInfo struct {
 	FileAttributes uint32
 	ReparseTag     uint32
 }
-
-const fileAllAccess windows.ACCESS_MASK = 0x001f01ff
 
 // Ownership and privacy are validated from the open handle below. FileInfo on
 // Windows does not expose either the token SID or the effective DACL.
@@ -120,98 +119,20 @@ func rejectReparsePoint(file *os.File) error {
 }
 
 func setPrivateDACL(handle windows.Handle, directory bool) error {
-	user, err := currentTokenUserSID()
-	if err != nil {
-		return err
-	}
-	ace := "(A;;GA;;;" + user.String() + ")"
-	if directory {
-		ace = "(A;OICI;GA;;;" + user.String() + ")"
-	}
-	descriptor, err := windows.SecurityDescriptorFromString("D:P" + ace)
-	if err != nil {
-		return err
-	}
-	dacl, _, err := descriptor.DACL()
-	if err != nil {
-		return err
-	}
-	return windows.SetSecurityInfo(
-		handle,
-		windows.SE_FILE_OBJECT,
-		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
-		nil,
-		nil,
-		dacl,
-		nil,
-	)
+	return winacl.SetHandle(handle, directory)
 }
 
 func validatePrivateDACL(handle windows.Handle, directory, requireProtected bool) error {
-	descriptor, err := windows.GetSecurityInfo(handle, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
-	if err != nil {
-		return err
-	}
-	control, _, err := descriptor.Control()
-	if err != nil {
-		return err
-	}
-	if control&windows.SE_DACL_PRESENT == 0 || requireProtected && control&windows.SE_DACL_PROTECTED == 0 {
-		return fmt.Errorf("%w: DACL is absent or not protected", ErrUnsafeObject)
-	}
-	dacl, _, err := descriptor.DACL()
-	if err != nil {
-		return err
-	}
-	if dacl == nil || dacl.AceCount != 1 {
-		return fmt.Errorf("%w: DACL is not limited to one principal", ErrUnsafeObject)
-	}
-	var ace *windows.ACCESS_ALLOWED_ACE
-	if err := windows.GetAce(dacl, 0, &ace); err != nil {
-		return err
-	}
-	if ace == nil || ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE {
-		return fmt.Errorf("%w: DACL does not contain one allow ACE", ErrUnsafeObject)
-	}
-	user, err := currentTokenUserSID()
-	if err != nil {
-		return err
-	}
-	aceSID := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
-	if !windows.EqualSid(user, aceSID) {
-		return fmt.Errorf("%w: DACL principal is not the current token user", ErrUnsafeObject)
-	}
-	if ace.Mask != windows.GENERIC_ALL && ace.Mask != fileAllAccess {
-		return fmt.Errorf("%w: DACL does not grant full control", ErrUnsafeObject)
-	}
-	flags := ace.Header.AceFlags
-	if directory {
-		wanted := uint8(windows.OBJECT_INHERIT_ACE | windows.CONTAINER_INHERIT_ACE)
-		if control&windows.SE_DACL_PROTECTED == 0 || flags != wanted {
-			return fmt.Errorf("%w: directory DACL is not protected and inheritable", ErrUnsafeObject)
-		}
-		return nil
-	}
-	if control&windows.SE_DACL_PROTECTED != 0 {
-		if flags != 0 {
-			return fmt.Errorf("%w: protected file ACE has unexpected inheritance flags", ErrUnsafeObject)
-		}
-		return nil
-	}
-	allowedInherited := uint8(windows.INHERITED_ACE | windows.OBJECT_INHERIT_ACE | windows.CONTAINER_INHERIT_ACE)
-	if flags&windows.INHERITED_ACE == 0 || flags & ^allowedInherited != 0 {
-		return fmt.Errorf("%w: file DACL was neither protected nor safely inherited", ErrUnsafeObject)
+	if err := winacl.Validate(handle, directory, requireProtected); err != nil {
+		return fmt.Errorf("%w: %v", ErrUnsafeObject, err)
 	}
 	return nil
 }
 
 func currentTokenUserSID() (*windows.SID, error) {
-	user, err := windows.GetCurrentProcessToken().GetTokenUser()
+	user, err := winacl.CurrentUserSID()
 	if err != nil {
 		return nil, fmt.Errorf("query current token user: %w", err)
 	}
-	if user == nil || user.User.Sid == nil {
-		return nil, fmt.Errorf("%w: current token user SID is unavailable", ErrUnsafeObject)
-	}
-	return user.User.Sid, nil
+	return user, nil
 }

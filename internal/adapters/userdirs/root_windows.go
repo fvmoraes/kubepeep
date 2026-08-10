@@ -5,14 +5,14 @@ package userdirs
 import (
 	"fmt"
 	"path/filepath"
-	"strings"
 	"unsafe"
 
+	"github.com/fvmoraes/kubepeep/internal/winacl"
 	"golang.org/x/sys/windows"
 )
 
 func defaultRoot() (string, error) {
-	localAppData, err := windows.KnownFolderPath(windows.FOLDERID_LocalAppData, 0)
+	localAppData, err := windows.KnownFolderPath(windows.FOLDERID_LocalAppData, windows.KF_FLAG_CREATE)
 	if err != nil {
 		return "", fmt.Errorf("user directories: resolve LocalAppData: %w", err)
 	}
@@ -53,43 +53,11 @@ func protectDirectory(path string) error {
 		return fmt.Errorf("directory is a reparse point")
 	}
 
-	tokenUser, err := windows.GetCurrentProcessToken().GetTokenUser()
-	if err != nil {
+	if err := winacl.SetHandle(handle, true); err != nil {
 		return err
 	}
-	sid := tokenUser.User.Sid.String()
-	descriptor, err := windows.SecurityDescriptorFromString("D:P(A;OICI;GA;;;" + sid + ")")
-	if err != nil {
-		return err
-	}
-	dacl, _, err := descriptor.DACL()
-	if err != nil {
-		return err
-	}
-	if err := windows.SetSecurityInfo(
-		handle,
-		windows.SE_FILE_OBJECT,
-		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
-		nil,
-		nil,
-		dacl,
-		nil,
-	); err != nil {
-		return err
-	}
-
-	actual, err := windows.GetSecurityInfo(handle, windows.SE_FILE_OBJECT, windows.DACL_SECURITY_INFORMATION)
-	if err != nil {
-		return err
-	}
-	sddl := actual.String()
-	actualDACL, _, err := actual.DACL()
-	if err != nil {
-		return err
-	}
-	if actualDACL == nil || actualDACL.AceCount != 1 || !strings.Contains(sddl, "D:P") ||
-		!strings.Contains(sddl, "(A;OICI;") || !strings.Contains(sddl, ";;;"+sid+")") {
-		return fmt.Errorf("directory DACL is not limited to the current user")
+	if err := winacl.Validate(handle, true, true); err != nil {
+		return fmt.Errorf("directory DACL is not limited to the current user: %w", err)
 	}
 	return nil
 }
