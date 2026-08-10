@@ -1,8 +1,8 @@
 # Evidências da Fase 3 — Fundação
 
-**Data da validação local:** 2026-08-03  
+**Data da validação local:** 2026-08-10  
 **Plataforma principal:** Linux amd64  
-**Estado:** validação final em andamento
+**Estado:** gates locais concluídos; execução nativa macOS/Windows aguardando o workflow publicado
 
 ## Escopo implementado
 
@@ -38,20 +38,23 @@ SPA permaneceram compatíveis e a auditoria npm passou sem vulnerabilidades.
 | Gate | Resultado em 2026-08-03 |
 | --- | --- |
 | `go mod tidy` + `go mod verify` | passou |
-| `go test -count=1 ./...` (pacotes do kubePeep) | 147 testes, 20 pacotes, passou |
-| `go test -race -count=1 ./...` | 147 testes, passou |
+| `go test -count=1` (pacotes do kubePeep) | todos os 19 pacotes do projeto passaram |
+| `go test -race -count=1` | todos os pacotes aplicáveis passaram |
 | `CGO_ENABLED=0 go test ./...` | passou |
 | `go vet` | passou |
 | `npm ci` | 254 pacotes instalados pelo lockfile |
 | `npm audit` | zero vulnerabilidades |
 | frontend format/lint/typecheck | passou |
-| Vitest | 4 testes em 2 arquivos, passou |
+| Vitest | 7 testes em 2 arquivos, passou |
+| Playwright | 1 smoke E2E em Chromium, passou |
 | Vite build | 1.890 módulos; JS 269,03 kB e CSS 7,83 kB |
 | smoke do binário | lifecycle completo passou com `PATH` sem Node.js |
 | cross-build CGO-free | Linux, macOS e Windows; amd64 e arm64 |
-| `make verify` | passou após executar todos os gates oficiais |
+| `make verify` | passou pelos gates Go/frontend/build/smoke/Ginger; o E2E foi reexecutado e passou após alinhar o estado de erro esperado |
 | `ginger doctor` | cinco checks passaram |
-| `govulncheck ./...` | exige toolchain Go 1.25.12 ou posterior na linha 1.25; o host 1.26.1 foi rejeitado por vulnerabilidades da standard library |
+| `govulncheck` nos 19 pacotes do projeto | nenhuma vulnerabilidade alcançável com Go 1.25.12; o host 1.26.1 foi rejeitado por vulnerabilidades da standard library |
+| black-box nativo Linux | build do binário + `start` → `status` → `stop` → `status`, passou |
+| cross-compile dos testes Windows | `securefs` e `cli` amd64, passou |
 
 O smoke usa `HOME` temporário e ambiente vazio, inicia com `--no-browser`,
 aguarda o canal autenticado, consulta `/health`, `/api/v1/status` e
@@ -89,7 +92,9 @@ presentes e auditados.
   PID/porta/token paralelo;
 - status/stop nunca sinalizam PID e exigem prova HTTP autenticada;
 - logs usam allowlist, redaction por conteúdo e rotação 10 MiB/5 backups/14 dias;
-- testes forçam duas rotações, falha/recovery do sink e inspecionam JSONL;
+- testes validam os defaults 10 MiB/5 backups/14 dias, forçam mais de cinco
+  rotações, cobrem falha/recovery e inspecionam current/backups para JSONL e
+  ausência de marcadores sensíveis;
 - banco, sidecars, journal, backup e temporários existentes passam pelo scanner
   de corpus sintético;
 - frontend de produção não usa Service Worker, Cache Storage, IndexedDB,
@@ -102,8 +107,11 @@ presentes e auditados.
 
 O adapter `securefs` usa no-follow, identidade de objeto/handle, publicação
 no-replace, owner e modos privados no Unix; no Windows usa handles com
-`OPEN_REPARSE_POINT`, DACL protegida/herdável e `LockFileEx`. O workflow inclui
-testes nativos em macOS e Windows, além do cross-build local.
+`OPEN_REPARSE_POINT`, DACL protegida/herdável limitada ao `TokenUser` e
+`LockFileEx`. O `doctor` reutiliza os validadores reais em todas as plataformas,
+sem retornar sucesso incondicional no Windows. O workflow inclui testes nativos
+em macOS e Windows, teste adversarial de DACL/reparse e black-box do binário,
+além do cross-build local.
 
 Dois limites permanecem explícitos para revalidação nativa/contínua:
 
@@ -111,8 +119,9 @@ Dois limites permanecem explícitos para revalidação nativa/contínua:
    pathname ao criar conexões futuras. Os guards detectam substituições normais
    e a raiz `0700`/DACL reduz o atacante, mas eliminar um ataque ABA integral
    exigiria Connector/VFS próprio;
-2. a prova de SID/DACL/reparse em Windows depende do job nativo do CI; a
-   cross-compilação local apenas comprova a portabilidade de build.
+2. a prova executada de SID/DACL/reparse em Windows depende do job nativo do
+   CI; a cross-compilação local comprova que o teste e a implementação compilam,
+   mas não substitui a semântica do kernel Windows.
 
 Esses limites não autorizam caminhos alternativos, permissões abertas nem
 fallback inseguro. Qualquer falha observada continua fail-closed.
@@ -129,5 +138,19 @@ Três revisões independentes foram executadas durante a implementação:
 - runtime/CLI: verificou lifecycle, locks, controle autenticado, cleanup e
   paths/DACL multiplataforma.
 
-A auditoria final de rastreabilidade, qualidade e informações sensíveis é o
-último passo antes de marcar os checkboxes e criar o commit da fase.
+A auditoria final classificou inicialmente 46 tarefas como `PASS` e oito como
+`PARTIAL`. Os oito gaps foram tratados no código local:
+
+- cursor opaco e decoder estrito possuem testes próprios;
+- frontend cobre loading, vazio, offline, erro HTTP, todas as rotas e 404;
+- logging prova defaults, cinco backups e sanitização após rotação;
+- `securefs` aplica/valida DACL por handle e possui testes Windows adversariais;
+- lifecycle ganhou black-box do binário para runners nativos;
+- `doctor` inspeciona DACL/tipos reais em vez de confiar no adapter;
+- schema de observabilidade cobre tipos, sucesso, erro e ausência de contexto;
+- shutdown integrado cobre raw ativo, timeout, hook falho, cleanup e erro
+  observável convertido em exit code operacional.
+
+A consulta automática do resultado remoto está temporariamente indisponível
+porque a credencial local do GitHub CLI retorna HTTP 401. Por isso F3-46 e
+F3-49 permanecem abertas até o workflow macOS/Windows efetivamente concluir.

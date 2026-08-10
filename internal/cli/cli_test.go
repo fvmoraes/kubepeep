@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -162,6 +163,23 @@ func TestStatusAndStopWithoutStateHaveDefinedExitCodes(t *testing.T) {
 		if code != test.code || stdout.String() != "not running\n" {
 			t.Fatalf("%s exit=%d output=%q", test.command, code, stdout.String())
 		}
+	}
+}
+
+func TestStartCleanupFailureUsesOperationalExitCode(t *testing.T) {
+	layout := cliLayout(t)
+	stderr := &bytes.Buffer{}
+	cleanupFailure := errors.New("synthetic cleanup failure")
+	code := ExecuteContext(context.Background(), []string{"start", "--no-browser"}, Dependencies{
+		ResolveLayout: func() (userdirs.Layout, error) { return layout, nil },
+		Start: func(context.Context, StartOptions) (localruntime.RunResult, error) {
+			return localruntime.RunResult{Started: true}, cleanupFailure
+		},
+		Stdout: &bytes.Buffer{},
+		Stderr: stderr,
+	})
+	if code != ExitOperational || !bytes.Contains(stderr.Bytes(), []byte("synthetic cleanup failure")) {
+		t.Fatalf("exit=%d stderr=%q", code, stderr.String())
 	}
 }
 

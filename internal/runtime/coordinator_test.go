@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -269,4 +270,125 @@ func TestShutdownHTTPServerForcesCloseAfterTimeout(t *testing.T) {
 		t.Fatal("forced close did not release the client")
 	}
 	close(release)
+}
+
+func TestRunForegroundRawTimeoutAndHookFailureStillCleanAllState(t *testing.T) {
+	runtimeDirectory := filepath.Join(t.TempDir(), "runtime")
+	port := availablePort(t)
+	parent, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	ready := make(chan ControlIdentityDTO, 1)
+	rawEntered := make(chan struct{})
+	rawRelease := make(chan struct{})
+	rawExitedDone := make(chan struct{})
+	requestDone := make(chan struct{})
+	var enteredOnce sync.Once
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(rawRelease) }) })
+	var rawExited atomic.Bool
+	var beforeRan atomic.Bool
+	var afterRan atomic.Bool
+	hookFailure := errors.New("synthetic stream cleanup failure")
+
+	factory := ServiceFactoryFunc(func(context.Context, ServiceDependencies) (Service, error) {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/health", func(writer http.ResponseWriter, _ *http.Request) {
+			writer.WriteHeader(http.StatusOK)
+		})
+		mux.HandleFunc("/raw", func(writer http.ResponseWriter, _ *http.Request) {
+			flusher, ok := writer.(http.Flusher)
+			if !ok {
+				http.Error(writer, "streaming unavailable", http.StatusInternalServerError)
+				return
+			}
+			writer.Header().Set("Content-Type", "text/event-stream")
+			writer.WriteHeader(http.StatusOK)
+			flusher.Flush()
+			enteredOnce.Do(func() { close(rawEntered) })
+			<-rawRelease
+			rawExited.Store(true)
+			close(rawExitedDone)
+		})
+		return Service{
+			Handler: mux,
+			Cleanups: []NamedCleanup{
+				{Name: "raw streams", Stage: CleanupBeforeHTTP, Func: func(context.Context) error {
+					beforeRan.Store(true)
+					return hookFailure
+				}},
+				{Name: "storage", Stage: CleanupAfterHTTP, Func: func(context.Context) error {
+					afterRan.Store(true)
+					releaseOnce.Do(func() { close(rawRelease) })
+					return nil
+				}},
+			},
+		}, nil
+	})
+	type outcome struct {
+		result RunResult
+		err    error
+	}
+	finished := make(chan outcome, 1)
+	go func() {
+		result, err := RunForeground(parent, RunOptions{
+			RuntimeDirectory: runtimeDirectory,
+			Port:             &port,
+			Factory:          factory,
+			ShutdownTimeout:  time.Second,
+			OnReady:          func(identity ControlIdentityDTO) { ready <- identity },
+		})
+		finished <- outcome{result: result, err: err}
+	}()
+
+	identity := <-ready
+	go func() {
+		response, err := http.Get(identity.URL() + "/raw")
+		if err == nil {
+			_, _ = io.Copy(io.Discard, response.Body)
+			_ = response.Body.Close()
+		}
+		close(requestDone)
+	}()
+	select {
+	case <-rawEntered:
+	case <-time.After(3 * time.Second):
+		t.Fatal("raw route did not become active")
+	}
+	cancel()
+
+	var got outcome
+	select {
+	case got = <-finished:
+	case <-time.After(4 * time.Second):
+		t.Fatal("runtime did not finish after forced shutdown")
+	}
+	if !got.result.Started || got.result.Identity != identity {
+		t.Fatalf("run result lost the published identity: %#v", got.result)
+	}
+	if !errors.Is(got.err, context.DeadlineExceeded) || !errors.Is(got.err, hookFailure) {
+		t.Fatalf("shutdown error does not expose timeout and hook failure: %v", got.err)
+	}
+	select {
+	case <-rawExitedDone:
+	case <-time.After(time.Second):
+		t.Fatal("after-HTTP cleanup did not release the non-cooperative raw handler")
+	}
+	if !beforeRan.Load() || !afterRan.Load() || !rawExited.Load() {
+		t.Fatalf("cleanup incomplete: before=%v after=%v rawExited=%v", beforeRan.Load(), afterRan.Load(), rawExited.Load())
+	}
+	select {
+	case <-requestDone:
+	case <-time.After(time.Second):
+		t.Fatal("forced close left the raw client blocked")
+	}
+	if _, err := os.Stat(InstancePath(runtimeDirectory)); !os.IsNotExist(err) {
+		t.Fatalf("instance state survived failed shutdown: %v", err)
+	}
+	lock, err := AcquireFileLock(LockPath(runtimeDirectory))
+	if err != nil {
+		t.Fatalf("instance lock survived failed shutdown: %v", err)
+	}
+	if err := lock.Close(); err != nil {
+		t.Fatal(err)
+	}
 }

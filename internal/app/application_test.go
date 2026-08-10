@@ -19,6 +19,7 @@ import (
 
 	"github.com/fvmoraes/kubepeep/internal/api"
 	"github.com/fvmoraes/kubepeep/internal/logging"
+	"github.com/fvmoraes/kubepeep/internal/securefs"
 )
 
 type staticSnapshots struct {
@@ -35,7 +36,7 @@ func (s staticSnapshots) Snapshot(context.Context) (api.Snapshot, error) {
 }
 
 func TestGingerRequestMiddlewareWritesLocalJSONL(t *testing.T) {
-	logPath := filepath.Join(t.TempDir(), "kubePeep.log")
+	logPath := filepath.Join(privateTestDirectory(t), "kubePeep.log")
 	logger, sink, err := logging.New(logPath, &bytes.Buffer{}, logging.Options{})
 	if err != nil {
 		t.Fatal(err)
@@ -288,7 +289,7 @@ func newTestApplication(t *testing.T, snapshots api.SnapshotProvider) *Applicati
 
 func testApplicationOptions(t *testing.T, snapshots api.SnapshotProvider) Options {
 	t.Helper()
-	logger, sink, err := logging.New(filepath.Join(t.TempDir(), "kubePeep.log"), io.Discard, logging.Options{})
+	logger, sink, err := logging.New(filepath.Join(privateTestDirectory(t), "kubePeep.log"), io.Discard, logging.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -308,6 +309,15 @@ func testApplicationOptions(t *testing.T, snapshots api.SnapshotProvider) Option
 		},
 		Logger: logger,
 	}
+}
+
+func privateTestDirectory(t *testing.T) string {
+	t.Helper()
+	directory := t.TempDir()
+	if err := securefs.EnsurePrivateDirectory(directory); err != nil {
+		t.Fatal(err)
+	}
+	return directory
 }
 
 func healthySnapshot() api.Snapshot {

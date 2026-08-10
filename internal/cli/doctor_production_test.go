@@ -67,3 +67,20 @@ func TestProductionDoctorSanitizesInvalidConfig(t *testing.T) {
 		t.Fatal("invalid config was not reported")
 	}
 }
+
+func TestPermissionDoctorInspectsExistingObjects(t *testing.T) {
+	layout, err := userdirs.ForRoot(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := layout.EnsureDirectories(); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(layout.Config, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	check := checkPermissions(layout)
+	if check.Status != DoctorFail || check.Code != "LOCAL_PERMISSIONS_INVALID" {
+		t.Fatalf("permission check accepted an unsafe object: %#v", check)
+	}
+}

@@ -50,8 +50,8 @@ As fases seguem a ordem determinada pelo prompt. Para evitar duplicação, a Fas
 | [7 — Ações](07-acoes.md) | Restart, scale, delete, port-forward e exec | Ações autorizadas, confirmadas e canceláveis |
 | [8 — Distribuição](08-distribuicao.md) | Releases, instaladores, CI e aceite | MVP multiplataforma publicável |
 
-Estado atual: **Fases 1 e 2 concluídas**; a **Fase 3 está em execução desde
-2026-08-03**. O fechamento documental está registrado em
+Estado atual: **Fases 1 e 2 concluídas**; a **Fase 3 concluiu os gates locais**
+e aguarda a execução nativa macOS/Windows do workflow. O fechamento documental da Fase 2 está registrado em
 [Evidências da Fase 2](../docs/research/phase2-validation.md).
 
 O acompanhamento dos critérios finais está em [Matriz de aceite do MVP](matriz-aceite-mvp.md).

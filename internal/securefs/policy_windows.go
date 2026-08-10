@@ -178,11 +178,7 @@ func validatePrivateDACL(handle windows.Handle, directory, requireProtected bool
 		return err
 	}
 	aceSID := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
-	equal, err := windows.EqualSid(user, aceSID)
-	if err != nil {
-		return err
-	}
-	if !equal {
+	if !windows.EqualSid(user, aceSID) {
 		return fmt.Errorf("%w: DACL principal is not the current token user", ErrUnsafeObject)
 	}
 	if ace.Mask != windows.GENERIC_ALL && ace.Mask != fileAllAccess {
