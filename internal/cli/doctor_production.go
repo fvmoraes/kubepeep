@@ -5,11 +5,11 @@ import (
 	"errors"
 	"io/fs"
 	"os"
-	"runtime"
 
 	"github.com/fvmoraes/kubepeep/internal/adapters/sqlite"
 	"github.com/fvmoraes/kubepeep/internal/adapters/userdirs"
 	productconfig "github.com/fvmoraes/kubepeep/internal/config"
+	"github.com/fvmoraes/kubepeep/internal/securefs"
 	webassets "github.com/fvmoraes/kubepeep/internal/web"
 )
 
@@ -106,22 +106,21 @@ func checkFrontend() DoctorCheck {
 }
 
 func checkPermissions(layout userdirs.Layout) DoctorCheck {
-	if runtime.GOOS == "windows" {
-		return DoctorCheck{Group: "segurança", Name: "local_permissions", Status: DoctorPass, Code: "WINDOWS_DACL_MANAGED", Message: "Local paths are protected by the native Windows DACL adapter."}
-	}
-	paths := []struct {
-		path string
-		mode fs.FileMode
-	}{
-		{layout.Root, 0o700}, {layout.LogsDir, 0o700}, {layout.RuntimeDir, 0o700}, {layout.Cache, 0o700},
-		{layout.Config, 0o600}, {layout.Database, 0o600}, {layout.Log, 0o600}, {layout.Lock, 0o600},
-	}
-	for _, candidate := range paths {
-		info, err := os.Lstat(candidate.path)
+	for _, path := range []string{layout.Root, layout.LogsDir, layout.RuntimeDir, layout.Cache} {
+		err := securefs.ValidatePrivateDirectory(path)
 		if errors.Is(err, os.ErrNotExist) {
 			continue
 		}
-		if err != nil || info.Mode()&os.ModeSymlink != 0 || info.Mode().Perm() != candidate.mode {
+		if err != nil {
+			return DoctorCheck{Group: "segurança", Name: "local_permissions", Status: DoctorFail, Code: "LOCAL_PERMISSIONS_INVALID", Message: "A local path is not private or has an unsafe type."}
+		}
+	}
+	for _, path := range []string{layout.Config, layout.Database, layout.Log, layout.Lock, layout.Instance} {
+		err := securefs.ValidatePrivateRegular(path)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
 			return DoctorCheck{Group: "segurança", Name: "local_permissions", Status: DoctorFail, Code: "LOCAL_PERMISSIONS_INVALID", Message: "A local path is not private or has an unsafe type."}
 		}
 	}

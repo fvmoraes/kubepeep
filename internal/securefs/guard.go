@@ -43,6 +43,26 @@ func OpenRegular(path string, flag int) (*Guard, error) {
 	return guard, nil
 }
 
+// ValidatePrivateRegular proves that an existing path is a private regular
+// file owned by the current user and that its pathname still matches the open
+// handle. On Windows, privacy is derived from the protected DACL; on Unix it
+// is the exact 0600 mode.
+func ValidatePrivateRegular(path string) error {
+	guard, err := OpenRegular(path, os.O_RDONLY)
+	if err != nil {
+		return err
+	}
+	defer guard.Close()
+	info, err := guard.file.Stat()
+	if err != nil {
+		return err
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
+		return fmt.Errorf("%w: regular file mode is not private", ErrUnsafeObject)
+	}
+	return guard.Validate()
+}
+
 // CreateExclusive creates one private regular file and fails if any object is
 // already present at path.
 func CreateExclusive(path string) (*Guard, error) {

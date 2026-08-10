@@ -3,6 +3,7 @@ package logging
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -289,6 +290,69 @@ func TestObservabilitySchemaOmitsUnavailableFields(t *testing.T) {
 		if _, ok := entry[field]; !ok {
 			t.Fatalf("required applicable field %q is absent: %#v", field, entry)
 		}
+	}
+}
+
+func TestObservabilitySchemaTypesAndErrorPathWithoutKubernetesContext(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(privateTempDir(t), "kubePeep.log")
+	var stdout bytes.Buffer
+	logger, sink, err := New(path, &stdout, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	logger.Info("ignored message",
+		"component", "api",
+		"operation", "resource_list",
+		"request_id", "req_types",
+		"context", "development",
+		"namespace", "payments",
+		"resource", "pods",
+		"duration", 25*time.Millisecond,
+		"error_code", "NONE",
+	)
+	logger.Error("panic_recovered",
+		"request_id", "req_error",
+		"error_code", "INTERNAL",
+		"error", errors.New("password=synthetic-must-not-leak"),
+	)
+	if err := sink.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	lines := bytes.Split(bytes.TrimSpace(stdout.Bytes()), []byte{'\n'})
+	if len(lines) != 2 {
+		t.Fatalf("log line count = %d, want 2", len(lines))
+	}
+	var success map[string]any
+	if err := json.Unmarshal(lines[0], &success); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"timestamp", "level", "component", "operation", "request_id", "context", "namespace", "resource", "duration", "error_code"} {
+		if _, ok := success[field].(string); !ok {
+			t.Fatalf("success field %q has unsafe type/value: %#v", field, success[field])
+		}
+	}
+	if _, err := time.Parse(time.RFC3339Nano, success["timestamp"].(string)); err != nil {
+		t.Fatalf("timestamp is not RFC3339Nano: %v", err)
+	}
+
+	var failure map[string]any
+	if err := json.Unmarshal(lines[1], &failure); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"timestamp", "level", "component", "operation", "request_id", "error_code"} {
+		if _, ok := failure[field].(string); !ok {
+			t.Fatalf("failure field %q has unsafe type/value: %#v", field, failure[field])
+		}
+	}
+	for _, absent := range []string{"context", "namespace", "resource", "duration", "error"} {
+		if _, exists := failure[absent]; exists {
+			t.Fatalf("unavailable/non-allowlisted field %q was serialized: %#v", absent, failure)
+		}
+	}
+	if bytes.Contains(lines[1], []byte("synthetic-must-not-leak")) {
+		t.Fatalf("error content leaked: %s", lines[1])
 	}
 }
 
