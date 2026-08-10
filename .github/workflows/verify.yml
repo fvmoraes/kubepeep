@@ -108,7 +108,25 @@ jobs:
           npm run build
 
       - name: Test native paths, permissions, locks, control lifecycle, and doctor
+        if: runner.os != 'Windows'
         env:
           CGO_ENABLED: "0"
           KUBEPEEP_NATIVE_BLACKBOX: "1"
         run: go test -count=1 ./internal/adapters/userdirs ./internal/securefs ./internal/runtime ./internal/cli
+
+      - name: Test native paths, permissions, locks, control lifecycle, and doctor (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          CGO_ENABLED: "0"
+          KUBEPEEP_NATIVE_BLACKBOX: "1"
+        run: |
+          $lines = & go test -count=1 ./internal/adapters/userdirs ./internal/securefs ./internal/runtime ./internal/cli 2>&1
+          $exitCode = $LASTEXITCODE
+          $lines | Write-Output
+          if ($exitCode -ne 0) {
+            $diagnostic = (($lines | Select-Object -Last 30) -join "`n")
+            $diagnostic = $diagnostic.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::error title=Native Windows test diagnostic::$diagnostic"
+            exit $exitCode
+          }
