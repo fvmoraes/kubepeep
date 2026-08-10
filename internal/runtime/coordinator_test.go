@@ -162,7 +162,14 @@ func TestRunForegroundReturnsExistingAuthenticatedInstance(t *testing.T) {
 		})
 		firstDone <- err
 	}()
-	want := <-ready
+	var want ControlIdentityDTO
+	select {
+	case want = <-ready:
+	case err := <-firstDone:
+		t.Fatalf("first runtime exited before readiness: %v", err)
+	case <-time.After(15 * time.Second):
+		t.Fatal("first runtime did not publish readiness")
+	}
 	got, err := RunForeground(context.Background(), RunOptions{
 		RuntimeDirectory: runtimeDirectory, Port: &port, Factory: healthyFactory(&atomic.Bool{}),
 	})
@@ -173,8 +180,13 @@ func TestRunForegroundReturnsExistingAuthenticatedInstance(t *testing.T) {
 		t.Fatalf("second start result = %#v", got)
 	}
 	cancel()
-	if err := <-firstDone; err != nil {
-		t.Fatal(err)
+	select {
+	case err := <-firstDone:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("first runtime did not stop after cancellation")
 	}
 }
 
