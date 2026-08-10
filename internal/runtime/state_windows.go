@@ -5,7 +5,6 @@ package runtime
 import (
 	"fmt"
 	"os"
-	"strings"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
@@ -15,6 +14,8 @@ type fileAttributeTagInformation struct {
 	FileAttributes uint32
 	ReparseTag     uint32
 }
+
+const windowsFileAllAccess windows.ACCESS_MASK = 0x001f01ff
 
 func openStateFile(path string) (*os.File, error) {
 	pathPointer, err := windows.UTF16PtrFromString(path)
@@ -179,7 +180,6 @@ func validateCurrentUserDACL(handle windows.Handle, directory bool) error {
 	if err != nil {
 		return fmt.Errorf("runtime: query current user SID: %w", err)
 	}
-	sid := tokenUser.User.Sid.String()
 	descriptor, err := windows.GetSecurityInfo(
 		handle,
 		windows.SE_FILE_OBJECT,
@@ -188,17 +188,42 @@ func validateCurrentUserDACL(handle windows.Handle, directory bool) error {
 	if err != nil {
 		return fmt.Errorf("runtime: inspect DACL: %w", err)
 	}
-	sddl := descriptor.String()
+	control, _, err := descriptor.Control()
+	if err != nil {
+		return fmt.Errorf("runtime: inspect DACL control: %w", err)
+	}
+	if control&windows.SE_DACL_PRESENT == 0 || control&windows.SE_DACL_PROTECTED == 0 {
+		return fmt.Errorf("%w: DACL is absent or not protected", ErrUnsafeState)
+	}
 	dacl, _, err := descriptor.DACL()
 	if err != nil {
 		return fmt.Errorf("runtime: inspect DACL entries: %w", err)
 	}
-	wantedACE := "(A;;"
-	if directory {
-		wantedACE = "(A;OICI;"
-	}
-	if dacl == nil || dacl.AceCount != 1 || !strings.Contains(sddl, "D:P") || !strings.Contains(sddl, wantedACE) || !strings.Contains(sddl, ";;;"+sid+")") {
+	if dacl == nil || dacl.AceCount != 1 {
 		return fmt.Errorf("%w: DACL is not limited to the current user", ErrUnsafeState)
+	}
+	var ace *windows.ACCESS_ALLOWED_ACE
+	if err := windows.GetAce(dacl, 0, &ace); err != nil {
+		return fmt.Errorf("runtime: inspect DACL ACE: %w", err)
+	}
+	if ace == nil || ace.Header.AceType != windows.ACCESS_ALLOWED_ACE_TYPE {
+		return fmt.Errorf("%w: DACL does not contain one allow ACE", ErrUnsafeState)
+	}
+	aceSID := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
+	if tokenUser.User.Sid == nil || !windows.EqualSid(tokenUser.User.Sid, aceSID) {
+		return fmt.Errorf("%w: DACL principal is not the current token user", ErrUnsafeState)
+	}
+	if ace.Mask != windows.GENERIC_ALL && ace.Mask != windowsFileAllAccess {
+		return fmt.Errorf("%w: DACL does not grant full control", ErrUnsafeState)
+	}
+	flags := ace.Header.AceFlags
+	if directory {
+		wanted := uint8(windows.OBJECT_INHERIT_ACE | windows.CONTAINER_INHERIT_ACE)
+		if flags != wanted {
+			return fmt.Errorf("%w: directory DACL is not inheritable", ErrUnsafeState)
+		}
+	} else if flags != 0 {
+		return fmt.Errorf("%w: file DACL has unexpected inheritance flags", ErrUnsafeState)
 	}
 	return nil
 }
