@@ -2,7 +2,7 @@
 
 **Data da validação local:** 2026-08-10  
 **Plataforma principal:** Linux amd64  
-**Estado:** gates locais concluídos; execução nativa macOS/Windows aguardando o workflow publicado
+**Estado:** concluída; gates locais e workflow nativo Linux/macOS/Windows aprovados
 
 ## Escopo implementado
 
@@ -55,6 +55,7 @@ SPA permaneceram compatíveis e a auditoria npm passou sem vulnerabilidades.
 | `govulncheck` nos 19 pacotes do projeto | nenhuma vulnerabilidade alcançável com Go 1.25.12; o host 1.26.1 foi rejeitado por vulnerabilidades da standard library |
 | black-box nativo Linux | build do binário + `start` → `status` → `stop` → `status`, passou |
 | cross-compile dos testes Windows | `securefs` e `cli` amd64, passou |
+| workflow nativo publicado | [run #9](https://github.com/fvmoraes/kubepeep/actions/runs/31392541114), commit `50988d8`: `build-and-test` e os dois jobs da matriz nativa macOS/Windows passaram; duração total 2m49s |
 
 O smoke usa `HOME` temporário e ambiente vazio, inicia com `--no-browser`,
 aguarda o canal autenticado, consulta `/health`, `/api/v1/status` e
@@ -113,15 +114,15 @@ sem retornar sucesso incondicional no Windows. O workflow inclui testes nativos
 em macOS e Windows, teste adversarial de DACL/reparse e black-box do binário,
 além do cross-build local.
 
-Dois limites permanecem explícitos para revalidação nativa/contínua:
+Dois limites permanecem explícitos para revalidação contínua:
 
 1. `database/sql` e o driver modernc podem reabrir o arquivo e sidecars por
    pathname ao criar conexões futuras. Os guards detectam substituições normais
    e a raiz `0700`/DACL reduz o atacante, mas eliminar um ataque ABA integral
    exigiria Connector/VFS próprio;
-2. a prova executada de SID/DACL/reparse em Windows depende do job nativo do
-   CI; a cross-compilação local comprova que o teste e a implementação compilam,
-   mas não substitui a semântica do kernel Windows.
+2. a prova de SID/DACL/reparse depende do job Windows nativo e deve permanecer
+   na CI; em 2026-08-10 ela passou no run #9, enquanto a cross-compilação local
+   continua sendo apenas a verificação adicional de portabilidade do build.
 
 Esses limites não autorizam caminhos alternativos, permissões abertas nem
 fallback inseguro. Qualquer falha observada continua fail-closed.
@@ -151,6 +152,6 @@ A auditoria final classificou inicialmente 46 tarefas como `PASS` e oito como
 - shutdown integrado cobre raw ativo, timeout, hook falho, cleanup e erro
   observável convertido em exit code operacional.
 
-A consulta automática do resultado remoto está temporariamente indisponível
-porque a credencial local do GitHub CLI retorna HTTP 401. Por isso F3-46 e
-F3-49 permanecem abertas até o workflow macOS/Windows efetivamente concluir.
+A credencial local do GitHub CLI continuou retornando HTTP 401, então a
+verificação foi feita pela página pública imutável do run. O run #9 concluiu
+com sucesso e fechou F3-46 e F3-49 com execução nativa real.
