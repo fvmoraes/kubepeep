@@ -1,0 +1,321 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kp-harness
+  labels:
+    app.kubernetes.io/name: kubepeep-kind-harness
+    app.kubernetes.io/part-of: kubepeep
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kp-allowed
+  labels:
+    app.kubernetes.io/name: kubepeep-kind-harness
+    app.kubernetes.io/part-of: kubepeep
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+    kubepeep.dev/access-scenario: allowed
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kp-denied
+  labels:
+    app.kubernetes.io/name: kubepeep-kind-harness
+    app.kubernetes.io/part-of: kubepeep
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+    kubepeep.dev/access-scenario: denied
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: manual-viewer
+  namespace: kp-harness
+  labels:
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: namespace-lister
+  namespace: kp-harness
+  labels:
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dashboard-viewer
+  namespace: kp-harness
+  labels:
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+automountServiceAccountToken: false
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kp-resource-reader
+  namespace: kp-allowed
+  labels:
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "configmaps", "services"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list", "watch"]
+---
+# The denied namespace contains the same Role only so the refresh scenario can
+# add and remove one narrow RoleBinding. Neither test identity is bound here in
+# the baseline fixture.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kp-resource-reader
+  namespace: kp-denied
+  labels:
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "configmaps", "services"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kp-resource-readers
+  namespace: kp-allowed
+  labels:
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+subjects:
+  - kind: ServiceAccount
+    name: manual-viewer
+    namespace: kp-harness
+  - kind: ServiceAccount
+    name: namespace-lister
+    namespace: kp-harness
+  - kind: ServiceAccount
+    name: dashboard-viewer
+    namespace: kp-harness
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kp-resource-reader
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kp-dashboard-log-reader
+  namespace: kp-allowed
+  labels:
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+rules:
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kp-dashboard-log-reader
+  namespace: kp-allowed
+  labels:
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+subjects:
+  - kind: ServiceAccount
+    name: dashboard-viewer
+    namespace: kp-harness
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kp-dashboard-log-reader
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kp-namespace-lister
+  labels:
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kp-namespace-lister
+  labels:
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+subjects:
+  - kind: ServiceAccount
+    name: namespace-lister
+    namespace: kp-harness
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kp-namespace-lister
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kp-fixture
+  namespace: kp-allowed
+  labels:
+    app.kubernetes.io/name: kp-fixture
+    app.kubernetes.io/part-of: kubepeep-kind-harness
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+data:
+  access: allowed
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kp-fixture
+  namespace: kp-denied
+  labels:
+    app.kubernetes.io/name: kp-fixture
+    app.kubernetes.io/part-of: kubepeep-kind-harness
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+data:
+  access: denied
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kp-fixture
+  namespace: kp-allowed
+  labels:
+    app.kubernetes.io/name: kp-fixture
+    app.kubernetes.io/part-of: kubepeep-kind-harness
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+spec:
+  automountServiceAccountToken: false
+  restartPolicy: Never
+  containers:
+    - name: fixture
+      image: registry.k8s.io/pause:3.10
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+      readOnlyRootFilesystem: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kp-degraded
+  namespace: kp-allowed
+  labels:
+    app.kubernetes.io/name: kp-degraded
+    app.kubernetes.io/part-of: kubepeep-kind-harness
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kp-degraded
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kp-degraded
+        app.kubernetes.io/part-of: kubepeep-kind-harness
+        app.kubernetes.io/managed-by: kubepeep-kind-harness
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: unavailable
+          image: registry.k8s.io/pause:0.0-kubepeep-missing
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kp-restarting
+  namespace: kp-allowed
+  labels:
+    app.kubernetes.io/name: kp-restarting
+    app.kubernetes.io/part-of: kubepeep-kind-harness
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+spec:
+  automountServiceAccountToken: false
+  restartPolicy: Always
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+  containers:
+    - name: synthetic-log
+      image: registry.k8s.io/e2e-test-images/busybox:1.29-4
+      command: ["/bin/sh", "-c", "echo 'possible error: synthetic dashboard fixture unavailable'; exit 1"]
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+        readOnlyRootFilesystem: true
+---
+apiVersion: v1
+kind: Event
+metadata:
+  name: kp-warning
+  namespace: kp-allowed
+  labels:
+    app.kubernetes.io/name: kp-warning
+    app.kubernetes.io/part-of: kubepeep-kind-harness
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+type: Warning
+reason: SyntheticFailure
+message: Synthetic kubePeep dashboard warning fixture
+involvedObject:
+  apiVersion: v1
+  kind: Pod
+  namespace: kp-allowed
+  name: kp-restarting
+source:
+  component: kubepeep-kind-harness
+firstTimestamp: "2026-08-10T12:00:00Z"
+lastTimestamp: "2026-08-10T12:00:00Z"
+count: 3
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kp-fixture
+  namespace: kp-denied
+  labels:
+    app.kubernetes.io/name: kp-fixture
+    app.kubernetes.io/part-of: kubepeep-kind-harness
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+spec:
+  automountServiceAccountToken: false
+  restartPolicy: Never
+  containers:
+    - name: fixture
+      image: registry.k8s.io/pause:3.10
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+        readOnlyRootFilesystem: true

@@ -132,6 +132,27 @@ func TestExplicitInvalidPortIsInvocationError(t *testing.T) {
 	}
 }
 
+func TestKubernetesBootstrapFlagsFailBeforeStartupWhenInvalid(t *testing.T) {
+	for _, arguments := range [][]string{
+		{"--context", ""},
+		{"--kubeconfig", ""},
+		{"--namespace", "*"},
+		{"--namespace", "Not_A_Namespace"},
+	} {
+		called := false
+		code := ExecuteContext(context.Background(), arguments, Dependencies{
+			Start: func(context.Context, StartOptions) (localruntime.RunResult, error) {
+				called = true
+				return localruntime.RunResult{}, nil
+			},
+			Stdout: &bytes.Buffer{}, Stderr: &bytes.Buffer{},
+		})
+		if code != ExitInvalid || called {
+			t.Fatalf("args=%v exit=%d called=%v", arguments, code, called)
+		}
+	}
+}
+
 func TestDefaultCompositionIsAvailable(t *testing.T) {
 	layout := cliLayout(t)
 	stderr := &bytes.Buffer{}

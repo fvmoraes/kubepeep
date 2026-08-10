@@ -22,15 +22,23 @@ import (
 )
 
 type Options struct {
-	Config     *gingerconfig.Config
-	Port       int
-	Build      api.BuildInfo
-	Snapshots  api.SnapshotProvider
-	Generation api.GenerationSource
-	Sessions   *api.SessionStore
-	SessionTTL time.Duration
-	Frontend   fs.FS
-	Logger     *gingerlogger.Logger
+	Config      *gingerconfig.Config
+	Port        int
+	Build       api.BuildInfo
+	Snapshots   api.SnapshotProvider
+	Generation  api.GenerationSource
+	Sessions    *api.SessionStore
+	Profiles    handlers.ClusterProfileService
+	Scopes      handlers.NamespaceScopeService
+	Namespaces  handlers.NamespaceCatalog
+	Permissions handlers.PermissionMatrixService
+	Selection   handlers.SelectionReader
+	Contexts    handlers.ContextService
+	Dashboard   handlers.DashboardService
+	Cursors     *api.CursorCodec
+	SessionTTL  time.Duration
+	Frontend    fs.FS
+	Logger      *gingerlogger.Logger
 }
 
 type Application struct {
@@ -117,12 +125,20 @@ func New(options Options) (*Application, error) {
 		apiMiddleware.BrowserAPI(security),
 	)
 	handlers.Register(application.Router, handlers.Dependencies{
-		Snapshots:  options.Snapshots,
-		Sessions:   sessions,
-		Generation: generation,
-		Origin:     origin,
-		Port:       options.Port,
-		Build:      options.Build,
+		Snapshots:   options.Snapshots,
+		Sessions:    sessions,
+		Generation:  generation,
+		Profiles:    options.Profiles,
+		Scopes:      options.Scopes,
+		Namespaces:  options.Namespaces,
+		Permissions: options.Permissions,
+		Selection:   options.Selection,
+		Contexts:    options.Contexts,
+		Dashboard:   options.Dashboard,
+		Cursors:     options.Cursors,
+		Origin:      origin,
+		Port:        options.Port,
+		Build:       options.Build,
 	})
 
 	apiFallback := gingermiddleware.Chain(

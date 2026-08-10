@@ -8,12 +8,19 @@ import (
 
 	gingerhealth "github.com/fvmoraes/ginger/pkg/health"
 
+	"github.com/fvmoraes/kubepeep/internal/adapters/kubernetes"
 	"github.com/fvmoraes/kubepeep/internal/adapters/sqlite"
 	"github.com/fvmoraes/kubepeep/internal/api"
 	httpapp "github.com/fvmoraes/kubepeep/internal/app"
 	"github.com/fvmoraes/kubepeep/internal/buildinfo"
+	kuberuntime "github.com/fvmoraes/kubepeep/internal/integration/kubernetesruntime"
 	"github.com/fvmoraes/kubepeep/internal/logging"
 	localruntime "github.com/fvmoraes/kubepeep/internal/runtime"
+	"github.com/fvmoraes/kubepeep/internal/services/authorization"
+	"github.com/fvmoraes/kubepeep/internal/services/clusterprofiles"
+	contextservice "github.com/fvmoraes/kubepeep/internal/services/contexts"
+	"github.com/fvmoraes/kubepeep/internal/services/namespaces"
+	"github.com/fvmoraes/kubepeep/internal/services/selection"
 )
 
 type namedChecker struct {
@@ -77,6 +84,67 @@ func (factory *productionFactory) Build(ctx context.Context, dependencies localr
 			_ = store.Close()
 		}
 	}()
+	profileRepository, err := clusterprofiles.NewRepository(store.SQLDB())
+	if err != nil {
+		return localruntime.Service{}, err
+	}
+	home, _ := os.UserHomeDir()
+	generation, err := api.NewGenerationStore()
+	if err != nil {
+		return localruntime.Service{}, err
+	}
+	cursors, err := api.NewCursorCodec()
+	if err != nil {
+		return localruntime.Service{}, err
+	}
+	sessions, err := api.NewSessionStore(0)
+	if err != nil {
+		return localruntime.Service{}, err
+	}
+	clientFactory, err := kubernetes.NewClientFactory(kubernetes.FactoryOptions{})
+	if err != nil {
+		return localruntime.Service{}, err
+	}
+	kubernetesRuntime, err := kuberuntime.New(ctx, kubernetes.NewLoader(kubernetes.LoaderOptions{}), clientFactory)
+	if err != nil {
+		return localruntime.Service{}, err
+	}
+	closeRuntimeOnError := true
+	defer func() {
+		if closeRuntimeOnError {
+			_ = kubernetesRuntime.Close()
+		}
+	}()
+	authorizationService, err := authorization.New(kubernetesRuntime, authorization.Options{})
+	if err != nil {
+		return localruntime.Service{}, err
+	}
+	dashboardBackend, err := kuberuntime.NewDashboardBackend(kubernetesRuntime, authorizationService)
+	if err != nil {
+		return localruntime.Service{}, err
+	}
+	coordinator, err := selection.NewCoordinator(generation, sessions, func(next string) {
+		kubernetesRuntime.OnGeneration(next)
+		authorizationService.InvalidateAll()
+		dashboardBackend.OnGeneration(next)
+	})
+	if err != nil {
+		return localruntime.Service{}, err
+	}
+	closeCoordinatorOnError := true
+	defer func() {
+		if closeCoordinatorOnError {
+			coordinator.Close()
+		}
+	}()
+	selectionState, err := selection.NewState(coordinator, namespaces.SelectionBinding{Generation: generation.Current()}, namespaces.ScopeResolution{})
+	if err != nil {
+		return localruntime.Service{}, err
+	}
+	profileService, err := clusterprofiles.NewService(profileRepository, home, selectionState)
+	if err != nil {
+		return localruntime.Service{}, err
+	}
 
 	applicationChecker := namedChecker{name: "application", check: func(context.Context) error {
 		if !logSink.Healthy() {
@@ -94,6 +162,28 @@ func (factory *productionFactory) Build(ctx context.Context, dependencies localr
 	if err != nil {
 		return localruntime.Service{}, fmt.Errorf("startup: create health provider: %w", err)
 	}
+	contexts, err := contextservice.NewService(profileRepository, kubernetesRuntime, selectionState, snapshots)
+	if err != nil {
+		return localruntime.Service{}, err
+	}
+	var explicitPath, explicitContext *string
+	if factory.options.KubeconfigSet {
+		explicitPath = &factory.options.Kubeconfig
+	}
+	if factory.options.ContextSet {
+		explicitContext = &factory.options.Context
+	}
+	ephemeralNamespace := ""
+	if factory.options.NamespaceSet {
+		ephemeralNamespace = factory.options.Namespace
+	}
+	if err := contexts.Bootstrap(ctx, contextservice.BootstrapRequest{
+		ExplicitPath: explicitPath, ExplicitContext: explicitContext, EphemeralNS: ephemeralNamespace,
+	}); err != nil {
+		return localruntime.Service{}, fmt.Errorf("startup: bootstrap Kubernetes selection: %w", err)
+	}
+	namespaceRepository := sqlite.NewNamespaceScopeRepository(store)
+	namespaceService := namespaces.NewService(namespaceRepository, selectionState, kubernetesRuntime)
 
 	gingerConfig := factory.options.Config.ToGinger(factory.options.Layout.Database)
 	application, err := httpapp.New(httpapp.Options{
@@ -104,8 +194,18 @@ func (factory *productionFactory) Build(ctx context.Context, dependencies localr
 			Commit:    buildinfo.Commit,
 			BuildDate: buildinfo.BuildDate,
 		},
-		Snapshots: snapshots,
-		Logger:    logger,
+		Snapshots:   snapshots,
+		Profiles:    profileService,
+		Contexts:    contexts,
+		Scopes:      namespaceService,
+		Namespaces:  kubernetesRuntime,
+		Permissions: authorizationService,
+		Selection:   selectionState,
+		Dashboard:   dashboardBackend,
+		Cursors:     cursors,
+		Generation:  generation,
+		Sessions:    sessions,
+		Logger:      logger,
 	})
 	if err != nil {
 		return localruntime.Service{}, fmt.Errorf("startup: compose HTTP application: %w", err)
@@ -113,9 +213,13 @@ func (factory *productionFactory) Build(ctx context.Context, dependencies localr
 
 	closeStoreOnError = false
 	closeLogOnError = false
+	closeRuntimeOnError = false
+	closeCoordinatorOnError = false
 	return localruntime.Service{
 		Handler: application.Handler,
 		Cleanups: []localruntime.NamedCleanup{
+			{Name: "selection coordinator", Func: func(context.Context) error { coordinator.Close(); return nil }},
+			{Name: "Kubernetes clients", Func: func(context.Context) error { return kubernetesRuntime.Close() }},
 			{Name: "local log", Func: func(context.Context) error { return logSink.Close() }},
 			{Name: "SQLite", Func: func(context.Context) error { return store.Close() }},
 		},

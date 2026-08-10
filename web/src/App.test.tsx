@@ -12,10 +12,20 @@ const placeholderRoutes = [
   ['/events', 'Events'],
   ['/network', 'Network'],
   ['/config', 'Config'],
-  ['/namespaces', 'Namespaces'],
-  ['/permissions', 'Permissions'],
   ['/settings', 'Settings'],
 ] as const
+
+function json(data: unknown, status = 200): Response {
+  return new Response(JSON.stringify(status < 400 ? { data } : data), { status, headers: { 'Content-Type': 'application/json' } })
+}
+
+function localStatus() {
+  return {
+    version: 'test', commit: 'unknown', buildDate: 'unknown', port: 2748,
+    components: Object.fromEntries(['application', 'sqlite', 'kubeconfig', 'context', 'cluster', 'metrics'].map((key) => [key, { status: key === 'application' ? 'healthy' : 'unknown', code: 'TEST', message: 'test', checkedAt: null }])),
+    selection: null,
+  }
+}
 
 function renderApp(path = '/') {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -47,13 +57,12 @@ describe('application shell', () => {
   })
 
   it('shows the empty context state without persisting remote data', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      data: {
-        version: 'test', commit: 'unknown', buildDate: 'unknown', port: 2748,
-        components: Object.fromEntries(['application', 'sqlite', 'kubeconfig', 'context', 'cluster', 'metrics'].map((key) => [key, { status: key === 'application' ? 'healthy' : 'unknown', code: 'TEST', message: 'test', checkedAt: null }])),
-        selection: null,
-      },
-    }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      if (String(input) === '/api/v1/cluster/profiles') {
+        return Promise.resolve(json([]))
+      }
+      return Promise.resolve(json(localStatus()))
+    }))
 
     renderApp()
 
@@ -69,12 +78,33 @@ describe('application shell', () => {
     expect(await screen.findByRole('heading', { name: 'The local API is unavailable' })).toBeInTheDocument()
   })
 
+  it('updates the header and overview from the active in-memory selection', async () => {
+    const selected = {
+      ...localStatus(),
+      selection: {
+        clusterProfileId: 1, context: 'development', cluster: 'dev-cluster', scopeId: 7,
+        scopeName: 'Finance', scopeMode: 'list', scopeSource: 'saved', defaultNamespace: 'payments',
+        namespaceCount: 3, generation: 'gen_42',
+      },
+    }
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => Promise.resolve(
+      String(input) === '/api/v1/cluster/profiles' ? json([]) : json(selected),
+    )))
+    renderApp()
+
+    expect(await screen.findByRole('heading', { name: 'Cluster overview' })).toBeInTheDocument()
+    expect(screen.getByText('development · Finance')).toBeInTheDocument()
+    expect(screen.getByText('dev-cluster · 3 namespaces')).toBeInTheDocument()
+    expect(window.localStorage).toHaveLength(0)
+    expect(window.sessionStorage).toHaveLength(0)
+  })
+
   it('renders a distinct error state when the local API rejects the request', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+    vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(json({
       code: 'INTERNAL',
       message: 'Internal server error.',
       requestId: 'req_test',
-    }), { status: 500, headers: { 'Content-Type': 'application/json' } })))
+    }, 500))))
     renderApp()
 
     expect(await screen.findByRole('heading', { name: 'The local API returned an error' })).toBeInTheDocument()
