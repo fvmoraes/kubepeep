@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -22,10 +23,14 @@ func TestProductionDoctorCoversLocalFoundation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if report.Overall != DoctorPass {
-		t.Fatalf("doctor did not pass: %#v", report)
+	if report.Overall == DoctorFail {
+		t.Fatalf("local doctor reported a critical failure: %#v", report)
 	}
-	wanted := map[string]bool{"strict_config": false, "integrity": false, "embedded_frontend": false, "local_permissions": false, "loopback_bind": false}
+	wanted := map[string]bool{
+		"strict_config": false, "integrity": false, "embedded_frontend": false,
+		"local_permissions": false, "loopback_bind": false, "source": false,
+		"context": false, "exec_plugin": false, "connectivity": false, "basic_capability": false,
+	}
 	for _, check := range report.Checks {
 		if _, ok := wanted[check.Name]; ok {
 			wanted[check.Name] = true
@@ -35,6 +40,59 @@ func TestProductionDoctorCoversLocalFoundation(t *testing.T) {
 		if !found {
 			t.Fatalf("doctor check %s is missing", name)
 		}
+	}
+}
+
+func TestKubernetesDoctorSanitizesUnavailableExecPlugin(t *testing.T) {
+	layout, err := userdirs.ForRoot(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := layout.EnsureDirectories(); err != nil {
+		t.Fatal(err)
+	}
+	marker := "SYNTHETIC_SECRET_PLUGIN_COMMAND"
+	kubeconfig := filepath.Join(t.TempDir(), "config.yaml")
+	content := `apiVersion: v1
+kind: Config
+clusters:
+- name: cluster
+  cluster:
+    server: https://127.0.0.1:1
+    insecure-skip-tls-verify: true
+contexts:
+- name: local
+  context:
+    cluster: cluster
+    user: user
+current-context: local
+users:
+- name: user
+  user:
+    exec:
+      apiVersion: client.authentication.k8s.io/v1
+      command: ` + marker + `
+      interactiveMode: Never
+`
+	if err := os.WriteFile(kubeconfig, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("KUBECONFIG", kubeconfig)
+	checks := checkKubernetes(context.Background(), layout)
+	var pluginFound bool
+	for _, check := range checks {
+		if strings.Contains(check.Message, marker) || strings.Contains(check.Message, kubeconfig) {
+			t.Fatalf("diagnostic leaked plugin/path detail: %#v", check)
+		}
+		if check.Name == "exec_plugin" {
+			pluginFound = true
+			if check.Status != DoctorWarn || check.Code != "EXEC_PLUGIN_UNAVAILABLE" {
+				t.Fatalf("unexpected plugin check: %#v", check)
+			}
+		}
+	}
+	if !pluginFound {
+		t.Fatal("exec plugin check missing")
 	}
 }
 

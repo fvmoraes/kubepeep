@@ -13,7 +13,11 @@ import {
 } from 'lucide-react'
 import { NavLink, Outlet, Route, Routes } from 'react-router'
 
-import { APIError, getStatus } from './api/client'
+import { getStatus } from './api/client'
+import { ContextSelector } from './components/ContextSelector'
+import { DashboardPage } from './components/Dashboard'
+import { NamespaceScopeEditor } from './components/NamespaceScopeEditor'
+import { PermissionsMatrixPage } from './components/PermissionsMatrix'
 import { StatePanel } from './components/StatePanel'
 
 const navigation = [
@@ -48,6 +52,14 @@ function StatusBadge() {
 }
 
 function Shell() {
+  const status = useQuery({
+    queryKey: ['local-status'],
+    queryFn: ({ signal }) => getStatus(signal),
+    staleTime: 15_000,
+    refetchOnWindowFocus: false,
+  })
+  const selection = status.data?.selection ?? null
+
   return (
     <div className="app-shell">
       <aside className="sidebar">
@@ -66,39 +78,20 @@ function Shell() {
       </aside>
       <div className="workspace">
         <header className="topbar">
-          <div>
+          <div className="active-context">
             <span className="eyebrow">context</span>
-            <strong>No Kubernetes context selected</strong>
+            <strong>{selection ? `${selection.context} · ${selection.scopeName ?? 'no namespace scope'}` : 'No Kubernetes context selected'}</strong>
+            {selection ? <small>{selection.cluster} · {selection.namespaceCount} namespace{selection.namespaceCount === 1 ? '' : 's'}</small> : null}
           </div>
-          <StatusBadge />
+          <div className="topbar-controls">
+            <ContextSelector selection={selection} />
+            <StatusBadge />
+          </div>
         </header>
         <main id="main-content"><Outlet /></main>
       </div>
     </div>
   )
-}
-
-function Overview() {
-  const status = useQuery({
-    queryKey: ['local-status'],
-    queryFn: ({ signal }) => getStatus(signal),
-    staleTime: 15_000,
-    refetchOnWindowFocus: false,
-  })
-
-  if (status.isPending) {
-    return <StatePanel kind="loading" title="Preparing the local workspace">Checking application and SQLite health.</StatePanel>
-  }
-  if (status.isError) {
-	  if (status.error instanceof APIError) {
-	    return <StatePanel kind="error" title="The local API returned an error">The response was rejected safely. Retry after checking the local status or running kubePeep doctor.</StatePanel>
-	  }
-    return <StatePanel kind="offline" title="The local API is unavailable">Reload after the kubePeep process is ready.</StatePanel>
-  }
-  if (!status.data.selection) {
-    return <StatePanel kind="empty" title="Choose a Kubernetes context">The local application is ready. Context and namespace setup arrives in the next implementation phase.</StatePanel>
-  }
-  return <StatePanel kind="unavailable" title="Cluster data is not enabled yet">The foundation is healthy; Kubernetes queries are introduced in Phase 4.</StatePanel>
 }
 
 function Placeholder({ title }: { title: string }) {
@@ -109,10 +102,12 @@ export function App() {
   return (
     <Routes>
       <Route element={<Shell />}>
-        <Route index element={<Overview />} />
-        {navigation.slice(1).map(({ path, label }) => (
+        <Route index element={<DashboardPage />} />
+        {navigation.slice(1).filter(({ path }) => path !== '/namespaces' && path !== '/permissions').map(({ path, label }) => (
           <Route key={path} path={path.slice(1)} element={<Placeholder title={label} />} />
         ))}
+        <Route path="namespaces" element={<NamespaceScopeEditor />} />
+        <Route path="permissions" element={<PermissionsMatrixPage />} />
         <Route path="*" element={<StatePanel kind="error" title="Page not found">Return to Overview using the navigation.</StatePanel>} />
       </Route>
     </Routes>

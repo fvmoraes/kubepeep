@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
+
+	"k8s.io/apimachinery/pkg/util/validation"
 
 	productconfig "github.com/fvmoraes/kubepeep/internal/config"
 	localruntime "github.com/fvmoraes/kubepeep/internal/runtime"
@@ -91,15 +94,29 @@ func NewRootCommand(dependencies Dependencies) *cobra.Command {
 }
 
 func bindStartFlags(command *cobra.Command, flags *startFlags) {
-	command.Flags().StringVar(&flags.context, "context", "", "Kubernetes context (connected in Phase 4)")
-	command.Flags().StringVar(&flags.kubeconfig, "kubeconfig", "", "kubeconfig path (connected in Phase 4)")
-	command.Flags().StringVar(&flags.namespace, "namespace", "", "initial namespace (connected in Phase 4)")
+	command.Flags().StringVar(&flags.context, "context", "", "Kubernetes context")
+	command.Flags().StringVar(&flags.kubeconfig, "kubeconfig", "", "ordered kubeconfig path list")
+	command.Flags().StringVar(&flags.namespace, "namespace", "", "one-time initial namespace")
 	command.Flags().BoolVar(&flags.noBrowser, "no-browser", false, "do not open the browser")
 	command.Flags().IntVar(&flags.port, "port", 0, "local port (1024-65535)")
 }
 
 func runStart(dependencies Dependencies, flags *startFlags) func(*cobra.Command, []string) error {
 	return func(command *cobra.Command, _ []string) error {
+		if command.Flags().Changed("context") && strings.TrimSpace(flags.context) == "" {
+			return &ExitError{Code: ExitInvalid, Err: errors.New("context must not be empty")}
+		}
+		if command.Flags().Changed("kubeconfig") && strings.TrimSpace(flags.kubeconfig) == "" {
+			return &ExitError{Code: ExitInvalid, Err: errors.New("kubeconfig must not be empty")}
+		}
+		if command.Flags().Changed("namespace") {
+			if flags.namespace == "*" {
+				return &ExitError{Code: ExitInvalid, Err: errors.New("namespace must be one explicit Kubernetes namespace, not *")}
+			}
+			if problems := validation.IsDNS1123Label(flags.namespace); len(problems) != 0 {
+				return &ExitError{Code: ExitInvalid, Err: errors.New("namespace is not a valid Kubernetes namespace name")}
+			}
+		}
 		var explicitPort *int
 		if command.Flags().Changed("port") {
 			if flags.port < localruntime.MinimumPort || flags.port > localruntime.MaximumPort {
