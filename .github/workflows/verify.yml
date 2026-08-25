@@ -195,7 +195,37 @@ jobs:
       - name: Test Windows installer checksum, archive, uninstall, and purge
         if: runner.os == 'Windows'
         shell: pwsh
-        run: ./scripts/install_test.ps1
+        run: |
+          $lines = & ./scripts/install_test.ps1 2>&1
+          $scriptSucceeded = $?
+          $exitCode = if ($scriptSucceeded -and ($null -eq $LASTEXITCODE -or $LASTEXITCODE -eq 0)) {
+            0
+          } elseif ($null -ne $LASTEXITCODE -and $LASTEXITCODE -ne 0) {
+            [int]$LASTEXITCODE
+          } else {
+            1
+          }
+          if ($exitCode -eq 0) {
+            $lines | Write-Output
+            exit 0
+          }
+          $diagnosticPattern = '^install-test stage=(?:static-hash-api|fixture-build|initial-install|fixture-guard|version-validation|transaction-lock|upgrade|checksum-validation|archive-validation|candidate-validation|rollback|reparse-binary|uninstall|path-ownership|reparse-data|argument-validation|architecture|purge|cleanup|unknown) type=[A-Za-z][A-Za-z0-9]{0,63} hresult=0x[0-9A-F]{8}$'
+          $safeTail = @($lines | Select-Object -Last 30 | ForEach-Object {
+            $line = [string]$_
+            if ($line -match $diagnosticPattern) {
+              $line
+            } else {
+              '[non-diagnostic output redacted]'
+            }
+          })
+          if (@($safeTail -match $diagnosticPattern).Count -eq 0) {
+            $safeTail = @($safeTail | Select-Object -Last 29) + 'install-test stage=unknown type=ProcessFailure hresult=0x00000001'
+          }
+          $safeTail | Write-Output
+          $diagnostic = ($safeTail -join "`n")
+          $diagnostic = $diagnostic.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+          Write-Output "::error title=Windows installer test diagnostic::$diagnostic"
+          exit $exitCode
 
   release-snapshot:
     needs: build-and-test

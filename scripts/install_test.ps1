@@ -5,6 +5,74 @@ function Assert-True([bool]$Condition, [string]$Message) {
     if (-not $Condition) { throw $Message }
 }
 
+function Get-SHA256Hex([string]$Path) {
+    $stream = $null
+    $hasher = $null
+    try {
+        $stream = [System.IO.File]::OpenRead($Path)
+        $hasher = [System.Security.Cryptography.SHA256]::Create()
+        $hashBytes = $hasher.ComputeHash($stream)
+        return ([System.BitConverter]::ToString($hashBytes)).Replace('-', '').ToLowerInvariant()
+    } finally {
+        if ($null -ne $hasher) { $hasher.Dispose() }
+        if ($null -ne $stream) { $stream.Dispose() }
+    }
+}
+
+function Get-AllowlistedTestStage([string]$Stage) {
+    switch -Exact ($Stage) {
+        'static-hash-api' { return $Stage }
+        'fixture-build' { return $Stage }
+        'initial-install' { return $Stage }
+        'fixture-guard' { return $Stage }
+        'version-validation' { return $Stage }
+        'transaction-lock' { return $Stage }
+        'upgrade' { return $Stage }
+        'checksum-validation' { return $Stage }
+        'archive-validation' { return $Stage }
+        'candidate-validation' { return $Stage }
+        'rollback' { return $Stage }
+        'reparse-binary' { return $Stage }
+        'uninstall' { return $Stage }
+        'path-ownership' { return $Stage }
+        'reparse-data' { return $Stage }
+        'argument-validation' { return $Stage }
+        'architecture' { return $Stage }
+        'purge' { return $Stage }
+        'cleanup' { return $Stage }
+        default { return 'unknown' }
+    }
+}
+
+function Get-SafeTestDiagnostic([string]$Stage, [Exception]$Exception) {
+    $safeStage = Get-AllowlistedTestStage $Stage
+    for ($depth = 0; $depth -lt 16 -and $null -ne $Exception -and $null -ne $Exception.InnerException; $depth++) {
+        $Exception = $Exception.InnerException
+    }
+    if ($null -eq $Exception) {
+        $typeName = 'Exception'
+        $hResult = 0
+    } else {
+        $typeName = $Exception.GetType().Name
+        if ([string]::IsNullOrEmpty($typeName) -or $typeName -notmatch '^[A-Za-z][A-Za-z0-9]{0,63}$') {
+            $typeName = 'Exception'
+        }
+        $hResult = [int]($Exception.HResult)
+    }
+    $hResultHex = '{0:X8}' -f $hResult
+    return "install-test stage=$safeStage type=$typeName hresult=0x$hResultHex"
+}
+
+function Invoke-SafeTestCleanup([scriptblock]$Action) {
+    try {
+        & $Action
+    } catch {
+        if ($null -eq $script:testFailureDiagnostic) {
+            $script:testFailureDiagnostic = Get-SafeTestDiagnostic 'cleanup' $_.Exception
+        }
+    }
+}
+
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) ('kubepeep-installer-test-' + [Guid]::NewGuid().ToString('N'))
 $releaseDir = Join-Path $testRoot 'release'
 $payloadDir = Join-Path $testRoot 'payload'
@@ -20,9 +88,11 @@ $previousRelease = $env:KUBEPEEP_TEST_RELEASE
 $previousUserPath = [Environment]::GetEnvironmentVariable('Path', 'User')
 $dataRoot = Join-Path $testLocalAppData 'kubePeep'
 $nestedJunction = $null
+$script:testStage = 'unknown'
+$script:testFailureDiagnostic = $null
 
 function Write-Checksums {
-    $hash = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $hash = Get-SHA256Hex $archivePath
     Set-Content -LiteralPath (Join-Path $releaseDir 'checksums.txt') -Value "$hash  $archiveName" -Encoding ASCII
 }
 
@@ -111,6 +181,14 @@ function Enable-FixtureDownloadOverride {
 }
 
 try {
+    $script:testStage = 'static-hash-api'
+    $legacyHashCommand = 'Get-' + 'FileHash'
+    foreach ($hashCheckedScript in @('./install.ps1', './scripts/install_test.ps1')) {
+        $scriptSource = [IO.File]::ReadAllText((Resolve-Path $hashCheckedScript))
+        Assert-True ($scriptSource.IndexOf($legacyHashCommand, [StringComparison]::OrdinalIgnoreCase) -lt 0) 'PowerShell installer tests depend on module-autoloaded hashing'
+    }
+
+    $script:testStage = 'fixture-build'
     New-Item -ItemType Directory -Path $releaseDir, $payloadDir, $testLocalAppData -Force | Out-Null
     $ldflags = '-X github.com/fvmoraes/kubepeep/internal/buildinfo.Version=0.1.0 -X github.com/fvmoraes/kubepeep/internal/buildinfo.Commit=synthetic -X github.com/fvmoraes/kubepeep/internal/buildinfo.BuildDate=2026-08-17T00:00:00Z'
     & go build -trimpath -ldflags $ldflags -o (Join-Path $payloadDir 'kubePeep.exe') ./cmd/kubePeep
@@ -124,6 +202,7 @@ try {
     $env:LOCALAPPDATA = $testLocalAppData
     Enable-FixtureDownloadOverride
 
+    $script:testStage = 'initial-install'
     & ./install.ps1 -Version 0.1.0 -InstallDir $installDir | Out-Null
     Assert-True (Test-Path -LiteralPath $binaryPath -PathType Leaf) 'PowerShell installer did not install the binary'
     $version = (& $binaryPath version | Out-String)
@@ -132,6 +211,7 @@ try {
     $installedUserPath = [Environment]::GetEnvironmentVariable('Path', 'User')
     Assert-True (@(([string]$installedUserPath).Split(';') | Where-Object { $_.TrimEnd('\') -ieq $installDir.TrimEnd('\') }).Count -eq 1) 'PowerShell installer did not add exactly one user PATH entry'
 
+    $script:testStage = 'fixture-guard'
     Remove-Item Function:\global:Invoke-WebRequest -Force
     $rejected = $false
     try { & ./install.ps1 -Version 0.1.0 -InstallDir $installDir | Out-Null } catch { $rejected = $true }
@@ -139,11 +219,13 @@ try {
     Assert-True ((& $binaryPath version | Out-String) -match 'version=0\.1\.0(?:\s|$)') 'fail-closed fixture validation changed the installed binary'
     Enable-FixtureDownloadOverride
 
+    $script:testStage = 'version-validation'
     $rejected = $false
     try { & ./install.ps1 -Version '01.1.0' -InstallDir $installDir | Out-Null } catch { $rejected = $true }
     Assert-True $rejected 'PowerShell installer accepted a release version with a leading zero'
     Assert-True ((& $binaryPath version | Out-String) -match 'version=0\.1\.0(?:\s|$)') 'invalid leading-zero version changed the installed binary'
 
+    $script:testStage = 'transaction-lock'
     $heldLockPath = Join-Path $installDir '.kubePeep.install.lock'
     $transactionDownloadMarker = Join-Path $testRoot 'transaction-downloaded'
     $heldLock = [IO.File]::Open($heldLockPath, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
@@ -159,6 +241,7 @@ try {
         Remove-Item -LiteralPath $heldLockPath -Force -ErrorAction SilentlyContinue
     }
 
+    $script:testStage = 'upgrade'
     $oldLdflags = '-X github.com/fvmoraes/kubepeep/internal/buildinfo.Version=0.0.9 -X github.com/fvmoraes/kubepeep/internal/buildinfo.Commit=synthetic-old -X github.com/fvmoraes/kubepeep/internal/buildinfo.BuildDate=2026-08-17T00:00:00Z'
     & go build -trimpath -ldflags $oldLdflags -o $binaryPath ./cmd/kubePeep
     if ($LASTEXITCODE -ne 0) { throw 'could not create the previous-version upgrade fixture' }
@@ -168,12 +251,14 @@ try {
     $upgradedUserPath = [Environment]::GetEnvironmentVariable('Path', 'User')
     Assert-True (@(([string]$upgradedUserPath).Split(';') | Where-Object { $_.TrimEnd('\') -ieq $installDir.TrimEnd('\') }).Count -eq 1) 'PowerShell upgrade duplicated its user PATH entry'
 
+    $script:testStage = 'checksum-validation'
     [IO.File]::WriteAllBytes((Join-Path $releaseDir 'checksums.txt'), (New-Object byte[] (1MB + 1)))
     $rejected = $false
     try { & ./install.ps1 -Version 0.1.0 -InstallDir $installDir | Out-Null } catch { $rejected = $true }
     Assert-True $rejected 'PowerShell installer accepted an oversized checksum list'
     Assert-True ((& $binaryPath version | Out-String) -match 'version=0\.1\.0(?:\s|$)') 'oversized checksum list changed the installed binary'
 
+    $script:testStage = 'archive-validation'
     Publish-ValidPayload
     $oversizedArchive = [IO.File]::Open($archivePath, [IO.FileMode]::Open, [IO.FileAccess]::Write, [IO.FileShare]::None)
     try { $oversizedArchive.SetLength(256MB + 1) } finally { $oversizedArchive.Dispose() }
@@ -190,6 +275,7 @@ try {
     Move-Item -LiteralPath "$archivePath.missing" -Destination $archivePath
     Assert-True ((& $binaryPath version | Out-String) -match 'version=0\.1\.0(?:\s|$)') 'missing archive changed the installed binary'
 
+    $script:testStage = 'checksum-validation'
     Write-Checksums
     $validChecksumLine = Get-Content -LiteralPath (Join-Path $releaseDir 'checksums.txt') -Raw
     Set-Content -LiteralPath (Join-Path $releaseDir 'checksums.txt') -Value ($validChecksumLine + $validChecksumLine) -Encoding ASCII
@@ -204,6 +290,7 @@ try {
     Assert-True $rejected 'PowerShell installer accepted a bad checksum'
     Assert-True ((& $binaryPath version | Out-String) -match 'version=0\.1\.0(?:\s|$)') 'bad checksum changed the installed binary'
 
+    $script:testStage = 'archive-validation'
     New-AdversarialZip @('kubePeep.exe', 'kubePeep.exe')
     $rejected = $false
     try { & ./install.ps1 -Version 0.1.0 -InstallDir $installDir | Out-Null } catch { $rejected = $true }
@@ -214,6 +301,7 @@ try {
     try { & ./install.ps1 -Version 0.1.0 -InstallDir $installDir | Out-Null } catch { $rejected = $true }
     Assert-True $rejected 'PowerShell installer accepted a traversal entry'
 
+    $script:testStage = 'candidate-validation'
     Build-VersionBinary (Join-Path $payloadDir 'kubePeep.exe') '0.1.0suffix'
     Publish-ValidPayload
     $rejected = $false
@@ -221,6 +309,7 @@ try {
     Assert-True $rejected 'PowerShell installer accepted an inexact candidate version token'
     Assert-True ((& $binaryPath version | Out-String) -match 'version=0\.1\.0(?:\s|$)') 'inexact candidate version changed the installed binary'
 
+    $script:testStage = 'rollback'
     $rollbackMarker = Join-Path $testRoot 'rollback-marker'
     Build-RollbackFixture (Join-Path $payloadDir 'kubePeep.exe')
     Publish-ValidPayload
@@ -236,6 +325,7 @@ try {
     Build-VersionBinary (Join-Path $payloadDir 'kubePeep.exe') '0.1.0'
     Publish-ValidPayload
 
+    $script:testStage = 'reparse-binary'
     $savedBinary = Join-Path $testRoot 'saved-installed-kubePeep.exe'
     $executionProbe = Join-Path $testRoot 'execution-probe.exe'
     $executionMarker = Join-Path $testRoot 'execution-marker'
@@ -254,6 +344,7 @@ try {
         Move-Item -LiteralPath $savedBinary -Destination $binaryPath
     }
 
+    $script:testStage = 'uninstall'
     New-Item -ItemType Directory -Path $dataRoot -Force | Out-Null
     Set-Content -LiteralPath (Join-Path $dataRoot 'sentinel') -Value 'preserve-me'
     & ./install.ps1 -Uninstall -InstallDir $installDir | Out-Null
@@ -262,6 +353,7 @@ try {
     $uninstalledUserPath = [Environment]::GetEnvironmentVariable('Path', 'User')
     Assert-True (@(([string]$uninstalledUserPath).Split(';') | Where-Object { $_.TrimEnd('\') -ieq $installDir.TrimEnd('\') }).Count -eq 0) 'PowerShell uninstall preserved its user PATH entry'
 
+    $script:testStage = 'path-ownership'
     $manualPath = [Environment]::GetEnvironmentVariable('Path', 'User')
     $manualEntries = if ([string]::IsNullOrWhiteSpace($manualPath)) { @($installDir) } else { @($manualPath.Split(';')) + $installDir }
     [Environment]::SetEnvironmentVariable('Path', ($manualEntries -join ';'), 'User')
@@ -273,6 +365,7 @@ try {
     Assert-True (@(([string]$preservedUserPath).Split(';') | Where-Object { $_.TrimEnd('\') -ieq $installDir.TrimEnd('\') }).Count -eq 1) 'PowerShell uninstall removed a preexisting PATH entry'
     [Environment]::SetEnvironmentVariable('Path', $manualPath, 'User')
 
+    $script:testStage = 'reparse-data'
     $preservedData = "$dataRoot.preserved"
     $outsideData = Join-Path $testRoot 'outside-data'
     Move-Item -LiteralPath $dataRoot -Destination $preservedData
@@ -298,10 +391,12 @@ try {
     Assert-True (Test-Path -LiteralPath (Join-Path $dataRoot 'sentinel')) 'nested reparse rejection partially deleted local data'
     [IO.Directory]::Delete($nestedJunction)
 
+    $script:testStage = 'argument-validation'
     $rejected = $false
     try { & ./install.ps1 -Uninstall -ConfirmPurge -InstallDir $installDir | Out-Null } catch { $rejected = $true }
     Assert-True $rejected 'PowerShell installer accepted -ConfirmPurge without -PurgeData'
 
+    $script:testStage = 'architecture'
     $savedArchitecture = $env:PROCESSOR_ARCHITECTURE
     $savedArchitectureW6432 = $env:PROCESSOR_ARCHITEW6432
     $env:PROCESSOR_ARCHITECTURE = 'RISCV64'
@@ -315,6 +410,7 @@ try {
         $env:PROCESSOR_ARCHITEW6432 = $savedArchitectureW6432
     }
 
+    $script:testStage = 'purge'
     $runtimeDir = Join-Path $dataRoot 'runtime'
     New-Item -ItemType Directory -Path $runtimeDir -Force | Out-Null
     Set-Content -LiteralPath (Join-Path $runtimeDir 'kubePeep.lock') -Value 'synthetic-lock'
@@ -326,23 +422,34 @@ try {
     Assert-True (-not (Test-Path -LiteralPath $dataRoot)) 'PowerShell confirmed purge preserved local data'
 
     Write-Output 'install.ps1 tests passed'
+} catch {
+    $script:testFailureDiagnostic = Get-SafeTestDiagnostic $script:testStage $_.Exception
 } finally {
-    Remove-Item Function:\global:Invoke-WebRequest -Force -ErrorAction SilentlyContinue
-    Remove-Item Env:\KUBEPEEP_INSTALLER_ROLLBACK_MARKER -ErrorAction SilentlyContinue
-    Remove-Item Env:\KUBEPEEP_INSTALLER_EXECUTION_MARKER -ErrorAction SilentlyContinue
-    Remove-Item Env:\KUBEPEEP_INSTALLER_DOWNLOAD_MARKER -ErrorAction SilentlyContinue
-    $env:LOCALAPPDATA = $previousLocalAppData
-    $env:KUBEPEEP_TEST_RELEASE = $previousRelease
-    [Environment]::SetEnvironmentVariable('Path', $previousUserPath, 'User')
+    Invoke-SafeTestCleanup { Remove-Item Function:\global:Invoke-WebRequest -Force -ErrorAction SilentlyContinue }
+    Invoke-SafeTestCleanup { Remove-Item Env:\KUBEPEEP_INSTALLER_ROLLBACK_MARKER -ErrorAction SilentlyContinue }
+    Invoke-SafeTestCleanup { Remove-Item Env:\KUBEPEEP_INSTALLER_EXECUTION_MARKER -ErrorAction SilentlyContinue }
+    Invoke-SafeTestCleanup { Remove-Item Env:\KUBEPEEP_INSTALLER_DOWNLOAD_MARKER -ErrorAction SilentlyContinue }
+    Invoke-SafeTestCleanup { $env:LOCALAPPDATA = $previousLocalAppData }
+    Invoke-SafeTestCleanup { $env:KUBEPEEP_TEST_RELEASE = $previousRelease }
+    Invoke-SafeTestCleanup { [Environment]::SetEnvironmentVariable('Path', $previousUserPath, 'User') }
     foreach ($possibleReparsePoint in @($dataRoot, $nestedJunction, $binaryPath)) {
         if ([string]::IsNullOrWhiteSpace($possibleReparsePoint)) { continue }
-        $item = Get-Item -LiteralPath $possibleReparsePoint -Force -ErrorAction SilentlyContinue
-        if ($null -eq $item -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) { continue }
-        if ($item.PSIsContainer) {
-            [IO.Directory]::Delete($possibleReparsePoint)
-        } else {
-            [IO.File]::Delete($possibleReparsePoint)
+        Invoke-SafeTestCleanup {
+            $item = Get-Item -LiteralPath $possibleReparsePoint -Force -ErrorAction SilentlyContinue
+            if ($null -ne $item -and ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                if ($item.PSIsContainer) {
+                    [IO.Directory]::Delete($possibleReparsePoint)
+                } else {
+                    [IO.File]::Delete($possibleReparsePoint)
+                }
+            }
         }
     }
-    Remove-Item -LiteralPath $testRoot -Recurse -Force -ErrorAction SilentlyContinue
+    Invoke-SafeTestCleanup { Remove-Item -LiteralPath $testRoot -Recurse -Force -ErrorAction SilentlyContinue }
 }
+
+if ($null -ne $script:testFailureDiagnostic) {
+    Write-Output $script:testFailureDiagnostic
+    exit 1
+}
+exit 0

@@ -327,6 +327,20 @@ function Test-ExactVersionOutput([string]$Output, [string]$ExpectedVersion) {
     return (($Output -split '\s+') -contains ("version=" + $ExpectedVersion))
 }
 
+function Get-SHA256Hex([string]$Path) {
+    $stream = $null
+    $hasher = $null
+    try {
+        $stream = [System.IO.File]::OpenRead($Path)
+        $hasher = [System.Security.Cryptography.SHA256]::Create()
+        $hashBytes = $hasher.ComputeHash($stream)
+        return ([System.BitConverter]::ToString($hashBytes)).Replace('-', '').ToLowerInvariant()
+    } finally {
+        if ($null -ne $hasher) { $hasher.Dispose() }
+        if ($null -ne $stream) { $stream.Dispose() }
+    }
+}
+
 if ($Uninstall) {
     if (-not [string]::IsNullOrWhiteSpace($Version)) {
         Fail '-Version cannot be combined with -Uninstall.'
@@ -413,7 +427,7 @@ try {
     if ($matches.Count -ne 1) {
         Fail 'release checksum entry is missing or duplicated.'
     }
-    $actual = (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash.ToLowerInvariant()
+    $actual = Get-SHA256Hex $archivePath
     if ($actual -ne $matches[0]) {
         Fail 'SHA-256 verification failed.'
     }
