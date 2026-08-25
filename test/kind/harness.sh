@@ -484,7 +484,7 @@ validate_action_authorization() {
 	expect_can_i yes "$app_e2e_subject" update deployments.apps/scale kp-allowed "black-box identity can scale" kp-action-deployment
 	expect_can_i yes "$app_e2e_subject" delete pods kp-allowed "black-box identity can delete" kp-delete-probe
 	expect_can_i yes "$app_e2e_subject" create pods/portforward kp-allowed "black-box identity can port-forward" kp-interactive
-	expect_can_i no "$app_e2e_subject" create pods/exec kp-allowed "black-box identity does not receive exec" kp-interactive
+	expect_can_i yes "$app_e2e_subject" create pods/exec kp-allowed "black-box identity can exec" kp-interactive
 	expect_can_i no "$app_e2e_subject" patch deployments.apps kp-denied "black-box identity is denied in kp-denied" kp-action-deployment
 }
 

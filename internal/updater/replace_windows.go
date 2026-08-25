@@ -79,10 +79,10 @@ func launchWindowsReplacement(target, candidate, backup, failed, status, lockPat
 	)
 	const (
 		createNewProcessGroup = 0x00000200
-		detachedProcess       = 0x00000008
+		createNoWindow        = 0x08000000
 	)
 	command.SysProcAttr = &syscall.SysProcAttr{
-		CreationFlags: createNewProcessGroup | detachedProcess,
+		CreationFlags: createNewProcessGroup | createNoWindow,
 		HideWindow:    true,
 	}
 	if err := command.Start(); err != nil {
