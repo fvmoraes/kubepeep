@@ -212,7 +212,8 @@ try {
     Assert-True (@(([string]$installedUserPath).Split(';') | Where-Object { $_.TrimEnd('\') -ieq $installDir.TrimEnd('\') }).Count -eq 1) 'PowerShell installer did not add exactly one user PATH entry'
 
     $script:testStage = 'fixture-guard'
-    Remove-Item Function:\global:Invoke-WebRequest -Force
+    Remove-Item Function:\Invoke-WebRequest -Force
+    Assert-True ($null -eq (Get-Command Invoke-WebRequest -CommandType Function -ErrorAction SilentlyContinue)) 'PowerShell fixture download override remained active'
     $rejected = $false
     try { & ./install.ps1 -Version 0.1.0 -InstallDir $installDir | Out-Null } catch { $rejected = $true }
     Assert-True $rejected 'PowerShell installer accepted fixture mode without its explicit download function'
@@ -425,7 +426,7 @@ try {
 } catch {
     $script:testFailureDiagnostic = Get-SafeTestDiagnostic $script:testStage $_.Exception
 } finally {
-    Invoke-SafeTestCleanup { Remove-Item Function:\global:Invoke-WebRequest -Force -ErrorAction SilentlyContinue }
+    Invoke-SafeTestCleanup { Remove-Item Function:\Invoke-WebRequest -Force -ErrorAction SilentlyContinue }
     Invoke-SafeTestCleanup { Remove-Item Env:\KUBEPEEP_INSTALLER_ROLLBACK_MARKER -ErrorAction SilentlyContinue }
     Invoke-SafeTestCleanup { Remove-Item Env:\KUBEPEEP_INSTALLER_EXECUTION_MARKER -ErrorAction SilentlyContinue }
     Invoke-SafeTestCleanup { Remove-Item Env:\KUBEPEEP_INSTALLER_DOWNLOAD_MARKER -ErrorAction SilentlyContinue }
