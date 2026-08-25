@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -163,7 +164,7 @@ func TestWindowsHelperRejectsCandidateChangedWhileWaitingForParent(t *testing.T)
 		t.Fatal(err)
 	}
 	_ = parent.Wait()
-	waitForWindowsStatus(t, status, "failed version=0.2.0")
+	waitForWindowsFailureStatus(t, status, "0.2.0", "replace-source-hash")
 	if got := executableVersion(t, target); !strings.Contains(got, "version=0.1.0") {
 		t.Fatalf("candidate mutation changed installed version=%q", got)
 	}
@@ -251,14 +252,30 @@ func hashHex(t *testing.T, path string) string {
 
 func waitForWindowsStatus(t *testing.T, path, expected string) {
 	t.Helper()
+	content := waitForWindowsStatusValue(t, path)
+	if content != expected {
+		t.Fatalf("status=%q want=%q", content, expected)
+	}
+}
+
+func waitForWindowsFailureStatus(t *testing.T, path, version, stage string) {
+	t.Helper()
+	content := waitForWindowsStatusValue(t, path)
+	pattern := regexp.MustCompile("^failed version=" + regexp.QuoteMeta(version) +
+		" stage=" + regexp.QuoteMeta(stage) +
+		` type=[A-Za-z][A-Za-z0-9]{0,63} hresult=0x[0-9A-F]{8}$`)
+	if !pattern.MatchString(content) {
+		t.Fatalf("unsafe or unexpected failure status=%q", content)
+	}
+}
+
+func waitForWindowsStatusValue(t *testing.T, path string) string {
+	t.Helper()
 	deadline := time.Now().Add(20 * time.Second)
 	for time.Now().Before(deadline) {
 		content, err := os.ReadFile(path)
 		if err == nil {
-			if string(content) != expected {
-				t.Fatalf("status=%q want=%q", content, expected)
-			}
-			return
+			return string(content)
 		}
 		if !os.IsNotExist(err) {
 			t.Fatal(err)
@@ -266,4 +283,5 @@ func waitForWindowsStatus(t *testing.T, path, expected string) {
 		time.Sleep(100 * time.Millisecond)
 	}
 	t.Fatalf("timed out waiting for %s", path)
+	return ""
 }

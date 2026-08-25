@@ -107,12 +107,54 @@ const windowsHelperScript = `param(
 )
 $ErrorActionPreference = 'Stop'
 $replaced = $false
+$failureStage = 'unknown'
 function Assert-RegularFile([string]$Path, [string]$Description) {
     $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
     if ($null -eq $item -or $item.PSIsContainer -or
         ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
         throw "$Description is not a regular file"
     }
+}
+function Get-AllowlistedFailureStage([string]$Stage) {
+    switch -Exact ($Stage) {
+        'wait-parent' { return $Stage }
+        'replace-invoke' { return $Stage }
+        'replace-source-inspect' { return $Stage }
+        'replace-destination-inspect' { return $Stage }
+        'replace-source-hash' { return $Stage }
+        'replace-destination-hash' { return $Stage }
+        'replace-commit' { return $Stage }
+        'verify-start' { return $Stage }
+        'verify-output' { return $Stage }
+        'cleanup-backup' { return $Stage }
+        'write-success-status' { return $Stage }
+        'rollback-invoke' { return $Stage }
+        'rollback-source-inspect' { return $Stage }
+        'rollback-destination-inspect' { return $Stage }
+        'rollback-source-hash' { return $Stage }
+        'rollback-destination-hash' { return $Stage }
+        'rollback-commit' { return $Stage }
+        'rollback-cleanup' { return $Stage }
+        default { return 'unknown' }
+    }
+}
+function Get-SafeFailureDiagnostic([string]$Stage, [Exception]$Exception) {
+    $safeStage = Get-AllowlistedFailureStage $Stage
+    for ($depth = 0; $depth -lt 16 -and $null -ne $Exception -and $null -ne $Exception.InnerException; $depth++) {
+        $Exception = $Exception.InnerException
+    }
+    if ($null -eq $Exception) {
+        $typeName = 'Exception'
+        $hResult = 0
+    } else {
+        $typeName = $Exception.GetType().Name
+        if ([string]::IsNullOrEmpty($typeName) -or $typeName -notmatch '^[A-Za-z][A-Za-z0-9]{0,63}$') {
+            $typeName = 'Exception'
+        }
+        $hResult = [int]($Exception.HResult)
+    }
+    $hResultHex = '{0:X8}' -f $hResult
+    return "stage=$safeStage type=$typeName hresult=0x$hResultHex"
 }
 function Test-RetryableReplaceError([Exception]$Exception) {
     while ($null -ne $Exception) {
@@ -131,20 +173,26 @@ function Invoke-VerifiedReplaceWithRetry(
     [string]$ExpectedSourceHash,
     [string]$ExpectedDestinationHash,
     [string]$SourceDescription,
-    [string]$DestinationDescription
+    [string]$DestinationDescription,
+    [string]$StagePrefix
 ) {
     for ($attempt = 0; $attempt -lt 20; $attempt++) {
         try {
+            $script:failureStage = "$StagePrefix-source-inspect"
             Assert-RegularFile $Source $SourceDescription
+            $script:failureStage = "$StagePrefix-destination-inspect"
             Assert-RegularFile $Destination $DestinationDescription
+            $script:failureStage = "$StagePrefix-source-hash"
             $sourceHash = (Get-FileHash -LiteralPath $Source -Algorithm SHA256).Hash.ToLowerInvariant()
             if ($sourceHash -ne $ExpectedSourceHash.ToLowerInvariant()) {
                 throw "$SourceDescription changed while the update was pending"
             }
+            $script:failureStage = "$StagePrefix-destination-hash"
             $destinationHash = (Get-FileHash -LiteralPath $Destination -Algorithm SHA256).Hash.ToLowerInvariant()
             if ($destinationHash -ne $ExpectedDestinationHash.ToLowerInvariant()) {
                 throw "$DestinationDescription changed while the update was pending"
             }
+            $script:failureStage = "$StagePrefix-commit"
             [System.IO.File]::Replace($Source, $Destination, $BackupPath, $true)
             return
         } catch {
@@ -241,6 +289,7 @@ function Invoke-VersionWithTimeout([string]$Path) {
     }
 }
 try {
+    $failureStage = 'wait-parent'
     if ($ParentPid -gt 0) {
         for ($attempt = 0; $attempt -lt 3000; $attempt++) {
             if (-not (Get-Process -Id $ParentPid -ErrorAction SilentlyContinue)) { break }
@@ -250,24 +299,33 @@ try {
             throw 'timed out waiting for the updater process to exit'
         }
     }
-    Invoke-VerifiedReplaceWithRetry $Candidate $Target $Backup $ExpectedCandidateHash $ExpectedCurrentHash 'candidate executable' 'installed executable'
+    $failureStage = 'replace-invoke'
+    Invoke-VerifiedReplaceWithRetry $Candidate $Target $Backup $ExpectedCandidateHash $ExpectedCurrentHash 'candidate executable' 'installed executable' 'replace'
     $replaced = $true
+    $failureStage = 'verify-start'
     $versionOutput = Invoke-VersionWithTimeout $Target
+    $failureStage = 'verify-output'
     $versionTokens = [regex]::Split($versionOutput, '\s+')
     if (-not ($versionTokens -contains ("version=" + $ExpectedVersion))) {
         throw 'replacement version verification failed'
     }
+    $failureStage = 'cleanup-backup'
     Remove-Item -LiteralPath $Backup -Force
+    $failureStage = 'write-success-status'
     [System.IO.File]::WriteAllText($Status, "installed version=$ExpectedVersion")
 } catch {
-    $statusMessage = "failed version=$ExpectedVersion"
+    $failureDiagnostic = Get-SafeFailureDiagnostic $failureStage $_.Exception
+    $statusMessage = "failed version=$ExpectedVersion $failureDiagnostic"
     if ($replaced -and (Test-Path -LiteralPath $Backup -PathType Leaf)) {
         try {
-            Invoke-VerifiedReplaceWithRetry $Backup $Target $Failed $ExpectedCurrentHash $ExpectedCandidateHash 'rollback executable' 'failed replacement executable'
+            $failureStage = 'rollback-invoke'
+            Invoke-VerifiedReplaceWithRetry $Backup $Target $Failed $ExpectedCurrentHash $ExpectedCandidateHash 'rollback executable' 'failed replacement executable' 'rollback'
+            $failureStage = 'rollback-cleanup'
             Remove-Item -LiteralPath $Failed -Force -ErrorAction SilentlyContinue
             $statusMessage = "rolled-back version=$ExpectedVersion"
         } catch {
-            $statusMessage = "rollback-failed version=$ExpectedVersion"
+            $rollbackDiagnostic = Get-SafeFailureDiagnostic $failureStage $_.Exception
+            $statusMessage = "rollback-failed version=$ExpectedVersion $rollbackDiagnostic"
         }
     }
     try { [System.IO.File]::WriteAllText($Status, $statusMessage) } catch { }
