@@ -1,6 +1,6 @@
 # Fase 9 — Experiência operacional
 
-**Estado atual:** planejada (0/84)
+**Estado atual:** em execução (10/84)
 
 **Benchmark:** [facilitadores oficiais do Aptakube](../docs/research/aptakube-ux-benchmark.md)
 
@@ -55,24 +55,24 @@ absoluta de Secret. Ela não é condição para concluir a Fase 9.
 
 ### Baseline, requisitos e não-infringimento
 
-- [ ] **F9-01** Registrar URLs oficiais, data da consulta e resumo factual de cada facilitador usado.
-- [ ] **F9-02** Documentar que o benchmark não autoriza cópia de marca, código, textos, screenshots, ícones, layout ou identidade proprietária.
-- [ ] **F9-03** Inventariar no frontend e backend quais facilitadores já existem, quais são parciais e quais precisam ser criados.
+- [x] **F9-01** Registrar URLs oficiais, data da consulta e resumo factual de cada facilitador usado.
+- [x] **F9-02** Documentar que o benchmark não autoriza cópia de marca, código, textos, screenshots, ícones, layout ou identidade proprietária.
+- [x] **F9-03** Inventariar no frontend e backend quais facilitadores já existem, quais são parciais e quais precisam ser criados.
 - [ ] **F9-04** Ligar cada item do inventário a componente, rota, service, adapter, teste e critério `UX-M` correspondente.
 - [ ] **F9-05** Atualizar produto, arquitetura, API, dados e segurança antes de implementar qualquer contrato novo.
 - [ ] **F9-06** Classificar cada campo persistido, renderizado, copiado, baixado ou diagnosticado.
-- [ ] **F9-07** Revisar licenças de qualquer dependência adicional e preferir componentes próprios já usados pelo projeto.
+- [x] **F9-07** Revisar licenças de qualquer dependência adicional e preferir componentes próprios já usados pelo projeto.
 - [ ] **F9-08** Criar flags de entrega apenas quando houver rollback seguro; nenhuma flag pode enfraquecer autorização ou redaction.
 
 ### Paleta, atalhos e navegação
 
-- [ ] **F9-09** Criar um catálogo tipado de destinos a partir das rotas reais, sem strings duplicadas espalhadas pela UI.
-- [ ] **F9-10** Implementar paleta somente de navegação aberta por `Ctrl+K`/`Cmd+K` e botão acessível.
+- [x] **F9-09** Criar um catálogo tipado de destinos a partir das rotas reais, sem strings duplicadas espalhadas pela UI.
+- [x] **F9-10** Implementar paleta somente de navegação aberta por `Ctrl+K`/`Cmd+K` e botão acessível.
 - [ ] **F9-11** Buscar por tela, tipo de recurso, contexto, escopo e namespace sem indexar objetos remotos em storage persistente.
 - [ ] **F9-12** Preservar contexto/escopo/filtros pertinentes ao navegar e rejeitar destino incompatível com a geração atual.
-- [ ] **F9-13** Conter foco na paleta, restaurá-lo ao fechar, suportar setas/Enter/Escape e anunciar resultados ao leitor de tela.
-- [ ] **F9-14** Não oferecer mutações na primeira versão da paleta; ações continuam no alvo contextual e no backend reautorizado.
-- [ ] **F9-15** Criar ajuda de atalhos descoberta por teclado e pela interface, com conflitos de browser documentados.
+- [x] **F9-13** Conter foco na paleta, restaurá-lo ao fechar, suportar setas/Enter/Escape e anunciar resultados ao leitor de tela.
+- [x] **F9-14** Não oferecer mutações na primeira versão da paleta; ações continuam no alvo contextual e no backend reautorizado.
+- [x] **F9-15** Criar ajuda de atalhos descoberta por teclado e pela interface, com conflitos de browser documentados.
 - [ ] **F9-16** Adicionar atalhos seguros para atualizar, focar busca, abrir seletor e voltar, sem capturar campos de edição.
 - [ ] **F9-17** Testar Windows/Linux (`Ctrl`) e macOS (`Meta`), composição de teclado, foco e navegação somente por teclado.
 - [ ] **F9-18** Garantir deep links/reload com History API para todos os destinos do catálogo.
@@ -154,7 +154,7 @@ absoluta de Secret. Ela não é condição para concluir a Fase 9.
 
 ### Hardening, acessibilidade e evidência
 
-- [ ] **F9-76** Executar threat-model delta cobrindo paleta, preferências, logs agregados, diff e multi-contexto.
+- [x] **F9-76** Executar threat-model delta cobrindo paleta, preferências, logs agregados, diff e multi-contexto.
 - [ ] **F9-77** Validar teclado, foco, leitor de tela, contraste, zoom e estados que não dependem apenas de cor.
 - [ ] **F9-78** Validar loading, vazio, offline, proibido, unknown, parcial, cancelado, stale e truncado em cada superfície nova.
 - [ ] **F9-79** Inspecionar localStorage, sessionStorage, IndexedDB, Cache API/service workers, SQLite, WAL/journal, backups e logs após E2E.

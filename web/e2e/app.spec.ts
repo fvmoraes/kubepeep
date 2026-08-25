@@ -6,10 +6,19 @@ test('serves the application shell and preserves History API navigation', async 
   await expect(page.getByLabel('Primary navigation')).toBeVisible()
   await expect(page.getByText('kubePeep', { exact: true })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'The local API returned an error' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Open command center' })).toBeVisible()
 
-  await page.getByRole('link', { name: 'Workloads' }).click()
+  await page.keyboard.press('Control+k')
+  await expect(page.getByRole('dialog', { name: 'Command center' })).toBeVisible()
+  await page.getByRole('combobox', { name: 'Search application pages' }).fill('Workloads')
+  await page.keyboard.press('Enter')
   await expect(page).toHaveURL(/\/workloads$/)
   await expect(page.getByRole('heading', { name: 'Workloads' })).toBeVisible()
+
+  await page.keyboard.press('Shift+/')
+  await expect(page.getByRole('dialog', { name: 'Keyboard shortcuts' })).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.getByRole('dialog')).toHaveCount(0)
 
   await page.reload()
   await expect(page.getByRole('heading', { name: 'Workloads' })).toBeVisible()

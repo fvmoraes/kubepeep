@@ -15,6 +15,7 @@ import {
 import { NavLink, Outlet, Route, Routes } from 'react-router'
 
 import { getStatus } from './api/client'
+import { CommandCenter } from './components/CommandCenter'
 import { ContextSelector } from './components/ContextSelector'
 import { DashboardPage } from './components/Dashboard'
 import { NamespaceScopeEditor } from './components/NamespaceScopeEditor'
@@ -25,17 +26,19 @@ import { SettingsPage } from './components/SettingsPage'
 import { StatePanel } from './components/StatePanel'
 
 const navigation = [
-  { path: '/', label: 'Overview', icon: CircleGauge },
-  { path: '/workloads', label: 'Workloads', icon: Boxes },
-  { path: '/pods', label: 'Pods', icon: Activity },
-  { path: '/logs', label: 'Logs', icon: ScrollText },
-  { path: '/events', label: 'Events', icon: FileText },
-  { path: '/network', label: 'Network', icon: Network },
-  { path: '/config', label: 'Config', icon: Braces },
-  { path: '/namespaces', label: 'Namespaces', icon: TerminalSquare },
-  { path: '/permissions', label: 'Permissions', icon: KeyRound },
-  { path: '/settings', label: 'Settings', icon: Settings },
+  { path: '/', label: 'Overview', description: 'Cluster health and operational summary', keywords: ['dashboard', 'health'], icon: CircleGauge },
+  { path: '/workloads', label: 'Workloads', description: 'Deployments, StatefulSets and DaemonSets', keywords: ['deployment', 'statefulset', 'daemonset'], icon: Boxes },
+  { path: '/pods', label: 'Pods', description: 'Pod inventory, status and containers', keywords: ['container', 'restart'], icon: Activity },
+  { path: '/logs', label: 'Logs', description: 'Bounded container log viewer', keywords: ['tail', 'stream'], icon: ScrollText },
+  { path: '/events', label: 'Events', description: 'Kubernetes event timeline', keywords: ['warning', 'reason'], icon: FileText },
+  { path: '/network', label: 'Network', description: 'Services, ingresses and endpoints', keywords: ['service', 'ingress', 'endpointslice'], icon: Network },
+  { path: '/config', label: 'Config', description: 'Safe configuration resource views', keywords: ['configmap', 'yaml'], icon: Braces },
+  { path: '/namespaces', label: 'Namespaces', description: 'Namespace scopes and selection', keywords: ['scope'], icon: TerminalSquare },
+  { path: '/permissions', label: 'Permissions', description: 'Effective Kubernetes capabilities', keywords: ['rbac', 'authorization'], icon: KeyRound },
+  { path: '/settings', label: 'Settings', description: 'Allowlisted local preferences', keywords: ['preferences'], icon: Settings },
 ] as const
+
+const commandRoutes = navigation.map(({ path, label, description, keywords }) => ({ path, label, description, keywords }))
 
 function StatusBadge() {
   const status = useQuery({
@@ -102,6 +105,7 @@ function Shell() {
             {selection ? <small>{selection.cluster} · {selection.namespaceCount} namespace{selection.namespaceCount === 1 ? '' : 's'}</small> : null}
           </div>
           <div className="topbar-controls">
+            <CommandCenter routes={commandRoutes} />
             <ContextSelector selection={selection} />
             <StatusBadge />
           </div>

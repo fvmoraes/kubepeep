@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -118,6 +118,29 @@ describe('application shell', () => {
       expect(screen.getByRole('heading', { name: title })).toBeInTheDocument()
       view.unmount()
     }
+  })
+
+  it('exposes the exact static application routes in the topbar command center', () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('offline')))
+    renderApp()
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open command center' }))
+    expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual([
+      expect.stringContaining('Overview'),
+      expect.stringContaining('Workloads'),
+      expect.stringContaining('Pods'),
+      expect.stringContaining('Logs'),
+      expect.stringContaining('Events'),
+      expect.stringContaining('Network'),
+      expect.stringContaining('Config'),
+      expect.stringContaining('Namespaces'),
+      expect.stringContaining('Permissions'),
+      expect.stringContaining('Settings'),
+    ])
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Search application pages' }), { target: { value: 'rbac' } })
+    expect(screen.getByRole('option', { name: /Permissions/ })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: /Overview/ })).not.toBeInTheDocument()
   })
 
   it('renders the explicit not-found error route', () => {

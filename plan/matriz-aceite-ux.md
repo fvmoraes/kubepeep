@@ -12,7 +12,7 @@ estado atual do código tiver sido executada e registrada.
 | ID | Status | Critério | Fase/tarefas | Evidência mínima |
 | --- | --- | --- | --- | --- |
 | UX-M01 | [ ] | O produto descobre contextos do kubeconfig sem modificar arquivos nem expor credenciais | F9-01–08, F9-66–75 | hash/mtime antes/depois, contextos parciais, plugin `exec` sanitizado, inspeção negativa |
-| UX-M02 | [ ] | Paleta e atalhos permitem navegar somente por teclado, sem oferecer mutações ou persistir dados remotos | F9-09–18 | unitário React, leitor de tela/foco, Playwright e storage vazio |
+| UX-M02 | [x] | Paleta e atalhos permitem navegar somente por teclado, sem oferecer mutações ou persistir dados remotos | F9-09–18 | `CommandCenter.test.tsx`, `App.test.tsx` e Playwright; foco/teclado, zero fetch próprio e storages vazios; [evidência F9](../docs/research/phase9-evidence.md) |
 | UX-M03 | [ ] | Listas oferecem busca, filtros visíveis/resetáveis e ordenação natural determinística | F9-19–25, F9-29 | parser/ordenação unitários, paginação, alta cardinalidade e E2E |
 | UX-M04 | [ ] | Favoritos e recentes armazenam apenas referências allowlisted, limitadas e removíveis | F9-26–29 | migration/DTO/API/UI, limpeza, limites e inspeção de browser/SQLite |
 | UX-M05 | [ ] | Listas e detalhes apresentam status e relações de forma humana, acessível e ligada à evidência real | F9-30–33, F9-77–78 | componentes por kind, relações autorizadas, fixtures degradadas e acessibilidade |

@@ -58,7 +58,7 @@ As fases seguem a ordem determinada pelo prompt. Para evitar duplicação, a Fas
 | [6 — Recursos](06-recursos.md) | Consultas somente leitura e streaming | local 65/67; Kind pendente | [Fase 6](../docs/research/phase6-evidence.md) |
 | [7 — Ações](07-acoes.md) | Restart, scale, delete, port-forward e exec | local 45/47; Kind pendente | [Fase 7](../docs/research/phase7-evidence.md) |
 | [8 — Distribuição](08-distribuicao.md) | Releases, instaladores, CI e aceite | 33/50; nativos/CI/Kind pendentes | [Fase 8](../docs/research/phase8-evidence.md) |
-| [9 — Experiência operacional](09-experiencia-operacional.md) | Paleta, filtros, quick actions, logs, diff e leitura multi-contexto | planejada (0/84) | [Benchmark Aptakube](../docs/research/aptakube-ux-benchmark.md) e [matriz UX](matriz-aceite-ux.md) |
+| [9 — Experiência operacional](09-experiencia-operacional.md) | Paleta, filtros, quick actions, logs, diff e leitura multi-contexto | em execução (10/84) | [Benchmark Aptakube](../docs/research/aptakube-ux-benchmark.md), [evidência F9](../docs/research/phase9-evidence.md) e [matriz UX](matriz-aceite-ux.md) |
 
 Estado atual: **as implementações locais das Fases 4 a 7 estão concluídas**.
 Os checkboxes remanescentes dessas fases são exclusivamente provas contra o
@@ -163,7 +163,8 @@ localmente e aguardam nove tarefas Kind no total: F4-48–50, F5-56/F5-59,
 F6-56/F6-57 e F7-43/F7-44. A Fase 8 possui 33 de 50 tarefas comprovadas.
 Esses números serão atualizados após a execução Kind/CI atualmente em
 fechamento. A Fase 9 foi especificada em 2026-08-25 e inicia com 84 tarefas e
-15 critérios adicionais ainda sem evidência aceita.
+15 critérios adicionais, dos quais `UX-M02` possui evidência local aceita; CI
+do commit funcional permanece obrigatória.
 
 Na matriz final, 22 de 27 critérios do MVP possuem evidência local ou nativa
 anterior aplicável. Permanecem abertos os critérios que exigem Kind real,
