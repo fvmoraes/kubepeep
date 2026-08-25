@@ -1,0 +1,17 @@
+#!/bin/sh
+set -eu
+
+security_hook_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+security_repo_root=$(CDPATH= cd -- "$security_hook_dir/.." && pwd)
+security_zero=0000000000000000000000000000000000000000
+security_checked=
+
+while read -r security_local_ref security_local_sha security_remote_ref security_remote_sha; do
+	: "${security_local_ref:?}" "${security_remote_ref:?}" "${security_remote_sha:?}"
+	[ "$security_local_sha" != "$security_zero" ] || continue
+	case " $security_checked " in
+	*" $security_local_sha "*) continue ;;
+	esac
+	"$security_repo_root/scripts/security_check.sh" "$security_local_sha"
+	security_checked="$security_checked $security_local_sha"
+done

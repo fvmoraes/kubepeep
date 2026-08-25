@@ -11,6 +11,11 @@ kubeconfig.*
 *.pfx
 credentials.json
 service-account*.json
+.netrc
+.npmrc
+.pypirc
+id_rsa*
+id_ed25519*
 
 # Runtime data
 *.db
@@ -48,6 +53,4 @@ coverage/
 *mcp.json
 *opencode.json
 # dwyt end
-.codebase-memory/artifact.json
-.codebase-memory/graph.db.zst
-.codebase-memory/artifact.json
+.codebase-memory/

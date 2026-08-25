@@ -1,0 +1,17 @@
+[extend]
+useDefault = true
+
+# The RFC 6455 sample nonce is public test data, not a credential. Keep this
+# exception bound to the exact value and the exact WebSocket test files.
+[[rules]]
+id = "generic-api-key"
+
+    [[rules.allowlists]]
+    description = "RFC 6455 public sample nonce in WebSocket tests"
+    condition = "AND"
+    regexTarget = "secret"
+    regexes = ['''^dGhlIHNhbXBsZSBub25jZQ==$''']
+    paths = [
+      '''^internal/api/handlers/actions_exec_wire_test\.go$''',
+      '''^spikes/phase1/spike/(lifecycle_matrix_test|spike_test|ws_matrix_test)\.go$''',
+    ]

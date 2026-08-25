@@ -1,0 +1,7 @@
+#!/bin/sh
+set -eu
+
+security_hook_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+security_repo_root=$(CDPATH= cd -- "$security_hook_dir/.." && pwd)
+
+"$security_repo_root/scripts/security_check.sh" HEAD

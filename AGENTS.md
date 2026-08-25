@@ -14,6 +14,9 @@ Before every final response, save a session context snapshot with the Obsidian M
 Never rely only on grep/glob when MCP tools are available.
 Keep project context under `~/.dwyt`.
 Never hardcode machine-specific absolute paths in shared markdown instructions.
+Treat the absence of sensitive data as a non-negotiable project premise: never commit or push credentials, tokens, kubeconfigs, private keys, private PII, machine-specific paths, runtime logs/databases, or generated artifacts.
+Before every commit and push, run `scripts/security_check.sh HEAD`; commit and tag identities must use an approved GitHub noreply address.
+Never print a discovered secret. Report only its type, location, and affected commit; rotate or revoke it before rewriting every affected remote ref.
 
 ## Priority Order
 

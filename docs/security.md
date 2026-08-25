@@ -19,6 +19,35 @@
 7. Encerrar recursos quando contexto, escopo, página ou processo mudar.
 8. Instalar e atualizar somente artefatos cuja integridade foi validada.
 
+### 1.1 Repositório e cadeia de desenvolvimento
+
+A ausência de dados sensíveis no Git é uma premissa inegociável do projeto.
+Nenhum commit, branch, tag, release, artefato ou log de CI pode conter:
+
+- credenciais, tokens, senhas, kubeconfigs, chaves privadas ou arquivos de ambiente;
+- dados de clientes, endpoints internos, PII privada ou e-mails corporativos;
+- paths absolutos da máquina de desenvolvimento;
+- bancos, logs, dumps, caches, binários ou outros artefatos gerados.
+
+Fixtures precisam ser sintéticas e deliberadamente inválidas. Uma exceção do
+scanner exige valor público/sintético exato, path exato e justificativa em
+`.gitleaks.toml`, ou fingerprint histórico exato em `.gitleaksignore`;
+allowlists amplas são proibidas. Autor, committer e tagger usam somente endereço
+noreply oficial do GitHub.
+
+Todo clone deve ativar `.githooks/pre-commit` e `.githooks/pre-push` com
+`git config --local core.hooksPath .githooks`. O gate
+`scripts/security_check.sh HEAD` valida o index staged e o histórico completo,
+identidades, mensagens de commit/tag, paths e nomes de arquivos de risco, e
+executa Gitleaks com segredos redigidos. As CIs de verificação e release
+executam o mesmo gate com checkout completo.
+
+Se um dado sensível alcançar o remoto, a resposta é: interromper novos pushes,
+revogar ou rotacionar a credencial primeiro, reescrever todos os refs afetados
+com lease explícito, validar novamente e solicitar ao provedor a remoção de
+objetos órfãos, caches e logs que continuem acessíveis. O valor descoberto nunca
+deve ser copiado para issue, commit, log ou relatório de auditoria.
+
 ## 2. Premissas e limites
 
 - O dispositivo e a conta local do usuário não são considerados comprometidos.

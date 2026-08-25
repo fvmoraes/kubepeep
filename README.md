@@ -125,6 +125,19 @@ make verify
 make release-snapshot
 ```
 
+Sensitive data is never allowed in Git history. Enable the repository's
+pre-commit and pre-push gates once per clone, and run the same check explicitly
+whenever needed:
+
+```sh
+git config --local core.hooksPath .githooks
+./scripts/security_check.sh HEAD
+```
+
+Commit authors and committers must use an approved GitHub noreply address. See the
+[repository security premise](docs/security.md#11-repositório-e-cadeia-de-desenvolvimento)
+before adding fixtures, logs, kubeconfigs, environment files, or diagnostics.
+
 The executable is built with `CGO_ENABLED=0`; frontend assets and SQLite
 migrations are embedded. See [the executable plan](plan/README.md),
 [API contract](docs/api.md), [security model](docs/security.md), and

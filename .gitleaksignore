@@ -1,0 +1,5 @@
+# Exact historical fingerprints for deliberately invalid PEM redaction fixtures.
+# Any edit or reintroduction receives a different fingerprint and fails the gate.
+53b6e81f8273dac0bd5102144a3c9b5f2dd5d9e8:internal/services/dashboard/logs_test.go:private-key:98
+071772c90c4b6841dffad8c14b47dd08ba7edf34:internal/services/dashboard/log_detection_test.go:private-key:107
+071772c90c4b6841dffad8c14b47dd08ba7edf34:internal/services/dashboard/log_detection_test.go:private-key:153
