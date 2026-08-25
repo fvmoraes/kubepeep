@@ -151,6 +151,32 @@ Scripts, archives e `checksums.txt` de uma instalação pertencem à mesma vers�
 O instalador recebe ou resolve uma tag explícita `v${version}`, baixa somente
 assets dessa release e falha fechado se o checksum não corresponder.
 
+### 3.7 Fase 9 — Experiência operacional
+
+A expansão solicitada depois do prompt mantém os contratos seguros já
+implementados e avança em fatias verticais:
+
+1. benchmark, inventário real e threat-model delta;
+2. paleta somente de navegação, ajuda e atalhos acessíveis;
+3. filtros/reset/ordenação natural e preferências allowlisted;
+4. favoritos/recentes mínimos, limitados e removíveis;
+5. visão humana e menu contextual sobre as actions existentes;
+6. YAML somente leitura, diff seguro e recusa de Secret;
+7. logs agregados com proveniência/budgets e métricas opcionais;
+8. gerenciador de port-forward;
+9. leitura multi-contexto com fan-out limitado, autorização e geração por
+   origem;
+10. hardening, inspeção negativa, Kind/E2E, archives nativos e reindexação.
+
+Uma fatia fecha frontend, contrato/API, backend, dados, testes e documentação
+antes da seguinte. A paleta inicial não executa mutações. A agregação
+multi-contexto é somente leitura; qualquer action exige selecionar uma única
+origem e passa novamente por SAR no backend. Edição/aplicação genérica de YAML
+permanece fora do gate e não é introduzida implicitamente pelo viewer.
+
+Tarefas e critérios completos: [Fase 9](../plan/09-experiencia-operacional.md)
+e [matriz UX](../plan/matriz-aceite-ux.md).
+
 ## 4. Comandos oficiais futuros
 
 O repositório deve oferecer uma interface estável por Makefile. A implementação desses targets é tarefa da Fase 3; esta seção não afirma que já existem.

@@ -644,3 +644,97 @@ Evidências ainda exigidas da implementação:
 - [ ] O adapter F3 repete canal autenticado, lock, owner/DACL, TOCTOU e cleanup
   em Unix e Windows nativos.
 - [ ] Os archives F8 repetem `start`/`status`/`stop` nos runners de release.
+
+## 20. Delta de segurança da experiência operacional
+
+A Fase 9 introduz superfícies que aceleram navegação e troubleshooting, mas
+não altera as fronteiras de confiança. O benchmark funcional está documentado
+em [research/aptakube-ux-benchmark.md](research/aptakube-ux-benchmark.md); a
+implementação e a identidade continuam sendo próprias do Kube Peep.
+
+### 20.1 Paleta, busca, favoritos e recentes
+
+- A paleta inicial contém apenas destinos estáticos, contextos/escopos já
+  visíveis e comandos de navegação. Ela não executa action mutável.
+- O índice de busca vive em memória e não incorpora logs, YAML, terminal,
+  valores de ConfigMap/Secret, bodies de objetos ou erros brutos.
+- Favoritos/recentes usam schema versionado, limite e allowlist. São proibidos
+  endpoint, path de kubeconfig, token, certificado, header, UID desnecessário,
+  corpo do recurso, YAML, log e comando de `exec`.
+- URL/query string não recebe conteúdo remoto ou identificador classificado
+  como sensível. Ao mudar autorização/origem, referências inacessíveis somem
+  sem revelar metadados adicionais.
+- UI preferences nunca viram mecanismo de autorização; o backend ignora
+  affordances antigas e revalida operações.
+
+### 20.2 YAML e diff
+
+- YAML continua sob `get`, `no-store`, tamanho/timeout e memória efêmera.
+- Secret não possui viewer, busca, cópia, download, favorito, coluna ou diff;
+  `data` e `stringData` nunca chegam ao frontend.
+- Diff exige leitura autorizada independente dos dois lados e mostra suas
+  origens. A normalização de `managedFields`/status é opt-in e não pode ocultar
+  que campos foram removidos da comparação.
+- Renderização, syntax highlighting e busca não enviam conteúdo a worker,
+  serviço, CDN ou telemetria externos.
+- Edição/aplicação genérica não faz parte deste gate. Uma fase futura precisará
+  de server-side dry-run, preview, `resourceVersion`, confirmação, RBAC e
+  recusa de Secret antes de qualquer request mutável.
+
+### 20.3 Logs agregados
+
+- Cada fonte passa por autorização e budget próprios; permissão em um
+  namespace/pod não se propaga a outro.
+- Toda linha mantém origem, e o merge não remove a distinção entre containers,
+  pods, namespaces ou contextos.
+- Fontes, linhas, bytes, janela, concorrência e duração têm limites globais e
+  por origem. Cliente lento aciona backpressure/truncamento explícito.
+- Troca de rota, escopo, geração ou conjunto de contextos cancela leitores e
+  fecha streams. Reconexão nunca muda silenciosamente de alvo.
+- Busca/destaque/estatística usam apenas o buffer em memória. Conteúdo não entra
+  em SQLite, arquivo de aplicação, storage do browser, telemetria, erro ou
+  diagnóstico.
+- Copiar/baixar é gesto explícito e transfere dados diretamente ao browser; a
+  aplicação não cria cópia persistente intermediária.
+
+### 20.4 Multi-contexto
+
+- O modo agregado da Fase 9 é somente leitura e usa fan-out limitado,
+  cancelável e ligado a uma geração.
+- Todo item carrega proveniência mínima: profile, contexto, cluster,
+  namespace, tipo e geração. Essa proveniência é exibida, não apenas interna.
+- RBAC/capability são calculados separadamente por contexto, namespace,
+  resource, subresource, verb e resourceName. Não existe união de permissões.
+- Falha, timeout, autenticação, `403`, stale, truncamento e retry permanecem
+  associados à origem. Um contexto não apaga nem torna confiáveis dados de
+  outro.
+- Toda mutação exige um único alvo/origem explícito e reautorização imediata;
+  não há restart/scale/delete/exec/port-forward em massa implícito.
+- Kubeconfigs continuam somente leitura e clusters não precisam se conectar
+  entre si nem receber componente do Kube Peep.
+
+### 20.5 Port-forward e conexão
+
+- Port-forward usa loopback por padrão e nunca escolhe `0.0.0.0` como fallback
+  de colisão.
+- Sessões possuem dono, limite, contexto/escopo/generation e cleanup em stop,
+  stop-all, troca de origem e shutdown.
+- Estado de conexão usa retry limitado com backoff/jitter e cancelamento. Erro
+  publicado é código/estado sanitizado, nunca body, plugin stderr, path,
+  endpoint, stack trace ou credencial.
+
+### 20.6 Gate negativo
+
+Antes de fechar qualquer critério `UX-M`, o E2E injeta sentinelas sintéticas em
+Secret, log, YAML e erro e inspeciona:
+
+- localStorage, sessionStorage, IndexedDB, Cache API e service workers;
+- SQLite, WAL/journal, backups e arquivos temporários controlados;
+- logs, diagnósticos, traces e outputs de CI;
+- archives, installers e assets embutidos;
+- staged content e todo o histórico Git alcançável.
+
+A inspeção nunca publica o valor da sentinela. Ela registra somente
+pass/fail, categoria e caminho relativo allowlisted. Qualquer achado reabre o
+gate, remove o dado do estado versionado/alcançável e exige rotação/revogação
+quando o valor puder ser uma credencial real.

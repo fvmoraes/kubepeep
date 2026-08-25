@@ -1,8 +1,8 @@
 # Especificação de produto e experiência
 
-> **Status:** revisado com as evidências e ADRs da Fase 1
+> **Status:** revisado com as evidências/ADRs da Fase 1 e com os requisitos de experiência operacional da Fase 9
 >
-> **Fontes:** [prompt inicial](../plan/initial_prompt.md), [plano geral](../plan/README.md), [Fase 2](../plan/02-especificacao.md) e [matriz do MVP](../plan/matriz-aceite-mvp.md).
+> **Fontes:** [prompt inicial](../plan/initial_prompt.md), [plano geral](../plan/README.md), [Fase 2](../plan/02-especificacao.md), [matriz do MVP](../plan/matriz-aceite-mvp.md), [benchmark Aptakube](research/aptakube-ux-benchmark.md) e [matriz UX](../plan/matriz-aceite-ux.md).
 
 ## 1. Propósito
 
@@ -107,6 +107,32 @@ Uma pessoa administradora buscando governança global, edição arbitrária de r
 - Oferecer gráficos decorativos.
 - Escutar fora de loopback.
 - Instalar ou gerenciar dependências exigidas por plugins `exec` do kubeconfig.
+
+### 4.3 Objetivos da experiência operacional
+
+A Fase 9 acrescenta conveniências inspiradas em comportamentos documentados
+oficialmente pelo Aptakube, sem copiar identidade ou transformar o Kube Peep em
+uma console administrativa:
+
+- navegar por paleta, atalhos e teclado, sem disparar mutações pela paleta;
+- localizar informação com filtros visíveis/resetáveis, ordenação natural,
+  colunas allowlisted, favoritos e recentes limitados;
+- aproximar logs, YAML, restart, scale, delete, port-forward e `exec` do alvo
+  por menus contextuais que representam capabilities atuais;
+- tornar listas/detalhes mais humanos, mantendo ligação com condições, eventos
+  e objetos reais em vez de inventar diagnósticos;
+- melhorar YAML somente leitura, logs, métricas e sessões de port-forward;
+- comparar objetos acessíveis por diff somente leitura, com origem explícita e
+  proibição absoluta para Secret;
+- consultar múltiplos contextos somente para leitura, com proveniência,
+  autorização, geração e falha isoladas por origem;
+- mostrar conexão, reconexão, resultado parcial, stale e retry sem apagar dados
+  válidos de outra origem.
+
+Esses objetivos não retiram nenhum não objetivo do MVP: edição/aplicação
+genérica de YAML, mutação em massa e expansão de Secret continuam fora do gate.
+O catálogo completo e a ordem de implementação estão na
+[Fase 9](../plan/09-experiencia-operacional.md).
 
 ## 5. Fronteira funcional do MVP
 
@@ -437,6 +463,22 @@ evidência de performance; os budgets de carga e stream já definidos em
 | Qualidade e release | testes, Ginger, GoReleaser, checksums e plataformas têm evidência | MVP-23–27 |
 
 Os testes futuros e seus níveis estão detalhados em [implementation-plan.md](implementation-plan.md).
+
+### 12.1 Critérios adicionais da Fase 9
+
+| Jornada | Critério objetivo | IDs |
+| --- | --- | --- |
+| Navegação | paleta/atalhos acessíveis, sem mutação e sem persistência remota | UX-M02 |
+| Exploração | filtros, reset, ordenação, favoritos e visão humana são previsíveis e allowlisted | UX-M03–05 |
+| Ações contextuais | affordance respeita capability e backend reautoriza o alvo único | UX-M06 |
+| YAML e diff | leitura útil sem persistência e sem qualquer conteúdo de Secret | UX-M07–08 |
+| Logs e métricas | múltiplas fontes permanecem limitadas, identificadas, canceláveis e opcionais | UX-M09–10 |
+| Sessões | port-forward em loopback possui dono, limite e encerramento verificável | UX-M11 |
+| Multi-contexto | agregação é somente leitura, com origem/autorização/falha isoladas | UX-M12–13 |
+| Estados e privacidade | degradação é honesta e nenhuma facilidade publica/persiste dado proibido | UX-M14–15 |
+
+A [matriz UX](../plan/matriz-aceite-ux.md) é a autoridade para evidência e
+mantém os requisitos futuros separados do gate atual.
 
 ## 13. Decisões incorporadas da Fase 1
 

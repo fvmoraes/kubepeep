@@ -1,10 +1,18 @@
 # Plano de desenvolvimento do Kube Peep
 
-Este diretório transforma o [prompt inicial](initial_prompt.md) em uma sequência executável de trabalho. O plano mantém as oito fases definidas no prompt e usa gates objetivos: uma fase só termina quando seus entregáveis, testes e documentação estiverem concluídos.
+Este diretório transforma o [prompt inicial](initial_prompt.md) em uma sequência
+executável de trabalho. As oito fases originais permanecem rastreáveis e a
+Fase 9 adiciona a expansão de experiência operacional solicitada depois do
+prompt. Uma fase só termina quando seus entregáveis, testes e documentação
+estiverem concluídos.
 
 ## Resultado esperado
 
-Ao final da Fase 8, o Kube Peep deve ser um binário local autocontido, construído com Go 1.25 e Ginger v1.4.4, contendo a interface React embutida, operando com o kubeconfig do usuário e respeitando integralmente o RBAC do cluster.
+Ao final da Fase 8, o Kube Peep deve ser um binário local autocontido,
+construído com Go 1.25 e Ginger v1.4.4, contendo a interface React embutida,
+operando com o kubeconfig do usuário e respeitando integralmente o RBAC do
+cluster. A Fase 9 preserva essa base e acrescenta facilitadores de navegação,
+exploração e troubleshooting com identidade própria.
 
 Princípio de produto que governa todas as decisões:
 
@@ -15,6 +23,7 @@ Princípio de produto que governa todas as decisões:
 - [DWYT](https://github.com/fvmoraes/dwyt): referência de organização, identidade visual, experiência local, embedding, instalação e distribuição. Não é fonte de regras de negócio.
 - [Ginger v1.4.4](https://github.com/fvmoraes/ginger/tree/v1.4.4): framework obrigatório do backend.
 - [Documentação do Ginger v1.4.4](https://pkg.go.dev/github.com/fvmoraes/ginger@v1.4.4): API pública fixada para o projeto.
+- [Aptakube](https://aptakube.com/) e seu [repositório oficial](https://github.com/aptakube/aptakube): benchmark funcional dos facilitadores da Fase 9. Não são fonte de código, marca, layout ou identidade visual; as adaptações e os desvios de segurança estão no [relatório de pesquisa](../docs/research/aptakube-ux-benchmark.md).
 
 A Fase 1 confirmou que os templates do Ginger para serviço HTTP e CLI Cobra
 são mutuamente exclusivos e que `ginger generate command` não se aplica a um
@@ -34,7 +43,7 @@ confirma a arquitetura; não substitui os testes da implementação de produçã
 ## Sequência e gates
 
 ```text
-Fase 1 ──> Fase 2 ──> Fase 3 ──> Fase 4 ──> Fase 5 ──> Fase 6 ──> Fase 7 ──> Fase 8
+Fase 1 ──> Fase 2 ──> Fase 3 ──> Fase 4 ──> Fase 5 ──> Fase 6 ──> Fase 7 ──> Fase 8 ──> Fase 9
 ```
 
 As fases seguem a ordem determinada pelo prompt. Para evitar duplicação, a Fase 5 cria somente as consultas compartilhadas mínimas necessárias ao overview; a Fase 6 estende essas mesmas interfaces para listas e detalhes completos. A CI mínima começa na Fase 3 e cresce com cada fatia, mas o gate de distribuição só fecha na Fase 8.
@@ -49,6 +58,7 @@ As fases seguem a ordem determinada pelo prompt. Para evitar duplicação, a Fas
 | [6 — Recursos](06-recursos.md) | Consultas somente leitura e streaming | local 65/67; Kind pendente | [Fase 6](../docs/research/phase6-evidence.md) |
 | [7 — Ações](07-acoes.md) | Restart, scale, delete, port-forward e exec | local 45/47; Kind pendente | [Fase 7](../docs/research/phase7-evidence.md) |
 | [8 — Distribuição](08-distribuicao.md) | Releases, instaladores, CI e aceite | 33/50; nativos/CI/Kind pendentes | [Fase 8](../docs/research/phase8-evidence.md) |
+| [9 — Experiência operacional](09-experiencia-operacional.md) | Paleta, filtros, quick actions, logs, diff e leitura multi-contexto | planejada (0/84) | [Benchmark Aptakube](../docs/research/aptakube-ux-benchmark.md) e [matriz UX](matriz-aceite-ux.md) |
 
 Estado atual: **as implementações locais das Fases 4 a 7 estão concluídas**.
 Os checkboxes remanescentes dessas fases são exclusivamente provas contra o
@@ -57,7 +67,10 @@ PowerShell/Windows, smoke dos seis archives e execução dos workflows atuais.
 O único run nativo já aceito permanece o da Fase 3, `31392541114`; ele não é
 reutilizado como evidência para código posterior.
 
-O acompanhamento dos critérios finais está em [Matriz de aceite do MVP](matriz-aceite-mvp.md).
+O acompanhamento dos critérios originais está na [Matriz de aceite do
+MVP](matriz-aceite-mvp.md). Os requisitos adicionais permanecem separados na
+[Matriz de aceite da experiência operacional](matriz-aceite-ux.md), evitando
+reescrever retroativamente o escopo e as evidências do prompt inicial.
 
 ## Regras de execução
 
@@ -103,6 +116,11 @@ Uma tarefa funcional somente pode ser marcada como concluída quando, conforme a
 - OpenTelemetry é opcional, não entra no caminho crítico e permanece desativado por padrão.
 - Watches, streams, port-forwards e sessões de `exec` precisam ter dono, limite, cancelamento e encerramento observáveis.
 - Qualquer YAML de Secret deve omitir valores; o MVP exibe somente metadados de Secrets.
+- Paleta, busca global, favoritos, recentes, diff, colunas configuráveis e
+  agregações nunca incluem conteúdo ou YAML de Secret.
+- Agregação multi-contexto é somente leitura; capabilities, falhas e dados
+  permanecem isolados e identificados por origem. Toda mutação exige alvo único
+  e nova autorização no backend.
 - O scan de logs é limitado, cancelável, não persistente e apresenta “possíveis erros”, nunca diagnósticos inventados.
 - O banco não armazena snapshots do cluster. Preferências persistidas usam uma allowlist e nunca recebem credenciais, Secrets ou conteúdo de logs.
 - Respostas com dados Kubernetes, logs ou permissões usam política `no-store`; somente assets estáticos versionados podem receber cache longo.
@@ -143,6 +161,9 @@ Uma tarefa funcional somente pode ser marcada como concluída quando, conforme a
 As Fases 1–3 estão concluídas. F4–F7 fecharam todo o trabalho comprovável
 localmente e aguardam nove tarefas Kind no total: F4-48–50, F5-56/F5-59,
 F6-56/F6-57 e F7-43/F7-44. A Fase 8 possui 33 de 50 tarefas comprovadas.
+Esses números serão atualizados após a execução Kind/CI atualmente em
+fechamento. A Fase 9 foi especificada em 2026-08-25 e inicia com 84 tarefas e
+15 critérios adicionais ainda sem evidência aceita.
 
 Na matriz final, 22 de 27 critérios do MVP possuem evidência local ou nativa
 anterior aplicável. Permanecem abertos os critérios que exigem Kind real,
