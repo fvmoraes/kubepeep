@@ -89,7 +89,8 @@ func NewRootCommand(dependencies Dependencies) *cobra.Command {
 	}
 
 	doctor := newDoctorCommand(dependencies)
-	root.AddCommand(start, stop, status, version, doctor)
+	update := newUpdateCommand(dependencies)
+	root.AddCommand(start, stop, status, version, doctor, update)
 	return root
 }
 

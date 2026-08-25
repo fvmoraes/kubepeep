@@ -1,4 +1,5 @@
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useEffect, useRef } from 'react'
 import {
   Activity,
   Boxes,
@@ -18,6 +19,9 @@ import { ContextSelector } from './components/ContextSelector'
 import { DashboardPage } from './components/Dashboard'
 import { NamespaceScopeEditor } from './components/NamespaceScopeEditor'
 import { PermissionsMatrixPage } from './components/PermissionsMatrix'
+import { LogsPage } from './components/LogsPage'
+import { ConfigPage, EventsPage, NetworkPage, PodsPage, WorkloadsPage } from './components/ResourcePages'
+import { SettingsPage } from './components/SettingsPage'
 import { StatePanel } from './components/StatePanel'
 
 const navigation = [
@@ -52,6 +56,7 @@ function StatusBadge() {
 }
 
 function Shell() {
+  const queryClient = useQueryClient()
   const status = useQuery({
     queryKey: ['local-status'],
     queryFn: ({ signal }) => getStatus(signal),
@@ -59,9 +64,22 @@ function Shell() {
     refetchOnWindowFocus: false,
   })
   const selection = status.data?.selection ?? null
+  const previousGeneration = useRef<string | null>(null)
+
+  useEffect(() => {
+    const current = selection?.generation ?? null
+    const previous = previousGeneration.current
+    if (previous && previous !== current) {
+      const belongsToPreviousGeneration = (query: { queryKey: readonly unknown[] }) => query.queryKey.includes(previous)
+      void queryClient.cancelQueries({ predicate: belongsToPreviousGeneration })
+      queryClient.removeQueries({ predicate: belongsToPreviousGeneration })
+    }
+    previousGeneration.current = current
+  }, [queryClient, selection?.generation])
 
   return (
     <div className="app-shell">
+      <a className="skip-link" href="#main-content">Skip to main content</a>
       <aside className="sidebar">
         <div className="brand" aria-label="kubePeep home">
           <span className="brand-mark" aria-hidden="true">kp</span>
@@ -94,20 +112,20 @@ function Shell() {
   )
 }
 
-function Placeholder({ title }: { title: string }) {
-  return <StatePanel kind="empty" title={title}>This area is intentionally empty until its backend capability is implemented.</StatePanel>
-}
-
 export function App() {
   return (
     <Routes>
       <Route element={<Shell />}>
         <Route index element={<DashboardPage />} />
-        {navigation.slice(1).filter(({ path }) => path !== '/namespaces' && path !== '/permissions').map(({ path, label }) => (
-          <Route key={path} path={path.slice(1)} element={<Placeholder title={label} />} />
-        ))}
+        <Route path="workloads" element={<WorkloadsPage />} />
+        <Route path="pods" element={<PodsPage />} />
+        <Route path="logs" element={<LogsPage />} />
+        <Route path="events" element={<EventsPage />} />
+        <Route path="network" element={<NetworkPage />} />
+        <Route path="config" element={<ConfigPage />} />
         <Route path="namespaces" element={<NamespaceScopeEditor />} />
         <Route path="permissions" element={<PermissionsMatrixPage />} />
+        <Route path="settings" element={<SettingsPage />} />
         <Route path="*" element={<StatePanel kind="error" title="Page not found">Return to Overview using the navigation.</StatePanel>} />
       </Route>
     </Routes>

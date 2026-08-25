@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -58,5 +59,34 @@ func TestGroupWarningEventsUsesClosedKeyAndPreservesCounts(t *testing.T) {
 	}
 	if result[1].Count != 0 {
 		t.Fatalf("zero count was not preserved: %+v", result[1])
+	}
+}
+
+func TestGroupEventsNormalizesClosedTypesAndKeepsCursorIdentitiesDistinct(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
+	events := []NormalizedEvent{
+		{UID: "normal-a", Namespace: "ns", RegardingKind: "Pod", RegardingName: "pod", RegardingUID: "pod-a", Type: "normal", Reason: "Pulled", Message: "image", Count: 1, Source: "kubelet", ObservedAt: now},
+		{UID: "normal-b", Namespace: "ns", RegardingKind: "Pod", RegardingName: "pod", RegardingUID: "pod-b", Type: "Normal", Reason: "Pulled", Message: "image", Count: 1, Source: "kubelet", ObservedAt: now},
+		{UID: "warning", Namespace: "ns", RegardingKind: "Pod", RegardingName: "pod", RegardingUID: "pod-c", Type: "WARNING", Reason: "BackOff", Message: "retry", Count: 2, Source: "kubelet", ObservedAt: now.Add(-time.Minute)},
+		{UID: "custom", Namespace: "ns", RegardingKind: "Node", RegardingName: "node", RegardingUID: "node-a", Type: "Custom", Reason: "Odd", Message: "unknown", Count: 3, Source: "controller", ObservedAt: now.Add(-2 * time.Minute)},
+	}
+	result := GroupEvents(events)
+	if len(result) != 4 {
+		t.Fatalf("got %d groups, want 4", len(result))
+	}
+	if result[0].Type != "Normal" || result[1].Type != "Normal" || result[2].Type != "Warning" || result[3].Type != "Unknown" {
+		t.Fatalf("event types were not normalized: %+v", result)
+	}
+	if EventCursorIdentity(result[0]) == EventCursorIdentity(result[1]) {
+		t.Fatal("different Kubernetes UIDs collapsed to the same cursor identity")
+	}
+	for _, event := range result {
+		if event.Type != "Normal" && event.Type != "Warning" && event.Type != "Unknown" {
+			t.Fatalf("non-contract type escaped: %+v", event)
+		}
+	}
+	if identity := EventCursorIdentity(EventDTO{Namespace: "ns", Message: strings.Repeat("x", 128<<10), Type: "Warning"}); len(identity) > 256 {
+		t.Fatalf("cursor identity retained an unbounded event payload: %d bytes", len(identity))
 	}
 }

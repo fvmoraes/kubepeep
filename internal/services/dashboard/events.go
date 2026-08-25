@@ -2,8 +2,11 @@ package dashboard
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -146,7 +149,19 @@ type EventGroupKey struct {
 	Source        string
 }
 
+// GroupEvents normalizes the Kubernetes event type to the closed public enum
+// and groups only events with the complete documented identity. The private
+// cursor identity retains the UIDs which are deliberately omitted from the
+// public DTO, so two otherwise equal events remain distinct while paginating.
+func GroupEvents(events []NormalizedEvent) []EventDTO {
+	return groupEvents(events, false)
+}
+
 func GroupWarningEvents(events []NormalizedEvent) []EventDTO {
+	return groupEvents(events, true)
+}
+
+func groupEvents(events []NormalizedEvent, warningsOnly bool) []EventDTO {
 	type aggregate struct {
 		key      EventGroupKey
 		uid      types.UID
@@ -155,7 +170,8 @@ func GroupWarningEvents(events []NormalizedEvent) []EventDTO {
 	}
 	groups := make(map[EventGroupKey]aggregate)
 	for _, event := range events {
-		if !strings.EqualFold(event.Type, "Warning") {
+		eventType := normalizeEventType(event.Type)
+		if warningsOnly && eventType != "Warning" {
 			continue
 		}
 		key := EventGroupKey{
@@ -163,7 +179,7 @@ func GroupWarningEvents(events []NormalizedEvent) []EventDTO {
 			RegardingKind: event.RegardingKind,
 			RegardingName: event.RegardingName,
 			RegardingUID:  event.RegardingUID,
-			Type:          "Warning",
+			Type:          eventType,
 			Reason:        event.Reason,
 			Message:       event.Message,
 			Source:        event.Source,
@@ -199,10 +215,21 @@ func GroupWarningEvents(events []NormalizedEvent) []EventDTO {
 	})
 	for _, item := range ordering {
 		var timestamp *string
+		cursorTimestamp := ""
 		if !item.observed.IsZero() {
 			formatted := item.observed.UTC().Format(time.RFC3339Nano)
 			timestamp = &formatted
+			cursorTimestamp = formatted
 		}
+		identityHash := sha256.Sum256([]byte(strings.Join([]string{
+			item.key.RegardingKind,
+			item.key.RegardingName,
+			string(item.key.RegardingUID),
+			item.key.Type,
+			item.key.Reason,
+			item.key.Message,
+			item.key.Source,
+		}, "\x00")))
 		result = append(result, EventDTO{
 			Timestamp:  timestamp,
 			Namespace:  item.key.Namespace,
@@ -212,10 +239,46 @@ func GroupWarningEvents(events []NormalizedEvent) []EventDTO {
 			Message:    sanitizeText(item.key.Message, MaximumProblemText),
 			Count:      item.count,
 			Source:     stringPointer(sanitizeText(item.key.Source, MaximumStatusBytes)),
-			Type:       "Warning",
+			Type:       item.key.Type,
+			cursorIdentity: strings.Join([]string{
+				cursorTimestamp, item.key.Namespace, string(item.uid), hex.EncodeToString(identityHash[:]),
+			}, "\x00"),
 		})
 	}
 	return result
+}
+
+func normalizeEventType(value string) string {
+	switch {
+	case strings.EqualFold(value, "Normal"):
+		return "Normal"
+	case strings.EqualFold(value, "Warning"):
+		return "Warning"
+	default:
+		return "Unknown"
+	}
+}
+
+// EventCursorIdentity returns a stable internal merge key. UIDs never enter
+// the EventDTO JSON, but remain authenticated inside the opaque cursor.
+func EventCursorIdentity(value EventDTO) string {
+	if value.cursorIdentity != "" {
+		return value.cursorIdentity
+	}
+	digest := sha256.Sum256([]byte(strings.Join([]string{
+		value.ObjectKind, value.ObjectName, value.Type, value.Reason, value.Message,
+		optionalEventString(value.Source), strconv.FormatInt(value.Count, 10),
+	}, "\x00")))
+	return strings.Join([]string{
+		optionalEventString(value.Timestamp), value.Namespace, hex.EncodeToString(digest[:]),
+	}, "\x00")
+}
+
+func optionalEventString(value *string) string {
+	if value == nil {
+		return ""
+	}
+	return *value
 }
 
 type EventService struct {
@@ -228,6 +291,17 @@ func NewEventService(port EventPort, budget QueryBudget) *EventService {
 }
 
 func (s *EventService) Warnings(ctx context.Context, selection Selection) DashboardBlockDTO[[]EventDTO] {
+	return s.collect(ctx, selection, true)
+}
+
+// All returns all three public event types. Dashboard summary deliberately
+// continues to call Warnings, while the event endpoint applies its own
+// default-Warning or explicit Normal/Warning/Unknown filter.
+func (s *EventService) All(ctx context.Context, selection Selection) DashboardBlockDTO[[]EventDTO] {
+	return s.collect(ctx, selection, false)
+}
+
+func (s *EventService) collect(ctx context.Context, selection Selection, warningsOnly bool) DashboardBlockDTO[[]EventDTO] {
 	namespaces := canonicalNamespaces(selection.Namespaces)
 	block := blockWithValue(make([]EventDTO, 0), emptyCoverage(len(namespaces)))
 	if s == nil || s.port == nil {
@@ -258,7 +332,11 @@ func (s *EventService) Warnings(ctx context.Context, selection Selection) Dashbo
 			block.Complete = false
 		}
 	}
-	block.Value = GroupWarningEvents(all)
+	if warningsOnly {
+		block.Value = GroupWarningEvents(all)
+	} else {
+		block.Value = GroupEvents(all)
+	}
 	return block
 }
 
@@ -266,16 +344,16 @@ func (s *EventService) loadNamespace(ctx context.Context, namespace string, maxi
 	result := make([]NormalizedEvent, 0)
 	continuation := ""
 	for page := 0; page < s.budget.MaxPages; page++ {
+		remaining := maximumItems - len(result)
+		if remaining <= 0 {
+			return result, false, true, nil
+		}
 		if err := ctx.Err(); err != nil {
 			return result, false, false, err
 		}
 		response, err := s.port.ListEvents(ctx, namespace, PageRequest{Limit: s.budget.PageSize, Continue: continuation})
 		if err != nil {
 			return result, false, false, err
-		}
-		remaining := maximumItems - len(result)
-		if remaining <= 0 {
-			return result, false, true, nil
 		}
 		if len(response.Items) > remaining {
 			result = append(result, response.Items[:remaining]...)

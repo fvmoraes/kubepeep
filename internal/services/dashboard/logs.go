@@ -48,8 +48,8 @@ func (s *LogService) Scan(ctx context.Context, request LogScanRequest, targets [
 		addBlockError(&block, "", NewFeatureUnavailableError())
 		return block
 	}
-	limitedTargets, targetTruncated := limitExplicitTargets(targets, resolved.MaxPods, s.budget.MaxContainers)
-	if targetTruncated {
+	limitedTargets, selectionTruncated := limitExplicitTargets(targets, resolved.MaxPods, s.budget.MaxContainers)
+	if selectionTruncated {
 		block.Truncated = true
 		block.Complete = false
 	}
@@ -149,10 +149,11 @@ func (s *LogService) Scan(ctx context.Context, request LogScanRequest, targets [
 			addUniqueBlockError(&block, namespace, result.err)
 			continue
 		}
-		completedTargets[namespace]++
 		if result.truncated {
 			block.Truncated = true
 			block.Complete = false
+		} else {
+			completedTargets[namespace]++
 		}
 		block.Value = append(block.Value, result.matches...)
 	}
@@ -164,12 +165,13 @@ func (s *LogService) Scan(ctx context.Context, request LogScanRequest, targets [
 		block.Complete = false
 	}
 	for _, namespace := range namespaces {
-		if expectedTargets[namespace] > 0 && completedTargets[namespace] == expectedTargets[namespace] && !containsNamespaceError(block.Errors, namespace) {
+		if !selectionTruncated && expectedTargets[namespace] > 0 && completedTargets[namespace] == expectedTargets[namespace] && !containsNamespaceError(block.Errors, namespace) {
 			block.Coverage.CompletedNamespaces++
 		}
 	}
-	block.Value, targetTruncated = capSerializedMatches(block.Value, s.budget.MaxScanBytes)
-	if targetTruncated {
+	var outputTruncated bool
+	block.Value, outputTruncated = capSerializedMatches(block.Value, s.budget.MaxScanBytes)
+	if outputTruncated {
 		block.Truncated = true
 		block.Complete = false
 	}
@@ -201,10 +203,16 @@ func (s *LogService) scanTarget(ctx context.Context, request ResolvedLogScanRequ
 		return targetScanResult{index: index, truncated: truncated, err: readErr}
 	}
 	matches := make([]LogMatchDTO, 0)
+	insidePrivateKey := false
 	for _, line := range lines {
+		privateExcerpt, privateKey := redactPrivateKeyLogLine(line.value, &insidePrivateKey)
 		detected, ok := DetectLogLine(line.value, line.truncated)
 		if !ok {
 			continue
+		}
+		if privateKey {
+			detected.Excerpt = privateExcerpt
+			detected.Redacted = true
 		}
 		matches = append(matches, LogMatchDTO{
 			Namespace:  target.Namespace,

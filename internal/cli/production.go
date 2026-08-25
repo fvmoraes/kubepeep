@@ -16,10 +16,13 @@ import (
 	kuberuntime "github.com/fvmoraes/kubepeep/internal/integration/kubernetesruntime"
 	"github.com/fvmoraes/kubepeep/internal/logging"
 	localruntime "github.com/fvmoraes/kubepeep/internal/runtime"
+	actionservice "github.com/fvmoraes/kubepeep/internal/services/actions"
 	"github.com/fvmoraes/kubepeep/internal/services/authorization"
 	"github.com/fvmoraes/kubepeep/internal/services/clusterprofiles"
 	contextservice "github.com/fvmoraes/kubepeep/internal/services/contexts"
+	"github.com/fvmoraes/kubepeep/internal/services/dashboard"
 	"github.com/fvmoraes/kubepeep/internal/services/namespaces"
+	resourcecore "github.com/fvmoraes/kubepeep/internal/services/resources"
 	"github.com/fvmoraes/kubepeep/internal/services/selection"
 )
 
@@ -123,10 +126,54 @@ func (factory *productionFactory) Build(ctx context.Context, dependencies localr
 	if err != nil {
 		return localruntime.Service{}, err
 	}
+	resourceBackend, err := kuberuntime.NewResourceBackend(kubernetesRuntime, authorizationService, resourcecore.TextRedactorFunc(func(value string) string {
+		redacted, _ := dashboard.Redact(value)
+		return redacted
+	}))
+	if err != nil {
+		return localruntime.Service{}, err
+	}
+	preferenceService := &resourcecore.PreferenceService{
+		Repository: sqlite.NewPreferenceRepository(store),
+		Detector:   resourcecore.DefaultSensitiveDetector{},
+	}
+	actionBackends, err := kuberuntime.NewActionBackends(kubernetesRuntime)
+	if err != nil {
+		return localruntime.Service{}, err
+	}
+	actionAudit := kuberuntime.NewActionAuditSink(logger)
+	actions, err := actionservice.NewActionService(authorizationService, kubernetesRuntime, actionBackends.Mutations, actionAudit)
+	if err != nil {
+		return localruntime.Service{}, err
+	}
+	portForwards, err := actionservice.NewPortForwardService(authorizationService, kubernetesRuntime, actionBackends.PortForward, actionAudit)
+	if err != nil {
+		actions.Shutdown()
+		return localruntime.Service{}, err
+	}
+	execSessions, err := actionservice.NewExecService(authorizationService, kubernetesRuntime, actionBackends.Mutations, actionBackends.Exec, actionAudit)
+	if err != nil {
+		portForwards.Shutdown()
+		actions.Shutdown()
+		return localruntime.Service{}, err
+	}
+	closeActionsOnError := true
+	defer func() {
+		if closeActionsOnError {
+			resourceBackend.Close()
+			execSessions.Shutdown()
+			portForwards.Shutdown()
+			actions.Shutdown()
+		}
+	}()
 	coordinator, err := selection.NewCoordinator(generation, sessions, func(next string) {
 		kubernetesRuntime.OnGeneration(next)
 		authorizationService.InvalidateAll()
 		dashboardBackend.OnGeneration(next)
+		resourceBackend.OnGeneration(next)
+		actions.OnGeneration(next)
+		portForwards.OnGeneration(next)
+		execSessions.OnGeneration(next)
 	})
 	if err != nil {
 		return localruntime.Service{}, err
@@ -194,18 +241,24 @@ func (factory *productionFactory) Build(ctx context.Context, dependencies localr
 			Commit:    buildinfo.Commit,
 			BuildDate: buildinfo.BuildDate,
 		},
-		Snapshots:   snapshots,
-		Profiles:    profileService,
-		Contexts:    contexts,
-		Scopes:      namespaceService,
-		Namespaces:  kubernetesRuntime,
-		Permissions: authorizationService,
-		Selection:   selectionState,
-		Dashboard:   dashboardBackend,
-		Cursors:     cursors,
-		Generation:  generation,
-		Sessions:    sessions,
-		Logger:      logger,
+		Snapshots:    snapshots,
+		Profiles:     profileService,
+		Contexts:     contexts,
+		Scopes:       namespaceService,
+		Namespaces:   kubernetesRuntime,
+		Permissions:  authorizationService,
+		Selection:    selectionState,
+		Dashboard:    dashboardBackend,
+		Resources:    resourceBackend,
+		Streams:      resourceBackend,
+		Preferences:  preferenceService,
+		Actions:      actions,
+		PortForwards: portForwards,
+		Exec:         execSessions,
+		Cursors:      cursors,
+		Generation:   generation,
+		Sessions:     sessions,
+		Logger:       logger,
 	})
 	if err != nil {
 		return localruntime.Service{}, fmt.Errorf("startup: compose HTTP application: %w", err)
@@ -215,9 +268,17 @@ func (factory *productionFactory) Build(ctx context.Context, dependencies localr
 	closeLogOnError = false
 	closeRuntimeOnError = false
 	closeCoordinatorOnError = false
+	closeActionsOnError = false
 	return localruntime.Service{
 		Handler: application.Handler,
 		Cleanups: []localruntime.NamedCleanup{
+			{Name: "Kubernetes resource watches", Func: func(context.Context) error { resourceBackend.Close(); return nil }},
+			{Name: "Kubernetes actions", Func: func(context.Context) error {
+				execSessions.Shutdown()
+				portForwards.Shutdown()
+				actions.Shutdown()
+				return nil
+			}},
 			{Name: "selection coordinator", Func: func(context.Context) error { coordinator.Close(); return nil }},
 			{Name: "Kubernetes clients", Func: func(context.Context) error { return kubernetesRuntime.Close() }},
 			{Name: "local log", Func: func(context.Context) error { return logSink.Close() }},

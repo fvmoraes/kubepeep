@@ -1,0 +1,97 @@
+version: 2
+
+project_name: kubePeep
+
+before:
+  hooks:
+    - sh -c "cd web && npm ci"
+    - sh -c "cd web && npm run typecheck"
+    - sh -c "cd web && npm test"
+    - sh -c "cd web && npm run build"
+
+builds:
+  - id: kubePeep
+    main: ./cmd/kubePeep
+    binary: kubePeep
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    ldflags:
+      - >-
+        -s -w
+        -X github.com/fvmoraes/kubepeep/internal/buildinfo.Version={{ .Version }}
+        -X github.com/fvmoraes/kubepeep/internal/buildinfo.Commit={{ .Commit }}
+        -X github.com/fvmoraes/kubepeep/internal/buildinfo.BuildDate={{ .CommitDate }}
+
+archives:
+  - id: kubePeep
+    ids:
+      - kubePeep
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: "kubePeep_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    builds_info:
+      owner: root
+      group: root
+      mode: 0755
+      mtime: "{{ .CommitDate }}"
+    files:
+      - src: README.md
+        info:
+          owner: root
+          group: root
+          mode: 0644
+          mtime: "{{ .CommitDate }}"
+      - src: LICENSE
+        info:
+          owner: root
+          group: root
+          mode: 0644
+          mtime: "{{ .CommitDate }}"
+      - src: THIRD_PARTY_NOTICES.md
+        info:
+          owner: root
+          group: root
+          mode: 0644
+          mtime: "{{ .CommitDate }}"
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+release:
+  github:
+    owner: fvmoraes
+    name: kubepeep
+  draft: false
+  prerelease: auto
+  mode: keep-existing
+  extra_files:
+    - glob: ./install.sh
+    - glob: ./install.ps1
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
+      - '^ci:'
+      - '^Merge '

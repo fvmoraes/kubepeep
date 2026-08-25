@@ -54,6 +54,69 @@ metadata:
     app.kubernetes.io/managed-by: kubepeep-kind-harness
 automountServiceAccountToken: false
 ---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: resource-viewer
+  namespace: kp-harness
+  labels:
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: restart-actor
+  namespace: kp-harness
+  labels:
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: scale-actor
+  namespace: kp-harness
+  labels:
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: delete-actor
+  namespace: kp-harness
+  labels:
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: portforward-actor
+  namespace: kp-harness
+  labels:
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: exec-actor
+  namespace: kp-harness
+  labels:
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+automountServiceAccountToken: false
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: app-e2e
+  namespace: kp-harness
+  labels:
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+automountServiceAccountToken: false
+---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -150,6 +213,230 @@ roleRef:
   name: kp-dashboard-log-reader
 ---
 apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kp-f6-resource-reader
+  namespace: kp-allowed
+  labels:
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "services", "configmaps"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list"]
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["discovery.k8s.io"]
+    resources: ["endpointslices"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kp-f6-resource-reader
+  namespace: kp-allowed
+  labels:
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+subjects:
+  - kind: ServiceAccount
+    name: resource-viewer
+    namespace: kp-harness
+  - kind: ServiceAccount
+    name: app-e2e
+    namespace: kp-harness
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kp-f6-resource-reader
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kp-restart-action
+  namespace: kp-allowed
+  labels:
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    resourceNames: ["kp-action-deployment"]
+    verbs: ["patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kp-restart-action
+  namespace: kp-allowed
+  labels:
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+subjects:
+  - kind: ServiceAccount
+    name: restart-actor
+    namespace: kp-harness
+  - kind: ServiceAccount
+    name: app-e2e
+    namespace: kp-harness
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kp-restart-action
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kp-scale-action
+  namespace: kp-allowed
+  labels:
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments/scale"]
+    resourceNames: ["kp-action-deployment"]
+    verbs: ["update"]
+  - apiGroups: ["apps"]
+    resources: ["statefulsets/scale"]
+    resourceNames: ["kp-action-statefulset"]
+    verbs: ["update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kp-scale-action
+  namespace: kp-allowed
+  labels:
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+subjects:
+  - kind: ServiceAccount
+    name: scale-actor
+    namespace: kp-harness
+  - kind: ServiceAccount
+    name: app-e2e
+    namespace: kp-harness
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kp-scale-action
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kp-delete-action
+  namespace: kp-allowed
+  labels:
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    resourceNames: ["kp-delete-probe"]
+    verbs: ["delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kp-delete-action
+  namespace: kp-allowed
+  labels:
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+subjects:
+  - kind: ServiceAccount
+    name: delete-actor
+    namespace: kp-harness
+  - kind: ServiceAccount
+    name: app-e2e
+    namespace: kp-harness
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kp-delete-action
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kp-portforward-action
+  namespace: kp-allowed
+  labels:
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    resourceNames: ["kp-interactive"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["pods/portforward"]
+    resourceNames: ["kp-interactive"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kp-portforward-action
+  namespace: kp-allowed
+  labels:
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+subjects:
+  - kind: ServiceAccount
+    name: portforward-actor
+    namespace: kp-harness
+  - kind: ServiceAccount
+    name: app-e2e
+    namespace: kp-harness
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kp-portforward-action
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: kp-exec-action
+  namespace: kp-allowed
+  labels:
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    resourceNames: ["kp-interactive"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    resourceNames: ["kp-interactive"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: kp-exec-action
+  namespace: kp-allowed
+  labels:
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+subjects:
+  - kind: ServiceAccount
+    name: exec-actor
+    namespace: kp-harness
+  - kind: ServiceAccount
+    name: app-e2e
+    namespace: kp-harness
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: kp-exec-action
+---
+apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
   name: kp-namespace-lister
@@ -213,12 +500,446 @@ spec:
   restartPolicy: Never
   containers:
     - name: fixture
-      image: registry.k8s.io/pause:3.10
+      image: registry.k8s.io/pause:3.10@sha256:ee6521f290b2168b6e0935a181d4cff9be1ac3f505666ef0e3c98fae8199917a
       securityContext:
         allowPrivilegeEscalation: false
         capabilities:
           drop: ["ALL"]
       readOnlyRootFilesystem: true
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kp-config
+  namespace: kp-allowed
+  labels:
+    app.kubernetes.io/name: kp-config
+    app.kubernetes.io/part-of: kubepeep-kind-harness
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+data:
+  mode: canonical
+  feature: resource-detail
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: kp-secret-metadata
+  namespace: kp-allowed
+  labels:
+    app.kubernetes.io/name: kp-secret-metadata
+    app.kubernetes.io/part-of: kubepeep-kind-harness
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+type: Opaque
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kp-action-deployment
+  namespace: kp-allowed
+  labels:
+    app.kubernetes.io/name: kp-action-deployment
+    app.kubernetes.io/part-of: kubepeep-kind-harness
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kp-action-deployment
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kp-action-deployment
+        app.kubernetes.io/part-of: kubepeep-kind-harness
+        app.kubernetes.io/managed-by: kubepeep-kind-harness
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: workload
+          image: registry.k8s.io/pause:3.10@sha256:ee6521f290b2168b6e0935a181d4cff9be1ac3f505666ef0e3c98fae8199917a
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kp-headless
+  namespace: kp-allowed
+  labels:
+    app.kubernetes.io/name: kp-headless
+    app.kubernetes.io/part-of: kubepeep-kind-harness
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: kp-action-statefulset
+  ports:
+    - name: placeholder
+      port: 8080
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kp-action-statefulset
+  namespace: kp-allowed
+  labels:
+    app.kubernetes.io/name: kp-action-statefulset
+    app.kubernetes.io/part-of: kubepeep-kind-harness
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+spec:
+  serviceName: kp-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kp-action-statefulset
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kp-action-statefulset
+        app.kubernetes.io/part-of: kubepeep-kind-harness
+        app.kubernetes.io/managed-by: kubepeep-kind-harness
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: workload
+          image: registry.k8s.io/pause:3.10@sha256:ee6521f290b2168b6e0935a181d4cff9be1ac3f505666ef0e3c98fae8199917a
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: kp-daemonset
+  namespace: kp-allowed
+  labels:
+    app.kubernetes.io/name: kp-daemonset
+    app.kubernetes.io/part-of: kubepeep-kind-harness
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kp-daemonset
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kp-daemonset
+        app.kubernetes.io/part-of: kubepeep-kind-harness
+        app.kubernetes.io/managed-by: kubepeep-kind-harness
+    spec:
+      automountServiceAccountToken: false
+      tolerations:
+        - key: node-role.kubernetes.io/control-plane
+          operator: Exists
+          effect: NoSchedule
+      containers:
+        - name: workload
+          image: registry.k8s.io/pause:3.10@sha256:ee6521f290b2168b6e0935a181d4cff9be1ac3f505666ef0e3c98fae8199917a
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kp-job
+  namespace: kp-allowed
+  labels:
+    app.kubernetes.io/name: kp-job
+    app.kubernetes.io/part-of: kubepeep-kind-harness
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+spec:
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kp-job
+        app.kubernetes.io/part-of: kubepeep-kind-harness
+        app.kubernetes.io/managed-by: kubepeep-kind-harness
+    spec:
+      automountServiceAccountToken: false
+      restartPolicy: Never
+      containers:
+        - name: complete
+          image: registry.k8s.io/e2e-test-images/busybox:1.29-4@sha256:2e0f836850e09b8b7cc937681d6194537a09fbd5f6b9e08f4d646a85128e8937
+          command: ["/bin/true"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: kp-cronjob
+  namespace: kp-allowed
+  labels:
+    app.kubernetes.io/name: kp-cronjob
+    app.kubernetes.io/part-of: kubepeep-kind-harness
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+spec:
+  schedule: "0 0 1 1 *"
+  suspend: true
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: kp-cronjob
+            app.kubernetes.io/part-of: kubepeep-kind-harness
+            app.kubernetes.io/managed-by: kubepeep-kind-harness
+        spec:
+          automountServiceAccountToken: false
+          restartPolicy: Never
+          containers:
+            - name: complete
+              image: registry.k8s.io/e2e-test-images/busybox:1.29-4@sha256:2e0f836850e09b8b7cc937681d6194537a09fbd5f6b9e08f4d646a85128e8937
+              command: ["/bin/true"]
+              securityContext:
+                allowPrivilegeEscalation: false
+                capabilities:
+                  drop: ["ALL"]
+                readOnlyRootFilesystem: true
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kp-interactive
+  namespace: kp-allowed
+  labels:
+    app.kubernetes.io/name: kp-interactive
+    app.kubernetes.io/part-of: kubepeep-kind-harness
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+spec:
+  automountServiceAccountToken: false
+  restartPolicy: Always
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65532
+    runAsGroup: 65532
+    fsGroup: 65532
+  volumes:
+    - name: web-root
+      emptyDir: {}
+  containers:
+    - name: web
+      image: registry.k8s.io/e2e-test-images/busybox:1.29-4@sha256:2e0f836850e09b8b7cc937681d6194537a09fbd5f6b9e08f4d646a85128e8937
+      command: ["/bin/sh", "-c"]
+      args: ["printf 'synthetic current log ready\\n'; printf 'ok\\n' >/www/index.html; exec httpd -f -p 8080 -h /www"]
+      ports:
+        - name: http
+          containerPort: 8080
+      volumeMounts:
+        - name: web-root
+          mountPath: /www
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+        readOnlyRootFilesystem: true
+    - name: utility
+      image: registry.k8s.io/e2e-test-images/busybox:1.29-4@sha256:2e0f836850e09b8b7cc937681d6194537a09fbd5f6b9e08f4d646a85128e8937
+      command: ["sleep", "86400"]
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+        readOnlyRootFilesystem: true
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kp-delete-probe
+  namespace: kp-allowed
+  labels:
+    app.kubernetes.io/name: kp-delete-probe
+    app.kubernetes.io/part-of: kubepeep-kind-harness
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+spec:
+  automountServiceAccountToken: false
+  restartPolicy: Never
+  containers:
+    - name: fixture
+      image: registry.k8s.io/pause:3.10@sha256:ee6521f290b2168b6e0935a181d4cff9be1ac3f505666ef0e3c98fae8199917a
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+        readOnlyRootFilesystem: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kp-service
+  namespace: kp-allowed
+  labels:
+    app.kubernetes.io/name: kp-service
+    app.kubernetes.io/part-of: kubepeep-kind-harness
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+spec:
+  selector:
+    app.kubernetes.io/name: kp-interactive
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: kp-ingress
+  namespace: kp-allowed
+  labels:
+    app.kubernetes.io/name: kp-ingress
+    app.kubernetes.io/part-of: kubepeep-kind-harness
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+spec:
+  rules:
+    - host: kubepeep.invalid
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: kp-service
+                port:
+                  name: http
+---
+apiVersion: discovery.k8s.io/v1
+kind: EndpointSlice
+metadata:
+  name: kp-service-v1
+  namespace: kp-allowed
+  labels:
+    kubernetes.io/service-name: kp-service
+    endpointslice.kubernetes.io/managed-by: kubepeep-kind-harness
+    app.kubernetes.io/name: kp-service-v1
+    app.kubernetes.io/part-of: kubepeep-kind-harness
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+addressType: IPv4
+ports:
+  - name: http
+    protocol: TCP
+    port: 8080
+endpoints:
+  - addresses: ["10.0.0.10"]
+    conditions:
+      ready: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kp-action-deployment
+  namespace: kp-denied
+  labels:
+    app.kubernetes.io/name: kp-action-deployment
+    app.kubernetes.io/part-of: kubepeep-kind-harness
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kp-action-deployment
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kp-action-deployment
+        app.kubernetes.io/part-of: kubepeep-kind-harness
+        app.kubernetes.io/managed-by: kubepeep-kind-harness
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: workload
+          image: registry.k8s.io/pause:3.10@sha256:ee6521f290b2168b6e0935a181d4cff9be1ac3f505666ef0e3c98fae8199917a
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: kp-action-statefulset
+  namespace: kp-denied
+  labels:
+    app.kubernetes.io/name: kp-action-statefulset
+    app.kubernetes.io/part-of: kubepeep-kind-harness
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+spec:
+  serviceName: kp-headless
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kp-action-statefulset
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kp-action-statefulset
+        app.kubernetes.io/part-of: kubepeep-kind-harness
+        app.kubernetes.io/managed-by: kubepeep-kind-harness
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: workload
+          image: registry.k8s.io/pause:3.10@sha256:ee6521f290b2168b6e0935a181d4cff9be1ac3f505666ef0e3c98fae8199917a
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+            readOnlyRootFilesystem: true
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kp-interactive
+  namespace: kp-denied
+  labels:
+    app.kubernetes.io/name: kp-interactive
+    app.kubernetes.io/part-of: kubepeep-kind-harness
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+spec:
+  automountServiceAccountToken: false
+  restartPolicy: Always
+  containers:
+    - name: utility
+      image: registry.k8s.io/e2e-test-images/busybox:1.29-4@sha256:2e0f836850e09b8b7cc937681d6194537a09fbd5f6b9e08f4d646a85128e8937
+      command: ["sleep", "86400"]
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+        readOnlyRootFilesystem: true
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kp-delete-probe
+  namespace: kp-denied
+  labels:
+    app.kubernetes.io/name: kp-delete-probe
+    app.kubernetes.io/part-of: kubepeep-kind-harness
+    app.kubernetes.io/managed-by: kubepeep-kind-harness
+spec:
+  automountServiceAccountToken: false
+  restartPolicy: Never
+  containers:
+    - name: fixture
+      image: registry.k8s.io/pause:3.10@sha256:ee6521f290b2168b6e0935a181d4cff9be1ac3f505666ef0e3c98fae8199917a
+      securityContext:
+        allowPrivilegeEscalation: false
+        capabilities:
+          drop: ["ALL"]
+        readOnlyRootFilesystem: true
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -242,9 +963,13 @@ spec:
         app.kubernetes.io/managed-by: kubepeep-kind-harness
     spec:
       automountServiceAccountToken: false
+      # Keep this dashboard fixture deterministically unavailable without
+      # relying on a mutable or deliberately missing container image.
+      nodeSelector:
+        kubepeep.dev/nonexistent-node: "true"
       containers:
         - name: unavailable
-          image: registry.k8s.io/pause:0.0-kubepeep-missing
+          image: registry.k8s.io/pause:3.10@sha256:ee6521f290b2168b6e0935a181d4cff9be1ac3f505666ef0e3c98fae8199917a
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -268,7 +993,7 @@ spec:
     runAsUser: 65532
   containers:
     - name: synthetic-log
-      image: registry.k8s.io/e2e-test-images/busybox:1.29-4
+      image: registry.k8s.io/e2e-test-images/busybox:1.29-4@sha256:2e0f836850e09b8b7cc937681d6194537a09fbd5f6b9e08f4d646a85128e8937
       command: ["/bin/sh", "-c", "echo 'possible error: synthetic dashboard fixture unavailable'; exit 1"]
       securityContext:
         allowPrivilegeEscalation: false
@@ -313,7 +1038,7 @@ spec:
   restartPolicy: Never
   containers:
     - name: fixture
-      image: registry.k8s.io/pause:3.10
+      image: registry.k8s.io/pause:3.10@sha256:ee6521f290b2168b6e0935a181d4cff9be1ac3f505666ef0e3c98fae8199917a
       securityContext:
         allowPrivilegeEscalation: false
         capabilities:

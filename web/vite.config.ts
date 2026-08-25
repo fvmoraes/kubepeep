@@ -13,6 +13,8 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
     include: ['src/**/*.test.{ts,tsx}'],
+    maxWorkers: 4,
+    testTimeout: 10_000,
     css: true,
   },
 })

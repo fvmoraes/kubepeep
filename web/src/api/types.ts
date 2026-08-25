@@ -333,6 +333,8 @@ export interface EnvelopeMeta {
   generation?: string
   collectedAt?: string
   continue?: string
+  page?: CollectionPageMeta
+  coverage?: DashboardCoverage | null
 }
 
 export interface Envelope<T> {
@@ -345,4 +347,379 @@ export interface APIErrorPayload {
   message?: string
   requestId?: string
   details?: unknown
+}
+
+export interface CollectionPageMeta {
+  limit: number
+  next: string
+  complete: boolean
+  truncated: boolean
+  filterScope: 'page' | 'collection'
+}
+
+export interface CollectionResult<T> {
+  items: T[]
+  page: CollectionPageMeta
+  coverage: DashboardCoverage | null
+  generation?: string
+  collectedAt?: string
+}
+
+export interface ResourceListQuery extends PageQuery {
+  namespaces?: string[]
+  kinds?: string[]
+  statuses?: string[]
+  sort?: string
+  order?: 'asc' | 'desc'
+  workload?: string
+  node?: string
+  restarts?: 'any' | 'gt0' | 'gte3' | 'gte10'
+  problematic?: boolean
+  objectKind?: string
+  reason?: string
+  addressType?: string
+}
+
+export interface ResourceMetadata {
+  namespace: string
+  name: string
+  uid: string
+  resourceVersion: string
+  creationTimestamp: string
+  labels: Record<string, string>
+}
+
+export interface Condition {
+  type: string
+  status: 'True' | 'False' | 'Unknown' | string
+  reason: string | null
+  message: string | null
+  lastTransitionTime: string | null
+}
+
+export interface ContainerPort {
+  name: string | null
+  containerPort: number
+  protocol: string
+}
+
+export interface ContainerSpec {
+  name: string
+  image: string
+  ports: ContainerPort[]
+}
+
+export type WorkloadStatus = 'Healthy' | 'Progressing' | 'Degraded' | 'Suspended' | 'Completed' | 'Failed' | 'Unknown'
+
+export interface Workload {
+  namespace: string
+  kind: 'Deployment' | 'StatefulSet' | 'DaemonSet' | 'Job' | 'CronJob'
+  name: string
+  ready: number | null
+  desired: number | null
+  available: number | null
+  updated: number | null
+  status: WorkloadStatus
+  ageSeconds: number
+}
+
+export interface WorkloadDetail {
+  metadata: ResourceMetadata
+  kind: Workload['kind']
+  ready: number | null
+  desired: number | null
+  available: number | null
+  updated: number | null
+  status: WorkloadStatus
+  selector: Record<string, string> | null
+  restartAt: string | null
+  conditions: Condition[]
+  containers: ContainerSpec[]
+  related: ResourceRef[]
+}
+
+export interface ReadyCount {
+  current: number
+  desired: number
+}
+
+export interface ResourceOwner {
+  kind: string
+  name: string
+}
+
+export interface Pod {
+  namespace: string
+  name: string
+  status: 'Running' | 'Pending' | 'Succeeded' | 'Failed' | 'Unknown'
+  ready: ReadyCount
+  restarts: number
+  node: string | null
+  ip: string | null
+  owner: ResourceOwner | null
+  ageSeconds: number
+  problematic: boolean
+}
+
+export interface PodContainer {
+  spec: ContainerSpec
+  type: ContainerType
+  ready: boolean | null
+  restartCount: number
+  state: 'waiting' | 'running' | 'terminated' | 'unknown'
+  reason: string | null
+}
+
+export interface PodDetail {
+  metadata: ResourceMetadata
+  summary: Pod
+  conditions: Condition[]
+  containers: PodContainer[]
+  initContainers: PodContainer[]
+  ephemeralContainers: PodContainer[]
+  relatedEvents: ResourceRef[]
+}
+
+export interface EventResource {
+  timestamp: string | null
+  namespace: string
+  objectKind: string
+  objectName: string
+  reason: string
+  message: string
+  count: number
+  source: string | null
+  type: 'Normal' | 'Warning' | 'Unknown'
+}
+
+export interface TypedValue {
+  type: 'number' | 'name'
+  value: number | string
+}
+
+export interface ServicePort {
+  name: string | null
+  protocol: string
+  port: number
+  targetPort: TypedValue
+  nodePort: number | null
+  appProtocol: string | null
+}
+
+export interface ServiceResource {
+  namespace: string
+  name: string
+  type: string
+  clusterIPs: string[]
+  ports: ServicePort[]
+  selector: Record<string, string> | null
+  externalEndpoints: Array<{ address: string; port: number; protocol: string }>
+}
+
+export interface ServiceDetail {
+  metadata: ResourceMetadata
+  summary: ServiceResource
+  sessionAffinity: string
+  externalTrafficPolicy: string | null
+  ipFamilies: string[]
+  healthCheckNodePort: number | null
+}
+
+export interface IngressBackend {
+  serviceName: string
+  servicePort: TypedValue
+}
+
+export interface IngressPath {
+  host: string
+  path: string
+  pathType: string
+  backend: IngressBackend
+}
+
+export interface IngressResource {
+  namespace: string
+  name: string
+  className: string | null
+  hosts: string[]
+  paths: IngressPath[]
+  tlsHosts: string[]
+}
+
+export interface IngressDetail {
+  metadata: ResourceMetadata
+  summary: IngressResource
+  defaultBackend: IngressBackend | null
+  loadBalancerAddresses: string[]
+}
+
+export interface EndpointSliceResource {
+  namespace: string
+  name: string
+  addressType: 'IPv4' | 'IPv6' | 'FQDN' | 'Unknown'
+  ports: Array<{ name: string | null; protocol: string | null; port: number | null; appProtocol: string | null }>
+  endpoints: Array<{
+    addresses: string[]
+    hostname: string | null
+    nodeName: string | null
+    zone: string | null
+    conditions: { ready: boolean | null; serving: boolean | null; terminating: boolean | null }
+    targetRef: ResourceRef | null
+  }>
+}
+
+export interface EndpointSliceDetail {
+  metadata: ResourceMetadata
+  summary: EndpointSliceResource
+}
+
+export interface ConfigMapResource {
+  namespace: string
+  name: string
+  uid: string
+  creationTimestamp: string
+}
+
+export interface ConfigMapDetail {
+  metadata: ResourceMetadata
+  entries: Array<{ key: string; encoding: 'utf-8' | 'base64'; value: string; truncated: boolean }>
+  totalBytes: number
+  truncated: boolean
+}
+
+export interface SecretMetadata {
+  apiVersion: 'v1'
+  kind: 'Secret'
+  metadata: {
+    name: string
+    namespace: string
+    uid: string
+    creationTimestamp: string
+    deletionTimestamp?: string
+  }
+}
+
+export interface LogLine {
+  timestamp: string | null
+  text: string
+  truncated: boolean
+}
+
+export interface LogRead {
+  container: string
+  previous: boolean
+  lines: LogLine[]
+  truncated: boolean
+}
+
+export interface LogQuery {
+  container: string
+  previous?: boolean
+  timestamps?: boolean
+  tailLines?: number
+  since?: string
+}
+
+export type SavedFilterCollection = 'workloads' | 'pods' | 'events' | 'logs'
+
+export interface SavedFilter {
+  id: string
+  name: string
+  query: Record<string, unknown>
+}
+
+export interface SavedFilterSet {
+  version: 1
+  items: SavedFilter[]
+}
+
+export interface Preferences {
+  version: 1
+  ui: { language: 'en' | 'pt-BR' }
+  logs: { wrap: boolean; timestamps: boolean; tailLines: number }
+  dashboard: { logScanWindow: '15m' | '30m' | '1h' | '4h'; sectionOrder: string[]; hiddenSections: string[] }
+  filters: Record<SavedFilterCollection, SavedFilterSet>
+}
+
+export interface ActionTarget {
+  clusterProfileId: number
+  context: string
+  namespace: string
+  kind: 'Deployment' | 'StatefulSet' | 'Pod'
+  name: string
+}
+
+export interface ConfirmedAction {
+  confirmed: true
+  target: ActionTarget
+  expectedGeneration: string
+}
+
+export interface RestartActionRequest extends ConfirmedAction {
+  action: 'restart'
+  consequenceCode: 'RECREATE_WORKLOAD_PODS'
+  expectedResourceVersion: string
+}
+
+export interface ScaleActionRequest extends ConfirmedAction {
+  replicas: number
+  action: 'scale'
+  consequenceCode: 'CHANGE_REPLICA_COUNT'
+  expectedResourceVersion: string
+}
+
+export interface PodDeleteActionRequest extends ConfirmedAction {
+  action: 'deletePod'
+  consequenceCode: 'DELETE_POD'
+  expectedUid: string
+  expectedResourceVersion: string
+}
+
+export interface PortForwardCreateRequest extends ConfirmedAction {
+  remotePort: number
+  localPort: number | null
+  action: 'portForward'
+  consequenceCode: 'EXPOSE_POD_PORT_LOCALLY'
+}
+
+export interface ExecInit extends ConfirmedAction {
+  container: string
+  command: string[]
+  tty: boolean
+  stdin: boolean
+  action: 'exec'
+  consequenceCode: 'OPEN_INTERACTIVE_PROCESS'
+}
+
+export interface ActionAccepted {
+  accepted: true
+  action: string
+  target: ActionTarget
+  generation: string
+  resourceVersion: string | null
+  replicas?: number
+}
+
+export interface PortForward {
+  id: string
+  clusterProfileId: number
+  context: string
+  generation: string
+  namespace: string
+  pod: string
+  remotePort: number
+  localAddress: '127.0.0.1'
+  localPort: number
+  status: 'active' | 'closed' | 'expired' | 'podGone' | 'failed'
+  createdAt: string
+  expiresAt: string
+  endedAt: string | null
+  endReason: string | null
+}
+
+export interface ExecTicket {
+  sessionId: string
+  websocketUrl: string
+  protocols: string[]
+  expiresAt: string
 }

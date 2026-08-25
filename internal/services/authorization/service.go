@@ -148,7 +148,6 @@ func (s *Service) Check(ctx context.Context, key Key) Capability {
 // running SSAR is still shared, because it is already an up-to-date remote
 // review rather than a cached decision.
 func (s *Service) Refresh(ctx context.Context, key Key) Capability {
-	s.removeCachedKey(key)
 	return s.check(ctx, key, true)
 }
 
@@ -162,7 +161,13 @@ func (s *Service) check(ctx context.Context, key Key, bypassCache bool) Capabili
 
 	now := s.now()
 	s.mu.Lock()
-	if !bypassCache {
+	if bypassCache {
+		// Invalidate the cached decision in the same critical section that
+		// joins or creates the live review. A separate lock window lets a
+		// concurrent refresher delete a freshly published result and issue a
+		// second SAR even though its call overlapped the first one.
+		delete(s.cache, key)
+	} else {
 		if entry, ok := s.cache[key]; ok {
 			if now.Before(entry.capability.ExpiresAt) {
 				result := entry.capability
@@ -274,12 +279,6 @@ func (s *Service) invalidateKey(key Key) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.keyRevisions[key]++
-	delete(s.cache, key)
-}
-
-func (s *Service) removeCachedKey(key Key) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	delete(s.cache, key)
 }
 

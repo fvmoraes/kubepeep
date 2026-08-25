@@ -92,6 +92,27 @@ func TestLogScanRedactsAndReturnsDeterministicMatches(t *testing.T) {
 	}
 }
 
+func TestLogScanRedactsMatchesInsideMultilinePrivateKey(t *testing.T) {
+	t.Parallel()
+	reader := &mapLogReader{values: map[string]string{
+		"ns/pod/app": "-----BEGIN ENCRYPTED PRIVATE KEY-----\n" +
+			"error private-body-material\n" +
+			"-----END ENCRYPTED PRIVATE KEY-----\n" +
+			"error safe-after-block\n",
+	}}
+	service := NewLogService(reader, allowLogs{}, fixedClock{time.Now()}, LogBudget{})
+	block := service.Scan(context.Background(), LogScanRequest{}, []LogTarget{{Namespace: "ns", Pod: "pod", Container: "app", ContainerType: ContainerRegular}})
+	if !block.Complete || block.Truncated || len(block.Value) != 2 {
+		t.Fatalf("unexpected private-key scan: %+v", block)
+	}
+	if !block.Value[0].Redacted || block.Value[0].Excerpt != "[REDACTED_PRIVATE_KEY]" {
+		t.Fatalf("private-key body escaped: %+v", block.Value[0])
+	}
+	if strings.Contains(block.Value[0].Excerpt, "private-body-material") || !strings.Contains(block.Value[1].Excerpt, "safe-after-block") {
+		t.Fatalf("private material leaked or following line was lost: %+v", block.Value)
+	}
+}
+
 func TestLogScanLineContainerTailAndResponseBudgetsAreVisible(t *testing.T) {
 	t.Parallel()
 	content := "error " + strings.Repeat("x", 100) + "\nerror second\nerror third\n"
@@ -129,6 +150,9 @@ func TestLogScanMaxScanBytesBoundsAggregateReadsAcrossConcurrentContainers(t *te
 	if block.Complete || !block.Truncated {
 		t.Fatalf("aggregate input limit was not visible: %+v", block)
 	}
+	if block.Coverage.CompletedNamespaces != 0 {
+		t.Fatalf("a byte-truncated namespace was reported complete: %+v", block.Coverage)
+	}
 }
 
 func TestLogScanAggregateExhaustionCancelsPendingTargets(t *testing.T) {
@@ -151,6 +175,9 @@ func TestLogScanAggregateExhaustionCancelsPendingTargets(t *testing.T) {
 	})
 	if block.Complete || !block.Truncated {
 		t.Fatalf("aggregate exhaustion was not visible: %+v", block)
+	}
+	if block.Coverage.CompletedNamespaces != 0 {
+		t.Fatalf("an incomplete namespace was reported complete: %+v", block.Coverage)
 	}
 	reader.mu.Lock()
 	defer reader.mu.Unlock()

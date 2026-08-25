@@ -31,7 +31,7 @@ func TestNativeBinaryLifecycleBlackBox(t *testing.T) {
 	}
 	build := exec.Command("go", "build", "-trimpath", "-o", executable, "./cmd/kubePeep")
 	build.Dir = repository
-	build.Env = replaceProcessEnvironment(os.Environ(), map[string]string{"CGO_ENABLED": "0", "GOTOOLCHAIN": "go1.25.12"})
+	build.Env = replaceProcessEnvironment(os.Environ(), map[string]string{"CGO_ENABLED": "0", "GOTOOLCHAIN": "go1.25.13"})
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build native binary: %v\n%s", err, output)
 	}

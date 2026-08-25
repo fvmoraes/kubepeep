@@ -79,3 +79,82 @@ test('keeps the dashboard useful with partial data and an explicit bounded log s
   await expect(page.getByText('token=[REDACTED]')).toBeVisible()
   await expect(page.getByText('sensitive value redacted')).toBeVisible()
 })
+
+test('filters Pods, persists allowlisted saved filters and builds the Logs catalog from exact capabilities', async ({ page }) => {
+  const generation = 'gen_filters_e2e'
+  const empty = { version: 1, items: [] as Array<{ id: string; name: string; query: Record<string, unknown> }> }
+  let preferences = {
+    version: 1,
+    ui: { language: 'en' },
+    logs: { wrap: false, timestamps: true, tailLines: 200 },
+    dashboard: { logScanWindow: '15m', sectionOrder: ['summary'], hiddenSections: [] as string[] },
+    filters: {
+      workloads: empty,
+      pods: { version: 1, items: [{ id: 'saved-worker', name: 'Worker failures', query: { namespace: ['payments'], status: ['Failed'], node: 'worker-9' } }] },
+      events: empty,
+      logs: empty,
+    },
+  }
+  const podRequests: string[] = []
+  const status = {
+    version: 'test', commit: 'test', buildDate: 'test', port: 2748,
+    components: Object.fromEntries(['application', 'sqlite', 'kubeconfig', 'context', 'cluster', 'metrics'].map((name) => [name, { status: 'healthy', code: 'TEST', message: 'ready', checkedAt: null }])),
+    selection: { clusterProfileId: 1, context: 'development', cluster: 'kind-kubepeep', scopeId: 1, scopeName: 'Restricted', scopeMode: 'list', scopeSource: 'saved', defaultNamespace: 'payments', namespaceCount: 1, generation },
+  }
+  const pod = { namespace: 'payments', name: 'api-abc', status: 'Running', ready: { current: 1, desired: 1 }, restarts: 2, node: 'worker-1', ip: '10.0.0.8', owner: { kind: 'Deployment', name: 'api' }, ageSeconds: 60, problematic: false }
+
+  await page.route('**/api/v1/**', async (route) => {
+    const request = route.request()
+    const url = new URL(request.url())
+    const path = `${url.pathname}${url.search}`
+    let data: unknown = []
+    let meta: Record<string, unknown> = { generation }
+    if (url.pathname === '/api/v1/status') data = status
+    else if (url.pathname === '/api/v1/cluster/profiles') data = []
+    else if (url.pathname === '/api/v1/session') data = { csrfToken: 'csrf_filters', origin: 'http://127.0.0.1:4173', generation, expiresAt: '2026-08-17T18:00:00Z' }
+    else if (url.pathname === '/api/v1/preferences' && request.method() === 'PUT') {
+      preferences = request.postDataJSON() as typeof preferences
+      data = preferences
+    } else if (url.pathname === '/api/v1/preferences') data = preferences
+    else if (url.pathname === '/api/v1/pods' && url.searchParams.has('limit')) {
+      podRequests.push(path)
+      data = [pod]
+      meta = { generation, page: { limit: 100, next: '', complete: true, truncated: false, filterScope: 'collection' }, coverage: null }
+    } else if (url.pathname === '/api/v1/permissions') data = {
+      generation, complete: true, truncated: false, errors: [], decisions: [{ capabilityId: 'pods.logs.get', namespace: 'payments', resourceName: 'api-abc', decision: 'allowed', apiGroup: '', resource: 'pods', subresource: 'log', verb: 'get', reasonCode: 'SAR_ALLOWED', expiresAt: null }],
+    }
+    else if (url.pathname === '/api/v1/pods/payments/api-abc') data = {
+      metadata: { namespace: 'payments', name: 'api-abc', uid: 'uid-api', resourceVersion: '17', creationTimestamp: '2026-08-17T10:00:00Z', labels: {} },
+      summary: pod, conditions: [], containers: [{ spec: { name: 'api', image: 'example/api:1', ports: [] }, type: 'regular', ready: true, restartCount: 2, state: 'running', reason: null }], initContainers: [], ephemeralContainers: [], relatedEvents: [],
+    }
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data, meta }) })
+  })
+
+  await page.goto('/pods')
+  await expect(page.getByRole('heading', { name: 'Pods' })).toBeVisible()
+  await page.getByLabel('Namespace').fill('payments')
+  await page.getByLabel('Workload owner').fill('api')
+  await page.getByLabel('Node').fill('worker-1')
+  await page.getByLabel('Search this bounded page').fill('backend')
+  await page.getByRole('button', { name: 'Apply filters' }).click()
+  await expect.poll(() => podRequests.some((value) => {
+    const query = new URL(value, 'http://127.0.0.1').searchParams
+    return query.get('namespace') === 'payments' && query.get('workload') === 'api' && query.get('node') === 'worker-1' && query.get('search') === 'backend'
+  })).toBe(true)
+
+  await page.getByRole('combobox', { name: 'Saved filter', exact: true }).selectOption('saved-worker')
+  await page.getByRole('button', { name: 'Apply saved filter' }).click()
+  await expect(page.getByLabel('Node')).toHaveValue('worker-9')
+  await expect(page.getByLabel('Status')).toHaveValue('Failed')
+  await page.getByLabel('Save current filter as').fill('Saved from browser')
+  await page.getByRole('button', { name: 'Save current filter' }).click()
+  await expect(page.getByText('Current bounded filter saved.')).toBeVisible()
+  expect(preferences.filters.pods.items.some((value) => value.name === 'Saved from browser')).toBe(true)
+
+  await page.getByRole('link', { name: 'Logs', exact: true }).click()
+  await expect(page.getByText('1 log-authorized Pod available in the complete bounded catalog.')).toBeVisible()
+  await page.getByRole('combobox', { name: 'Namespace', exact: true }).selectOption('payments')
+  await page.getByRole('combobox', { name: 'Pod', exact: true }).selectOption('api-abc')
+  await page.getByRole('combobox', { name: 'Container', exact: true }).selectOption('api')
+  await expect(page.getByRole('button', { name: 'Read logs' })).toBeEnabled()
+})

@@ -19,6 +19,7 @@ import (
 	metricsv1beta1 "k8s.io/metrics/pkg/apis/metrics/v1beta1"
 	metricsclient "k8s.io/metrics/pkg/client/clientset/versioned"
 
+	kubeadapter "github.com/fvmoraes/kubepeep/internal/adapters/kubernetes"
 	"github.com/fvmoraes/kubepeep/internal/services/authorization"
 	"github.com/fvmoraes/kubepeep/internal/services/dashboard"
 	"github.com/fvmoraes/kubepeep/internal/services/namespaces"
@@ -458,11 +459,26 @@ func toDashboardError(err error) error {
 	if errors.Is(err, context.Canceled) {
 		return context.Canceled
 	}
+	var clientError *kubeadapter.SafeError
+	if errors.As(err, &clientError) {
+		switch clientError.Code {
+		case kubeadapter.CodeAuthenticationUnavailable:
+			return dashboard.NewAuthenticationUnavailableError()
+		case kubeadapter.CodeRequestTimeout:
+			return context.DeadlineExceeded
+		case kubeadapter.CodeRequestCanceled, kubeadapter.CodeGenerationChanged:
+			return context.Canceled
+		default:
+			return err
+		}
+	}
 	switch authorization.ErrorCodeOf(err) {
 	case authorization.CodeForbidden:
 		return dashboard.NewDeniedError()
 	case authorization.CodeAuthorizationUnavailable:
 		return dashboard.NewAuthorizationUnavailableError()
+	case authorization.CodeAuthenticationUnavailable:
+		return dashboard.NewAuthenticationUnavailableError()
 	case authorization.CodeUpstreamTimeout:
 		return context.DeadlineExceeded
 	case authorization.CodeClientCanceled:

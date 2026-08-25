@@ -1,29 +1,52 @@
-# Evidência local do harness Kind — 2026-08-10
+# Evidência local do harness Kind — 2026-08-24
 
-Validações concluídas nesta estação:
+Validações offline concluídas nesta estação:
 
 - `sh -n test/kind/harness.sh`: passou;
 - `dash -n test/kind/harness.sh`: passou;
-- `./test/kind/harness.sh static`: passou sem consultar o kubeconfig atual;
-- parsing seguro de todos os documentos em `rbac.yaml` e de `cluster.yaml`:
-  passou;
-- inspeção estrutural e textual para `cluster-admin` e wildcards em
-  `resources`/`verbs`: passou;
-- `kubectl` cliente v1.33.3 está disponível.
+- parse do driver `test/kind/app_e2e.py`: passou;
+- `./test/kind/harness.sh static`: passou sem consultar o kubeconfig;
+- binário real com kubeconfig sintético apontando para loopback fechado:
+  `app_e2e.py --mode offline` passou, incluindo sessão/CSRF, dashboard parcial
+  ou indisponível e leitura de recurso indisponível;
+- parse seguro dos 56 documentos de `rbac.yaml` e de `cluster.yaml`: passou;
+- regras exatas das identidades F6/F7, subjects separados e ausência de
+  wildcard/`cluster-admin`: passou;
+- todas as imagens das fixtures e o node Kind preservam tag legível e estão
+  fixados por digest SHA-256; imagem mutável é rejeitada: passou;
+- o Deployment degradado usa `nodeSelector` insatisfazível, e não uma imagem
+  inexistente: passou;
+- Secret versionado sem `data`/`stringData`: passou;
+- `kind` v0.32.0 e cliente `kubectl` v1.33.3 estão disponíveis.
 
-A execução contra API real não foi possível nesta estação: o executável
-`kind` não está instalado e o daemon Docker não responde. Nenhum cluster ou
-recurso Kubernetes foi criado, alterado ou removido durante esta validação.
+Os cenários dinâmicos que dependem de Kind não foram executados nesta estação
+porque o daemon Docker não responde no contexto `desktop-linux`. O cenário
+offline acima não consulta nem altera Kubernetes. Nenhum cluster nem recurso
+Kubernetes foi criado, alterado ou removido durante a validação local.
 
-Quando esses dois pré-requisitos estiverem disponíveis, a evidência dinâmica é
-reproduzida por:
+Com Docker disponível, a reprodução completa é:
 
 ```sh
 ./test/kind/harness.sh create
 ./test/kind/harness.sh validate
 ./test/kind/harness.sh kubeconfigs
+./test/kind/harness.sh app-e2e ./kubePeep
 ```
 
-`create` não remove cluster ou namespace; `validate` altera somente a
-RoleBinding temporária `kp-denied/kp-refresh-probe`, verifica concessão e
-revogação e restaura o estado negado mesmo após interrupção.
+`create` e `validate` nunca removem o cluster. As mutações atingem somente
+objetos descartáveis rotulados do harness, restauram restart/scale/delete e
+recriam RoleBindings próprias após revogação. Processos de watch,
+port-forward, exec e kubePeep possuem cleanup explícito e bounded.
+
+A etapa `app-e2e` é opcional porque exige o binário compilado. Ela cobre API
+HTTP/CSRF real; seleção de contexto e scopes `single/list/all`; dashboard
+completo/parcial/offline; leituras e ações permitidas/negadas; SSE
+snapshot/live/replay e reautorização após revogação; log follow; e exec
+WebSocket com heartbeat, canais, ticket one-shot e nova autorização antes do
+upgrade. A varredura final exige ausência de credenciais, payload do Secret,
+CSRF, tickets e linhas cruas de log no estado/output da aplicação.
+
+Os fluxos dinâmicos dependentes de Kind permanecem pendentes nesta estação
+somente pela indisponibilidade do daemon Docker; o workflow CI executa
+`app-e2e` com o binário real e falha fechado se qualquer marcador/revogação
+exceder os limites.

@@ -2,6 +2,9 @@ import type {
   APIErrorPayload,
   CapabilityMatrix,
   ClusterProfile,
+  CollectionResult,
+  ConfigMapDetail,
+  ConfigMapResource,
   DashboardBlock,
   DashboardEvent,
   DashboardLogMatch,
@@ -11,8 +14,16 @@ import type {
   DashboardRestart,
   DashboardSummary,
   Envelope,
+  EndpointSliceDetail,
+  EndpointSliceResource,
+  EventResource,
+  ExecTicket,
+  IngressDetail,
+  IngressResource,
   KubernetesContext,
   LogScanRequest,
+  LogQuery,
+  LogRead,
   Namespace,
   NamespaceScope,
   NamespaceScopeDeleteRequest,
@@ -21,12 +32,27 @@ import type {
   NamespaceScopeValidation,
   NamespaceScopeWriteRequest,
   PageQuery,
+  Pod,
+  PodDeleteActionRequest,
+  PodDetail,
+  PortForward,
+  PortForwardCreateRequest,
+  Preferences,
   PermissionQuery,
   SelectContextRequest,
   SelectionData,
   SelectNamespaceScopeRequest,
+  ServiceDetail,
+  ServiceResource,
+  SecretMetadata,
   SessionData,
   StatusData,
+  ResourceListQuery,
+  RestartActionRequest,
+  ScaleActionRequest,
+  ExecInit,
+  Workload,
+  WorkloadDetail,
 } from './types'
 
 export type * from './types'
@@ -128,6 +154,87 @@ function mutation<T>(path: string, method: 'POST' | 'PUT' | 'DELETE', body: unkn
   })
 }
 
+function resourceQuery(options: ResourceListQuery = {}): string {
+  const entries: Array<[string, string | number | boolean | undefined]> = [
+    ['limit', options.limit],
+    ['continue', options.continueToken],
+    ['search', options.search],
+    ['sort', options.sort],
+    ['order', options.order],
+    ['workload', options.workload],
+    ['node', options.node],
+    ['restarts', options.restarts],
+    ['problematic', options.problematic],
+    ['objectKind', options.objectKind],
+    ['reason', options.reason],
+    ['addressType', options.addressType],
+  ]
+  for (const namespace of options.namespaces ?? []) entries.push(['namespace', namespace])
+  for (const kind of options.kinds ?? []) entries.push(['kind', kind])
+  for (const status of options.statuses ?? []) entries.push(['status', status])
+  return queryString(entries)
+}
+
+async function collectionRequest<T>(path: string, options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<T>> {
+  const response = await requestEnvelope<T[]>(`${path}${resourceQuery(options)}`, { method: 'GET', signal })
+  if (!Array.isArray(response.data)) {
+    throw new APIError(502, { code: 'INVALID_RESPONSE', message: 'The resource collection returned an invalid response.' })
+  }
+  if (expectedGeneration && response.meta?.generation !== expectedGeneration) {
+    throw new APIError(409, { code: 'GENERATION_CHANGED', message: 'The resource response belongs to another selection generation.' })
+  }
+  return {
+    items: response.data,
+    page: response.meta?.page ?? {
+      limit: options.limit ?? response.data.length,
+      next: '',
+      complete: false,
+      truncated: true,
+      filterScope: 'page',
+    },
+    coverage: response.meta?.coverage ?? null,
+    generation: response.meta?.generation,
+    collectedAt: response.meta?.collectedAt,
+  }
+}
+
+async function resourceRequest<T>(path: string, signal?: AbortSignal, expectedGeneration?: string): Promise<T> {
+  const response = await requestEnvelope<T>(path, { method: 'GET', signal })
+  if (expectedGeneration && response.meta?.generation !== expectedGeneration) {
+    throw new APIError(409, { code: 'GENERATION_CHANGED', message: 'The resource response belongs to another selection generation.' })
+  }
+  return response.data
+}
+
+async function requestYAML(path: string, signal?: AbortSignal): Promise<string> {
+  const response = await fetch(path, {
+    method: 'GET',
+    headers: { Accept: 'application/yaml, text/yaml' },
+    cache: 'no-store',
+    credentials: 'same-origin',
+    signal,
+  })
+  if (!response.ok) {
+    const payload = (await decodeJSON(response)) as APIErrorPayload
+    throw new APIError(response.status, payload)
+  }
+  const contentType = response.headers.get('content-type')?.toLowerCase() ?? ''
+  if (!contentType.includes('yaml')) {
+    throw new APIError(502, { code: 'INVALID_RESPONSE', message: 'The YAML response used an unexpected content type.' })
+  }
+  return response.text()
+}
+
+function resourcePath(value: string): string {
+  return encodeURIComponent(value)
+}
+
+export function createIdempotencyKey(): string {
+  const bytes = new Uint8Array(16)
+  crypto.getRandomValues(bytes)
+  return `kp-${Array.from(bytes, (value) => value.toString(16).padStart(2, '0')).join('')}`
+}
+
 export async function getStatus(signal?: AbortSignal): Promise<StatusData> {
   return request<StatusData>('/api/v1/status', { method: 'GET', signal })
 }
@@ -195,7 +302,7 @@ export function selectNamespaceScope(id: number, body: SelectNamespaceScopeReque
   return mutation<SelectionData>(`/api/v1/namespace-scopes/${id}/select`, 'POST', body, csrfToken, signal)
 }
 
-export function getPermissions(options: PermissionQuery = {}, signal?: AbortSignal): Promise<CapabilityMatrix> {
+export async function getPermissions(options: PermissionQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CapabilityMatrix> {
   const entries: Array<[string, string | number | boolean | undefined]> = []
   for (const namespace of options.namespaces ?? []) {
     entries.push(['namespace', namespace])
@@ -207,7 +314,11 @@ export function getPermissions(options: PermissionQuery = {}, signal?: AbortSign
     entries.push(['resourceName', resourceName])
   }
   entries.push(['refresh', options.refresh])
-  return request<CapabilityMatrix>(`/api/v1/permissions${queryString(entries)}`, { method: 'GET', signal })
+  const matrix = await request<CapabilityMatrix>(`/api/v1/permissions${queryString(entries)}`, { method: 'GET', signal })
+  if (expectedGeneration && matrix.generation !== expectedGeneration) {
+    throw new APIError(409, { code: 'GENERATION_CHANGED', message: 'The permission response belongs to another selection generation.' })
+  }
+  return matrix
 }
 
 export function getDashboardSummary(signal?: AbortSignal, expectedGeneration?: string): Promise<DashboardResponse<DashboardSummary>> {
@@ -240,4 +351,152 @@ export function scanDashboardLogs(body: LogScanRequest, csrfToken: string, signa
     body: JSON.stringify(body),
     signal,
 	}, expectedGeneration)
+}
+
+export function getWorkloads(options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<Workload>> {
+  return collectionRequest<Workload>('/api/v1/workloads', options, signal, expectedGeneration)
+}
+
+export function getWorkload(kind: string, namespace: string, name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<WorkloadDetail> {
+  return resourceRequest<WorkloadDetail>(`/api/v1/workloads/${resourcePath(kind)}/${resourcePath(namespace)}/${resourcePath(name)}`, signal, expectedGeneration)
+}
+
+export function getWorkloadYAML(kind: string, namespace: string, name: string, signal?: AbortSignal): Promise<string> {
+  return requestYAML(`/api/v1/workloads/${resourcePath(kind)}/${resourcePath(namespace)}/${resourcePath(name)}/yaml`, signal)
+}
+
+export function getPods(options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<Pod>> {
+  return collectionRequest<Pod>('/api/v1/pods', options, signal, expectedGeneration)
+}
+
+export function getPod(namespace: string, name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<PodDetail> {
+  return resourceRequest<PodDetail>(`/api/v1/pods/${resourcePath(namespace)}/${resourcePath(name)}`, signal, expectedGeneration)
+}
+
+export function getPodYAML(namespace: string, name: string, signal?: AbortSignal): Promise<string> {
+  return requestYAML(`/api/v1/pods/${resourcePath(namespace)}/${resourcePath(name)}/yaml`, signal)
+}
+
+export function getPodLogs(namespace: string, name: string, options: LogQuery, signal?: AbortSignal, expectedGeneration?: string): Promise<LogRead> {
+  const query = queryString([
+    ['container', options.container],
+    ['previous', options.previous],
+    ['timestamps', options.timestamps],
+    ['tailLines', options.tailLines],
+    ['since', options.since],
+  ])
+  return resourceRequest<LogRead>(`/api/v1/pods/${resourcePath(namespace)}/${resourcePath(name)}/logs${query}`, signal, expectedGeneration)
+}
+
+export function getEvents(options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<EventResource>> {
+  return collectionRequest<EventResource>('/api/v1/events', options, signal, expectedGeneration)
+}
+
+export function getServices(options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<ServiceResource>> {
+  return collectionRequest<ServiceResource>('/api/v1/services', options, signal, expectedGeneration)
+}
+
+export function getService(namespace: string, name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<ServiceDetail> {
+  return resourceRequest<ServiceDetail>(`/api/v1/services/${resourcePath(namespace)}/${resourcePath(name)}`, signal, expectedGeneration)
+}
+
+export function getServiceYAML(namespace: string, name: string, signal?: AbortSignal): Promise<string> {
+  return requestYAML(`/api/v1/services/${resourcePath(namespace)}/${resourcePath(name)}/yaml`, signal)
+}
+
+export function getIngresses(options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<IngressResource>> {
+  return collectionRequest<IngressResource>('/api/v1/ingresses', options, signal, expectedGeneration)
+}
+
+export function getIngress(namespace: string, name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<IngressDetail> {
+  return resourceRequest<IngressDetail>(`/api/v1/ingresses/${resourcePath(namespace)}/${resourcePath(name)}`, signal, expectedGeneration)
+}
+
+export function getIngressYAML(namespace: string, name: string, signal?: AbortSignal): Promise<string> {
+  return requestYAML(`/api/v1/ingresses/${resourcePath(namespace)}/${resourcePath(name)}/yaml`, signal)
+}
+
+export function getEndpointSlices(options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<EndpointSliceResource>> {
+  return collectionRequest<EndpointSliceResource>('/api/v1/endpoint-slices', options, signal, expectedGeneration)
+}
+
+export function getEndpointSlice(namespace: string, name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<EndpointSliceDetail> {
+  return resourceRequest<EndpointSliceDetail>(`/api/v1/endpoint-slices/${resourcePath(namespace)}/${resourcePath(name)}`, signal, expectedGeneration)
+}
+
+export function getEndpointSliceYAML(namespace: string, name: string, signal?: AbortSignal): Promise<string> {
+  return requestYAML(`/api/v1/endpoint-slices/${resourcePath(namespace)}/${resourcePath(name)}/yaml`, signal)
+}
+
+export function getConfigMaps(options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<ConfigMapResource>> {
+  return collectionRequest<ConfigMapResource>('/api/v1/configmaps', options, signal, expectedGeneration)
+}
+
+export function getConfigMap(namespace: string, name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<ConfigMapDetail> {
+  return resourceRequest<ConfigMapDetail>(`/api/v1/configmaps/${resourcePath(namespace)}/${resourcePath(name)}`, signal, expectedGeneration)
+}
+
+export function getConfigMapYAML(namespace: string, name: string, signal?: AbortSignal): Promise<string> {
+  return requestYAML(`/api/v1/configmaps/${resourcePath(namespace)}/${resourcePath(name)}/yaml`, signal)
+}
+
+export function getSecrets(options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<SecretMetadata>> {
+  return collectionRequest<SecretMetadata>('/api/v1/secrets', options, signal, expectedGeneration)
+}
+
+export function getSecret(namespace: string, name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<SecretMetadata> {
+  return resourceRequest<SecretMetadata>(`/api/v1/secrets/${resourcePath(namespace)}/${resourcePath(name)}`, signal, expectedGeneration)
+}
+
+export function getPreferences(signal?: AbortSignal): Promise<Preferences> {
+  return request<Preferences>('/api/v1/preferences', { method: 'GET', signal })
+}
+
+export function putPreferences(value: Preferences, csrfToken: string, signal?: AbortSignal): Promise<Preferences> {
+  return mutation<Preferences>('/api/v1/preferences', 'PUT', value, csrfToken, signal)
+}
+
+export function restartWorkload(kind: string, namespace: string, name: string, body: RestartActionRequest, csrfToken: string, idempotencyKey: string, signal?: AbortSignal): Promise<import('./types').ActionAccepted> {
+  return request<import('./types').ActionAccepted>(`/api/v1/workloads/${resourcePath(kind)}/${resourcePath(namespace)}/${resourcePath(name)}/restart`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-KubePeep-CSRF': csrfToken, 'Idempotency-Key': idempotencyKey },
+    body: JSON.stringify(body),
+    signal,
+  })
+}
+
+export function scaleWorkload(kind: string, namespace: string, name: string, body: ScaleActionRequest, csrfToken: string, signal?: AbortSignal): Promise<import('./types').ActionAccepted> {
+  return mutation<import('./types').ActionAccepted>(`/api/v1/workloads/${resourcePath(kind)}/${resourcePath(namespace)}/${resourcePath(name)}/scale`, 'PUT', body, csrfToken, signal)
+}
+
+export function deletePod(namespace: string, name: string, body: PodDeleteActionRequest, csrfToken: string, signal?: AbortSignal): Promise<import('./types').ActionAccepted> {
+  return mutation<import('./types').ActionAccepted>(`/api/v1/pods/${resourcePath(namespace)}/${resourcePath(name)}`, 'DELETE', body, csrfToken, signal)
+}
+
+export function createPortForward(namespace: string, name: string, body: PortForwardCreateRequest, csrfToken: string, idempotencyKey: string, signal?: AbortSignal): Promise<PortForward> {
+  return request<PortForward>(`/api/v1/pods/${resourcePath(namespace)}/${resourcePath(name)}/port-forward`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-KubePeep-CSRF': csrfToken, 'Idempotency-Key': idempotencyKey },
+    body: JSON.stringify(body),
+    signal,
+  })
+}
+
+export async function getPortForwards(signal?: AbortSignal, expectedGeneration?: string): Promise<PortForward[]> {
+  const sessions = await request<PortForward[]>('/api/v1/port-forwards', { method: 'GET', signal })
+  if (!Array.isArray(sessions) || sessions.some((session) => session.localAddress !== '127.0.0.1')) {
+    throw new APIError(502, { code: 'INVALID_RESPONSE', message: 'The port-forward collection contains a non-loopback or invalid session.' })
+  }
+  if (expectedGeneration && sessions.some((session) => session.generation !== expectedGeneration)) {
+    throw new APIError(409, { code: 'GENERATION_CHANGED', message: 'The port-forward collection belongs to another selection generation.' })
+  }
+  return sessions
+}
+
+export function closePortForward(id: string, expectedGeneration: string, csrfToken: string, signal?: AbortSignal): Promise<void> {
+  return mutation<void>(`/api/v1/port-forwards/${resourcePath(id)}`, 'DELETE', { confirmed: true, expectedGeneration }, csrfToken, signal)
+}
+
+export function createExecTicket(namespace: string, name: string, body: ExecInit, csrfToken: string, signal?: AbortSignal): Promise<ExecTicket> {
+  return mutation<ExecTicket>(`/api/v1/pods/${resourcePath(namespace)}/${resourcePath(name)}/exec`, 'POST', body, csrfToken, signal)
 }

@@ -11,6 +11,7 @@ import (
 
 	"k8s.io/client-go/dynamic"
 	kubeclient "k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/metadata"
 	"k8s.io/client-go/rest"
 	metricsclient "k8s.io/metrics/pkg/client/clientset/versioned"
 )
@@ -83,6 +84,7 @@ func NewClientFactory(options FactoryOptions) (*ClientFactory, error) {
 type clientGroup struct {
 	kubernetes kubeclient.Interface
 	dynamic    dynamic.Interface
+	metadata   metadata.Interface
 	config     *rest.Config
 	httpClient *http.Client
 }
@@ -109,6 +111,16 @@ func (clients *Clients) UnaryDynamic() dynamic.Interface {
 	return clients.unary.dynamic
 }
 
+// UnaryMetadata exposes the metadata-only client used for resources whose
+// payload must never be materialized (notably Secrets). The underlying REST
+// configuration and credentials remain private to this adapter package.
+func (clients *Clients) UnaryMetadata() metadata.Interface {
+	if clients == nil || clients.unary == nil {
+		return nil
+	}
+	return clients.unary.metadata
+}
+
 func (clients *Clients) StreamingKubernetes() kubeclient.Interface {
 	if clients == nil || clients.streaming == nil {
 		return nil
@@ -121,6 +133,15 @@ func (clients *Clients) StreamingDynamic() dynamic.Interface {
 		return nil
 	}
 	return clients.streaming.dynamic
+}
+
+// StreamingMetadata is the long-running counterpart used by metadata-only
+// watches (ConfigMaps today, and deliberately never a typed Secret watch).
+func (clients *Clients) StreamingMetadata() metadata.Interface {
+	if clients == nil || clients.streaming == nil {
+		return nil
+	}
+	return clients.streaming.metadata
 }
 
 func (clients *Clients) Metrics() metricsclient.Interface {
@@ -232,9 +253,15 @@ func buildClientGroup(config *rest.Config) (*clientGroup, error) {
 		httpClient.CloseIdleConnections()
 		return nil, err
 	}
+	metadataClient, err := metadata.NewForConfigAndClient(config, httpClient)
+	if err != nil {
+		httpClient.CloseIdleConnections()
+		return nil, err
+	}
 	return &clientGroup{
 		kubernetes: kubernetesClient,
 		dynamic:    dynamicClient,
+		metadata:   metadataClient,
 		config:     rest.CopyConfig(config),
 		httpClient: httpClient,
 	}, nil

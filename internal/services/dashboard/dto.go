@@ -213,15 +213,16 @@ type WorkloadDTO struct {
 }
 
 type EventDTO struct {
-	Timestamp  *string `json:"timestamp"`
-	Namespace  string  `json:"namespace"`
-	ObjectKind string  `json:"objectKind"`
-	ObjectName string  `json:"objectName"`
-	Reason     string  `json:"reason"`
-	Message    string  `json:"message"`
-	Count      int64   `json:"count"`
-	Source     *string `json:"source"`
-	Type       string  `json:"type"`
+	Timestamp      *string `json:"timestamp"`
+	Namespace      string  `json:"namespace"`
+	ObjectKind     string  `json:"objectKind"`
+	ObjectName     string  `json:"objectName"`
+	Reason         string  `json:"reason"`
+	Message        string  `json:"message"`
+	Count          int64   `json:"count"`
+	Source         *string `json:"source"`
+	Type           string  `json:"type"`
+	cursorIdentity string
 }
 
 type LogReasonCode string

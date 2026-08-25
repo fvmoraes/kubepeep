@@ -84,7 +84,7 @@ func (backend *DashboardBackend) Restarts(ctx context.Context, binding namespace
 
 func (backend *DashboardBackend) Events(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution) dashboard.DashboardBlockDTO[[]dashboard.EventDTO] {
 	service, _ := backend.service(binding)
-	return service.Warnings(ctx, dashboardSelection(binding, resolution))
+	return service.EventList(ctx, dashboardSelection(binding, resolution))
 }
 
 func (backend *DashboardBackend) Metrics(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution) dashboard.DashboardBlockDTO[dashboard.MetricsDTO] {
@@ -198,6 +198,12 @@ func (backend *DashboardBackend) collectPods(ctx context.Context, port dashboard
 		continuation := ""
 		completed := false
 		for page := 0; page < backend.queryBudget.MaxPages; page++ {
+			remaining = backend.queryBudget.MaxItems - len(block.Value)
+			if remaining <= 0 {
+				block.Complete = false
+				block.Truncated = true
+				break
+			}
 			if err := ctx.Err(); err != nil {
 				addCollectionError(&block, namespace, err)
 				break
@@ -207,7 +213,6 @@ func (backend *DashboardBackend) collectPods(ctx context.Context, port dashboard
 				addCollectionError(&block, namespace, err)
 				break
 			}
-			remaining = backend.queryBudget.MaxItems - len(block.Value)
 			if len(response.Items) > remaining {
 				block.Value = append(block.Value, response.Items[:remaining]...)
 				block.Complete = false
@@ -254,6 +259,12 @@ func (backend *DashboardBackend) collectEvents(ctx context.Context, port dashboa
 		continuation := ""
 		completed := false
 		for page := 0; page < backend.queryBudget.MaxPages; page++ {
+			remaining = backend.queryBudget.MaxItems - len(block.Value)
+			if remaining <= 0 {
+				block.Complete = false
+				block.Truncated = true
+				break
+			}
 			if err := ctx.Err(); err != nil {
 				addCollectionError(&block, namespace, err)
 				break
@@ -263,7 +274,6 @@ func (backend *DashboardBackend) collectEvents(ctx context.Context, port dashboa
 				addCollectionError(&block, namespace, err)
 				break
 			}
-			remaining = backend.queryBudget.MaxItems - len(block.Value)
 			if len(response.Items) > remaining {
 				block.Value = append(block.Value, response.Items[:remaining]...)
 				block.Complete = false

@@ -19,11 +19,13 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Set up Go
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
-          go-version: 1.25.12
+          go-version: 1.25.13
           cache-dependency-path: go.sum
 
       - name: Set up Node.js
@@ -32,6 +34,11 @@ jobs:
           node-version: 24.18.0
           cache: npm
           cache-dependency-path: web/package-lock.json
+
+      - name: Pin npm
+        run: |
+          npm install --global npm@11.16.0
+          test "$(npm --version)" = "11.16.0"
 
       - name: Install and audit frontend dependencies
         working-directory: web
@@ -43,6 +50,7 @@ jobs:
         working-directory: web
         run: |
           npm run format:check
+          npm run lint
           npm run typecheck
           npm test
           npm run build
@@ -62,13 +70,33 @@ jobs:
           test -z "$(find cmd internal -type f -name '*.go' -exec gofmt -l {} +)"
           go mod verify
 
+      - name: Validate GitHub Actions workflows
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+
+      - name: Verify Unix installer
+        run: |
+          sh -n install.sh scripts/install_test.sh
+          ./scripts/install_test.sh
+
       - name: Test and build embedded binary
         env:
           CGO_ENABLED: "0"
         run: |
-          go list ./... | grep -v '/web/node_modules/' | xargs go vet
-          go list ./... | grep -v '/web/node_modules/' | xargs go test
+          mapfile -t packages < <(go list ./... | grep -v '/web/node_modules/')
+          go vet "${packages[@]}"
+          go test -count=1 "${packages[@]}"
           go build -trimpath -o dist/kubePeep ./cmd/kubePeep
+          ./scripts/smoke.sh dist/kubePeep
+
+      - name: Run the race detector
+        env:
+          CGO_ENABLED: "1"
+        run: go test -count=1 -race ./internal/...
+
+      - name: Scan reachable Go vulnerabilities
+        run: |
+          mapfile -t packages < <(go list ./... | grep -v '/web/node_modules/')
+          go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 "${packages[@]}"
 
       - name: Verify Ginger project
         run: |
@@ -87,11 +115,13 @@ jobs:
     steps:
       - name: Check out source
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Set up Go
         uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
-          go-version: 1.25.12
+          go-version: 1.25.13
           cache-dependency-path: go.sum
 
       - name: Set up Node.js
@@ -100,6 +130,12 @@ jobs:
           node-version: 24.18.0
           cache: npm
           cache-dependency-path: web/package-lock.json
+
+      - name: Pin npm
+        shell: bash
+        run: |
+          npm install --global npm@11.16.0
+          test "$(npm --version)" = "11.16.0"
 
       - name: Build embedded frontend
         working-directory: web
@@ -112,7 +148,11 @@ jobs:
         env:
           CGO_ENABLED: "0"
           KUBEPEEP_NATIVE_BLACKBOX: "1"
-        run: go test -count=1 ./internal/adapters/userdirs ./internal/securefs ./internal/runtime ./internal/cli
+        run: go test -count=1 ./internal/adapters/userdirs ./internal/securefs ./internal/runtime ./internal/updater ./internal/cli
+
+      - name: Parse native installer
+        if: runner.os != 'Windows'
+        run: sh -n install.sh
 
       - name: Test native paths, permissions, locks, control lifecycle, and doctor (Windows)
         if: runner.os == 'Windows'
@@ -121,7 +161,7 @@ jobs:
           CGO_ENABLED: "0"
           KUBEPEEP_NATIVE_BLACKBOX: "1"
         run: |
-          $lines = & go test -count=1 ./internal/adapters/userdirs ./internal/securefs ./internal/runtime ./internal/cli 2>&1
+          $lines = & go test -count=1 ./internal/adapters/userdirs ./internal/securefs ./internal/runtime ./internal/updater ./internal/cli 2>&1
           $exitCode = $LASTEXITCODE
           $lines | Write-Output
           if ($exitCode -ne 0) {
@@ -130,3 +170,251 @@ jobs:
             Write-Output "::error title=Native Windows test diagnostic::$diagnostic"
             exit $exitCode
           }
+
+      - name: Parse Windows installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $tokens = $null
+          $errors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+            (Resolve-Path ./install.ps1),
+            [ref]$tokens,
+            [ref]$errors
+          ) | Out-Null
+          if ($errors.Count -ne 0) {
+            $errors | Format-List | Out-String | Write-Error
+          }
+
+      - name: Test Windows installer checksum, archive, uninstall, and purge
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/install_test.ps1
+
+  release-snapshot:
+    needs: build-and-test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version: 1.25.13
+          cache-dependency-path: go.sum
+
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24.18.0
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Pin npm
+        run: |
+          npm install --global npm@11.16.0
+          test "$(npm --version)" = "11.16.0"
+
+      - name: Validate release configuration and artifacts
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          distribution: goreleaser
+          version: v2.17.1
+          args: release --snapshot --clean
+
+      - name: Upload exact snapshot archives
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-snapshot
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/checksums.txt
+          if-no-files-found: error
+          retention-days: 1
+
+  native-archive-smoke:
+    needs: release-snapshot
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            goos: linux
+            goarch: amd64
+          - runner: ubuntu-24.04-arm
+            goos: linux
+            goarch: arm64
+          - runner: macos-15-intel
+            goos: darwin
+            goarch: amd64
+          - runner: macos-15
+            goos: darwin
+            goarch: arm64
+          - runner: windows-2025
+            goos: windows
+            goarch: amd64
+          - runner: windows-11-arm
+            goos: windows
+            goarch: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 15
+    steps:
+      - name: Check out smoke harness
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Download exact snapshot archives
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-snapshot
+          path: dist
+
+      - name: Execute Unix archive
+        if: matrix.goos != 'windows'
+        shell: bash
+        env:
+          TARGET_OS: ${{ matrix.goos }}
+          TARGET_ARCH: ${{ matrix.goarch }}
+        run: |
+          archive=$(find dist -maxdepth 1 -type f -name "kubePeep_*_${TARGET_OS}_${TARGET_ARCH}.tar.gz" -print -quit)
+          test -n "$archive"
+          archive_name=$(basename "$archive")
+          expected=$(awk -v name="$archive_name" '$2 == name || $2 == "*" name { print $1 }' dist/checksums.txt)
+          test -n "$expected"
+          if command -v sha256sum >/dev/null 2>&1; then
+            actual=$(sha256sum "$archive" | awk '{print $1}')
+          else
+            actual=$(shasum -a 256 "$archive" | awk '{print $1}')
+          fi
+          test "$actual" = "$expected"
+          mkdir -p "$RUNNER_TEMP/kubepeep-archive"
+          tar -xzf "$archive" -C "$RUNNER_TEMP/kubepeep-archive"
+          test -f "$RUNNER_TEMP/kubepeep-archive/README.md"
+          test -f "$RUNNER_TEMP/kubepeep-archive/LICENSE"
+          test -f "$RUNNER_TEMP/kubepeep-archive/THIRD_PARTY_NOTICES.md"
+          test "$(find "$RUNNER_TEMP/kubepeep-archive" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')" -eq 4
+          ./scripts/smoke.sh "$RUNNER_TEMP/kubepeep-archive/kubePeep"
+
+      - name: Execute Windows archive
+        if: matrix.goos == 'windows'
+        shell: pwsh
+        env:
+          TARGET_ARCH: ${{ matrix.goarch }}
+        run: |
+          $archive = Get-ChildItem -LiteralPath dist -Filter "kubePeep_*_windows_$env:TARGET_ARCH.zip" | Select-Object -First 1
+          if ($null -eq $archive) { throw 'snapshot archive was not found' }
+          $line = Get-Content -LiteralPath dist/checksums.txt | Where-Object { $_ -match ("\s+\*?" + [Regex]::Escape($archive.Name) + '$') }
+          if (@($line).Count -ne 1) { throw 'snapshot checksum entry is missing or duplicated' }
+          $expected = ($line -split '\s+')[0].ToLowerInvariant()
+          $actual = (Get-FileHash -LiteralPath $archive.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) { throw 'snapshot checksum mismatch' }
+          $extract = Join-Path $env:RUNNER_TEMP 'kubepeep-archive'
+          Expand-Archive -LiteralPath $archive.FullName -DestinationPath $extract
+          $requiredFiles = @('README.md', 'LICENSE', 'THIRD_PARTY_NOTICES.md', 'kubePeep.exe')
+          $actualFiles = @(Get-ChildItem -LiteralPath $extract -Force)
+          if ($actualFiles.Count -ne $requiredFiles.Count -or @($actualFiles | Where-Object { $_.PSIsContainer -or $_.Name -notin $requiredFiles }).Count -ne 0) {
+            throw 'archive contents do not match the exact release allowlist'
+          }
+          foreach ($required in $requiredFiles) {
+            if (-not (Test-Path -LiteralPath (Join-Path $extract $required))) { throw "archive is missing $required" }
+          }
+          $binary = Join-Path $extract 'kubePeep.exe'
+          & $binary version
+          if ($LASTEXITCODE -ne 0) { throw 'version command failed' }
+          $env:LOCALAPPDATA = Join-Path $env:RUNNER_TEMP 'kubepeep-localappdata'
+          New-Item -ItemType Directory -Path $env:LOCALAPPDATA -Force | Out-Null
+          $stdout = Join-Path $env:RUNNER_TEMP 'kubepeep.stdout.log'
+          $stderr = Join-Path $env:RUNNER_TEMP 'kubepeep.stderr.log'
+          $process = Start-Process -FilePath $binary -ArgumentList @('start', '--no-browser') -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          try {
+            $status = $null
+            foreach ($attempt in 1..200) {
+              & $binary status *> $null
+              if ($LASTEXITCODE -eq 0) {
+                $status = (& $binary status | Out-String)
+                break
+              }
+              if ($process.HasExited) { throw "process exited before readiness: $(Get-Content $stderr -Raw)" }
+              Start-Sleep -Milliseconds 100
+            }
+            if ([string]::IsNullOrWhiteSpace($status) -or $status -notmatch 'port=([0-9]+)') { throw 'status did not publish a port' }
+            $port = [int]$Matches[1]
+            Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$port/health" | Out-Null
+            Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$port/api/v1/status" | Out-Null
+            & $binary stop *> $null
+            if ($LASTEXITCODE -ne 0) { throw 'stop command failed' }
+            if (-not $process.WaitForExit(10000)) { throw 'process did not stop cleanly' }
+          } finally {
+            if (-not $process.HasExited) { Stop-Process -Id $process.Id -Force }
+          }
+
+  restricted-kind:
+    needs: build-and-test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version: 1.25.13
+          cache-dependency-path: go.sum
+
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24.18.0
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Pin npm and build the embedded application
+        run: |
+          npm install --global npm@11.16.0
+          test "$(npm --version)" = "11.16.0"
+          cd web
+          npm ci
+          npm run build
+          cd ..
+          CGO_ENABLED=0 go build -trimpath -o dist/kubePeep ./cmd/kubePeep
+
+      - name: Install pinned Kind
+        env:
+          KIND_VERSION: v0.32.0
+          KIND_SHA256: 50030de23cf40a18505f20426f6a8506bedf13c6e509244bd1fa9463721b0f54
+          KUBECTL_VERSION: v1.36.3
+          KUBECTL_SHA256: ebbd080e7c2e275093b55915722043257eb24004363e20acb3c4d71919f88336
+        run: |
+          mkdir -p "$RUNNER_TEMP/kubepeep-bin"
+          curl --fail --location --proto '=https' --tlsv1.2 \
+            "https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64" \
+            --output "$RUNNER_TEMP/kubepeep-bin/kind"
+          echo "$KIND_SHA256  $RUNNER_TEMP/kubepeep-bin/kind" | sha256sum --check --strict
+          curl --fail --location --proto '=https' --tlsv1.2 \
+            "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl" \
+            --output "$RUNNER_TEMP/kubepeep-bin/kubectl"
+          echo "$KUBECTL_SHA256  $RUNNER_TEMP/kubepeep-bin/kubectl" | sha256sum --check --strict
+          chmod 0755 "$RUNNER_TEMP/kubepeep-bin/kind"
+          chmod 0755 "$RUNNER_TEMP/kubepeep-bin/kubectl"
+          echo "$RUNNER_TEMP/kubepeep-bin" >> "$GITHUB_PATH"
+
+      - name: Create and validate restricted cluster
+        run: |
+          ./test/kind/harness.sh create
+          ./test/kind/harness.sh validate
+          ./test/kind/harness.sh kubeconfigs
+          ./test/kind/harness.sh app-e2e ./dist/kubePeep
+
+      - name: Remove ephemeral CI cluster
+        if: always()
+        run: kind delete cluster --name kubepeep-f4

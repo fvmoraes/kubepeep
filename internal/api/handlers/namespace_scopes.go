@@ -724,9 +724,9 @@ func scopePageStart(scopes []namespaces.Scope, query scopeListQuery, cursor scop
 
 func newScopeCursorState(scope namespaces.Scope, query scopeListQuery) scopeCursorState {
 	sortValue := scope.Name
-		if query.sort == "updatedAt" {
-			sortValue = scope.UpdatedAt.UTC().Format("2006-01-02T15:04:05.999999999Z07:00")
-		}
+	if query.sort == "updatedAt" {
+		sortValue = scope.UpdatedAt.UTC().Format("2006-01-02T15:04:05.999999999Z07:00")
+	}
 	return scopeCursorState{SortValue: sortValue, Name: scope.Name, ID: scope.ID}
 }
 

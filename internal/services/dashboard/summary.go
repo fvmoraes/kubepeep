@@ -17,6 +17,7 @@ type DashboardWorkloadService interface {
 
 type DashboardEventService interface {
 	Warnings(context.Context, Selection) DashboardBlockDTO[[]EventDTO]
+	All(context.Context, Selection) DashboardBlockDTO[[]EventDTO]
 }
 
 type DashboardLogService interface {
@@ -113,6 +114,13 @@ func (s *DashboardService) Warnings(ctx context.Context, selection Selection) Da
 		return unavailableEvents()
 	}
 	return s.Events.Warnings(ctx, selection)
+}
+
+func (s *DashboardService) EventList(ctx context.Context, selection Selection) DashboardBlockDTO[[]EventDTO] {
+	if s == nil || s.Events == nil {
+		return unavailableEvents()
+	}
+	return s.Events.All(ctx, selection)
 }
 
 func (s *DashboardService) ScanLogs(ctx context.Context, request LogScanRequest, targets []LogTarget) DashboardBlockDTO[[]LogMatchDTO] {

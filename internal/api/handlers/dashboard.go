@@ -231,7 +231,7 @@ func (handler *Dashboard) writeResult(w http.ResponseWriter, r *http.Request, bi
 		return
 	}
 	if err := totalDashboardFailure(value); err != nil {
-		api.WriteError(w, r, err)
+		handler.writeIfCurrent(w, r, binding, func() { api.WriteError(w, r, err) })
 		return
 	}
 	collectedAt := handler.now().UTC()
@@ -248,7 +248,9 @@ func (handler *Dashboard) writeResult(w http.ResponseWriter, r *http.Request, bi
 	}}
 	payload, err := json.Marshal(envelope)
 	if err != nil {
-		api.WriteError(w, r, api.NewHTTPError(http.StatusInternalServerError, api.CodeInternal, "The dashboard response could not be encoded.", nil, err))
+		handler.writeIfCurrent(w, r, binding, func() {
+			api.WriteError(w, r, api.NewHTTPError(http.StatusInternalServerError, api.CodeInternal, "The dashboard response could not be encoded.", nil, err))
+		})
 		return
 	}
 	write := func() {
@@ -258,6 +260,10 @@ func (handler *Dashboard) writeResult(w http.ResponseWriter, r *http.Request, bi
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write(payload)
 	}
+	handler.writeIfCurrent(w, r, binding, write)
+}
+
+func (handler *Dashboard) writeIfCurrent(w http.ResponseWriter, r *http.Request, binding namespaces.SelectionBinding, write func()) {
 	if fenced, ok := handler.selection.(interface {
 		IfCurrent(namespaces.SelectionBinding, func()) bool
 	}); ok {
@@ -266,7 +272,7 @@ func (handler *Dashboard) writeResult(w http.ResponseWriter, r *http.Request, bi
 		}
 		return
 	}
-	current, _ = handler.selection.Snapshot()
+	current, _ := handler.selection.Snapshot()
 	if !sameSelectionBinding(current, binding) {
 		api.WriteError(w, r, api.NewHTTPError(http.StatusConflict, api.CodeGenerationChanged, "The active selection changed before the dashboard response was published.", nil, nil))
 		return
@@ -315,6 +321,9 @@ func totalDashboardFailure(value any) error {
 	}
 	if _, ok := codes[dashboard.CodeAuthorizationUnavailable]; ok {
 		return api.NewHTTPError(http.StatusServiceUnavailable, api.CodeAuthorizationUnavailable, "Authorization could not be confirmed.", nil, nil)
+	}
+	if _, ok := codes[dashboard.CodeAuthenticationUnavailable]; ok {
+		return api.NewHTTPError(http.StatusServiceUnavailable, api.CodeAuthenticationUnavailable, "Kubernetes authentication is unavailable.", nil, nil)
 	}
 	if _, ok := codes[dashboard.CodeValidationFailed]; ok {
 		return validationHTTPError("The dashboard request is invalid.", nil)
@@ -427,7 +436,7 @@ func decodeDashboardListQuery(r *http.Request, kind dashboardQueryKind) (dashboa
 	if len(result.namespaces) > 100 {
 		return dashboardListQuery{}, validationHTTPError("namespace accepts at most 100 values.", nil)
 	}
-	result.search = strings.ToLower(query.Get("search"))
+	result.search = query.Get("search")
 	if len(result.search) > 256 {
 		return dashboardListQuery{}, validationHTTPError("search must be at most 256 bytes.", nil)
 	}
@@ -436,6 +445,9 @@ func decodeDashboardListQuery(r *http.Request, kind dashboardQueryKind) (dashboa
 			return dashboardListQuery{}, validationHTTPError("status is not supported by this dashboard route.", nil)
 		}
 		result.statuses[status] = struct{}{}
+	}
+	if kind == dashboardQueryEvents && len(result.statuses) == 0 {
+		result.statuses["Warning"] = struct{}{}
 	}
 	result.sort = query.Get("sort")
 	result.order = query.Get("order")
@@ -525,7 +537,7 @@ func narrowDashboardNamespaces(resolution *namespaces.ScopeResolution, requested
 }
 
 func filterProblems(block *dashboard.DashboardBlockDTO[[]dashboard.ProblemPodDTO], query dashboardListQuery) {
-	values := block.Value[:0]
+	values := make([]dashboard.ProblemPodDTO, 0, len(block.Value))
 	for _, item := range block.Value {
 		if len(query.statuses) > 0 {
 			if _, ok := query.statuses[string(item.Severity)]; !ok {
@@ -539,34 +551,42 @@ func filterProblems(block *dashboard.DashboardBlockDTO[[]dashboard.ProblemPodDTO
 	}
 	block.Value = values
 	sort.SliceStable(block.Value, func(left, right int) bool {
-		comparison := compareProblems(block.Value[left], block.Value[right], query.sort)
-		if query.order == "desc" {
-			return comparison > 0
-		}
-		return comparison < 0
+		return compareProblems(block.Value[left], block.Value[right], query.sort, query.order) < 0
 	})
 }
 
-func compareProblems(left, right dashboard.ProblemPodDTO, field string) int {
+func compareProblems(left, right dashboard.ProblemPodDTO, field, order string) int {
+	comparison := 0
 	switch field {
 	case "severity":
 		leftRank, rightRank := problemSeverityRank(left.Severity), problemSeverityRank(right.Severity)
 		if leftRank != rightRank {
-			return leftRank - rightRank
+			comparison = leftRank - rightRank
 		}
 	case "age":
 		if left.AgeSeconds != right.AgeSeconds {
 			if left.AgeSeconds < right.AgeSeconds {
-				return -1
+				comparison = -1
+			} else {
+				comparison = 1
 			}
-			return 1
 		}
 	}
-	return strings.Compare(left.Namespace+"\x00"+left.Pod+"\x00"+optionalString(left.Container), right.Namespace+"\x00"+right.Pod+"\x00"+optionalString(right.Container))
+	if comparison != 0 {
+		if order == "desc" {
+			return -comparison
+		}
+		return comparison
+	}
+	comparison = strings.Compare(left.Namespace+"\x00"+left.Pod+"\x00"+optionalString(left.Container), right.Namespace+"\x00"+right.Pod+"\x00"+optionalString(right.Container))
+	if field == "identity" && order == "desc" {
+		return -comparison
+	}
+	return comparison
 }
 
 func filterEvents(block *dashboard.DashboardBlockDTO[[]dashboard.EventDTO], query dashboardListQuery) {
-	values := block.Value[:0]
+	values := make([]dashboard.EventDTO, 0, len(block.Value))
 	for _, item := range block.Value {
 		if len(query.statuses) > 0 {
 			if _, ok := query.statuses[item.Type]; !ok {
@@ -580,33 +600,49 @@ func filterEvents(block *dashboard.DashboardBlockDTO[[]dashboard.EventDTO], quer
 	}
 	block.Value = values
 	sort.SliceStable(block.Value, func(left, right int) bool {
-		comparison := compareEvents(block.Value[left], block.Value[right], query.sort)
-		if query.order == "desc" {
-			return comparison > 0
-		}
-		return comparison < 0
+		return compareEvents(block.Value[left], block.Value[right], query.sort, query.order) < 0
 	})
 }
 
-func compareEvents(left, right dashboard.EventDTO, field string) int {
+func compareEvents(left, right dashboard.EventDTO, field, order string) int {
+	comparison := 0
 	switch field {
 	case "timestamp":
-		if value := strings.Compare(optionalString(left.Timestamp), optionalString(right.Timestamp)); value != 0 {
-			return value
-		}
+		comparison = strings.Compare(optionalString(left.Timestamp), optionalString(right.Timestamp))
 	case "count":
 		if left.Count != right.Count {
 			if left.Count < right.Count {
-				return -1
+				comparison = -1
+			} else {
+				comparison = 1
 			}
-			return 1
 		}
 	}
-	return strings.Compare(left.Namespace+"\x00"+left.ObjectKind+"\x00"+left.ObjectName+"\x00"+left.Reason, right.Namespace+"\x00"+right.ObjectKind+"\x00"+right.ObjectName+"\x00"+right.Reason)
+	if comparison != 0 {
+		if order == "desc" {
+			return -comparison
+		}
+		return comparison
+	}
+	comparison = compareCanonicalEvents(left, right)
+	if field == "identity" && order == "desc" {
+		return -comparison
+	}
+	return comparison
+}
+
+func compareCanonicalEvents(left, right dashboard.EventDTO) int {
+	if comparison := strings.Compare(optionalString(left.Timestamp), optionalString(right.Timestamp)); comparison != 0 {
+		return -comparison
+	}
+	if comparison := strings.Compare(left.Namespace, right.Namespace); comparison != 0 {
+		return comparison
+	}
+	return strings.Compare(dashboard.EventCursorIdentity(left), dashboard.EventCursorIdentity(right))
 }
 
 func filterMetrics(block *dashboard.DashboardBlockDTO[dashboard.MetricsDTO], query dashboardListQuery) {
-	values := block.Value.Pods[:0]
+	values := make([]dashboard.PodMetricDTO, 0, len(block.Value.Pods))
 	for _, item := range block.Value.Pods {
 		if query.search != "" && !containsFolded(query.search, item.Pod) {
 			matched := false
@@ -621,15 +657,11 @@ func filterMetrics(block *dashboard.DashboardBlockDTO[dashboard.MetricsDTO], que
 	}
 	block.Value.Pods = values
 	sort.SliceStable(block.Value.Pods, func(left, right int) bool {
-		comparison := compareMetrics(block.Value.Pods[left], block.Value.Pods[right], query.sort)
-		if query.order == "desc" {
-			return comparison > 0
-		}
-		return comparison < 0
+		return compareMetrics(block.Value.Pods[left], block.Value.Pods[right], query.sort, query.order) < 0
 	})
 }
 
-func compareMetrics(left, right dashboard.PodMetricDTO, field string) int {
+func compareMetrics(left, right dashboard.PodMetricDTO, field, order string) int {
 	var leftValue, rightValue int64
 	switch field {
 	case "cpu":
@@ -638,12 +670,20 @@ func compareMetrics(left, right dashboard.PodMetricDTO, field string) int {
 		leftValue, rightValue = left.MemoryBytes, right.MemoryBytes
 	}
 	if leftValue != rightValue {
+		comparison := 1
 		if leftValue < rightValue {
-			return -1
+			comparison = -1
 		}
-		return 1
+		if order == "desc" {
+			return -comparison
+		}
+		return comparison
 	}
-	return strings.Compare(left.Namespace+"\x00"+left.Pod, right.Namespace+"\x00"+right.Pod)
+	comparison := strings.Compare(left.Namespace+"\x00"+left.Pod, right.Namespace+"\x00"+right.Pod)
+	if field == "identity" && order == "desc" {
+		return -comparison
+	}
+	return comparison
 }
 
 func rebuildMetricRanks(value *dashboard.MetricsDTO) {
@@ -775,7 +815,7 @@ func problemCursorIdentity(value dashboard.ProblemPodDTO) string {
 }
 
 func eventCursorIdentity(value dashboard.EventDTO) string {
-	return strings.Join([]string{value.Namespace, value.ObjectKind, value.ObjectName, value.Reason, value.Message, optionalString(value.Source)}, "\x00")
+	return dashboard.EventCursorIdentity(value)
 }
 
 func metricCursorIdentity(value dashboard.PodMetricDTO) string {

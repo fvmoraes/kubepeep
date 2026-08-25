@@ -6,12 +6,13 @@ import (
 )
 
 const (
-	CodeValidationFailed         = "VALIDATION_FAILED"
-	CodeForbidden                = "FORBIDDEN"
-	CodeFeatureUnavailable       = "FEATURE_UNAVAILABLE"
-	CodeAuthorizationUnavailable = "AUTHORIZATION_UNAVAILABLE"
-	CodeUpstreamTimeout          = "UPSTREAM_TIMEOUT"
-	CodeClusterUnavailable       = "CLUSTER_UNAVAILABLE"
+	CodeValidationFailed          = "VALIDATION_FAILED"
+	CodeForbidden                 = "FORBIDDEN"
+	CodeFeatureUnavailable        = "FEATURE_UNAVAILABLE"
+	CodeAuthorizationUnavailable  = "AUTHORIZATION_UNAVAILABLE"
+	CodeAuthenticationUnavailable = "AUTHENTICATION_UNAVAILABLE"
+	CodeUpstreamTimeout           = "UPSTREAM_TIMEOUT"
+	CodeClusterUnavailable        = "CLUSTER_UNAVAILABLE"
 	// CodeUpstreamUnavailable remains a Go-level compatibility alias. The
 	// public value is the closed API code CLUSTER_UNAVAILABLE.
 	CodeUpstreamUnavailable = CodeClusterUnavailable
@@ -43,6 +44,10 @@ func NewFeatureUnavailableError() error {
 
 func NewAuthorizationUnavailableError() error {
 	return &PublicError{code: CodeAuthorizationUnavailable, message: "Authorization could not be confirmed."}
+}
+
+func NewAuthenticationUnavailableError() error {
+	return &PublicError{code: CodeAuthenticationUnavailable, message: "Kubernetes authentication is unavailable."}
 }
 
 type publicError interface {

@@ -22,6 +22,7 @@ import (
 	metricstypes "k8s.io/metrics/pkg/apis/metrics/v1beta1"
 	metricsfake "k8s.io/metrics/pkg/client/clientset/versioned/fake"
 
+	kubeadapter "github.com/fvmoraes/kubepeep/internal/adapters/kubernetes"
 	"github.com/fvmoraes/kubepeep/internal/services/authorization"
 	"github.com/fvmoraes/kubepeep/internal/services/dashboard"
 	"github.com/fvmoraes/kubepeep/internal/services/namespaces"
@@ -109,6 +110,28 @@ func (*dashboardAuthorizationStub) InvalidateAll()              {}
 
 func dashboardTestBinding() namespaces.SelectionBinding {
 	return namespaces.SelectionBinding{ClusterProfileID: 11, Context: "dev", Cluster: "cluster-a", Generation: "gen-11"}
+}
+
+func TestDashboardAdapterPreservesAuthenticationClassification(t *testing.T) {
+	t.Parallel()
+	converted := toDashboardError(&kubeadapter.SafeError{
+		Code: kubeadapter.CodeAuthenticationUnavailable, Message: "safe", Retryable: true,
+	})
+	type publicError interface {
+		Code() string
+		PublicMessage() string
+	}
+	var safe publicError
+	if !errors.As(converted, &safe) || safe.Code() != dashboard.CodeAuthenticationUnavailable || strings.Contains(safe.PublicMessage(), "credential") {
+		t.Fatalf("authentication classification was lost or unsafe: %#v", converted)
+	}
+
+	converted = toDashboardError(&authorization.PublicError{
+		Code: authorization.CodeAuthenticationUnavailable, Message: "safe", HTTPStatus: http.StatusServiceUnavailable,
+	})
+	if !errors.As(converted, &safe) || safe.Code() != dashboard.CodeAuthenticationUnavailable {
+		t.Fatalf("authorization authentication classification was lost: %#v", converted)
+	}
 }
 
 func dashboardTestClients(t *testing.T, objects ...runtime.Object) (*fixedDashboardClients, *kubefake.Clientset, *metricsfake.Clientset) {

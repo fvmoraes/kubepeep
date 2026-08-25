@@ -18,27 +18,34 @@ import (
 	"github.com/fvmoraes/kubepeep/internal/api"
 	"github.com/fvmoraes/kubepeep/internal/api/handlers"
 	apiMiddleware "github.com/fvmoraes/kubepeep/internal/api/middlewares"
+	actionservice "github.com/fvmoraes/kubepeep/internal/services/actions"
 	"github.com/fvmoraes/kubepeep/internal/web"
 )
 
 type Options struct {
-	Config      *gingerconfig.Config
-	Port        int
-	Build       api.BuildInfo
-	Snapshots   api.SnapshotProvider
-	Generation  api.GenerationSource
-	Sessions    *api.SessionStore
-	Profiles    handlers.ClusterProfileService
-	Scopes      handlers.NamespaceScopeService
-	Namespaces  handlers.NamespaceCatalog
-	Permissions handlers.PermissionMatrixService
-	Selection   handlers.SelectionReader
-	Contexts    handlers.ContextService
-	Dashboard   handlers.DashboardService
-	Cursors     *api.CursorCodec
-	SessionTTL  time.Duration
-	Frontend    fs.FS
-	Logger      *gingerlogger.Logger
+	Config       *gingerconfig.Config
+	Port         int
+	Build        api.BuildInfo
+	Snapshots    api.SnapshotProvider
+	Generation   api.GenerationSource
+	Sessions     *api.SessionStore
+	Profiles     handlers.ClusterProfileService
+	Scopes       handlers.NamespaceScopeService
+	Namespaces   handlers.NamespaceCatalog
+	Permissions  handlers.PermissionMatrixService
+	Selection    handlers.SelectionReader
+	Contexts     handlers.ContextService
+	Dashboard    handlers.DashboardService
+	Resources    handlers.ResourceService
+	Streams      handlers.ResourceStreamService
+	Preferences  handlers.PreferenceService
+	Actions      actionservice.ActionService
+	PortForwards actionservice.PortForwardService
+	Exec         handlers.ExecBridgeService
+	Cursors      *api.CursorCodec
+	SessionTTL   time.Duration
+	Frontend     fs.FS
+	Logger       *gingerlogger.Logger
 }
 
 type Application struct {
@@ -125,21 +132,44 @@ func New(options Options) (*Application, error) {
 		apiMiddleware.BrowserAPI(security),
 	)
 	handlers.Register(application.Router, handlers.Dependencies{
-		Snapshots:   options.Snapshots,
-		Sessions:    sessions,
-		Generation:  generation,
-		Profiles:    options.Profiles,
-		Scopes:      options.Scopes,
-		Namespaces:  options.Namespaces,
-		Permissions: options.Permissions,
-		Selection:   options.Selection,
-		Contexts:    options.Contexts,
-		Dashboard:   options.Dashboard,
-		Cursors:     options.Cursors,
-		Origin:      origin,
-		Port:        options.Port,
-		Build:       options.Build,
+		Snapshots:    options.Snapshots,
+		Sessions:     sessions,
+		Generation:   generation,
+		Profiles:     options.Profiles,
+		Scopes:       options.Scopes,
+		Namespaces:   options.Namespaces,
+		Permissions:  options.Permissions,
+		Selection:    options.Selection,
+		Contexts:     options.Contexts,
+		Dashboard:    options.Dashboard,
+		Resources:    options.Resources,
+		Preferences:  options.Preferences,
+		Actions:      options.Actions,
+		PortForwards: options.PortForwards,
+		Exec:         options.Exec,
+		Cursors:      options.Cursors,
+		Origin:       origin,
+		Port:         options.Port,
+		Build:        options.Build,
 	})
+	if options.Streams != nil && options.Selection != nil {
+		resourceStreams := handlers.NewResourceStreams(options.Streams, options.Selection, sessions, origin)
+		application.Router.HandleRaw(
+			"GET /api/v1/pods/{namespace}/{name}/logs/stream",
+			apiMiddleware.RawChain(application.Logger, security, 4*time.Hour, http.HandlerFunc(resourceStreams.LogFollow)),
+		)
+		application.Router.HandleRaw(
+			"GET /api/v1/stream",
+			apiMiddleware.RawChain(application.Logger, security, 0, http.HandlerFunc(resourceStreams.Resources)),
+		)
+	}
+	if options.Exec != nil && options.Selection != nil {
+		execStream := handlers.NewExecStream(options.Exec, options.Selection, origin)
+		application.Router.HandleRaw(
+			"GET /api/v1/exec/{sessionId}/stream",
+			apiMiddleware.RawChain(application.Logger, security, actionservice.DefaultExecDuration+time.Minute, execStream),
+		)
+	}
 
 	apiFallback := gingermiddleware.Chain(
 		apiMiddleware.RequestID(),

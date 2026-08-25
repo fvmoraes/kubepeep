@@ -415,6 +415,9 @@ func (s *WorkloadService) loadNamespace(ctx context.Context, namespace string, m
 	items := 0
 	fullyCollected := true
 	for page := 0; page < s.budget.MaxPages; page++ {
+		if items >= maximumItems {
+			return result, false, true, nil
+		}
 		if err := ctx.Err(); err != nil {
 			return result, false, false, err
 		}

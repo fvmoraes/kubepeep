@@ -80,12 +80,34 @@ func TestEventServiceAppliesItemBudgetAcrossWholeFanout(t *testing.T) {
 	t.Parallel()
 	now := time.Now().UTC()
 	port := &fakeEventPort{responses: map[string][]EventPage{
-		"a": {{Items: []NormalizedEvent{{Namespace: "a", Type: "Warning", UID: "a", Count: 1, ObservedAt: now}}}},
+		"a": {
+			{Items: []NormalizedEvent{{Namespace: "a", Type: "Warning", UID: "a", Count: 1, ObservedAt: now}}, Continue: "more"},
+			{Items: []NormalizedEvent{{Namespace: "a", Type: "Warning", UID: "a-extra", Count: 1, ObservedAt: now}}},
+		},
 		"b": {{Items: []NormalizedEvent{{Namespace: "b", Type: "Warning", UID: "b", Count: 1, ObservedAt: now}}}},
 	}}
 	block := NewEventService(port, QueryBudget{MaxItems: 1}).Warnings(context.Background(), Selection{Namespaces: []string{"a", "b"}})
-	if block.Complete || !block.Truncated || len(block.Value) != 1 || block.Coverage.CompletedNamespaces != 1 || port.calls["b"] != 0 {
+	if block.Complete || !block.Truncated || len(block.Value) != 1 || block.Coverage.CompletedNamespaces != 0 || port.calls["a"] != 1 || port.calls["b"] != 0 {
 		t.Fatalf("global fan-out budget not enforced: %+v calls=%+v", block, port.calls)
+	}
+}
+
+func TestEventServiceAllReturnsNormalWarningAndUnknown(t *testing.T) {
+	t.Parallel()
+	now := time.Now().UTC()
+	port := &fakeEventPort{responses: map[string][]EventPage{
+		"a": {{Items: []NormalizedEvent{
+			{Namespace: "a", Type: "Normal", UID: "normal", Count: 1, ObservedAt: now},
+			{Namespace: "a", Type: "Warning", UID: "warning", Count: 1, ObservedAt: now.Add(-time.Second)},
+			{Namespace: "a", Type: "custom", UID: "unknown", Count: 1, ObservedAt: now.Add(-2 * time.Second)},
+		}}},
+	}}
+	block := NewEventService(port, QueryBudget{}).All(context.Background(), Selection{Namespaces: []string{"a"}})
+	if !block.Complete || block.Truncated || len(block.Value) != 3 {
+		t.Fatalf("unexpected all-events block: %+v", block)
+	}
+	if block.Value[0].Type != "Normal" || block.Value[1].Type != "Warning" || block.Value[2].Type != "Unknown" {
+		t.Fatalf("closed type enum not preserved: %+v", block.Value)
 	}
 }
 
@@ -191,5 +213,9 @@ func (stub *stubDashboardWorkloads) Degraded(context.Context, Selection) Dashboa
 type stubDashboardEvents struct{ value DashboardBlockDTO[[]EventDTO] }
 
 func (stub *stubDashboardEvents) Warnings(context.Context, Selection) DashboardBlockDTO[[]EventDTO] {
+	return stub.value
+}
+
+func (stub *stubDashboardEvents) All(context.Context, Selection) DashboardBlockDTO[[]EventDTO] {
 	return stub.value
 }

@@ -13,6 +13,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/fvmoraes/kubepeep/internal/lifecycle"
 )
 
 const runtimeLifecycleTestTimeout = 15 * time.Second
@@ -108,6 +110,59 @@ func TestRunForegroundPublishesAfterHealthAndStopsThroughControl(t *testing.T) {
 	}
 	if _, err := os.Stat(InstancePath(runtimeDirectory)); !os.IsNotExist(err) {
 		t.Fatalf("instance state survived cleanup: %v", err)
+	}
+}
+
+func TestRunForegroundMarksParentCancellationAsServerShutdown(t *testing.T) {
+	runtimeDirectory := filepath.Join(t.TempDir(), "runtime")
+	port := availablePort(t)
+	parent, cancelParent := context.WithCancel(context.Background())
+	builtContext := make(chan context.Context, 1)
+	ready := make(chan struct{})
+	factory := ServiceFactoryFunc(func(ctx context.Context, _ ServiceDependencies) (Service, error) {
+		builtContext <- ctx
+		return Service{Handler: http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			if request.URL.Path == "/health" {
+				writer.WriteHeader(http.StatusOK)
+				return
+			}
+			http.NotFound(writer, request)
+		})}, nil
+	})
+	done := make(chan error, 1)
+	go func() {
+		_, err := RunForeground(parent, RunOptions{RuntimeDirectory: runtimeDirectory, Port: &port, Factory: factory, OnReady: func(ControlIdentityDTO) { close(ready) }})
+		done <- err
+	}()
+	var serviceContext context.Context
+	select {
+	case serviceContext = <-builtContext:
+	case <-time.After(runtimeLifecycleTestTimeout):
+		t.Fatal("service context was not built")
+	}
+	select {
+	case <-ready:
+	case err := <-done:
+		t.Fatalf("runtime exited before readiness: %v", err)
+	case <-time.After(runtimeLifecycleTestTimeout):
+		t.Fatal("runtime did not become ready")
+	}
+	cancelParent()
+	select {
+	case <-serviceContext.Done():
+		if !errors.Is(context.Cause(serviceContext), lifecycle.ErrServerShutdown) {
+			t.Fatalf("service context cause=%v", context.Cause(serviceContext))
+		}
+	case <-time.After(time.Second):
+		t.Fatal("service context was not canceled")
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(runtimeLifecycleTestTimeout):
+		t.Fatal("runtime did not stop")
 	}
 }
 

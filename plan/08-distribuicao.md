@@ -1,6 +1,8 @@
 # Fase 8 — Distribuição
 
-**Estado inicial:** pendente
+**Estado atual:** em fechamento (37/50); Kind, gates nativos/CI e candidate publicada pendentes
+
+**Evidência:** [relatório rastreável da Fase 8](../docs/research/phase8-evidence.md)
 
 **Dependências:** funcionalidades e testes das Fases 3 a 7
 **Gate final:** os 27 critérios e todos os gates técnicos complementares da matriz do MVP precisam ter evidência executada.
@@ -26,31 +28,31 @@ Transformar o projeto testado em artefatos reprodutíveis para Linux, macOS e Wi
 
 ### Build reprodutível
 
-- [ ] **F8-01** Reproduzir Go 1.25, Node 24.18.0 e npm 11.16.0 já fixados e fixar uma versão GoReleaser v2 exata na CI/release antes do primeiro snapshot.
-- [ ] **F8-02** Criar pipeline determinístico: instalar frontend com lockfile, testar, compilar assets e só então compilar Go.
-- [ ] **F8-03** Fazer o build falhar claramente quando os assets necessários ao `go:embed` estiverem ausentes.
-- [ ] **F8-04** Embutir frontend, migrations e assets sem versionar binários compilados no Git.
-- [ ] **F8-05** Injetar version, commit e build date por ldflags e expô-los em CLI/status.
-- [ ] **F8-06** Compilar com `CGO_ENABLED=0`, `-trimpath` e flags de tamanho aprovadas.
-- [ ] **F8-07** Produzir build snapshot e comparar conteúdo/nome de todos os archives.
+- [x] **F8-01** Reproduzir Go 1.25, Node 24.18.0 e npm 11.16.0 já fixados e fixar uma versão GoReleaser v2 exata na CI/release antes do primeiro snapshot.
+- [x] **F8-02** Criar pipeline determinístico: instalar frontend com lockfile, testar, compilar assets e só então compilar Go.
+- [x] **F8-03** Fazer o build falhar claramente quando os assets necessários ao `go:embed` estiverem ausentes.
+- [x] **F8-04** Embutir frontend, migrations e assets sem versionar binários compilados no Git.
+- [x] **F8-05** Injetar version, commit e build date por ldflags e expô-los em CLI/status.
+- [x] **F8-06** Compilar com `CGO_ENABLED=0`, `-trimpath` e flags de tamanho aprovadas.
+- [x] **F8-07** Produzir build snapshot e comparar conteúdo/nome de todos os archives.
 
 ### GoReleaser
 
-- [ ] **F8-08** Configurar Linux amd64 e arm64.
-- [ ] **F8-09** Configurar macOS amd64 e arm64.
-- [ ] **F8-10** Configurar Windows amd64 e validar Windows arm64; excluir arm64 somente com incompatibilidade reproduzida e documentada.
-- [ ] **F8-11** Gerar `tar.gz` para Unix e `zip` para Windows com nomes previsíveis.
-- [ ] **F8-12** Gerar `checksums.txt` SHA-256 e validar cada entrada.
-- [ ] **F8-13** Validar configuração GoReleaser e executar release snapshot antes de criar tag.
+- [x] **F8-08** Configurar Linux amd64 e arm64.
+- [x] **F8-09** Configurar macOS amd64 e arm64.
+- [x] **F8-10** Configurar Windows amd64 e validar Windows arm64; excluir arm64 somente com incompatibilidade reproduzida e documentada.
+- [x] **F8-11** Gerar `tar.gz` para Unix e `zip` para Windows com nomes previsíveis.
+- [x] **F8-12** Gerar `checksums.txt` SHA-256 e validar cada entrada.
+- [x] **F8-13** Validar configuração GoReleaser e executar release snapshot antes de criar tag.
 
 ### CI de pull request
 
-- [ ] **F8-14** Executar formatação/lint, `go vet`, testes Go e race detector onde suportado.
-- [ ] **F8-15** Executar lint, typecheck, testes e build do frontend.
-- [ ] **F8-16** Executar testes de integração com SQLite temporário e API Kubernetes controlada.
-- [ ] **F8-17** Executar `ginger inspect` e `ginger doctor` na CLI v1.4.4.
-- [ ] **F8-18** Compilar o binário embutido e executar smoke test em Linux.
-- [ ] **F8-19** Cobrir mudanças de backend, frontend, instaladores, workflows e configuração de release nos filtros do pipeline.
+- [x] **F8-14** Executar formatação/lint, `go vet`, testes Go e race detector onde suportado.
+- [x] **F8-15** Executar lint, typecheck, testes e build do frontend.
+- [x] **F8-16** Executar testes de integração com SQLite temporário e API Kubernetes controlada.
+- [x] **F8-17** Executar `ginger inspect` e `ginger doctor` na CLI v1.4.4.
+- [x] **F8-18** Compilar o binário embutido e executar smoke test em Linux.
+- [x] **F8-19** Cobrir mudanças de backend, frontend, instaladores, workflows e configuração de release nos filtros do pipeline.
 
 ### E2E restritivo
 
@@ -64,36 +66,36 @@ Transformar o projeto testado em artefatos reprodutíveis para Linux, macOS e Wi
 
 ### Instaladores
 
-- [ ] **F8-27** Implementar detecção segura de SO/arquitetura em `install.sh`.
-- [ ] **F8-28** Implementar instalação no PATH do usuário sem exigir `sudo`.
-- [ ] **F8-29** Tornar download e validação SHA-256 obrigatórios; abortar se checksum ou ferramenta segura não estiver disponível.
-- [ ] **F8-30** Substituir versão anterior atomicamente e preservar backup para rollback em falha.
-- [ ] **F8-31** Implementar o equivalente em PowerShell 5.1+ para Windows.
-- [ ] **F8-32** Manter a matriz dos instaladores idêntica à matriz realmente publicada pelo GoReleaser.
-- [ ] **F8-33** Verificar `kubePeep version` após instalação e imprimir o próximo comando.
+- [x] **F8-27** Implementar detecção segura de SO/arquitetura em `install.sh`.
+- [x] **F8-28** Implementar instalação no PATH do usuário sem exigir `sudo`.
+- [x] **F8-29** Tornar download e validação SHA-256 obrigatórios; abortar se checksum ou ferramenta segura não estiver disponível.
+- [x] **F8-30** Substituir versão anterior atomicamente e preservar backup para rollback em falha.
+- [x] **F8-31** Implementar o equivalente em PowerShell 5.1+ para Windows.
+- [x] **F8-32** Manter a matriz dos instaladores idêntica à matriz realmente publicada pelo GoReleaser.
+- [x] **F8-33** Verificar `kubePeep version` após instalação e imprimir o próximo comando.
 - [ ] **F8-34** Testar checksum válido, inválido, archive ausente, arquitetura não suportada, PATH e upgrade.
 
 ### Update e remoção
 
-- [ ] **F8-35** Implementar `kubePeep update` com descoberta de versão, download, checksum obrigatório e troca atômica.
+- [x] **F8-35** Implementar `kubePeep update` com descoberta de versão, download, checksum obrigatório e troca atômica.
 - [ ] **F8-36** Tratar binário em uso no Windows com helper pós-exit/mecanismo aprovado, checksum, rollback e teste nativo; não depender de rename do processo em execução.
-- [ ] **F8-37** Implementar exatamente a experiência aprovada na Fase 2: `install.sh --uninstall`/`install.ps1 -Uninstall`, dados preservados por default e purge separado com confirmação/path/lock/reparse validados.
-- [ ] **F8-38** Distinguir remoção do binário de remoção opcional dos dados locais; nunca apagar dados sem confirmação explícita.
+- [x] **F8-37** Implementar exatamente a experiência aprovada na Fase 2: `install.sh --uninstall`/`install.ps1 -Uninstall`, dados preservados por default e purge separado com confirmação/path/lock/reparse validados.
+- [x] **F8-38** Distinguir remoção do binário de remoção opcional dos dados locais; nunca apagar dados sem confirmação explícita.
 
 ### Release
 
-- [ ] **F8-39** Separar workflow de validação do workflow com permissão de publicar.
-- [ ] **F8-40** Publicar apenas a partir de tag/versionamento aprovado, com permissões mínimas.
+- [x] **F8-39** Separar workflow de validação do workflow com permissão de publicar.
+- [x] **F8-40** Publicar apenas a partir de tag/versionamento aprovado, com permissões mínimas.
 - [ ] **F8-41** Executar smoke test dos archives reais em runners Linux, macOS e Windows.
 - [ ] **F8-42** Executar instaladores contra uma release candidate e verificar checksum.
-- [ ] **F8-43** Atualizar README com instalação, execução, flags, dados locais, segurança, RBAC, update, remoção e troubleshooting.
-- [ ] **F8-44** Registrar limitações de Metrics API, plugins `exec`, plataformas e permissões.
-- [ ] **F8-45** Revisar licença e avisos de dependências/reuso visual.
+- [x] **F8-43** Atualizar README com instalação, execução, flags, dados locais, segurança, RBAC, update, remoção e troubleshooting.
+- [x] **F8-44** Registrar limitações de Metrics API, plugins `exec`, plataformas e permissões.
+- [x] **F8-45** Revisar licença e avisos de dependências/reuso visual.
 - [ ] **F8-46** Preencher as 27 evidências e os gates técnicos complementares da matriz do MVP.
-- [ ] **F8-47** Executar `ginger doctor`, suíte completa, GoReleaser e validação final dos artefatos.
+- [x] **F8-47** Executar `ginger doctor`, suíte completa, GoReleaser e validação final dos artefatos.
 - [ ] **F8-48** Testar os comandos publicados de instalação nos caminhos canônicos do GitHub, incluindo nomes/casing dos archives.
-- [ ] **F8-49** Fixar actions de terceiros por versão imutável/commit e limitar permissões do token por job.
-- [ ] **F8-50** Verificar que nenhum archive contém kubeconfig, banco, logs, cache, credencial ou asset de desenvolvimento indevido.
+- [x] **F8-49** Fixar actions de terceiros por versão imutável/commit e limitar permissões do token por job.
+- [x] **F8-50** Verificar que nenhum archive contém kubeconfig, banco, logs, cache, credencial ou asset de desenvolvimento indevido.
 
 ## Matriz mínima de artefatos
 
@@ -152,3 +154,7 @@ Os instaladores nunca devem solicitar um archive que a release não publica.
 ## Critério de saída
 
 Todos os critérios `MVP-01` a `MVP-27` e todos os gates técnicos complementares possuem evidência executada; suítes e E2E passam; GoReleaser produz archives coerentes; instaladores e update validam SHA-256; os binários rodam sem Node.js em runtime; e a release pode ser publicada para Linux, macOS e Windows com limitações explicitamente documentadas.
+
+Este gate ainda não está fechado. As 13 tarefas abertas estão discriminadas
+no relatório de evidências e dependem do Kind dinâmico, de PowerShell/Windows,
+da matriz nativa dos archives/instaladores na CI e de uma candidate publicada.

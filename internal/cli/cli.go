@@ -17,6 +17,7 @@ import (
 	"github.com/fvmoraes/kubepeep/internal/buildinfo"
 	productconfig "github.com/fvmoraes/kubepeep/internal/config"
 	localruntime "github.com/fvmoraes/kubepeep/internal/runtime"
+	"github.com/fvmoraes/kubepeep/internal/updater"
 )
 
 const (
@@ -50,6 +51,10 @@ type Browser interface {
 	Open(context.Context, string) error
 }
 
+type UpdateService interface {
+	Update(context.Context, updater.Request) (updater.Result, error)
+}
+
 // Dependencies makes process creation, filesystem resolution and service
 // composition replaceable in tests.
 type Dependencies struct {
@@ -58,6 +63,7 @@ type Dependencies struct {
 	Controller    localruntime.Controller
 	Browser       Browser
 	Doctor        DoctorChecker
+	Updater       UpdateService
 	Stdout        io.Writer
 	Stderr        io.Writer
 }
@@ -119,6 +125,9 @@ func normalizeDependencies(dependencies Dependencies) Dependencies {
 	}
 	if dependencies.Doctor == nil {
 		dependencies.Doctor = ProductionDoctor{}
+	}
+	if dependencies.Updater == nil {
+		dependencies.Updater = updater.Default()
 	}
 	if dependencies.Stdout == nil {
 		dependencies.Stdout = os.Stdout

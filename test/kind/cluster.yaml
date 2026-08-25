@@ -5,4 +5,4 @@ networking:
 nodes:
   - role: control-plane
     labels:
-      kubepeep.dev/harness: phase4
+      kubepeep.dev/harness: mvp

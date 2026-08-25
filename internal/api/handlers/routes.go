@@ -8,23 +8,29 @@ import (
 	"github.com/fvmoraes/ginger/pkg/router"
 
 	"github.com/fvmoraes/kubepeep/internal/api"
+	actionservice "github.com/fvmoraes/kubepeep/internal/services/actions"
 )
 
 type Dependencies struct {
-	Snapshots   api.SnapshotProvider
-	Sessions    *api.SessionStore
-	Generation  api.GenerationSource
-	Profiles    ClusterProfileService
-	Scopes      NamespaceScopeService
-	Namespaces  NamespaceCatalog
-	Permissions PermissionMatrixService
-	Selection   SelectionReader
-	Contexts    ContextService
-	Dashboard   DashboardService
-	Cursors     *api.CursorCodec
-	Origin      string
-	Port        int
-	Build       api.BuildInfo
+	Snapshots    api.SnapshotProvider
+	Sessions     *api.SessionStore
+	Generation   api.GenerationSource
+	Profiles     ClusterProfileService
+	Scopes       NamespaceScopeService
+	Namespaces   NamespaceCatalog
+	Permissions  PermissionMatrixService
+	Selection    SelectionReader
+	Contexts     ContextService
+	Dashboard    DashboardService
+	Resources    ResourceService
+	Preferences  PreferenceService
+	Actions      actionservice.ActionService
+	PortForwards actionservice.PortForwardService
+	Exec         actionservice.ExecService
+	Cursors      *api.CursorCodec
+	Origin       string
+	Port         int
+	Build        api.BuildInfo
 }
 
 const (
@@ -74,6 +80,52 @@ func Register(applicationRouter *router.Router, dependencies Dependencies) {
 		apiRouter.POST("/dashboard/log-scan", dashboard.LogScan)
 		apiRouter.GET("/metrics", dashboard.Metrics)
 	}
+	if dependencies.Resources != nil && dependencies.Selection != nil {
+		resourceHandler := NewResources(dependencies.Resources, dependencies.Preferences, dependencies.Selection, dependencies.Cursors)
+		apiRouter.GET("/workloads", resourceHandler.Workloads)
+		apiRouter.GET("/workloads/{kind}/{namespace}/{name}", resourceHandler.WorkloadDetail)
+		apiRouter.GET("/workloads/{kind}/{namespace}/{name}/yaml", resourceHandler.WorkloadYAML)
+		apiRouter.GET("/pods", resourceHandler.Pods)
+		apiRouter.GET("/pods/{namespace}/{name}", resourceHandler.PodDetail)
+		apiRouter.GET("/pods/{namespace}/{name}/yaml", resourceHandler.PodYAML)
+		apiRouter.GET("/pods/{namespace}/{name}/logs", resourceHandler.PodLogs)
+		apiRouter.GET("/events", resourceHandler.Events)
+		apiRouter.GET("/services", resourceHandler.Services)
+		apiRouter.GET("/services/{namespace}/{name}", resourceHandler.ServiceDetail)
+		apiRouter.GET("/services/{namespace}/{name}/yaml", resourceHandler.ServiceYAML)
+		apiRouter.GET("/ingresses", resourceHandler.Ingresses)
+		apiRouter.GET("/ingresses/{namespace}/{name}", resourceHandler.IngressDetail)
+		apiRouter.GET("/ingresses/{namespace}/{name}/yaml", resourceHandler.IngressYAML)
+		apiRouter.GET("/endpoint-slices", resourceHandler.EndpointSlices)
+		apiRouter.GET("/endpoint-slices/{namespace}/{name}", resourceHandler.EndpointSliceDetail)
+		apiRouter.GET("/endpoint-slices/{namespace}/{name}/yaml", resourceHandler.EndpointSliceYAML)
+		apiRouter.GET("/configmaps", resourceHandler.ConfigMaps)
+		apiRouter.GET("/configmaps/{namespace}/{name}", resourceHandler.ConfigMapDetail)
+		apiRouter.GET("/configmaps/{namespace}/{name}/yaml", resourceHandler.ConfigMapYAML)
+		apiRouter.GET("/secrets", resourceHandler.Secrets)
+		apiRouter.GET("/secrets/{namespace}/{name}", resourceHandler.SecretDetail)
+	}
+	if dependencies.Preferences != nil {
+		preferenceHandler := NewResources(nil, dependencies.Preferences, dependencies.Selection, dependencies.Cursors)
+		apiRouter.GET("/preferences", preferenceHandler.PreferencesGet)
+		apiRouter.PUT("/preferences", preferenceHandler.PreferencesPut)
+	}
+	if dependencies.Selection != nil && (dependencies.Actions != nil || dependencies.PortForwards != nil || dependencies.Exec != nil) {
+		actions := NewActionHandlers(dependencies.Actions, dependencies.PortForwards, dependencies.Exec, dependencies.Selection)
+		if dependencies.Actions != nil {
+			apiRouter.POST("/workloads/{kind}/{namespace}/{name}/restart", actions.Restart)
+			apiRouter.PUT("/workloads/{kind}/{namespace}/{name}/scale", actions.Scale)
+			apiRouter.DELETE("/pods/{namespace}/{name}", actions.DeletePod)
+		}
+		if dependencies.PortForwards != nil {
+			apiRouter.POST("/pods/{namespace}/{name}/port-forward", actions.CreatePortForward)
+			apiRouter.GET("/port-forwards", actions.ListPortForwards)
+			apiRouter.DELETE("/port-forwards/{id}", actions.ClosePortForward)
+		}
+		if dependencies.Exec != nil {
+			apiRouter.POST("/pods/{namespace}/{name}/exec", actions.CreateExecTicket)
+		}
+	}
 }
 
 // NewAPIFallback keeps reserved API paths out of the SPA while preserving the
@@ -107,12 +159,28 @@ func allowedMethods(path string) (string, bool) {
 	case statusPath, sessionPath, profilesPath, profilePath,
 		apiPrefix + "/contexts", apiPrefix + "/namespaces", apiPrefix + "/permissions",
 		apiPrefix + "/dashboard/summary", apiPrefix + "/dashboard/problems",
-		apiPrefix + "/dashboard/restarts", apiPrefix + "/dashboard/events", apiPrefix + "/metrics":
+		apiPrefix + "/dashboard/restarts", apiPrefix + "/dashboard/events", apiPrefix + "/metrics",
+		apiPrefix + "/port-forwards", apiPrefix + "/workloads", apiPrefix + "/pods",
+		apiPrefix + "/events", apiPrefix + "/services", apiPrefix + "/ingresses",
+		apiPrefix + "/endpoint-slices", apiPrefix + "/configmaps", apiPrefix + "/secrets":
 		return "GET, HEAD", true
+	case apiPrefix + "/preferences":
+		return "GET, HEAD, PUT", true
+	case apiPrefix + "/stream":
+		return "GET", true
 	case apiPrefix + "/contexts/select", apiPrefix + "/namespace-scopes/validate", apiPrefix + "/dashboard/log-scan":
 		return "POST", true
 	case apiPrefix + "/namespace-scopes":
 		return "GET, HEAD, POST", true
+	}
+	if actionAllow, actionKnown := actionAllowedMethods(path); actionKnown {
+		if resourceAllow, resourceKnown := resourceAllowedMethods(path); resourceKnown {
+			return mergeAllowMethods(actionAllow, resourceAllow), true
+		}
+		return actionAllow, true
+	}
+	if allow, known := resourceAllowedMethods(path); known {
+		return allow, true
 	}
 	prefix := apiPrefix + "/namespace-scopes/"
 	if !strings.HasPrefix(path, prefix) {
@@ -127,6 +195,80 @@ func allowedMethods(path string) (string, bool) {
 		return "POST", id != "" && !strings.Contains(id, "/")
 	}
 	return "GET, HEAD, PUT, DELETE", true
+}
+
+func resourceAllowedMethods(path string) (string, bool) {
+	if !strings.HasPrefix(path, apiPrefix+"/") {
+		return "", false
+	}
+	parts := strings.Split(strings.TrimPrefix(path, apiPrefix+"/"), "/")
+	for _, part := range parts {
+		if part == "" {
+			return "", false
+		}
+	}
+	switch {
+	case len(parts) == 4 && parts[0] == "workloads":
+		return "GET, HEAD", true
+	case len(parts) == 5 && parts[0] == "workloads" && parts[4] == "yaml":
+		return "GET, HEAD", true
+	case len(parts) == 3 && parts[0] == "pods":
+		return "GET, HEAD", true
+	case len(parts) == 4 && parts[0] == "pods" && (parts[3] == "yaml" || parts[3] == "logs"):
+		return "GET, HEAD", true
+	case len(parts) == 5 && parts[0] == "pods" && parts[3] == "logs" && parts[4] == "stream":
+		return "GET", true
+	case len(parts) == 3 && (parts[0] == "services" || parts[0] == "ingresses" || parts[0] == "endpoint-slices" || parts[0] == "configmaps" || parts[0] == "secrets"):
+		return "GET, HEAD", true
+	case len(parts) == 4 && parts[3] == "yaml" && (parts[0] == "services" || parts[0] == "ingresses" || parts[0] == "endpoint-slices" || parts[0] == "configmaps"):
+		return "GET, HEAD", true
+	default:
+		return "", false
+	}
+}
+
+func mergeAllowMethods(left, right string) string {
+	seen := map[string]bool{}
+	result := []string{}
+	for _, group := range []string{left, right} {
+		for _, method := range strings.Split(group, ", ") {
+			if method != "" && !seen[method] {
+				seen[method] = true
+				result = append(result, method)
+			}
+		}
+	}
+	return strings.Join(result, ", ")
+}
+
+func actionAllowedMethods(path string) (string, bool) {
+	if !strings.HasPrefix(path, apiPrefix+"/") {
+		return "", false
+	}
+	parts := strings.Split(strings.TrimPrefix(path, apiPrefix+"/"), "/")
+	for _, part := range parts {
+		if part == "" {
+			return "", false
+		}
+	}
+	switch {
+	case len(parts) == 5 && parts[0] == "workloads" && parts[4] == "restart":
+		return "POST", true
+	case len(parts) == 5 && parts[0] == "workloads" && parts[4] == "scale":
+		return "PUT", true
+	case len(parts) == 3 && parts[0] == "pods":
+		return "DELETE", true
+	case len(parts) == 4 && parts[0] == "pods" && parts[3] == "port-forward":
+		return "POST", true
+	case len(parts) == 4 && parts[0] == "pods" && parts[3] == "exec":
+		return "POST", true
+	case len(parts) == 2 && parts[0] == "port-forwards":
+		return "DELETE", true
+	case len(parts) == 3 && parts[0] == "exec" && parts[2] == "stream":
+		return "GET", true
+	default:
+		return "", false
+	}
 }
 
 func writeEnvelope(w http.ResponseWriter, value any) error {

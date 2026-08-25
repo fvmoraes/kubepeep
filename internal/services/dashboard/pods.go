@@ -614,16 +614,16 @@ func (s *PodService) loadPodNamespace(ctx context.Context, namespace string, max
 	result := make([]corev1.Pod, 0)
 	continuation := ""
 	for page := 0; page < s.budget.MaxPages; page++ {
+		remaining := maximumItems - len(result)
+		if remaining <= 0 {
+			return result, false, true, nil
+		}
 		if err := ctx.Err(); err != nil {
 			return result, false, false, err
 		}
 		response, err := s.pods.ListPods(ctx, namespace, PageRequest{Limit: s.budget.PageSize, Continue: continuation})
 		if err != nil {
 			return result, false, false, err
-		}
-		remaining := maximumItems - len(result)
-		if remaining <= 0 {
-			return result, false, true, nil
 		}
 		if len(response.Items) > remaining {
 			result = append(result, response.Items[:remaining]...)

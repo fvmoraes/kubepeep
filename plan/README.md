@@ -39,20 +39,23 @@ Fase 1 ──> Fase 2 ──> Fase 3 ──> Fase 4 ──> Fase 5 ──> Fase 
 
 As fases seguem a ordem determinada pelo prompt. Para evitar duplicação, a Fase 5 cria somente as consultas compartilhadas mínimas necessárias ao overview; a Fase 6 estende essas mesmas interfaces para listas e detalhes completos. A CI mínima começa na Fase 3 e cresce com cada fatia, mas o gate de distribuição só fecha na Fase 8.
 
-| Fase | Foco | Resultado do gate |
-| --- | --- | --- |
-| [1 — Descoberta](01-descoberta.md) | DWYT, Ginger e riscos | Arquitetura híbrida e decisões técnicas validadas |
-| [2 — Especificação](02-especificacao.md) | Produto, arquitetura, API, segurança e dados | Contratos objetivos e rastreáveis aprovados |
-| [3 — Fundação](03-fundacao.md) | Executável local, Ginger, Cobra, SQLite e React | Primeiro binário autocontido funcionando |
-| [4 — Kubernetes e RBAC](04-kubernetes-rbac.md) | Kubeconfig, contextos, escopos e autorização | Seleção segura de cluster e namespaces |
-| [5 — Dashboard](05-dashboard.md) | Saúde, problemas, restarts, eventos, logs e métricas | Overview útil, progressivo e tolerante a falhas parciais |
-| [6 — Recursos](06-recursos.md) | Consultas somente leitura e streaming | Navegação completa pelos recursos permitidos |
-| [7 — Ações](07-acoes.md) | Restart, scale, delete, port-forward e exec | Ações autorizadas, confirmadas e canceláveis |
-| [8 — Distribuição](08-distribuicao.md) | Releases, instaladores, CI e aceite | MVP multiplataforma publicável |
+| Fase | Foco | Estado verificável | Evidência |
+| --- | --- | --- | --- |
+| [1 — Descoberta](01-descoberta.md) | DWYT, Ginger e riscos | concluída (44/44) | [Fase 1](../docs/research/phase1-evidence.md) |
+| [2 — Especificação](02-especificacao.md) | Produto, arquitetura, API, segurança e dados | concluída | [Fase 2](../docs/research/phase2-validation.md) |
+| [3 — Fundação](03-fundacao.md) | Executável local, Ginger, Cobra, SQLite e React | concluída, inclusive workflow nativo | [Fase 3](../docs/research/phase3-evidence.md) |
+| [4 — Kubernetes e RBAC](04-kubernetes-rbac.md) | Kubeconfig, contextos, escopos e autorização | local 56/59; Kind pendente | [Fase 4](../docs/research/phase4-evidence.md) |
+| [5 — Dashboard](05-dashboard.md) | Saúde, problemas, restarts, eventos, logs e métricas | local 60/62; Kind pendente | [Fase 5](../docs/research/phase5-evidence.md) |
+| [6 — Recursos](06-recursos.md) | Consultas somente leitura e streaming | local 65/67; Kind pendente | [Fase 6](../docs/research/phase6-evidence.md) |
+| [7 — Ações](07-acoes.md) | Restart, scale, delete, port-forward e exec | local 45/47; Kind pendente | [Fase 7](../docs/research/phase7-evidence.md) |
+| [8 — Distribuição](08-distribuicao.md) | Releases, instaladores, CI e aceite | 33/50; nativos/CI/Kind pendentes | [Fase 8](../docs/research/phase8-evidence.md) |
 
-Estado atual: **Fases 1, 2 e 3 concluídas**; o workflow nativo da Fase 3 passou
-em Linux, macOS e Windows no run `31392541114`. A Fase 4 está em execução. O fechamento documental da Fase 2 está registrado em
-[Evidências da Fase 2](../docs/research/phase2-validation.md).
+Estado atual: **as implementações locais das Fases 4 a 7 estão concluídas**.
+Os checkboxes remanescentes dessas fases são exclusivamente provas contra o
+Kind canônico. A Fase 8 está em fechamento e ainda exige snapshot final,
+PowerShell/Windows, smoke dos seis archives e execução dos workflows atuais.
+O único run nativo já aceito permanece o da Fase 3, `31392541114`; ele não é
+reutilizado como evidência para código posterior.
 
 O acompanhamento dos critérios finais está em [Matriz de aceite do MVP](matriz-aceite-mvp.md).
 
@@ -137,12 +140,15 @@ Uma tarefa funcional somente pode ser marcada como concluída quando, conforme a
 
 ## Estado do plano
 
-A Fase 1 está concluída com 44 tarefas comprovadas e
-[matriz rastreável](../docs/research/phase1-evidence.md); as Fases 2 e 3 também
-estão concluídas com evidências próprias. As tarefas das fases seguintes
-permanecem pendentes até sua implementação e evidência próprias.
-Marcar um checkbox somente quando o resultado correspondente existir no
-repositório; evidência de spike não antecipa checkbox de produção ou release.
+As Fases 1–3 estão concluídas. F4–F7 fecharam todo o trabalho comprovável
+localmente e aguardam nove tarefas Kind no total: F4-48–50, F5-56/F5-59,
+F6-56/F6-57 e F7-43/F7-44. A Fase 8 possui 33 de 50 tarefas comprovadas.
+
+Na matriz final, 22 de 27 critérios do MVP possuem evidência local ou nativa
+anterior aplicável. Permanecem abertos os critérios que exigem Kind real,
+pipeline completo, snapshot final ou ambos. Evidência de configuração, teste
+estático, cross-build ou spike nunca substitui execução nativa/Kind quando o
+critério a exige.
 
 ## Convenção de nomes
 

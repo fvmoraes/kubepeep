@@ -99,10 +99,16 @@ func TestRedactionSensitiveClasses(t *testing.T) {
 		"error Authorization: Basic dXNlcjpwYXNzd29yZA== trailing-secret",
 		`error Authorization: "Bearer abcdefghijklmnop" trailing-secret`,
 		"error bearer abcdefghijklmnop",
+		"error bearer abc",
+		"error basic eA==",
 		"error jwt=" + jwt,
 		`error {"password":"super-secret"}`,
+		`error {"password":"secret with \"quoted\" tail","message":"kept"}`,
 		"error password=super-secret",
+		`error password = "secret with spaces" kept-suffix`,
+		`error passwd='secret with spaces' kept-suffix`,
 		"error postgres://user:super-secret@db.local/app",
+		`error postgres:\/\/user:super-secret@db.local\/app`,
 		"error X-Api-Key: abcdefghijklmnop",
 		"error -----BEGIN PRIVATE KEY-----",
 		"error -----BEGIN PRIVATE KEY-----\nbase64-secret-material\n-----END PRIVATE KEY----- trailing",
@@ -114,7 +120,7 @@ func TestRedactionSensitiveClasses(t *testing.T) {
 		if !ok || !match.Redacted {
 			t.Fatalf("line was not matched/redacted: %q (%+v)", line, match)
 		}
-		for _, secret := range []string{"super-secret", "abcdefghijklmnop", "dXNlcjpwYXNzd29yZA==", "trailing-secret", "base64-secret-material", jwt, "AKIA" + "ABCDEFGHIJKLMNOP"} {
+		for _, secret := range []string{"super-secret", "secret with", "quoted", "abcdefghijklmnop", "dXNlcjpwYXNzd29yZA==", "trailing-secret", "base64-secret-material", jwt, "AKIA" + "ABCDEFGHIJKLMNOP"} {
 			if strings.Contains(match.Excerpt, secret) {
 				t.Fatalf("secret %q remained in %q", secret, match.Excerpt)
 			}

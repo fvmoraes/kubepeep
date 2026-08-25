@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/fvmoraes/kubepeep/internal/lifecycle"
 )
 
 const (
@@ -182,7 +184,13 @@ func RunForeground(ctx context.Context, options RunOptions) (result RunResult, r
 	if err != nil {
 		return RunResult{}, err
 	}
-	runContext, cancelRun := context.WithCancel(ctx)
+	runContext, cancelRunCause := context.WithCancelCause(context.WithoutCancel(ctx))
+	cancelRun := func() { cancelRunCause(lifecycle.ErrServerShutdown) }
+	stopParent := context.AfterFunc(ctx, cancelRun)
+	defer stopParent()
+	if ctx.Err() != nil {
+		cancelRun()
+	}
 	defer cancelRun()
 	service, err := options.Factory.Build(runContext, ServiceDependencies{DataRoot: options.DataRoot, Port: port})
 	if err != nil {

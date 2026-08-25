@@ -226,6 +226,10 @@ func (s *MetricsService) loadNamespace(ctx context.Context, namespace string, ma
 	sampleWindow := time.Duration(0)
 	observationWindow := time.Duration(0)
 	for page := 0; page < s.budget.MaxPages; page++ {
+		remaining := maximumItems - len(result)
+		if remaining <= 0 {
+			return result, metricsCollectionWindow(sampleWindow, observationWindow), false, true, nil
+		}
 		if err := ctx.Err(); err != nil {
 			return result, metricsCollectionWindow(sampleWindow, observationWindow), false, false, err
 		}
@@ -247,10 +251,6 @@ func (s *MetricsService) loadNamespace(ctx context.Context, namespace string, ma
 			}
 		} else if pageWindow > observationWindow {
 			observationWindow = pageWindow
-		}
-		remaining := maximumItems - len(result)
-		if remaining <= 0 {
-			return result, metricsCollectionWindow(sampleWindow, observationWindow), false, true, nil
 		}
 		if len(response.Items) > remaining {
 			result = append(result, response.Items[:remaining]...)

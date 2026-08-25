@@ -47,6 +47,9 @@ func TestFactorySeparatesUnaryTimeoutFromStreamingTransport(t *testing.T) {
 	if !impersonationIsEmpty(clients.unaryConfigCopy().Impersonate) || !impersonationIsEmpty(clients.streamingConfigCopy().Impersonate) {
 		t.Fatal("factory enabled impersonation")
 	}
+	if clients.UnaryMetadata() == nil || clients.StreamingMetadata() == nil {
+		t.Fatal("factory did not construct metadata-only clients for both traffic classes")
+	}
 
 	_, unaryErr := clients.UnaryKubernetes().Discovery().RESTClient().Get().AbsPath("/version").DoRaw(context.Background())
 	if unaryErr == nil {
