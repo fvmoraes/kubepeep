@@ -115,6 +115,19 @@ function Assert-RegularFile([string]$Path, [string]$Description) {
         throw "$Description is not a regular file"
     }
 }
+function Get-SHA256Hex([string]$Path) {
+    $stream = $null
+    $hasher = $null
+    try {
+        $stream = [System.IO.File]::OpenRead($Path)
+        $hasher = [System.Security.Cryptography.SHA256]::Create()
+        $hashBytes = $hasher.ComputeHash($stream)
+        return ([System.BitConverter]::ToString($hashBytes)).Replace('-', '').ToLowerInvariant()
+    } finally {
+        if ($null -ne $hasher) { $hasher.Dispose() }
+        if ($null -ne $stream) { $stream.Dispose() }
+    }
+}
 function Get-AllowlistedFailureStage([string]$Stage) {
     switch -Exact ($Stage) {
         'wait-parent' { return $Stage }
@@ -183,12 +196,12 @@ function Invoke-VerifiedReplaceWithRetry(
             $script:failureStage = "$StagePrefix-destination-inspect"
             Assert-RegularFile $Destination $DestinationDescription
             $script:failureStage = "$StagePrefix-source-hash"
-            $sourceHash = (Get-FileHash -LiteralPath $Source -Algorithm SHA256).Hash.ToLowerInvariant()
+            $sourceHash = Get-SHA256Hex $Source
             if ($sourceHash -ne $ExpectedSourceHash.ToLowerInvariant()) {
                 throw "$SourceDescription changed while the update was pending"
             }
             $script:failureStage = "$StagePrefix-destination-hash"
-            $destinationHash = (Get-FileHash -LiteralPath $Destination -Algorithm SHA256).Hash.ToLowerInvariant()
+            $destinationHash = Get-SHA256Hex $Destination
             if ($destinationHash -ne $ExpectedDestinationHash.ToLowerInvariant()) {
                 throw "$DestinationDescription changed while the update was pending"
             }

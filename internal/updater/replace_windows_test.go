@@ -69,6 +69,30 @@ func TestWindowsUpdateProcessHelper(t *testing.T) {
 	}
 }
 
+func TestWindowsHelperHashesWithoutModuleAutoload(t *testing.T) {
+	if strings.Contains(strings.ToLower(windowsHelperScript), "get-filehash") {
+		t.Fatal("Windows helper must not depend on the Get-FileHash module cmdlet")
+	}
+	start := strings.Index(windowsHelperScript, "function Get-SHA256Hex")
+	end := strings.Index(windowsHelperScript, "function Get-AllowlistedFailureStage")
+	if start < 0 || end <= start {
+		t.Fatal("Windows helper SHA-256 function boundaries are missing")
+	}
+	hashHelper := windowsHelperScript[start:end]
+	for _, required := range []string{
+		"[System.IO.File]::OpenRead",
+		"[System.Security.Cryptography.SHA256]::Create()",
+		"[System.BitConverter]::ToString",
+		"finally {",
+		"$hasher.Dispose()",
+		"$stream.Dispose()",
+	} {
+		if !strings.Contains(hashHelper, required) {
+			t.Fatalf("Windows helper SHA-256 implementation is missing %q", required)
+		}
+	}
+}
+
 func TestWindowsHelperWaitsForParentThenAtomicallyReplaces(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "kubePeep.exe")
