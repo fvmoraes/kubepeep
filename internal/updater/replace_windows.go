@@ -114,6 +114,47 @@ function Assert-RegularFile([string]$Path, [string]$Description) {
         throw "$Description is not a regular file"
     }
 }
+function Test-RetryableReplaceError([Exception]$Exception) {
+    while ($null -ne $Exception) {
+        if ($Exception -is [IO.IOException] -or
+            $Exception -is [UnauthorizedAccessException]) {
+            return $true
+        }
+        $Exception = $Exception.InnerException
+    }
+    return $false
+}
+function Invoke-VerifiedReplaceWithRetry(
+    [string]$Source,
+    [string]$Destination,
+    [string]$BackupPath,
+    [string]$ExpectedSourceHash,
+    [string]$ExpectedDestinationHash,
+    [string]$SourceDescription,
+    [string]$DestinationDescription
+) {
+    for ($attempt = 0; $attempt -lt 20; $attempt++) {
+        try {
+            Assert-RegularFile $Source $SourceDescription
+            Assert-RegularFile $Destination $DestinationDescription
+            $sourceHash = (Get-FileHash -LiteralPath $Source -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($sourceHash -ne $ExpectedSourceHash.ToLowerInvariant()) {
+                throw "$SourceDescription changed while the update was pending"
+            }
+            $destinationHash = (Get-FileHash -LiteralPath $Destination -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($destinationHash -ne $ExpectedDestinationHash.ToLowerInvariant()) {
+                throw "$DestinationDescription changed while the update was pending"
+            }
+            [System.IO.File]::Replace($Source, $Destination, $BackupPath, $true)
+            return
+        } catch {
+            if (-not (Test-RetryableReplaceError $_.Exception) -or $attempt -eq 19) {
+                throw
+            }
+            Start-Sleep -Milliseconds 100
+        }
+    }
+}
 function Invoke-VersionWithTimeout([string]$Path) {
     $startInfo = New-Object System.Diagnostics.ProcessStartInfo
     $startInfo.FileName = $Path
@@ -209,22 +250,11 @@ try {
             throw 'timed out waiting for the updater process to exit'
         }
     }
-    Assert-RegularFile $Target 'installed executable'
-    Assert-RegularFile $Candidate 'candidate executable'
-    $currentHash = (Get-FileHash -LiteralPath $Target -Algorithm SHA256).Hash.ToLowerInvariant()
-    if ($currentHash -ne $ExpectedCurrentHash.ToLowerInvariant()) {
-        throw 'installed executable changed while the update was pending'
-    }
-    $candidateHash = (Get-FileHash -LiteralPath $Candidate -Algorithm SHA256).Hash.ToLowerInvariant()
-    if ($candidateHash -ne $ExpectedCandidateHash.ToLowerInvariant()) {
-        throw 'candidate executable changed while the update was pending'
-    }
-    Assert-RegularFile $Target 'installed executable'
-    Assert-RegularFile $Candidate 'candidate executable'
-    [System.IO.File]::Replace($Candidate, $Target, $Backup, $true)
+    Invoke-VerifiedReplaceWithRetry $Candidate $Target $Backup $ExpectedCandidateHash $ExpectedCurrentHash 'candidate executable' 'installed executable'
     $replaced = $true
     $versionOutput = Invoke-VersionWithTimeout $Target
-    if (-not (($versionOutput -split '\s+') -contains ("version=" + $ExpectedVersion))) {
+    $versionTokens = [regex]::Split($versionOutput, '\s+')
+    if (-not ($versionTokens -contains ("version=" + $ExpectedVersion))) {
         throw 'replacement version verification failed'
     }
     Remove-Item -LiteralPath $Backup -Force
@@ -233,9 +263,7 @@ try {
     $statusMessage = "failed version=$ExpectedVersion"
     if ($replaced -and (Test-Path -LiteralPath $Backup -PathType Leaf)) {
         try {
-            Assert-RegularFile $Backup 'rollback executable'
-            Assert-RegularFile $Target 'failed replacement executable'
-            [System.IO.File]::Replace($Backup, $Target, $Failed, $true)
+            Invoke-VerifiedReplaceWithRetry $Backup $Target $Failed $ExpectedCurrentHash $ExpectedCandidateHash 'rollback executable' 'failed replacement executable'
             Remove-Item -LiteralPath $Failed -Force -ErrorAction SilentlyContinue
             $statusMessage = "rolled-back version=$ExpectedVersion"
         } catch {

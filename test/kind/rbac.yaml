@@ -505,7 +505,7 @@ spec:
         allowPrivilegeEscalation: false
         capabilities:
           drop: ["ALL"]
-      readOnlyRootFilesystem: true
+        readOnlyRootFilesystem: true
 ---
 apiVersion: v1
 kind: ConfigMap

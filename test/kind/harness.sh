@@ -1424,6 +1424,23 @@ for index, document in enumerate(documents, start=1):
                 image = container.get("image") if isinstance(container, dict) else None
                 if not isinstance(image, str) or immutable_image.fullmatch(image) is None:
                     raise SystemExit(f"fixture document {index} contains a mutable container image")
+                security_context = container.get("securityContext", {})
+                capabilities = security_context.get("capabilities", {}) if isinstance(security_context, dict) else {}
+                if (
+                    not isinstance(security_context, dict)
+                    or security_context.get("allowPrivilegeEscalation") is not False
+                    or security_context.get("readOnlyRootFilesystem") is not True
+                    or security_context.get("privileged") is True
+                    or not isinstance(capabilities, dict)
+                    or capabilities.get("drop") != ["ALL"]
+                    or capabilities.get("add") not in (None, [])
+                ):
+                    raise SystemExit(f"fixture document {index} has an unsafe container securityContext")
+                if any(
+                    field in container
+                    for field in ("allowPrivilegeEscalation", "capabilities", "readOnlyRootFilesystem")
+                ):
+                    raise SystemExit(f"fixture document {index} places security fields outside securityContext")
 
 required = {
     ("Namespace", "", "kp-harness"),
