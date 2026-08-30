@@ -797,7 +797,9 @@ func paginateDashboardBlock[T any](
 			return nil, api.NewHTTPError(http.StatusInternalServerError, api.CodeInternal, "Dashboard pagination is temporarily unavailable.", nil, err)
 		}
 	}
-	block.Value = append([]T(nil), block.Value[start:end]...)
+	paged := make([]T, 0, end-start)
+	paged = append(paged, block.Value[start:end]...)
+	block.Value = paged
 	pageTruncated := originalTruncated || query.continueAt != "" || next != ""
 	pageComplete := originalComplete && next == ""
 	if query.continueAt != "" || next != "" {
