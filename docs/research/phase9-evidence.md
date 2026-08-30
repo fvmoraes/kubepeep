@@ -1,14 +1,15 @@
 # Evidências da Fase 9 — Experiência operacional
 
-**Estado:** duas fatias verticais validadas localmente; demais facilitadores
-em execução.
+**Estado:** três fatias verticais validadas localmente (15/84); demais
+facilitadores em execução.
 
 **Baseline de requisitos:** `5f24a1a`.
 
 ## 1. Escopo desta evidência
 
-As entregas registradas fecham o núcleo seguro da paleta de navegação e o
-estado canônico/visível das listas paginadas. Elas não afirmam conclusão de
+As entregas registradas fecham o núcleo seguro da paleta de navegação, o
+estado canônico/visível das listas paginadas e o lote de atalhos/deep links.
+Elas não afirmam conclusão de
 filtros negativos/multitermo, favoritos, quick actions, diff, logs agregados,
 gerenciador de port-forward ou leitura multi-contexto.
 
@@ -96,8 +97,11 @@ nenhuma capability antiga é usada para executar operação.
 | `web/src/components/CommandCenter.test.tsx` | interação, privacidade e acessibilidade por teclado |
 | `web/src/App.tsx` | catálogo de dez destinos e integração no topbar |
 | `web/src/App.test.tsx` | catálogo exato e busca por keyword estática |
+| `web/src/components/ContextSelector.tsx` e teste | alvo `Ctrl/Meta+O`, `aria-keyshortcuts`, `showPicker` e foco |
+| `web/src/components/ResourceListControls.tsx` e teste | alvos de busca/refresh e metadados acessíveis dos atalhos |
+| `web/src/components/LogsPage.tsx` | alvo de busca de logs visíveis, sem persistência |
 | `web/src/styles.css` | apresentação responsiva com identidade própria |
-| `web/e2e/app.spec.ts` | jornada no browser e deep link/reload |
+| `web/e2e/app.spec.ts` | jornada no browser e tabela `path`/`label`/`heading` das dez rotas |
 
 Nenhuma dependência foi adicionada. O componente usa React, React Router e
 Lucide já fixados no lockfile.
@@ -241,7 +245,87 @@ participar do desempate. `UX-M03` também permanece aberto até a conclusão e
 evidência de filtros positivos/negativos/multitermo, colunas allowlisted e alta
 cardinalidade.
 
-## 8. Reindexação integral do marco atual
+## 8. Terceira fatia: atalhos globais seguros e navegação completa
+
+### Catálogo e comandos
+
+O catálogo canônico único em `web/src/App.tsx` contém exatamente dez destinos:
+Overview (`/`), Workloads (`/workloads`), Pods (`/pods`), Logs (`/logs`),
+Events (`/events`), Network (`/network`), Config (`/config`), Namespaces
+(`/namespaces`), Permissions (`/permissions`) e Settings (`/settings`). Menu
+lateral, paleta e configuração do React Router derivam desse mesmo catálogo.
+
+Fora de campos editáveis e de composição, os atalhos usam o modificador
+primário de cada plataforma:
+
+| Atalho | Efeito seguro |
+| --- | --- |
+| `Ctrl/Meta+K` | abre a paleta somente de navegação |
+| `Ctrl/Meta+R` | refaz somente queries ativas cuja raiz está na allowlist explícita de leitura |
+| `Ctrl/Meta+F` | foca e seleciona a busca da página; sem alvo, preserva o Find do browser |
+| `Ctrl/Meta+O` | foca o seletor de contexto e tenta `showPicker()`; falha/ausência conserva o foco como fallback |
+| `Ctrl/Meta+B` | volta somente quando existe entrada anterior no histórico local da aplicação |
+
+A allowlist de refresh contém exclusivamente `action-permissions`,
+`cluster-profiles`, `contexts`, `dashboard`, `local-status`,
+`namespace-scopes`, `permissions`, `port-forwards`, `preferences` e
+`resources`. O TanStack Query recebe `type: active` e um predicado fechado por
+essa raiz. Mutations nunca passam por esse caminho; uma query futura não
+revisada também fica excluída por padrão, mesmo se estiver ativa.
+
+### Bloqueios e compatibilidade de teclado
+
+O listener não captura evento com `defaultPrevented`, `repeat`, composição
+ativa, tecla `Process`, `keyCode`/`which` 229, nem alvo em `input`, `textarea`,
+`select`, `contenteditable` ou elemento com `role=textbox`. Ctrl foi exercitado
+como contrato Windows/Linux e Meta como contrato macOS. Os atalhos só chamam
+`preventDefault()` depois que existe um efeito seguro aplicável; assim, Find,
+Open e Back do browser não são bloqueados quando a aplicação não possui alvo.
+
+O seletor expõe `aria-keyshortcuts="Control+O Meta+O"`; buscas e refreshs de
+tela expõem os metadados equivalentes. `showPicker()` é uma melhoria
+progressiva: se a API não existe ou lança exceção, o `select` continua focado e
+operável pelo teclado.
+
+### Deep link, reload e back
+
+O Playwright mantém uma tabela explícita `path`/`label`/`heading` para as dez
+páginas. Para cada linha, o teste navega pelo link real, confere URL,
+`aria-current` e heading, recarrega diretamente a rota e repete as asserções.
+Ao final, `Meta+B` comprova retorno à entrada anterior. O fallback History API
+continua restrito à SPA e não captura `/api/v1`, `/health` ou endpoints
+internos.
+
+### Evidência local e CI do SHA funcional
+
+| Gate | Resultado observado no commit `6b96a41` |
+| --- | --- |
+| Vitest/Testing Library | 17 arquivos, 79 testes, todos passaram |
+| Playwright Chromium | 3 de 3 cenários passaram |
+| Atalhos | Ctrl/Meta, editores, IME/229/`Process`, repeat, alvos ausentes e `showPicker`/fallback cobertos |
+| Rotas | tabela E2E das dez páginas cobre path, label, heading, deep-link, reload, estado ativo e back |
+| Privacidade | nenhum atalho adiciona persistência, mutação ou conteúdo remoto ao catálogo |
+
+Essa fatia fecha F9-16, F9-17 e F9-18, levando a fase a 15/84. O commit
+funcional exato `6b96a411d0ff52f0824933e3ea4e7689f72354bb` foi publicado em
+`origin/main` e validado pela
+[CI #25](https://github.com/fvmoraes/kubepeep/actions/runs/33296687430), que
+concluiu `success` com 11/11 jobs: `build-and-test`, runtimes nativos
+Windows/macOS, `release-snapshot`, `restricted-kind` e os seis
+`native-archive-smoke`. A CI #24 continua sendo evidência do marco anterior e
+não é reutilizada para provar os atalhos.
+
+Os testes de componente simulam os contratos Ctrl e Meta e o Playwright os
+exercita em Chromium Linux; isso comprova a lógica por modificador, sem alegar
+execução de browser nativo Windows/macOS. O job Kind da CI cria o cluster em
+runner efêmero vazio e o workflow executa `kind delete cluster` ao final.
+
+A ausência de dados sensíveis é premissa inegociável: nenhum atalho, teste,
+query, log ou artefato pode enviar kubeconfig, credencial, token, chave privada,
+Secret, conteúdo de log, banco local, PII privada ou path específico da
+máquina. A evidência usa somente dados sintéticos e resultados sanitizados.
+
+## 9. Reindexação integral do marco anterior
 
 Depois do commit funcional `41d419c`, o Codebase Knowledge Graph foi gerado em
 modo `full`, sem persistir um novo artefato no repositório. O índice ficou
@@ -266,18 +350,16 @@ daemon preservou vault e índice; a repetição pelo binário atual concluiu em
 cerca de 16 segundos. F9-84 continua aberta porque futuras fatias ainda mudarão
 o HEAD e exigirão nova evidência final.
 
-## 9. Pendências
+## 10. Pendências
 
 - ampliar catálogo com contextos/scopes somente depois de definir
   classificação e ciclo de vida em memória;
-- atalhos adicionais de refresh/foco/seletor sem capturar campos editáveis;
-- composição/IME, contraste, zoom e auditoria automatizada de acessibilidade;
-- deep-link/reload de todos os destinos, não apenas a jornada representativa;
+- contraste, zoom e auditoria automatizada de acessibilidade;
 - inspeção E2E final de todos os storages, SQLite, logs e archives;
-- CI do commit funcional e smoke nativo do frontend embutido;
+- acessibilidade além dos contratos de teclado já cobertos;
 - demais critérios `UX-M` da matriz.
 
-## 10. Regra de atualização
+## 11. Regra de atualização
 
 Este relatório só recebe evidência CI depois que o workflow do commit que
 contém a implementação terminar. Uma execução verde anterior não é

@@ -2,7 +2,8 @@
 
 **Data da atualização:** 2026-08-30
 **Plataformas:** Linux amd64 local; Linux, macOS e Windows nativos na CI
-**Estado:** 43 de 50 tarefas comprovadas; recriação Kind do zero, CI nativa atual e candidate publicada pendentes
+**Estado:** 47 de 50 tarefas comprovadas; somente candidate imutável e
+fechamento integral dos gates permanecem pendentes
 
 ## Resultado local e nativo
 
@@ -10,19 +11,23 @@ A configuração de distribuição está pronta para seis alvos
 Linux/macOS/Windows × amd64/arm64. GoReleaser v2.17.1, Go 1.26.7, Node
 24.18.0 e npm 11.16.0 estão fixados. Os workflows de verificação e release são
 separados, actions externas usam SHA completo e apenas o job de publicação
-possui `contents: write`. O workflow #23 ainda usou Go 1.25.13; sua evidência
-continua histórica e não é atribuída ao novo pin antes da CI correspondente.
+possui `contents: write`. O workflow #24 executou o pin atual Go 1.26.7 no head
+exato `4ce996b40914f729aefa8d949bde85f94873c8d9` e concluiu os 11 jobs com
+sucesso. O workflow #23, em Go 1.25.13, continua descrito apenas como histórico.
 
 O updater, o instalador Unix e os caminhos compartilhados dos instaladores
 possuem testes locais. Um snapshot atual do GoReleaser v2.17.1 com Go 1.26.7
 produziu os seis archives e o smoke do binário passou. O workflow de verificação
-#23 acrescentou historicamente execução nativa do instalador e updater no
-Windows, runtime no macOS e smoke dos seis archives, mas precisa ser repetido
-com o novo toolchain.
+#24 repetiu a prova no toolchain atual: runtime nativo do instalador/updater em
+Windows, runtime nativo em macOS, snapshot e smoke dos seis archives em runners
+Linux/macOS/Windows × amd64/arm64.
 
-No Kind local, `create` reutilizou o cluster canônico existente; `validate` e
-`app-e2e ./dist/kubePeep` passaram. Isso fecha os cenários F8-21–F8-26, mas não
-F8-20: a execução não removeu e recriou o cluster do zero.
+No Kind local anterior, `create` reutilizou o cluster canônico existente;
+`validate` e `app-e2e ./dist/kubePeep` passaram e fecharam F8-21–F8-26, mas não
+F8-20. A lacuna foi fechada na CI #24: o job `restricted-kind` rodou em runner
+efêmero inicialmente vazio e passou `create`, `validate`, `kubeconfigs` e
+`app-e2e`; o workflow executou `kind delete cluster` ao final, comprovando a
+criação do zero e a remoção posterior.
 
 ## Rastreabilidade da implementação
 
@@ -30,15 +35,42 @@ F8-20: a execução não removeu e recriou o cluster do zero.
 | --- | --- | --- |
 | Build | `go.mod`, `web/package-lock.json`, `Makefile`, embed e ldflags | testes/build Go, frontend build e seis cross-builds passaram |
 | GoReleaser | `.goreleaser.yaml` | snapshot v2.17.1 atual com Go 1.26.7 produziu seis archives; smoke do binário passou |
-| CI/release | `.github/workflows/verify.yml`, `release.yml` | workflow #23 executado no HEAD: 10 de 11 jobs passaram; somente `restricted-kind` falhou |
+| CI/release | `.github/workflows/verify.yml`, `release.yml` | workflow #24 executado no head `4ce996b`: 11 de 11 jobs passaram |
 | Instalador Unix | `install.sh`, `scripts/install_test.sh` | instalação limpa/upgrade, checksum, archives maliciosos/oversized, PATH, rollback, lock, uninstall e purge passaram |
-| Instalador Windows | `install.ps1`, `scripts/install_test.ps1` | suíte PowerShell nativa passou no job `native-runtime (windows-latest)` do workflow #23 |
-| Update | `internal/updater`, `internal/cli/update.go` | versão exata, SHA-256, limites, archive allowlist, lock, troca/rollback Unix e helper pós-exit Windows passaram, inclusive em execução nativa no workflow #23 |
+| Instalador Windows | `install.ps1`, `scripts/install_test.ps1` | suíte PowerShell nativa passou no job `native-runtime (windows-latest)` do workflow #24 |
+| Update | `internal/updater`, `internal/cli/update.go` | versão exata, SHA-256, limites, archive allowlist, lock, troca/rollback Unix e helper pós-exit Windows passaram, inclusive em execução nativa no workflow #24 |
 | Documentação/legal | `README.md`, `LICENSE`, `THIRD_PARTY_NOTICES.md` | instalação, RBAC, dados locais, update, remoção e troubleshooting documentados; licenças diretas auditadas |
-| Kind | `test/kind` | `create` reutilizou o cluster; `validate` e `app-e2e ./dist/kubePeep` passaram localmente, fechando F8-21–26; a recriação do zero e a CI permanecem pendentes |
-| Segurança remota | `scripts/security_check.sh` e refs Git | após fetch/prune havia somente `origin/main`, nenhuma tag, e o gate sobre `origin/main` passou nos 25 commits alcançáveis |
+| Kind | `test/kind` | histórico local: reutilização + `validate`/`app-e2e`; prova atual: CI #24 criou do zero em runner efêmero, passou `create`/`validate`/`kubeconfigs`/`app-e2e` e executou `kind delete cluster` ao final, fechando F8-20–26 |
+| Segurança remota | `scripts/security_check.sh` e refs Git | após o push de `6b96a41`, fetch mostrou somente `origin/main`, nenhuma tag, e o gate passou nos 28 commits alcançáveis por esse ref |
 
-## Workflow de verificação #23
+## Workflow de verificação #24 — evidência atual
+
+O [run público #24](https://github.com/fvmoraes/kubepeep/actions/runs/33295350787)
+foi disparado por push e executou o head completo
+`4ce996b40914f729aefa8d949bde85f94873c8d9`. O GitHub registrou conclusão
+`success`; os 11 jobs ficaram verdes:
+
+| Job | Resultado aceito |
+| --- | --- |
+| `build-and-test` | passou |
+| `native-runtime (windows-latest)` | passou |
+| `native-runtime (macos-latest)` | passou |
+| `release-snapshot` | passou |
+| `restricted-kind` | criou o cluster do zero em runner efêmero, passou `create`, `validate`, `kubeconfigs` e `app-e2e`; o workflow executou `kind delete cluster` ao final |
+| `native-archive-smoke (linux, amd64)` | passou |
+| `native-archive-smoke (linux, arm64)` | passou |
+| `native-archive-smoke (darwin, amd64)` | passou |
+| `native-archive-smoke (darwin, arm64)` | passou |
+| `native-archive-smoke (windows, amd64)` | passou |
+| `native-archive-smoke (windows, arm64)` | passou |
+
+Essa evidência fecha F8-20, F8-34, F8-36 e F8-41. Ela também fecha o critério
+MVP-23, porque o pipeline principal do head analisado terminou integralmente
+verde. Não fecha F8-42, F8-46, F8-48 nem MVP-26: snapshot e archives de CI não
+substituem instaladores executados pelos caminhos públicos de uma candidate
+imutável.
+
+## Workflow de verificação #23 — histórico preservado
 
 O [run #23](https://github.com/fvmoraes/kubepeep/actions/runs/33289508322)
 executou o commit `9d7c2ea`. O resultado observável foi 10 de 11 jobs verdes:
@@ -52,11 +84,12 @@ executou o commit `9d7c2ea`. O resultado observável foi 10 de 11 jobs verdes:
 | seis jobs `native-archive-smoke` — Linux, macOS e Windows em amd64/arm64 | passaram |
 | `restricted-kind` | falhou naquele run; a execução local posterior fecha F8-21–26, mas não F8-20 nem a CI atual |
 
-Esse run permitiu fechar F8-34, F8-36 e F8-41 no HEAD executado. As três foram
-reabertas depois da atualização do toolchain para Go 1.26.7: a prova permanece
-registrada como histórica, mas não valida binários novos. A falha Kind daquele
-run não foi reinterpretada como evidência parcial positiva; a evidência Kind
-aceita agora vem da execução local posterior descrita abaixo.
+Esse run permitiu fechar F8-34, F8-36 e F8-41 no HEAD então executado. As três
+foram reabertas depois da atualização do toolchain para Go 1.26.7. A prova
+permanece histórica e não valida binários novos; as tarefas só voltaram a ser
+fechadas pela CI #24. A falha Kind daquele run não foi reinterpretada como
+evidência parcial positiva: F8-20 foi fechada exclusivamente pelo
+`restricted-kind` verde e efêmero da CI #24.
 
 ## Atualização de segurança do toolchain
 
@@ -80,7 +113,8 @@ commit que contém a atualização.
 - Go 1.26.7: o pacote Kubernetes runtime passou 48/48 testes normais e os
   mesmos 48/48 com race;
 - `govulncheck` v1.7.0 com Go 1.26.7: zero vulnerabilidades alcançáveis;
-- frontend: lint, typecheck, build, 73 Vitest e três Playwright passaram;
+- frontend do head `4ce996b`: lint, typecheck, build, 73 Vitest e três
+  Playwright passaram na CI #24;
 - GoReleaser v2.17.1: snapshot atual gerou os seis archives com Go 1.26.7;
 - smoke do binário atual: passou;
 - Ginger v1.4.4: `version`, `inspect` e `doctor` passaram;
@@ -92,10 +126,14 @@ commit que contém a atualização.
 - evidência histórica Go 1.25.13: checksums repetíveis, allowlist exata de
   quatro entradas, documentos iguais à fonte, `trimpath` nos seis alvos e
   Gitleaks sem achados;
-- harness Kind: além dos gates estáticos, `create` reutilizou o cluster e
-  `validate`/`app-e2e ./dist/kubePeep` passaram;
-- segurança remota: fetch/prune mostrou somente `origin/main`, nenhuma tag, e
-  `scripts/security_check.sh origin/main` passou sobre 25 commits.
+- harness Kind local anterior: além dos gates estáticos, `create` reutilizou o
+  cluster e `validate`/`app-e2e ./dist/kubePeep` passaram;
+- harness Kind atual: a CI #24 criou o cluster em runner efêmero vazio, executou
+  validação, kubeconfigs e E2E do aplicativo, e chamou `kind delete cluster` ao
+  final;
+- segurança remota: após o push de `6b96a41`, fetch mostrou somente
+  `origin/main`, nenhuma tag, e `scripts/security_check.sh origin/main` passou
+  sobre os 28 commits então alcançáveis.
 
 Para tornar a repetição idempotente, o harness valida ownership sem confundir
 erro de API com ausência, reaplica o conjunto e recria sequencialmente o Pod de
@@ -108,16 +146,21 @@ HTTP 503, negação autoritativa retorna HTTP 403 e dashboard parcialmente
 autorizado permanece HTTP 200 com falhas isoladas.
 
 O gate remoto não encontrou evidência de segredo nos refs alcançáveis nem ref
-adicional que exija reescrita. Essa conclusão é limitada a `origin/main` e aos
-25 commits inspecionados; não afirma purga de cache ou objeto inacessível ao
-Git.
+adicional que exija reescrita. Essa conclusão é limitada ao snapshot
+`origin/main@6b96a41` e aos 28 commits então inspecionados; não afirma purga de
+cache ou objeto inacessível ao Git.
+
+A ausência de dados sensíveis é premissa não negociável, não apenas resultado
+de uma varredura: kubeconfigs, credenciais, tokens, chaves privadas, conteúdo
+de Secret, logs de aplicações, bancos locais, PII privada e paths específicos
+da máquina nunca podem ser enviados ao repositório, logs ou artefatos da CI.
+As evidências registram somente resultados sanitizados e identificadores
+públicos do próprio projeto.
 
 ## Tarefas ainda abertas
 
 | Tarefas | Evidência aguardada |
 | --- | --- |
-| F8-20 | remover e recriar do zero o cluster Kind canônico; a execução aceita reutilizou o cluster existente |
-| F8-34, F8-36 e F8-41 | repetir instalador, updater e smokes nativos dos seis archives na CI com Go 1.26.7 |
 | F8-42 | instaladores exercitados contra uma release candidate imutável, com checksum |
 | F8-46 | fechamento dos 27 critérios e de todos os gates complementares |
 | F8-48 | comandos publicados exercitados contra uma tag/candidate imutável |
@@ -130,10 +173,10 @@ Git.
 ./test/kind/harness.sh app-e2e ./dist/kubePeep
 ```
 
-Esses comandos passaram localmente, mas `create` encontrou e reutilizou o
-cluster. Para fechar F8-20, repetir `create` em ambiente comprovadamente sem o
-cluster canônico. Os gates nativos de Windows, macOS e dos seis archives do
-workflow #23 são históricos em Go 1.25.13; ainda é necessário repetir a CI com
-Go 1.26.7. Somente uma tag exata aprovada pode acionar `release.yml`; os
-instaladores publicados e seus nomes/casing continuam dependentes de uma
-candidate imutável.
+Esses comandos passaram localmente, mas aquela execução de `create` encontrou e
+reutilizou o cluster. O `restricted-kind` da CI #24 eliminou essa pendência ao
+executar a sequência completa em runner efêmero. Os gates nativos de Windows,
+macOS e dos seis archives também foram repetidos com Go 1.26.7 na CI #24. O run
+#23 permanece apenas como histórico do pin anterior. Somente uma tag exata
+aprovada pode acionar `release.yml`; os instaladores publicados, o checksum e
+os nomes/casing dos assets continuam dependentes de uma candidate imutável.

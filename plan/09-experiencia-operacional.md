@@ -1,6 +1,6 @@
 # Fase 9 — Experiência operacional
 
-**Estado atual:** em execução (12/84)
+**Estado atual:** em execução (15/84)
 
 **Benchmark:** [facilitadores oficiais do Aptakube](../docs/research/aptakube-ux-benchmark.md)
 
@@ -73,9 +73,9 @@ absoluta de Secret. Ela não é condição para concluir a Fase 9.
 - [x] **F9-13** Conter foco na paleta, restaurá-lo ao fechar, suportar setas/Enter/Escape e anunciar resultados ao leitor de tela.
 - [x] **F9-14** Não oferecer mutações na primeira versão da paleta; ações continuam no alvo contextual e no backend reautorizado.
 - [x] **F9-15** Criar ajuda de atalhos descoberta por teclado e pela interface, com conflitos de browser documentados.
-- [ ] **F9-16** Adicionar atalhos seguros para atualizar, focar busca, abrir seletor e voltar, sem capturar campos de edição.
-- [ ] **F9-17** Testar Windows/Linux (`Ctrl`) e macOS (`Meta`), composição de teclado, foco e navegação somente por teclado.
-- [ ] **F9-18** Garantir deep links/reload com History API para todos os destinos do catálogo.
+- [x] **F9-16** Adicionar atalhos seguros para atualizar, focar busca, abrir seletor e voltar, sem capturar campos de edição; refresh usa allowlist explícita de queries ativas somente leitura e nunca alcança mutations ou uma query futura não revisada.
+- [x] **F9-17** Testar os contratos de modificador Windows/Linux (`Ctrl`) e macOS (`Meta`), composição de teclado, foco e navegação somente por teclado, incluindo IME/229/`Process`, `repeat`, campos editáveis e fallback seguro quando o alvo não existe; Ctrl/Meta foram simulados nos testes de componente e exercitados no Chromium Linux, sem alegar browser nativo Windows/macOS.
+- [x] **F9-18** Garantir deep links/reload com History API, estado ativo e back local para todos os dez destinos do catálogo único.
 
 ### Listas, filtros, colunas, favoritos e recentes
 
@@ -173,6 +173,37 @@ absoluta de Secret. Ela não é condição para concluir a Fase 9.
 | logs | permitida | permitidos | opcionais | negadas | leitor disponível, ações mutáveis indisponíveis |
 | operador restrito | permitida | conforme Role | opcionais | subconjunto permitido | menu reflete capability e backend reautoriza |
 | multi-contexto divergente | diferente por origem | diferente por origem | diferente por origem | somente alvo único | nenhuma capability ou dado cruza origens |
+
+## Evidência versionada da terceira fatia
+
+O commit funcional `6b96a411d0ff52f0824933e3ea4e7689f72354bb`
+implementa os atalhos globais seguros
+`Ctrl/Meta+K/R/F/O/B`: abrir catálogo, atualizar leituras ativas, focar a busca
+da tela, abrir o seletor de contexto e voltar no histórico local. O refresh
+possui allowlist fechada dos roots de leitura; mutations e queries futuras
+ficam fora por padrão. Eventos em `input`, `textarea`, `select`,
+`contenteditable` ou `role=textbox`, eventos já tratados/repetidos e composição
+IME (`isComposing`, código 229 ou tecla `Process`) não são capturados.
+
+O seletor usa `showPicker()` quando disponível e conserva fallback de foco
+quando o browser não expõe ou recusa a API. O mesmo catálogo canônico fornece
+menu lateral, paleta e as dez rotas: Overview, Workloads, Pods, Logs, Events,
+Network, Config, Namespaces, Permissions e Settings. A tabela E2E declara
+`path`, `label` e `heading` para cada página e comprova navegação, reload,
+`aria-current` e back.
+
+Os gates locais passaram com 17 arquivos/79 testes Vitest e 3/3 Playwright. A
+[CI #25](https://github.com/fvmoraes/kubepeep/actions/runs/33296687430)
+executou o SHA funcional exato
+`6b96a411d0ff52f0824933e3ea4e7689f72354bb` e concluiu `success` com 11/11
+jobs: build/test, runtimes Windows/macOS, snapshot, Kind restritivo e os seis
+smokes nativos de archives. Essa evidência versionada fecha F9-16–F9-18 sem
+reutilizar a CI #24 do head anterior.
+
+A ausência de dados sensíveis continua como premissa inegociável: atalhos,
+queries, testes, logs e artefatos nunca podem enviar kubeconfig, credencial,
+token, chave privada, Secret, conteúdo de log, banco local, PII privada ou path
+específico da máquina.
 
 ## Critério de saída
 

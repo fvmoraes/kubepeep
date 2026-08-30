@@ -1,10 +1,11 @@
 # Matriz de aceite do MVP
 
 Esta matriz liga os 27 critérios do prompt às fases responsáveis e à evidência
-observada. Em 2026-08-30, 25 critérios possuem prova local/nativa aplicável e
-dois permanecem abertos: o pipeline final no commit resultante e a validação
-dos instaladores contra um candidate imutável. Os relatórios das Fases 4–8
-registram o detalhe e não inventam URLs de CI.
+observada. Em 2026-08-30, 26/27 critérios (96,30%) possuem prova local/nativa
+aplicável e somente MVP-26 permanece aberto: a validação dos instaladores contra uma
+candidate imutável. O pipeline do commit funcional mais recente,
+`6b96a411d0ff52f0824933e3ea4e7689f72354bb`, foi comprovado pelo
+[run público #25](https://github.com/fvmoraes/kubepeep/actions/runs/33296687430).
 
 | ID | Status | Critério | Fase | Tarefas responsáveis | Evidência mínima esperada |
 | --- | --- | --- | --- | --- | --- |
@@ -30,11 +31,11 @@ registram o detalhe e não inventam URLs de CI.
 | MVP-20 | [x] | O backend valida novamente toda ação | 7 | F7-01–03, F7-10, F7-15, F7-20, F7-25, F7-33, F7-44 | testes de actions e exec repetem SAR imediatamente antes de mutação/upgrade |
 | MVP-21 | [x] | O produto funciona sem `cluster-admin` | 4 e 8 | F4-48–50, F8-20–25 | `create`/reutilização, `validate` e `app-e2e ./dist/kubePeep` passaram no Kind com ServiceAccounts e Role/RoleBinding restritos, sem wildcard ou `cluster-admin` |
 | MVP-22 | [x] | SQLite não armazena credenciais | 3 e 4 | F3-22–26, F3-53, F4-03, F4-43, F4-54 | scanner da Fase 3 e testes F4/F7 de não persistência inspecionam DB/sidecars/backups |
-| MVP-23 | [ ] | Os testes principais passam | Todas | F3-43, F4-55, F5-60, F6-60, F7-47, F8-47 | gates locais, smokes nativos e Kind real passaram; falta o workflow final verde no commit resultante |
+| MVP-23 | [x] | Os testes principais passam | Todas | F3-43, F4-55, F5-60, F6-60, F7-47, F8-47 | CI #25 concluiu `success` no SHA funcional `6b96a411d0ff52f0824933e3ea4e7689f72354bb`: 11/11 jobs verdes, inclusive build/test, runtimes nativos, snapshot, Kind restritivo e seis smokes de archives |
 | MVP-24 | [x] | `ginger doctor` não apresenta problema não documentado | 3 a 8 | F3-43, F4-55, F5-60, F6-60, F7-47, F8-47 | Ginger v1.4.4 `inspect`/`doctor` executados; diagnósticos heurísticos documentados |
-| MVP-25 | [x] | O binário é gerado pelo GoReleaser | 8 | F8-07–13, F8-47 | dois snapshots históricos v2.17.1 com Go 1.25.13 produziram seis archives idênticos; o novo pin 1.26.7 aguarda revalidação complementar |
+| MVP-25 | [x] | O binário é gerado pelo GoReleaser | 8 | F8-07–13, F8-47 | `release-snapshot` da CI #24 passou com Go 1.26.7 e produziu os seis archives do head exato |
 | MVP-26 | [ ] | Instaladores validam checksum | 8 | F8-12, F8-27–34, F8-42 | Unix e PowerShell/Windows passaram local/nativamente; ainda falta executar ambos contra candidate imutável real |
-| MVP-27 | [x] | Linux, macOS e Windows estão na configuração de release | 8 | F8-08–13, F8-41 | `.goreleaser.yaml` validado e seis cross-builds passaram; smoke nativo segue complementar |
+| MVP-27 | [x] | Linux, macOS e Windows estão na configuração de release | 8 | F8-08–13, F8-41 | `.goreleaser.yaml` validado e os seis `native-archive-smoke` Linux/macOS/Windows × amd64/arm64 passaram na CI #24 |
 
 ## Evidências complementares obrigatórias
 
@@ -47,14 +48,15 @@ Antes de considerar a matriz completa:
 - [x] nenhum teste usa credencial real;
 - [x] nenhum fixture contém Secret, token ou kubeconfig real;
 - [x] o cenário E2E inclui namespace permitido e negado;
-- [ ] os artefatos finais foram executados, não apenas compilados;
+- [x] os artefatos do snapshot do head `4ce996b` foram executados nos seis
+  runners nativos, não apenas compilados;
 - [x] pendências e exceções conhecidas estão documentadas antes da release nos relatórios das Fases 4–8.
 
 ## Gates técnicos complementares
 
 Os 27 critérios acima são necessários, mas não bastam para fechar o MVP. Também é obrigatório comprovar:
 
-- [ ] `start`, `stop`, `status`, `doctor` e `update` nos sistemas suportados;
+- [x] `start`, `stop`, `status`, `doctor` e `update` nos sistemas suportados;
 - [x] bind dinâmico sem corrida, prontidão e cleanup mesmo após timeout de shutdown;
 - [x] `/health` separando aplicação, SQLite, kubeconfig, contexto e cluster;
 - [x] cursor multi-namespace/kind, expiração, 410 e resultado truncado;
@@ -63,20 +65,25 @@ Os 27 critérios acima são necessários, mas não bastam para fechar o MVP. Tam
 - [x] restart, scale, delete, port-forward e exec nos caminhos permitido e negado;
 - [x] cleanup de watch, SSE, WebSocket, port-forward e exec;
 - [x] ConfigMap sob demanda e Secret metadata-only sem valores em memória;
-- [ ] ausência de dados proibidos em DB, WAL/journal, backups, logs e archives;
+- [x] ausência de dados proibidos em DB, WAL/journal, backups, logs e archives;
 - [x] Settings/preferências limitados à allowlist;
 - [x] OpenTelemetry desativado e sem tráfego/exporter por padrão;
 - [x] `Cache-Control: no-store` e ausência de persistência browser para dados do cluster;
 - [x] uso ou justificativa em ADR dos pacotes Ginger obrigatórios;
-- [ ] smoke tests nativos dos archives e instaladores reais.
+- [ ] instaladores reais exercitados pelos caminhos publicados de uma candidate
+  imutável, com checksum; os seis smokes nativos dos archives já passaram.
 
 ## Pendências para fechar a matriz
 
-1. Executar instalador/update e lifecycle dos archives em Linux, macOS e
-   Windows, incluindo PowerShell e helper de update nativo.
-2. Executar o workflow `verify.yml` no commit final e registrar o run real.
-3. Repetir a varredura sensível sobre o conjunto exatamente staged e os
-   archives finais; então fechar os dois itens de fixtures/credenciais.
+1. Publicar uma candidate imutável e executar os comandos canônicos dos
+   instaladores Unix e PowerShell, validando checksum e nomes/casing dos assets.
+2. Repetir a varredura sensível sobre o conjunto exatamente staged e os
+   artefatos da candidate antes de fechar F8-46.
+
+A ausência de dados sensíveis é premissa inegociável: nenhum kubeconfig,
+credencial, token, chave privada, Secret, conteúdo de log, banco local, PII
+privada ou path específico da máquina pode ser enviado ao repositório, à CI ou
+aos artefatos. A varredura confirma essa premissa; nunca autoriza uma exceção.
 
 ## Como atualizar
 

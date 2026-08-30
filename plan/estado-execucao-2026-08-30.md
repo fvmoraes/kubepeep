@@ -12,10 +12,11 @@ públicos do próprio projeto e resultados sanitizados.
 | Campo | Valor na captura |
 | --- | --- |
 | Branch | `main` |
-| HEAD versionado | `9d7c2ea` — `fix: align restricted Kind validation contracts` |
+| HEAD versionado | `4ce996b40914f729aefa8d949bde85f94873c8d9` — `docs: record full project reindex` |
 | Relação com upstream | fetch/prune mostrou somente `origin/main`; nenhuma tag remota ou local |
-| Último workflow auditado | verificação #23, run público `33289508322` |
-| Resultado do workflow #23 | histórico em Go 1.25.13: 10 de 11 jobs passaram; somente `restricted-kind` falhou; não valida o toolchain atual Go 1.26.7 |
+| Último workflow auditado | [verificação #24, run público `33295350787`](https://github.com/fvmoraes/kubepeep/actions/runs/33295350787) |
+| Resultado do workflow #24 | `success` no head exato `4ce996b40914f729aefa8d949bde85f94873c8d9`; 11 de 11 jobs verdes com Go 1.26.7 |
+| Workflow #23 | histórico no head `9d7c2ea` e Go 1.25.13: 10/11; não representa pendência atual |
 | Release/tag | nenhuma candidate ou tag foi criada por esta execução |
 
 O working tree continha mudanças concorrentes ainda não versionadas quando este
@@ -31,6 +32,13 @@ relatório foi criado. Por isso, cada afirmação usa uma destas classes:
 Contagens de checkboxes medem rastreabilidade do plano, não esforço relativo nem
 percentual de maturidade comercial.
 
+A ausência de dados sensíveis é premissa inegociável deste inventário e de
+toda execução: kubeconfigs, credenciais, tokens, chaves privadas, conteúdo de
+Secret, logs de aplicações, bancos locais, PII privada e paths específicos da
+máquina nunca podem ser enviados ao repositório, GitHub Actions, logs ou
+artefatos. Somente resultados sanitizados e identificadores públicos do próprio
+projeto podem ser persistidos.
+
 ### 1.2 Fontes usadas
 
 - planos `plan/01-descoberta.md` a `plan/09-experiencia-operacional.md`;
@@ -44,14 +52,13 @@ percentual de maturidade comercial.
 ## 2. Resumo executivo
 
 O MVP funcional está implementado localmente. As Fases 1–3 e 5–7 estão
-concluídas; a Fase 4 mantém somente a matriz exaustiva F4-49 aberta. O Kind
-local passou `validate` e `app-e2e`, fechando F8-21–F8-26, mas o comando
-`create` reutilizou o cluster existente e não fecha a recriação do zero F8-20.
-A distribuição também possui um snapshot atual Go 1.26.7 com seis archives e
-smoke do binário verde. F8-34, F8-36 e F8-41 ainda exigem nova CI nativa, e uma
-release candidate imutável permanece gate separado. A Fase 9 começou com
-paleta de navegação segura e, no working tree atual, evolui listas, filtros e
-ordenação.
+concluídas; a Fase 4 mantém somente a matriz exaustiva F4-49 aberta. A CI #24
+passou integralmente no head `4ce996b`: o `restricted-kind` efêmero concluiu
+`create`, `validate`, `kubeconfigs`, `app-e2e` e `cleanup`, enquanto runtimes
+nativos, snapshot e seis smokes de archive ficaram verdes. Isso fecha F8-20,
+F8-34, F8-36, F8-41 e MVP-23. Uma release candidate imutável permanece gate
+separado. A Fase 9 possui paleta, listas/filtros e, no working tree atual, o
+lote local de atalhos e navegação completa F9-16–F9-18.
 
 | Fase | Feitas | Total | Estado objetivo | Gate restante |
 | --- | ---: | ---: | --- | --- |
@@ -62,23 +69,24 @@ ordenação.
 | 5 — Dashboard | 62 | 62 | concluída, inclusive Kind local | nenhum |
 | 6 — Recursos | 67 | 67 | concluída, inclusive E2E local | nenhum |
 | 7 — Ações | 47 | 47 | concluída, inclusive RBAC real | nenhum |
-| 8 — Distribuição | 43 | 50 | snapshot Go 1.26.7 e Kind local verdes | Kind do zero, CI nativa e candidate |
-| 9 — Experiência operacional | 12 | 84 | em execução | 72 tarefas e matriz UX |
+| 8 — Distribuição | 47 | 50 | CI #24, Kind efêmero e seis archives nativos verdes | F8-42, F8-46 e F8-48 |
+| 9 — Experiência operacional | 15 | 84 | em execução; atalhos locais validados | 69 tarefas e matriz UX |
 
 Agregados na captura:
 
 | Conjunto | Feitas | Total | Proporção informativa |
 | --- | ---: | ---: | ---: |
-| Fases originais 1–8 | 436 | 444 | 98,20% |
-| Expansão Fase 9 | 12 | 84 | 14,29% |
-| Plano completo atual | 448 | 528 | 84,85% |
-| Critérios MVP | 25 | 27 | 92,59% |
+| Fases originais 1–8 | 440 | 444 | 99,10% |
+| Expansão Fase 9 | 15 | 84 | 17,86% |
+| Plano completo atual | 455 | 528 | 86,17% |
+| Critérios MVP | 26 | 27 | 96,30% |
 | Critérios UX | 1 | 15 | 6,67% |
 
-Os bloqueios atuais são independentes: revalidar Go 1.26.7 em CI nativa,
-recriar o cluster Kind canônico do zero e exercitar uma candidate imutável.
-Publicação e comandos de instalação não podem ser inferidos do snapshot local,
-da reutilização do cluster nem do run #23 com toolchain anterior.
+O bloqueio de distribuição atual é a candidate imutável e o fechamento dos
+gates dependentes dela; Go 1.26.7, CI nativa, Kind limpo e archives já foram
+revalidados pela CI #24. Publicação e comandos canônicos de instalação não
+podem ser inferidos do snapshot. Separadamente, o lote F9-16–F9-18 está apenas
+no working tree e exige a CI seguinte do commit que o versionar.
 
 ## 3. Cronologia consolidada
 
@@ -125,12 +133,12 @@ da reutilização do cluster nem do run #23 com toolchain anterior.
   separados em uma Fase 9 e uma matriz UX próprias;
 - a primeira fatia F9 entregou a paleta somente de navegação e atalhos seguros.
 
-### 2026-08-30 — CI #23, reconciliação e segunda fatia F9
+### 2026-08-30 — CI #23 histórica, CI #24 atual e fatias F9
 
 - o workflow #23, ainda em Go 1.25.13, passou build/test, runtime nativo em
   macOS/Windows, snapshot e os seis smokes nativos de archives;
 - F8-34, F8-36 e F8-41 foram fechadas naquele estado, mas reabertas após o
-  upgrade para Go 1.26.7 até que nova CI nativa valide o toolchain atual;
+  upgrade para Go 1.26.7; isso descreve uma transição histórica já resolvida;
 - o Kind local posterior reutilizou o cluster, e `validate` mais
   `app-e2e ./dist/kubePeep` passaram, fechando F8-21–F8-26 sem fechar F8-20;
 - o Pod do cenário `previous-log` e o Event `000-kp-warning` foram tornados
@@ -159,6 +167,21 @@ da reutilização do cluster nem do run #23 com toolchain anterior.
 - fetch/prune mostrou somente `origin/main`, nenhuma tag, e o security gate
   remoto passou sobre os 25 commits alcançáveis, sem evidência de segredo ou
   ref a reescrever.
+- depois, a CI #24 executou o head exato
+  `4ce996b40914f729aefa8d949bde85f94873c8d9` com Go 1.26.7 e terminou
+  `success`: `build-and-test`, runtimes nativos Windows/macOS,
+  `release-snapshot`, `restricted-kind` e seis `native-archive-smoke` ficaram
+  verdes;
+- `restricted-kind` rodou em runner efêmero e concluiu `create`, `validate`,
+  `kubeconfigs`, `app-e2e` e `cleanup`, fechando F8-20; os jobs nativos atuais
+  fecharam F8-34, F8-36 e F8-41, e o pipeline integral fechou MVP-23;
+- no working tree posterior ao head da CI #24, a terceira fatia F9 adicionou
+  `Ctrl/Meta+K/R/F/O/B`, refresh por allowlist fechada de queries ativas de
+  leitura, proteção de editores/IME/229/`Process`/repeat, `showPicker` com
+  fallback de foco e E2E path/label/heading das dez rotas;
+- essa terceira fatia passou localmente 17 arquivos/79 Vitest e 3/3
+  Playwright, fechando F9-16–F9-18 no working tree, mas ainda exige a CI do
+  commit funcional seguinte.
 
 ## 4. Execução por fase
 
@@ -293,7 +316,7 @@ F7-44 foi fechada com a matriz real permitido/negado/revogado. Negação
 autoritativa permaneceu 403 e estado de autorização não determinável falhou
 fechado em 503.
 
-### 4.8 Fase 8 — Distribuição, 43/50
+### 4.8 Fase 8 — Distribuição, 47/50
 
 Implementado localmente ou comprovado no toolchain histórico:
 
@@ -307,23 +330,22 @@ Implementado localmente ou comprovado no toolchain histórico:
 - pin atual de linguagem Go 1.26.0 e toolchain exato Go 1.26.7;
 - snapshot GoReleaser v2.17.1 atual gerando os seis archives e smoke do binário
   aprovado;
-- F8-21–F8-26 comprovadas por `validate` e
+- F8-21–F8-26 comprovadas primeiro por `validate` e
   `app-e2e ./dist/kubePeep` no Kind local reutilizado;
-- runtime nativo macOS/Windows e smoke dos seis archives no workflow #23 como
-  evidência histórica do toolchain Go 1.25.13;
+- F8-20 comprovada depois pelo `restricted-kind` da CI #24, que passou criação,
+  validação, kubeconfigs, E2E e cleanup em runner efêmero;
+- runtime nativo macOS/Windows, instalador/updater, snapshot e smoke dos seis
+  archives comprovados no toolchain Go 1.26.7 pela CI #24;
+- workflow #23 preservado apenas como histórico do toolchain Go 1.25.13;
 - documentação legal, instalação, remoção e troubleshooting.
 
 Pendências exatas:
 
-- F8-20: remover e recriar do zero o cluster Kind canônico; `create` reutilizou
-  a instância existente nesta execução;
-- F8-34, F8-36 e F8-41: repetir instalador/updater e os seis smokes nativos com
-  Go 1.26.7; o run #23 não valida os novos binários;
 - F8-42: instaladores contra candidate imutável;
 - F8-46: fechamento integral da matriz MVP e gates complementares;
 - F8-48: comandos publicados e casing dos assets contra candidate real.
 
-### 4.9 Fase 9 — Experiência operacional, 12/84
+### 4.9 Fase 9 — Experiência operacional, 15/84
 
 Fechado e versionado:
 
@@ -349,13 +371,27 @@ Validado localmente no working tree, ainda dependente de commit/CI:
 - cursores vinculados à geração;
 - ordenação natural `item-2` antes de `item-10`, estabilidade e tie-breaker por
   identidade canônica nas coleções de contexto único.
+- atalhos globais `Ctrl/Meta+K/R/F/O/B` fora de campos editáveis;
+- refresh apenas de queries ativas de leitura com roots explicitamente
+  allowlisted; mutations e queries futuras ficam fora por padrão;
+- bloqueio de `defaultPrevented`, repeat, composição IME, `Process`, código 229,
+  `input`, `textarea`, `select`, `contenteditable` e `role=textbox`;
+- seletor de contexto com `showPicker()` progressivo e fallback de foco;
+- catálogo único das dez rotas usado por menu, paleta e Router;
+- E2E `path`/`label`/`heading` das dez páginas, com deep-link, reload,
+  `aria-current` e back local;
+- 17 arquivos/79 Vitest e 3/3 Playwright locais para o estado atual.
 
-F9-19 e F9-20 já estão marcadas. F9-21 permanece **aberta** mesmo com o
+F9-16–F9-20 já estão marcadas. F9-21 permanece **aberta** mesmo com o
 comparador natural implementado: o requisito também exige origem explícita em
 agregações, e a futura coleção multi-contexto ainda precisa incluir essa origem
 no desempate determinístico. UX-M03 permanece aberto porque inclui ainda
 filtros positivos/negativos/multitermo, colunas allowlisted e alta
 cardinalidade.
+
+O lote F9-16–F9-18 é posterior ao head `4ce996b` da CI #24. Essa execução não
+é reutilizada como prova dos atalhos; uma CI seguinte precisa validar o commit
+que os versionar.
 
 ## 5. Arquitetura e capacidades atuais
 
@@ -604,22 +640,43 @@ cluster e não transformar conveniência em autorização.
 | Distribuição | GoReleaser v2.17.1 gerou snapshot Go 1.26.7 com seis archives; smoke do binário passou |
 | Instalador Unix | instalação, upgrade, checksum, rollback, uninstall e purge |
 | Segurança | scanner de staged/history, identidades, paths, mensagens e Gitleaks |
-| Kind | gates estáticos, `create` com reutilização, `validate` e `app-e2e ./dist/kubePeep` passaram |
+| Kind | histórico local com reutilização; CI #24 efêmera passou `create`, `validate`, `kubeconfigs`, `app-e2e` e `cleanup` |
 
 ### 10.2 Evidência nativa
 
 - Fase 1: probe de controle executado nativamente em Linux e Windows amd64;
 - Fase 3: workflow #9 passou build/test e runtime nativo macOS/Windows;
-- Fase 8: workflow #23 passou runtime nativo macOS/Windows com Go 1.25.13;
-- Fase 8: os seis archives históricos foram verificados e executados nos
-  runners de suas combinações Linux/macOS/Windows × amd64/arm64;
-- instalador/updater PowerShell passaram no runner Windows do workflow #23.
+- Fase 8: workflow #24 passou runtime nativo macOS/Windows com Go 1.26.7;
+- Fase 8: os seis archives atuais foram verificados e executados nos runners
+  Linux/macOS/Windows × amd64/arm64;
+- Fase 8: instalador/updater PowerShell passaram no runner Windows da CI #24;
+- Fase 8: `restricted-kind` passou a sequência completa em runner efêmero.
 
-As três evidências da Fase 8 acima são históricas. Elas não validam o binário,
-instaladores ou archives reconstruídos com Go 1.26.7; por isso F8-34, F8-36 e
-F8-41 permanecem reabertas até nova CI nativa.
+O workflow #23 já havia exercitado os runtimes e archives com Go 1.25.13, mas
+essa evidência é apenas histórica. A CI #24 é a prova atual que fecha F8-20,
+F8-34, F8-36 e F8-41 no pin Go 1.26.7.
 
-### 10.3 Resultado histórico do workflow #23
+### 10.3 Resultado atual do workflow #24 e histórico do #23
+
+O [run público #24](https://github.com/fvmoraes/kubepeep/actions/runs/33295350787)
+executou o SHA completo `4ce996b40914f729aefa8d949bde85f94873c8d9`,
+terminou `success` e deixou 11/11 jobs verdes:
+
+| Job atual | Resultado |
+| --- | --- |
+| `build-and-test` | passou |
+| `native-runtime (windows-latest)` | passou |
+| `native-runtime (macos-latest)` | passou |
+| `release-snapshot` | passou |
+| `restricted-kind` | passou create/validate/kubeconfigs/app-e2e/cleanup em runner efêmero |
+| `native-archive-smoke` Linux amd64/arm64 | dois passaram |
+| `native-archive-smoke` Darwin amd64/arm64 | dois passaram |
+| `native-archive-smoke` Windows amd64/arm64 | dois passaram |
+
+Essa é a evidência atual do toolchain Go 1.26.7 e fecha F8-20, F8-34, F8-36,
+F8-41 e MVP-23. Ela não inclui as alterações F9-16–F9-18 ainda locais.
+
+#### Contexto histórico do workflow #23
 
 O run foi executado com Go 1.25.13, antes do upgrade do projeto para Go 1.26.7.
 
@@ -632,12 +689,13 @@ O run foi executado com Go 1.25.13, antes do upgrade do projeto para Go 1.26.7.
 | seis `native-archive-smoke` | passaram |
 | `restricted-kind` | falhou |
 
-O resultado documenta o comportamento do HEAD executado, mas não fecha os
+O resultado documenta o comportamento do HEAD executado, mas não é a prova dos
 gates do toolchain atual. A evidência local posterior fechou F4-50, F5-59,
-F6-57, F7-44 e F8-21–F8-26; F4-49, F8-20, F8-34, F8-36 e F8-41 permanecem
-abertas pelos motivos registrados neste relatório.
+F6-57, F7-44 e F8-21–F8-26. F8-20, F8-34, F8-36 e F8-41, reabertas durante a
+troca de pin, foram fechadas depois pela CI #24; somente F4-49 permanece aberta
+entre os itens citados nesta passagem histórica.
 
-### 10.4 Working tree da segunda fatia F9
+### 10.4 Working tree das fatias F9 locais
 
 Resultados locais já observados para os controles de lista:
 
@@ -645,7 +703,7 @@ Resultados locais já observados para os controles de lista:
 | --- | --- |
 | ESLint | passou |
 | TypeScript | passou sem emissão |
-| Vitest | 17 arquivos, 73/73 testes |
+| Vitest | 17 arquivos, 79/79 testes no estado atual |
 | Vite build | passou; 1.904 módulos transformados |
 | Playwright Chromium | 3/3 cenários |
 | Storage browser nos cenários | permaneceu vazio |
@@ -654,9 +712,12 @@ Resultados locais já observados para os controles de lista:
 | `govulncheck` | Go 1.26.7, nenhuma vulnerabilidade alcançável |
 
 A ordenação natural recebeu testes normais e race no pacote Kubernetes runtime.
-Ainda se exigem o security gate, commit e workflow do commit que contiver a
-mudança. Esses gates também não bastam para F9-21: a origem multi-contexto
-continua sem implementação.
+O lote posterior F9-16–F9-18 cobriu atalhos Ctrl/Meta, bloqueios de edição e
+IME, allowlist de refresh, `showPicker`/fallback e as dez rotas com
+deep-link/reload/back. Ainda se exigem o security gate, commit e workflow do
+commit que contiver o lote local. A CI #24 validou o head `4ce996b`, anterior a
+esses atalhos, e não é reutilizada. Esses gates também não bastam para F9-21: a
+origem multi-contexto continua sem implementação.
 
 ### 10.5 Kind: diagnóstico e evidência local
 
@@ -778,23 +839,22 @@ confirmação externa, não se deve afirmar “purga completa do provedor”.
 
 ## 12. Matrizes de aceite
 
-### 12.1 MVP, 25/27
+### 12.1 MVP, 26/27
 
-A evidência Kind local fecha MVP-10 e MVP-21, elevando a matriz para 25/27. Há
-uma ressalva de validade temporal: provas nativas de runtime/archives do run #23
-foram obtidas com Go 1.25.13 e não demonstram o toolchain atual Go 1.26.7. Essa
-reabertura afeta gates complementares e F8-34/F8-36/F8-41, enquanto MVP-23
-permanece aberto até a pipeline integral do estado atual.
+A evidência Kind local fechou MVP-10 e MVP-21. Depois, a CI #24 comprovou o
+toolchain Go 1.26.7, Kind efêmero, runtimes e archives no mesmo head, fechando
+MVP-23 e elevando a matriz para 26/27. A prova do run #23 permanece histórica,
+mas nenhuma pendência atual depende dela.
 
 Critérios ainda abertos:
 
 | ID | Motivo |
 | --- | --- |
-| MVP-23 | pipeline do estado final precisa ficar integralmente verde |
 | MVP-26 | checksum de instaladores precisa da candidate/publicação aplicável |
 
-Além dos 27 critérios, gates complementares ainda exigem recriação Kind do
-zero, CI nativa Go 1.26.7 e comandos publicados contra artefatos finais.
+Além dos 27 critérios, gates complementares ainda exigem os comandos publicados
+contra a candidate imutável e a inspeção final desses artefatos. Recriação Kind
+do zero e CI nativa Go 1.26.7 já foram comprovadas pelo run #24.
 
 ### 12.2 UX, 1/15
 
@@ -812,9 +872,9 @@ promessa de produto.
 
 | Divergência | Tratamento |
 | --- | --- |
-| documentos antigos tratavam workflow parcial como gate amplo | run #23 foi registrado como histórico, 10/11, Go 1.25.13 e sem fechar Kind |
-| F8 podia reutilizar prova de toolchain anterior | F8-34, F8-36 e F8-41 foram reabertas; nova CI Go 1.26.7 é obrigatória |
-| Kind local estava sem evidência positiva | `validate` e `app-e2e` passaram, fechando F8-21–26; F8-20 segue aberta porque `create` reutilizou o cluster |
+| documentos antigos tratavam workflow parcial como gate amplo | run #23 foi preservado como histórico; a evidência atual é o run #24 integralmente verde |
+| F8 podia reutilizar prova de toolchain anterior | F8-34, F8-36 e F8-41 foram reabertas durante a troca e fechadas somente pela CI #24 em Go 1.26.7 |
+| Kind local estava sem prova de criação limpa | a execução local fechou F8-21–26; a CI #24 efêmera passou a sequência completa e fechou F8-20 |
 | F4–F7 podiam parecer incompletas em código | F4-50, F5-59, F6-57 e F7-44 receberam a evidência real; somente F4-49 permanece aberta |
 | revogação sem opinião esperava 403 | contrato corrigido para `unknown`/503 sem inventar negação |
 | UI podia sugerir ordenação global | wording e contrato dizem “página limitada” |
@@ -824,7 +884,7 @@ promessa de produto.
 | ordenação lexicográfica não era natural | comparador natural estável foi implementado para contexto único; F9-21 segue aberta sem origem multi-contexto no desempate |
 | registro auxiliar de ADR do grafo está vazio | ADRs Git são canônicos; sincronização fica para o reindex final |
 
-F9-21 não deve mudar a contagem de 12/84 enquanto a agregação multi-contexto não
+F9-21 não deve mudar a contagem de 15/84 enquanto a agregação multi-contexto não
 tiver origem explícita e desempate determinístico. Quando essa parte for
 implementada e validada, atualizar `plan/09-experiencia-operacional.md`,
 `plan/README.md`, a evidência F9 e este relatório no mesmo commit.
@@ -1029,53 +1089,26 @@ status, commit alcançável e conclusão.
 
 ## 17. Inventário do working tree na captura
 
-Mudanças concorrentes relacionadas à continuação atual, todas com paths
-relativos:
+Mudanças locais posteriores ao head `4ce996b`, todas com paths relativos. Elas
+não fizeram parte da CI #24.
 
-### CI e Kind
+### Interface, atalhos e testes
 
-- `.github/workflows/release.yml`;
-- `.github/workflows/verify.yml`;
-- `.gitignore`;
-- `test/kind/app_e2e.py`;
-- `test/kind/harness.sh`;
-- `test/kind/rbac.yaml`;
-- `test/kind/README.md`.
-
-### Toolchain e runtime nativo
-
-- `go.mod`;
-- `internal/cli/native_process_test.go`.
-
-### Ordenação backend
-
-- `internal/integration/kubernetesruntime/resources_backend.go`;
-- `internal/integration/kubernetesruntime/resources_backend_test.go`;
-- `internal/integration/kubernetesruntime/resources_sort.go`;
-- `internal/integration/kubernetesruntime/resources_sort_test.go`.
-
-### Interface de listas
-
-- `web/src/components/ResourcePages.tsx`;
-- `web/src/components/ResourcePages.test.tsx`;
+- `web/src/App.tsx`;
+- `web/src/App.test.tsx`;
+- `web/src/components/CommandCenter.tsx`;
+- `web/src/components/CommandCenter.test.tsx`;
+- `web/src/components/ContextSelector.tsx`;
+- `web/src/components/ContextSelector.test.tsx`;
+- `web/src/components/LogsPage.tsx`;
 - `web/src/components/ResourceListControls.tsx`;
 - `web/src/components/ResourceListControls.test.tsx`;
-- `web/src/styles.css`;
 - `web/e2e/app.spec.ts`.
 
 ### Documentação reconciliada
 
-- `README.md`;
-- `docs/research/phase4-evidence.md`;
-- `docs/research/phase5-evidence.md`;
-- `docs/research/phase6-evidence.md`;
-- `docs/research/phase7-evidence.md`;
 - `docs/research/phase8-evidence.md`;
 - `docs/research/phase9-evidence.md`;
-- `plan/04-kubernetes-rbac.md`;
-- `plan/05-dashboard.md`;
-- `plan/06-recursos.md`;
-- `plan/07-acoes.md`;
 - `plan/08-distribuicao.md`;
 - `plan/09-experiencia-operacional.md`;
 - `plan/README.md`;

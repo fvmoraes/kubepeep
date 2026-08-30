@@ -1,6 +1,7 @@
 # Fase 8 — Distribuição
 
-**Estado atual:** em fechamento (43/50); recriação Kind do zero, CI nativa atual e candidate publicada pendentes
+**Estado atual:** em fechamento (47/50); somente a candidate publicada e o
+fechamento integral dos gates permanecem pendentes
 
 **Evidência:** [relatório rastreável da Fase 8](../docs/research/phase8-evidence.md)
 
@@ -56,7 +57,7 @@ Transformar o projeto testado em artefatos reprodutíveis para Linux, macOS e Wi
 
 ### E2E restritivo
 
-- [ ] **F8-20** Consolidar e recriar do zero o cluster Kind canônico incremental das Fases 4 a 7; K3d permanece apenas alternativa local equivalente.
+- [x] **F8-20** Consolidar e recriar do zero o cluster Kind canônico incremental das Fases 4 a 7; K3d permanece apenas alternativa local equivalente.
 - [x] **F8-21** Validar novamente namespace permitido/negado e Role/RoleBinding restritos.
 - [x] **F8-22** Validar novamente Deployment saudável/degradado, pod com restart e logs sintéticos.
 - [x] **F8-23** Validar novamente evento `Warning`, Service, Ingress e recursos necessários a cada ação.
@@ -73,12 +74,12 @@ Transformar o projeto testado em artefatos reprodutíveis para Linux, macOS e Wi
 - [x] **F8-31** Implementar o equivalente em PowerShell 5.1+ para Windows.
 - [x] **F8-32** Manter a matriz dos instaladores idêntica à matriz realmente publicada pelo GoReleaser.
 - [x] **F8-33** Verificar `kubePeep version` após instalação e imprimir o próximo comando.
-- [ ] **F8-34** Testar checksum válido, inválido, archive ausente, arquitetura não suportada, PATH e upgrade.
+- [x] **F8-34** Testar checksum válido, inválido, archive ausente, arquitetura não suportada, PATH e upgrade.
 
 ### Update e remoção
 
 - [x] **F8-35** Implementar `kubePeep update` com descoberta de versão, download, checksum obrigatório e troca atômica.
-- [ ] **F8-36** Tratar binário em uso no Windows com helper pós-exit/mecanismo aprovado, checksum, rollback e teste nativo; não depender de rename do processo em execução.
+- [x] **F8-36** Tratar binário em uso no Windows com helper pós-exit/mecanismo aprovado, checksum, rollback e teste nativo; não depender de rename do processo em execução.
 - [x] **F8-37** Implementar exatamente a experiência aprovada na Fase 2: `install.sh --uninstall`/`install.ps1 -Uninstall`, dados preservados por default e purge separado com confirmação/path/lock/reparse validados.
 - [x] **F8-38** Distinguir remoção do binário de remoção opcional dos dados locais; nunca apagar dados sem confirmação explícita.
 
@@ -86,7 +87,7 @@ Transformar o projeto testado em artefatos reprodutíveis para Linux, macOS e Wi
 
 - [x] **F8-39** Separar workflow de validação do workflow com permissão de publicar.
 - [x] **F8-40** Publicar apenas a partir de tag/versionamento aprovado, com permissões mínimas.
-- [ ] **F8-41** Executar smoke test dos archives reais em runners Linux, macOS e Windows.
+- [x] **F8-41** Executar smoke test dos archives reais em runners Linux, macOS e Windows.
 - [ ] **F8-42** Executar instaladores contra uma release candidate e verificar checksum.
 - [x] **F8-43** Atualizar README com instalação, execução, flags, dados locais, segurança, RBAC, update, remoção e troubleshooting.
 - [x] **F8-44** Registrar limitações de Metrics API, plugins `exec`, plataformas e permissões.
@@ -144,30 +145,48 @@ Os instaladores nunca devem solicitar um archive que a release não publica.
 | Cross-build compilar mas não iniciar | Smoke test do archive em runner nativo |
 | Remoção apagar dados do usuário | Escopos separados e confirmação explícita |
 
-## Evidência local mais recente
+## Evidência mais recente
 
-Em 2026-08-30, o GoReleaser v2.17.1 produziu um snapshot com o toolchain atual
-Go 1.26.7 para os seis alvos Linux/macOS/Windows × amd64/arm64. O smoke do
-binário gerado passou.
+Em 2026-08-30, o [workflow de verificação #24](https://github.com/fvmoraes/kubepeep/actions/runs/33295350787)
+concluiu com sucesso no head exato
+`4ce996b40914f729aefa8d949bde85f94873c8d9`. Os 11 jobs ficaram verdes:
+`build-and-test`, `native-runtime` em Windows, `native-runtime` em macOS,
+`release-snapshot`, `restricted-kind` e os seis `native-archive-smoke` para
+Linux/macOS/Windows × amd64/arm64. O snapshot usou Go 1.26.7 e os archives
+foram de fato executados em runners das seis combinações suportadas.
 
-No Kind local, `create` reutilizou o cluster canônico já existente; depois,
-`validate` e `app-e2e ./dist/kubePeep` passaram. As fixtures foram tornadas
+O runner efêmero de `restricted-kind` partiu sem o cluster canônico e concluiu
+`create`, `validate`, `kubeconfigs` e `app-e2e`; o workflow executou
+`kind delete cluster` ao final. Essa sequência comprova criação do zero e
+remoção posterior, fechando F8-20, além de preservar a evidência já aceita de
+F8-21–F8-26. Os jobs nativos atuais fecham F8-34, F8-36 e F8-41.
+
+Antes da CI #24, o Kind local havia reutilizado o cluster canônico já
+existente; `validate` e `app-e2e ./dist/kubePeep` passaram. As fixtures foram tornadas
 idempotentes para o Pod usado em `previous-log` e para o Event
 `000-kp-warning`, permitindo repetir a validação sem herdar estado inválido.
 Os cenários comprovaram negação autoritativa como HTTP 403, autorização
 indisponível/no-opinion fail-closed como HTTP 503 e dashboard parcialmente
 autorizado como HTTP 200 com falhas isoladas.
 
-Essa execução fecha F8-21–F8-26. F8-20 permanece aberta: reutilizar um cluster
-existente não comprova sua remoção e recriação do zero. F8-34, F8-36 e F8-41
-também permanecem abertas até o workflow atual executar instalador, updater e
-archives nativamente com Go 1.26.7.
+Essa execução local fechou F8-21–F8-26, mas não era suficiente para F8-20. A
+lacuna foi fechada depois, exclusivamente pela execução efêmera da CI #24. O
+workflow #23 permanece registrado apenas como histórico do toolchain Go
+1.25.13; ele não é necessário para sustentar os gates atuais, que foram
+reexecutados no head `4ce996b` pela CI #24.
 
-Após fetch/prune, somente `origin/main` estava presente e não havia tags.
-`scripts/security_check.sh origin/main` passou sobre os 25 commits alcançáveis;
-nesse escopo, não há evidência de segredo remoto nem ref que precise ser
-reescrito. Essa conclusão não afirma purga de objetos ou caches fora dos refs
-visíveis pelo Git.
+Após o push de `6b96a41`, fetch mostrou somente `origin/main` e nenhuma tag.
+`scripts/security_check.sh origin/main` passou sobre os 28 commits então
+alcançáveis; nesse snapshot do ref, não há evidência de segredo remoto nem ref
+que precise ser reescrito. Essa conclusão não afirma purga de objetos ou caches
+fora dos refs visíveis pelo Git.
+
+A ausência de dados sensíveis é premissa inegociável: nenhuma execução,
+archive, artefato, log, fixture ou documentação pode enviar kubeconfig,
+credencial, token, chave privada, conteúdo de Secret, log de aplicação, banco
+local, PII privada ou path específico da máquina ao GitHub ou ao repositório.
+Somente evidência sanitizada e identificadores públicos do projeto são
+registrados.
 
 ## Fora de escopo
 
@@ -180,7 +199,8 @@ visíveis pelo Git.
 
 Todos os critérios `MVP-01` a `MVP-27` e todos os gates técnicos complementares possuem evidência executada; suítes e E2E passam; GoReleaser produz archives coerentes; instaladores e update validam SHA-256; os binários rodam sem Node.js em runtime; e a release pode ser publicada para Linux, macOS e Windows com limitações explicitamente documentadas.
 
-Este gate ainda não está fechado. As sete tarefas abertas estão discriminadas
-no relatório de evidências: F8-20, F8-34, F8-36, F8-41–42, F8-46 e F8-48.
-Elas dependem da recriação Kind do zero, da CI nativa do toolchain atual, do
-fechamento da matriz de aceite e de uma candidate publicada.
+Este gate ainda não está fechado. As três tarefas abertas estão discriminadas
+no relatório de evidências: F8-42, F8-46 e F8-48. Elas dependem do fechamento
+dos gates restantes da matriz de aceite e de uma candidate imutável publicada;
+a recriação Kind do zero e a CI nativa do toolchain atual já foram comprovadas
+pela CI #24.

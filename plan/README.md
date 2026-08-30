@@ -57,21 +57,31 @@ As fases seguem a ordem determinada pelo prompt. Para evitar duplicação, a Fas
 | [5 — Dashboard](05-dashboard.md) | Saúde, problemas, restarts, eventos, logs e métricas | concluída (62/62), inclusive Kind real | [Fase 5](../docs/research/phase5-evidence.md) |
 | [6 — Recursos](06-recursos.md) | Consultas somente leitura e streaming | concluída (67/67), inclusive Kind real | [Fase 6](../docs/research/phase6-evidence.md) |
 | [7 — Ações](07-acoes.md) | Restart, scale, delete, port-forward e exec | concluída (47/47), inclusive Kind real | [Fase 7](../docs/research/phase7-evidence.md) |
-| [8 — Distribuição](08-distribuicao.md) | Releases, instaladores, CI e aceite | 43/50; CI atual, Kind do zero e candidate pendentes | [Fase 8](../docs/research/phase8-evidence.md) |
-| [9 — Experiência operacional](09-experiencia-operacional.md) | Paleta, filtros, quick actions, logs, diff e leitura multi-contexto | em execução (12/84) | [Benchmark Aptakube](../docs/research/aptakube-ux-benchmark.md), [evidência F9](../docs/research/phase9-evidence.md) e [matriz UX](matriz-aceite-ux.md) |
+| [8 — Distribuição](08-distribuicao.md) | Releases, instaladores, CI e aceite | 47/50; somente candidate e fechamento integral dos gates pendentes | [Fase 8](../docs/research/phase8-evidence.md) |
+| [9 — Experiência operacional](09-experiencia-operacional.md) | Paleta, filtros, quick actions, logs, diff e leitura multi-contexto | em execução (15/84) | [Benchmark Aptakube](../docs/research/aptakube-ux-benchmark.md), [evidência F9](../docs/research/phase9-evidence.md) e [matriz UX](matriz-aceite-ux.md) |
 
 Estado atual: **as Fases 5, 6 e 7 estão concluídas, inclusive no Kind real**.
 A Fase 4 está em 58/59: os fluxos reais e a revogação entre capability e
 operação passaram; somente a matriz ampliada de gramática/corridas de F4-49
-permanece aberta. O [workflow de verificação #23](https://github.com/fvmoraes/kubepeep/actions/runs/33289508322),
-executado no HEAD `9d7c2ea`, concluiu 10 de 11 jobs: build/test, runtimes
-nativos de macOS e Windows, snapshot e os seis smokes de archives passaram.
-Somente `restricted-kind` falhou. Depois desse run, o harness local reutilizou
-o cluster dedicado e concluiu `create`, `validate` e `app-e2e`; como não houve
-recriação do zero, F8-20 continua aberta, enquanto F8-21–26 foram fechadas.
-F8-34, F8-36 e F8-41 receberam evidência
-nativa histórica nesse HEAD, mas foram reabertas quando o toolchain mudou para
-Go 1.26.7; o novo CI precisa revalidá-las sem reutilizar o run anterior.
+permanece aberta. O [workflow de verificação #24](https://github.com/fvmoraes/kubepeep/actions/runs/33295350787),
+executado no head exato `4ce996b40914f729aefa8d949bde85f94873c8d9`,
+concluiu com `success` e 11/11 jobs verdes: build/test, runtimes nativos de
+macOS e Windows, snapshot, `restricted-kind` e os seis smokes de archives.
+No runner efêmero, Kind passou `create`, `validate`, `kubeconfigs` e `app-e2e`;
+o workflow executou `kind delete cluster` ao final. Por isso F8-20, F8-34,
+F8-36 e F8-41 estão fechadas. O
+[workflow #23](https://github.com/fvmoraes/kubepeep/actions/runs/33289508322),
+em Go 1.25.13 e com falha no `restricted-kind`, permanece apenas como histórico
+do head `9d7c2ea`, sem linguagem de pendência para o estado atual.
+
+Depois da CI #24, o commit `6b96a411d0ff52f0824933e3ea4e7689f72354bb`
+adicionou F9-16–F9-18: atalhos globais seguros `Ctrl/Meta+K/R/F/O/B`, refresh
+somente de queries ativas de leitura por allowlist explícita, bloqueios em
+campos editáveis/composição/repetição, seletor com `showPicker` e fallback de
+foco, e deep-link/reload/back para o catálogo único das dez rotas. A
+[CI #25](https://github.com/fvmoraes/kubepeep/actions/runs/33296687430)
+validou esse SHA exato com `success` em 11/11 jobs; localmente, a terceira fatia
+também passou 17 arquivos/79 testes Vitest e 3/3 Playwright.
 
 O acompanhamento dos critérios originais está na [Matriz de aceite do
 MVP](matriz-aceite-mvp.md). Os requisitos adicionais permanecem separados na
@@ -137,6 +147,10 @@ Uma tarefa funcional somente pode ser marcada como concluída quando, conforme a
 - Instaladores, scripts auxiliares e downloads usam tag/commit ou asset de
   release com versão exata e checksum; `raw/main`, `latest` e branch mutável não
   são fontes de instalação.
+- A ausência de dados sensíveis é premissa inegociável: kubeconfigs,
+  credenciais, tokens, chaves privadas, Secrets, logs de aplicações, bancos
+  locais, PII privada e paths específicos da máquina nunca são enviados ao
+  repositório, CI, logs ou artefatos; somente evidência sanitizada é registrada.
 
 ## Riscos que atravessam as fases
 
@@ -165,18 +179,19 @@ Uma tarefa funcional somente pode ser marcada como concluída quando, conforme a
 ## Estado do plano
 
 As Fases 1–3 e 5–7 estão concluídas. A Fase 4 possui 58 de 59 tarefas, com
-somente F4-49 aberta. A Fase 8 possui 43 de 50 tarefas comprovadas; permanecem
-abertas F8-20, F8-34, F8-36, F8-41–42, F8-46 e F8-48, sem reutilizar o run #23
-para o novo pin nem confundir o Kind local reutilizado com criação limpa. As
-Fases 1–8 somam 436/444 tarefas (98,20%); com F9 em 12/84, o plano completo
-soma 448/528 (84,85%). A Fase 9
+somente F4-49 aberta. A Fase 8 possui 47 de 50 tarefas comprovadas; permanecem
+abertas somente F8-42, F8-46 e F8-48. A CI #24 comprova o pin atual, os runners
+nativos e a criação Kind limpa; o run #23 fica preservado apenas como histórico.
+As Fases 1–8 somam 440/444 tarefas (99,10%); com F9 em 15/84, o plano completo
+soma 455/528 (86,17%). A Fase 9
 foi especificada em 2026-08-25 e inicia com 84
-tarefas e 15 critérios adicionais, dos quais `UX-M02` possui evidência local
-aceita; CI do commit funcional permanece obrigatória.
+tarefas e 15 critérios adicionais, dos quais `UX-M02` possui evidência aceita.
+O commit funcional mais recente passou integralmente na CI #25; os gates finais
+da fase continuam obrigatórios após as próximas fatias.
 
-Na matriz final, 25 de 27 critérios do MVP possuem evidência local ou nativa
-aplicável. Permanecem abertos o pipeline completo do estado atual e os
-instaladores contra uma candidate imutável. Evidência de configuração, teste
+Na matriz final, 26 de 27 critérios do MVP possuem evidência local ou nativa
+aplicável. Somente MVP-26 permanece aberto: os instaladores contra uma
+candidate imutável. Evidência de configuração, teste
 estático, cross-build ou spike nunca substitui execução nativa/Kind quando o
 critério a exige.
 
