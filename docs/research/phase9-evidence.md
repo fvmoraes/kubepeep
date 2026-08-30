@@ -241,7 +241,32 @@ participar do desempate. `UX-M03` também permanece aberto até a conclusão e
 evidência de filtros positivos/negativos/multitermo, colunas allowlisted e alta
 cardinalidade.
 
-## 8. Pendências
+## 8. Reindexação integral do marco atual
+
+Depois do commit funcional `41d419c`, o Codebase Knowledge Graph foi gerado em
+modo `full`, sem persistir um novo artefato no repositório. O índice ficou
+`ready`, com 6.083 nodes, 32.489 edges após o commit documental, 397 File nodes, 10 linguagens e nenhum
+arquivo skipped por falha.
+
+A cobertura conferiu os 35 paths alterados contra a mesma geração: 34 não
+possuíam issue registrada e `test/kind/harness.sh` manteve `parse_partial` na
+linha 960. As quatro faixas parciais globais — migration SQL, instalador
+PowerShell, harness e cliente TypeScript — foram lidas diretamente. Esse sinal
+é best-effort e não foi apresentado como prova de completude.
+
+O diff desde `9d7c2ea` produziu 181 símbolos-semente e blast radius inbound de
+32 símbolos, completo e sem truncamento em três hops. O rollup foi:
+`internal/integration` 15, `test/kind` 11, `web/src` 5 e `web/e2e` 1. A
+arquitetura registrou 98 Route nodes, 54 Package nodes, 20 entry points e 12
+clusters.
+
+A primeira tentativa falhou antes da análise porque o daemon executava uma
+geração antiga do binário já substituída. O reinício controlado somente do
+daemon preservou vault e índice; a repetição pelo binário atual concluiu em
+cerca de 16 segundos. F9-84 continua aberta porque futuras fatias ainda mudarão
+o HEAD e exigirão nova evidência final.
+
+## 9. Pendências
 
 - ampliar catálogo com contextos/scopes somente depois de definir
   classificação e ciclo de vida em memória;
@@ -252,7 +277,7 @@ cardinalidade.
 - CI do commit funcional e smoke nativo do frontend embutido;
 - demais critérios `UX-M` da matriz.
 
-## 9. Regra de atualização
+## 10. Regra de atualização
 
 Este relatório só recebe evidência CI depois que o workflow do commit que
 contém a implementação terminar. Uma execução verde anterior não é

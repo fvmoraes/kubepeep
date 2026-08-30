@@ -859,33 +859,73 @@ Essas faixas foram ou devem ser lidas diretamente; cobertura do grafo é sinal
 best-effort e não prova completude. Diretórios de build, dependências, Git e
 configurações locais ignoradas permanecem fora do índice por desenho.
 
-### 14.2 Métricas a preencher após estabilizar e versionar
+### 14.2 Reindexação `full` do marco funcional
 
-| Campo final | Valor |
+O commit funcional `41d419c` foi criado somente depois do gate de segurança e
+com working tree limpo. A indexação foi solicitada em modo `full`, com
+persistência desativada para a operação; nenhum artefato do grafo entrou no
+repositório. O status resultante apontou exatamente esse HEAD e a base
+`9d7c2ea`, sem detach ou worktree auxiliar.
+
+| Campo observado | Valor |
 | --- | --- |
-| Commit reindexado | `A preencher após o commit funcional` |
-| Modo | `full`, sem persistir artefato do índice no repositório |
-| Nodes | `A preencher` |
-| Edges | `A preencher` |
-| Arquivos skipped | `A preencher` |
-| Arquivos `parse_partial` | `A preencher` |
-| Mudanças detectadas | `A preencher` |
-| Blast radius inbound | `A preencher` |
-| Módulos impactados | `A preencher` |
-| Cobertura dos arquivos alterados | `A preencher` |
-| Estado do watcher/metadata | `A preencher` |
+| Commit funcional reindexado | `41d419c` |
+| Modo/metadados | `full`; gravação de cobertura completa; hashes completos; geração correspondente |
+| Estado | `ready` |
+| Nodes / edges | 6.083 / 32.489 após o commit documental final |
+| File nodes / linguagens | 397 / 10 |
+| Route nodes / Package nodes | 98 / 54 |
+| Entry points / clusters arquiteturais | 20 / 12 |
+| Arquivos skipped por falha | 0 |
+| Arquivos excluídos por desenho | 9 diretórios e 3 arquivos locais ignorados |
+| Arquivos `parse_partial` | 4 |
+| Paths alterados verificados | 35 de 35 com metadata correspondente |
+| Cobertura dos paths alterados | 34 sem issue registrada; `test/kind/harness.sh` parcial na linha 960 |
+| Diff analisado | 35 arquivos, 181 símbolos-semente |
+| Blast radius inbound | 32 símbolos em até 3 hops; 32 exibidos; sem truncamento |
+| Módulos impactados | `internal/integration` 15; `test/kind` 11; `web/src` 5; `web/e2e` 1 |
 
-Sequência de fechamento F9-84:
+O sinal de cobertura é best-effort, portanto “sem issue registrada” não é
+tratado como prova de completude. Todas as quatro faixas parciais foram lidas
+diretamente:
 
-1. terminar testes e documentação;
-2. executar security gate;
-3. versionar o mesmo estado que será indexado;
-4. executar indexação `full` com persistência desativada;
-5. consultar status e cobertura dos paths alterados;
-6. ler diretamente todas as faixas parciais;
-7. executar detecção de mudanças/blast radius contra a base adequada;
-8. substituir os placeholders acima por números e conclusões sanitizados;
-9. registrar as métricas finais neste relatório e nas evidências versionadas.
+| Arquivo | Faixas após o reindex | Verificação direta |
+| --- | --- | --- |
+| `internal/migrations/sql/0001_initial.sql` | 39–41, 68–116 | constraints, índices, triggers e preferências revisados |
+| `scripts/install_test.ps1` | 265 | limite do archive e preservação do binário anterior revisados |
+| `test/kind/harness.sh` | 960 | loop de `replace --raw` da escala revisado; validação `sh`/`dash` também passou |
+| `web/src/api/client.ts` | 58 | declaração de `APIError` revisada diretamente |
+
+### 14.3 Arquitetura e blast radius registrados
+
+O resumo arquitetural manteve as fronteiras esperadas: integração chama
+serviços (163 relações), API chama serviços (97), serviços chamam runtime (65)
+e adapters chamam serviços (34). Os núcleos com maior fan-in continuam runtime
+e services; a SPA aparece em dois clusters coesos, um centrado em cliente/
+queries e outro em páginas de recursos.
+
+O impacto inbound confirmou que a mudança de ordenação alcança os adapters de
+dashboard e seus testes, enquanto os controles de lista alcançam `App`, testes
+React e E2E. O hardening do harness alcança seus fluxos `create`, `validate`,
+refresh e app-e2e. Nenhum resultado foi omitido pelo limite da consulta.
+
+### 14.4 Incidente do indexador e recuperação
+
+A primeira solicitação `full` terminou com código 127 e worker log vazio. A
+inspeção mostrou que o daemon central ainda executava uma geração de binário já
+substituída em disco. Somente esse processo central foi encerrado; vault,
+índice e repositório foram preservados. O binário atual iniciou um daemon
+temporário e concluiu o reindex em cerca de 16 segundos. Consultas posteriores
+de status, cobertura, arquitetura e mudanças usaram a mesma geração completa.
+
+F9-84 permanece aberta: este é um reindex integral do marco atual, mas as
+próximas fatias F9 ainda alterarão o estado versionado. O fechamento final deve
+repetir indexação, cobertura, leitura das faixas parciais, blast radius e gate
+de segurança depois da última implementação e da CI correspondente.
+
+Depois de versionar este registro documental, uma última indexação `full`
+manteve os 6.083 nodes e acrescentou cinco edges derivados do novo estado Git,
+totalizando 32.489. Nenhum skipped ou `parse_partial` mudou.
 
 ## 15. Pendências priorizadas
 
