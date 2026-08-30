@@ -405,15 +405,18 @@ def select_context(client: Client, status: dict[str, Any]) -> dict[str, Any]:
 
 
 def create_scope(client: Client, status: dict[str, Any], name: str, mode: str, namespaces: list[str], default: str | None) -> dict[str, Any]:
+    selection = status["selection"]
     return client.data(
         "POST",
         "/api/v1/namespace-scopes",
         body={
+            "clusterProfileId": selection["clusterProfileId"],
+            "context": selection["context"],
             "name": name,
             "mode": mode,
             "namespaces": namespaces,
             "defaultNamespace": default,
-            "expectedGeneration": status["selection"]["generation"],
+            "expectedGeneration": selection["generation"],
         },
         expected=201,
         csrf=True,
@@ -494,6 +497,8 @@ def exercise_manual_scopes(client: Client, status: dict[str, Any]) -> dict[str, 
         "POST",
         "/api/v1/namespace-scopes",
         body={
+            "clusterProfileId": status["selection"]["clusterProfileId"],
+            "context": status["selection"]["context"],
             "name": "e2e-all-denied",
             "mode": "all",
             "namespaces": [],
@@ -527,10 +532,45 @@ def scale_deployment(client: Client, status: dict[str, Any], replicas: int) -> N
     selection = status["selection"]
     namespace = "kp-allowed"
     path = f"/api/v1/workloads/deployments/{namespace}/kp-action-deployment"
-    deployment = metadata(client.data("GET", path))
-    body = confirmation(selection, namespace, "Deployment", "kp-action-deployment", "scale", "CHANGE_REPLICA_COUNT")
-    body.update({"replicas": replicas, "expectedResourceVersion": deployment["resourceVersion"]})
-    client.request("PUT", path + "/scale", body=body, csrf=True)
+    deadline = time.monotonic() + 20
+    while True:
+        deployment = metadata(client.data("GET", path))
+        body = confirmation(
+            selection, namespace, "Deployment", "kp-action-deployment", "scale", "CHANGE_REPLICA_COUNT"
+        )
+        body.update({"replicas": replicas, "expectedResourceVersion": deployment["resourceVersion"]})
+        status_code, _, response = client.exchange("PUT", path + "/scale", body=body, csrf=True)
+        if status_code == 200:
+            return
+        code = response.get("code", "unknown") if isinstance(response, dict) else "unknown"
+        if time.monotonic() >= deadline or status_code != 409 or code != "CONFLICT":
+            raise E2EFailure(f"PUT {path}/scale returned HTTP {status_code}/{code}")
+        time.sleep(0.25)
+
+
+def restart_deployment(client: Client, status: dict[str, Any], namespace: str) -> None:
+    selection = status["selection"]
+    path = f"/api/v1/workloads/deployments/{namespace}/kp-action-deployment"
+    deadline = time.monotonic() + 20
+    while True:
+        deployment = metadata(client.data("GET", path))
+        body = confirmation(
+            selection, namespace, "Deployment", "kp-action-deployment", "restart", "RECREATE_WORKLOAD_PODS"
+        )
+        body["expectedResourceVersion"] = deployment["resourceVersion"]
+        status_code, _, response = client.exchange(
+            "POST",
+            path + "/restart",
+            body=body,
+            csrf=True,
+            idempotency_key="kp-e2e-restart-" + uuid.uuid4().hex,
+        )
+        if status_code == 202:
+            return
+        code = response.get("code", "unknown") if isinstance(response, dict) else "unknown"
+        if time.monotonic() >= deadline or status_code != 409 or code != "CONFLICT":
+            raise E2EFailure(f"POST {path}/restart returned HTTP {status_code}/{code}")
+        time.sleep(0.25)
 
 
 def wait_deployment_desired(client: Client, replicas: int, timeout: float) -> None:
@@ -631,7 +671,7 @@ def create_exec_ticket(client: Client, status: dict[str, Any], command: list[str
         or len(ticket["protocols"]) != 2
         or ticket["protocols"][0] != "kubepeep.exec.v1"
         or not isinstance(ticket["protocols"][1], str)
-        or not ticket["protocols"][1].startswith("kubepeep.exec.ticket.")
+        or not ticket["protocols"][1].startswith("kp-ticket.")
     ):
         raise E2EFailure("exec ticket did not use the public ephemeral protocol contract")
     return ticket
@@ -775,10 +815,29 @@ def check_periodic_revocation(
         wait_marker(control_dir, "f6-revoked", 30)
         resource_error = resource_stream.wait_for(lambda event: event.get("event") == "error", 85)
         log_error = log_stream.wait_for(lambda event: event.get("event") == "error", 20)
-        for event in (resource_error, log_error):
+        public_error_codes = {
+            "AUTHENTICATION_UNAVAILABLE",
+            "AUTHORIZATION_UNAVAILABLE",
+            "CLUSTER_UNAVAILABLE",
+            "FEATURE_UNAVAILABLE",
+            "FORBIDDEN",
+            "GENERATION_CHANGED",
+            "LIMIT_EXCEEDED",
+            "NOT_FOUND",
+            "UPSTREAM_TIMEOUT",
+            "VALIDATION_FAILED",
+        }
+        for stream_name, event in (("resource", resource_error), ("log", log_error)):
             payload = event.get("data")
-            if not isinstance(payload, dict) or str(payload.get("code", "")).upper() != "FORBIDDEN":
-                raise E2EFailure("periodic stream reauthorization did not fail closed as forbidden")
+            code = str(payload.get("code", "")).upper() if isinstance(payload, dict) else ""
+            # Kind's RBAC no-match is a successful SSAR with no opinion, which
+            # remains unknown by policy. The streams must still fail closed;
+            # the ordinary read below then proves the authoritative 403.
+            if code != "AUTHORIZATION_UNAVAILABLE":
+                safe_code = code if code in public_error_codes else "UNKNOWN"
+                raise E2EFailure(
+                    f"{stream_name} periodic reauthorization returned {safe_code} instead of AUTHORIZATION_UNAVAILABLE"
+                )
         # The stream reauthorization deliberately bypasses the ordinary read
         # cache. Once it has observed revocation, the product endpoint must use
         # that denied capability as well.
@@ -926,14 +985,7 @@ def check_allowed(client: Client, status: dict[str, Any], args: argparse.Namespa
     )
     if not isinstance(csrf_rejection, dict) or csrf_rejection.get("code") != "CSRF_REJECTED":
         raise E2EFailure("mutation without CSRF did not return CSRF_REJECTED")
-    client.request(
-        "POST",
-        deployment_path + "/restart",
-        body=restart,
-        expected=202,
-        csrf=True,
-        idempotency_key="kp-e2e-restart-" + uuid.uuid4().hex,
-    )
+    restart_deployment(client, status, namespace)
     scale_deployment(client, status, 2)
     scale_deployment(client, status, 1)
     port_forward = confirmation(
@@ -1139,4 +1191,14 @@ if __name__ == "__main__":
     try:
         raise SystemExit(main())
     except E2EFailure as error:
-        raise SystemExit(f"app-e2e: {error}") from error
+        raise SystemExit(f"app-e2e: {error}") from None
+    except Exception as error:
+        failure_type = type(error).__name__
+        if (
+            not 1 <= len(failure_type) <= 64
+            or not failure_type.isascii()
+            or not failure_type[0].isalpha()
+            or not failure_type.replace("_", "").isalnum()
+        ):
+            failure_type = "Unknown"
+        raise SystemExit(f"app-e2e: internal failure type={failure_type}") from None

@@ -710,6 +710,50 @@ restore_action_binding() {
 	reapply_fixture_object RoleBinding kp-allowed "$binding_name"
 }
 
+patch_resource_as() (
+	patch_subject=$1
+	patch_path=$2
+	patch_payload=$3
+	need curl
+	patch_proxy_dir=$(mktemp -d)
+	patch_proxy_socket=$patch_proxy_dir/proxy.sock
+	patch_proxy_log=$patch_proxy_dir/proxy.log
+	patch_proxy_pid=
+	patch_proxy_cleanup() {
+		if [ -n "${patch_proxy_pid:-}" ]; then
+			kill "$patch_proxy_pid" >/dev/null 2>&1 || true
+			wait "$patch_proxy_pid" >/dev/null 2>&1 || true
+		fi
+		if [ -n "${patch_proxy_dir:-}" ]; then
+			rm -rf -- "$patch_proxy_dir"
+		fi
+	}
+	trap patch_proxy_cleanup 0 HUP INT TERM
+	kubectl --context="$cluster_context" --request-timeout="$request_timeout" \
+		proxy --unix-socket="$patch_proxy_socket" --api-prefix=/ --as="$patch_subject" \
+		>"$patch_proxy_log" 2>&1 &
+	patch_proxy_pid=$!
+	patch_proxy_attempt=0
+	while [ ! -S "$patch_proxy_socket" ] && kill -0 "$patch_proxy_pid" >/dev/null 2>&1; do
+		[ "$patch_proxy_attempt" -lt 10 ] || break
+		patch_proxy_attempt=$((patch_proxy_attempt + 1))
+		sleep 1
+	done
+	[ -S "$patch_proxy_socket" ] || fail "the temporary Kubernetes API proxy did not become ready"
+	curl --fail --silent --show-error --connect-timeout 5 --max-time 20 \
+		--unix-socket "$patch_proxy_socket" \
+		--request PATCH \
+		--header 'Content-Type: application/merge-patch+json' \
+		--data "$patch_payload" \
+		"http://localhost$patch_path" >/dev/null
+	patch_status=$?
+	patch_proxy_cleanup
+	patch_proxy_pid=
+	patch_proxy_dir=
+	trap - 0 HUP INT TERM
+	exit "$patch_status"
+)
+
 scale_subresource() (
 	scale_namespace=$1
 	scale_kind=$2
@@ -728,19 +772,41 @@ scale_subresource() (
 		;;
 	esac
 	scale_path=/apis/apps/v1/namespaces/$scale_namespace/$scale_plural/$scale_name/scale
-	scale_rv=$(kube get "$scale_kind" "$scale_name" --namespace="$scale_namespace" \
-		-o 'jsonpath={.metadata.resourceVersion}')
-	scale_body=$(mktemp)
-	trap 'rm -f -- "${scale_body:-}"' 0 HUP INT TERM
-	printf '%s\n' "{\"apiVersion\":\"autoscaling/v1\",\"kind\":\"Scale\",\"metadata\":{\"name\":\"$scale_name\",\"namespace\":\"$scale_namespace\",\"resourceVersion\":\"$scale_rv\"},\"spec\":{\"replicas\":$scale_replicas}}" >"$scale_body"
-	if [ "$scale_as" = - ]; then
-		kube replace --raw="$scale_path" -f "$scale_body" >/dev/null
-	else
-		kube replace --raw="$scale_path" -f "$scale_body" --as="$scale_as" >/dev/null
+	scale_temporary_dir=$(mktemp -d)
+	scale_body=$scale_temporary_dir/body.json
+	scale_error=$scale_temporary_dir/error.log
+	trap 'rm -rf -- "${scale_temporary_dir:-}"' 0 HUP INT TERM
+	scale_attempt=0
+	scale_status=1
+	while [ "$scale_attempt" -lt 10 ]; do
+		scale_attempt=$((scale_attempt + 1))
+		scale_rv=$(kube get "$scale_kind" "$scale_name" --namespace="$scale_namespace" \
+			-o 'jsonpath={.metadata.resourceVersion}')
+		printf '%s\n' "{\"apiVersion\":\"autoscaling/v1\",\"kind\":\"Scale\",\"metadata\":{\"name\":\"$scale_name\",\"namespace\":\"$scale_namespace\",\"resourceVersion\":\"$scale_rv\"},\"spec\":{\"replicas\":$scale_replicas}}" >"$scale_body"
+		if [ "$scale_as" = - ]; then
+			if kube replace --raw="$scale_path" -f "$scale_body" >/dev/null 2>"$scale_error"; then
+				scale_status=0
+				break
+			else
+				scale_status=$?
+			fi
+		else
+			if kube replace --raw="$scale_path" -f "$scale_body" --as="$scale_as" \
+				>/dev/null 2>"$scale_error"; then
+				scale_status=0
+				break
+			else
+				scale_status=$?
+			fi
+		fi
+		grep -F '(Conflict)' "$scale_error" >/dev/null || break
+		sleep 1
+	done
+	if [ "$scale_status" -ne 0 ]; then
+		printf '%s\n' 'kind-harness: scale subresource request failed' >&2
 	fi
-	scale_status=$?
-	rm -f -- "$scale_body"
-	scale_body=
+	rm -rf -- "$scale_temporary_dir"
+	scale_temporary_dir=
 	trap - 0 HUP INT TERM
 	exit "$scale_status"
 )
@@ -765,17 +831,18 @@ validate_restart_and_scale_operations() {
 	trap mutation_cleanup 0 HUP INT TERM
 	kube patch deployment kp-action-deployment --namespace=kp-allowed --type=merge \
 		--patch='{"spec":{"template":{"metadata":{"annotations":{"kubectl.kubernetes.io/restartedAt":null}}}}}' >/dev/null
-	kube patch deployment kp-action-deployment --namespace=kp-allowed --type=merge \
-		--patch='{"spec":{"template":{"metadata":{"annotations":{"kubectl.kubernetes.io/restartedAt":"2026-08-17T00:00:00Z"}}}}}' \
-		--as="$restart_subject" >/dev/null
+	patch_resource_as "$restart_subject" \
+		/apis/apps/v1/namespaces/kp-allowed/deployments/kp-action-deployment \
+		'{"spec":{"template":{"metadata":{"annotations":{"kubectl.kubernetes.io/restartedAt":"2026-08-17T00:00:00Z"}}}}}'
 	restart_value=$(kube get deployment kp-action-deployment --namespace=kp-allowed \
 		-o 'jsonpath={.spec.template.metadata.annotations.kubectl\.kubernetes\.io/restartedAt}')
 	[ "$restart_value" = 2026-08-17T00:00:00Z ] || fail "authorized restart patch was not persisted"
 	kube patch deployment kp-action-deployment --namespace=kp-allowed --type=merge \
 		--patch='{"spec":{"template":{"metadata":{"annotations":{"kubectl.kubernetes.io/restartedAt":null}}}}}' >/dev/null
-	if kube patch deployment kp-action-deployment --namespace=kp-denied --type=merge \
-		--patch='{"spec":{"template":{"metadata":{"annotations":{"kubectl.kubernetes.io/restartedAt":"2026-08-17T00:00:00Z"}}}}}' \
-		--as="$restart_subject" >/dev/null 2>&1; then
+	if patch_resource_as "$restart_subject" \
+		/apis/apps/v1/namespaces/kp-denied/deployments/kp-action-deployment \
+		'{"spec":{"template":{"metadata":{"annotations":{"kubectl.kubernetes.io/restartedAt":"2026-08-17T00:00:00Z"}}}}}' \
+		>/dev/null 2>&1; then
 		fail "restart unexpectedly succeeded in kp-denied"
 	fi
 
@@ -1117,13 +1184,26 @@ write_offline_kubeconfig() {
 	mv -- "$offline_build" "$offline_output"
 }
 
+app_driver_failure() {
+	app_driver_failure_message=$1
+	app_driver_last_line=
+	if [ -f "${app_driver_log:-}" ]; then
+		app_driver_last_line=$(tail -n 1 -- "$app_driver_log" 2>/dev/null) || app_driver_last_line=
+	fi
+	if printf '%s\n' "$app_driver_last_line" |
+		LC_ALL=C grep -Eq '^app-e2e: [A-Za-z0-9 /_.:?=(),;+&-]{1,240}$'; then
+		fail "$app_driver_failure_message: ${app_driver_last_line#app-e2e: }"
+	fi
+	fail "$app_driver_failure_message"
+}
+
 wait_app_driver_marker() {
 	marker_name=$1
 	maximum_attempts=$2
 	attempt=0
 	while [ "$attempt" -lt "$maximum_attempts" ]; do
 		[ ! -f "$app_control_dir/$marker_name" ] || return 0
-		kill -0 "$app_driver_pid" >/dev/null 2>&1 || fail "app-e2e driver exited before marker $marker_name"
+		kill -0 "$app_driver_pid" >/dev/null 2>&1 || app_driver_failure "app-e2e driver exited before marker $marker_name"
 		attempt=$((attempt + 1))
 		sleep 1
 	done
@@ -1134,6 +1214,9 @@ coordinate_allowed_driver() {
 	wait_app_driver_marker f6-ready 240
 	revoke_action_binding kp-f6-resource-reader
 	app_f6_binding_revoked=yes
+	wait_can_i no "$app_e2e_subject" list pods kp-allowed "app F6 pod list revocation is visible"
+	wait_can_i no "$app_e2e_subject" watch pods kp-allowed "app F6 pod watch revocation is visible"
+	wait_can_i no "$app_e2e_subject" get pods/log kp-allowed "app F6 log revocation is visible" kp-interactive
 	touch "$app_control_dir/f6-revoked"
 	wait_app_driver_marker f6-done 100
 	restore_action_binding kp-f6-resource-reader
@@ -1262,7 +1345,7 @@ run_app_instance() {
 	fi
 	if ! wait "$app_driver_pid"; then
 		app_driver_pid=
-		fail "app-e2e $app_mode product driver failed"
+		app_driver_failure "app-e2e $app_mode product driver failed"
 	fi
 	app_driver_pid=
 	app_instance_cleanup

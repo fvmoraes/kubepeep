@@ -142,8 +142,10 @@ func (s *Service) Scale(ctx context.Context, binding namespaces.SelectionBinding
 	var mutation MutationResult
 	err = s.guarded(ctx, binding.Generation, key, authorization.OperationMutation, func(operationContext context.Context) error {
 		var operationErr error
+		commandTarget := target
+		commandTarget.Kind = route.Kind
 		mutation, operationErr = s.adapter.UpdateScale(operationContext, ScaleCommand{
-			Target:                  target,
+			Target:                  commandTarget,
 			Replicas:                int32(request.Replicas),
 			ExpectedResourceVersion: request.ExpectedResourceVersion,
 		})

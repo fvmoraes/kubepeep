@@ -989,17 +989,34 @@ spec:
   automountServiceAccountToken: false
   restartPolicy: Always
   securityContext:
+    fsGroup: 65532
     runAsNonRoot: true
     runAsUser: 65532
   containers:
     - name: synthetic-log
       image: registry.k8s.io/e2e-test-images/busybox:1.29-4@sha256:2e0f836850e09b8b7cc937681d6194537a09fbd5f6b9e08f4d646a85128e8937
-      command: ["/bin/sh", "-c", "echo 'possible error: synthetic dashboard fixture unavailable'; exit 1"]
+      command:
+        - /bin/sh
+        - -c
+        - |
+          if [ ! -f /state/restarted ]; then
+            echo 'possible error: synthetic dashboard fixture unavailable'
+            umask 077
+            : > /state/restarted
+            exit 1
+          fi
+          exec sleep 3600
       securityContext:
         allowPrivilegeEscalation: false
         capabilities:
           drop: ["ALL"]
         readOnlyRootFilesystem: true
+      volumeMounts:
+        - name: restart-state
+          mountPath: /state
+  volumes:
+    - name: restart-state
+      emptyDir: {}
 ---
 apiVersion: v1
 kind: Event

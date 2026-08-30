@@ -60,7 +60,7 @@ func TestActionsUseExactAuthorizationAndNarrowCommands(t *testing.T) {
 	if len(adapter.restarts) != 1 || adapter.restarts[0].ExpectedResourceVersion != "123" || adapter.restarts[0].RestartedAt.Location() != time.UTC {
 		t.Fatalf("restart command was not minimal: %#v", adapter.restarts)
 	}
-	if len(adapter.scales) != 1 || adapter.scales[0].Replicas != 0 || adapter.scales[0].ExpectedResourceVersion != "124" {
+	if len(adapter.scales) != 1 || adapter.scales[0].Target.Kind != "statefulsets" || adapter.scales[0].Replicas != 0 || adapter.scales[0].ExpectedResourceVersion != "124" {
 		t.Fatalf("scale command did not use the scale-only contract: %#v", adapter.scales)
 	}
 	if len(adapter.deletes) != 1 || adapter.deletes[0].ExpectedUID != "uid-1" || adapter.deletes[0].ExpectedResourceVersion != "125" {
