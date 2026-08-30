@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef } from 'react'
 import {
   Activity,
   Boxes,
@@ -25,20 +25,37 @@ import { ConfigPage, EventsPage, NetworkPage, PodsPage, WorkloadsPage } from './
 import { SettingsPage } from './components/SettingsPage'
 import { StatePanel } from './components/StatePanel'
 
-const navigation = [
-  { path: '/', label: 'Overview', description: 'Cluster health and operational summary', keywords: ['dashboard', 'health'], icon: CircleGauge },
-  { path: '/workloads', label: 'Workloads', description: 'Deployments, StatefulSets and DaemonSets', keywords: ['deployment', 'statefulset', 'daemonset'], icon: Boxes },
-  { path: '/pods', label: 'Pods', description: 'Pod inventory, status and containers', keywords: ['container', 'restart'], icon: Activity },
-  { path: '/logs', label: 'Logs', description: 'Bounded container log viewer', keywords: ['tail', 'stream'], icon: ScrollText },
-  { path: '/events', label: 'Events', description: 'Kubernetes event timeline', keywords: ['warning', 'reason'], icon: FileText },
-  { path: '/network', label: 'Network', description: 'Services, ingresses and endpoints', keywords: ['service', 'ingress', 'endpointslice'], icon: Network },
-  { path: '/config', label: 'Config', description: 'Safe configuration resource views', keywords: ['configmap', 'yaml'], icon: Braces },
-  { path: '/namespaces', label: 'Namespaces', description: 'Namespace scopes and selection', keywords: ['scope'], icon: TerminalSquare },
-  { path: '/permissions', label: 'Permissions', description: 'Effective Kubernetes capabilities', keywords: ['rbac', 'authorization'], icon: KeyRound },
-  { path: '/settings', label: 'Settings', description: 'Allowlisted local preferences', keywords: ['preferences'], icon: Settings },
+const applicationDestinations = [
+  { path: '/', label: 'Overview', description: 'Cluster health and operational summary', keywords: ['dashboard', 'health'], icon: CircleGauge, page: DashboardPage },
+  { path: '/workloads', label: 'Workloads', description: 'Deployments, StatefulSets and DaemonSets', keywords: ['deployment', 'statefulset', 'daemonset'], icon: Boxes, page: WorkloadsPage },
+  { path: '/pods', label: 'Pods', description: 'Pod inventory, status and containers', keywords: ['container', 'restart'], icon: Activity, page: PodsPage },
+  { path: '/logs', label: 'Logs', description: 'Bounded container log viewer', keywords: ['tail', 'stream'], icon: ScrollText, page: LogsPage },
+  { path: '/events', label: 'Events', description: 'Kubernetes event timeline', keywords: ['warning', 'reason'], icon: FileText, page: EventsPage },
+  { path: '/network', label: 'Network', description: 'Services, ingresses and endpoints', keywords: ['service', 'ingress', 'endpointslice'], icon: Network, page: NetworkPage },
+  { path: '/config', label: 'Config', description: 'Safe configuration resource views', keywords: ['configmap', 'yaml'], icon: Braces, page: ConfigPage },
+  { path: '/namespaces', label: 'Namespaces', description: 'Namespace scopes and selection', keywords: ['scope'], icon: TerminalSquare, page: NamespaceScopeEditor },
+  { path: '/permissions', label: 'Permissions', description: 'Effective Kubernetes capabilities', keywords: ['rbac', 'authorization'], icon: KeyRound, page: PermissionsMatrixPage },
+  { path: '/settings', label: 'Settings', description: 'Allowlisted local preferences', keywords: ['preferences'], icon: Settings, page: SettingsPage },
 ] as const
 
-const commandRoutes = navigation.map(({ path, label, description, keywords }) => ({ path, label, description, keywords }))
+const commandRoutes = applicationDestinations.map(({ path, label, description, keywords }) => ({ path, label, description, keywords }))
+const safeGlobalRefreshRoots = new Set([
+  'action-permissions',
+  'cluster-profiles',
+  'contexts',
+  'dashboard',
+  'local-status',
+  'namespace-scopes',
+  'permissions',
+  'port-forwards',
+  'preferences',
+  'resources',
+])
+
+function isSafeGlobalRefreshQuery(query: { queryKey: readonly unknown[] }) {
+  const root = query.queryKey[0]
+  return typeof root === 'string' && safeGlobalRefreshRoots.has(root)
+}
 
 function StatusBadge() {
   const status = useQuery({
@@ -68,6 +85,7 @@ function Shell() {
   })
   const selection = status.data?.selection ?? null
   const previousGeneration = useRef<string | null>(null)
+  const refreshActiveReads = useCallback(() => queryClient.refetchQueries({ type: 'active', predicate: isSafeGlobalRefreshQuery }), [queryClient])
 
   useEffect(() => {
     const current = selection?.generation ?? null
@@ -89,7 +107,7 @@ function Shell() {
           <div><strong>kubePeep</strong><small>local cluster view</small></div>
         </div>
         <nav aria-label="Primary navigation">
-          {navigation.map(({ path, label, icon: Icon }) => (
+          {applicationDestinations.map(({ path, label, icon: Icon }) => (
             <NavLink key={path} to={path} end={path === '/'}>
               <Icon size={17} strokeWidth={1.8} aria-hidden="true" />
               <span>{label}</span>
@@ -105,7 +123,7 @@ function Shell() {
             {selection ? <small>{selection.cluster} · {selection.namespaceCount} namespace{selection.namespaceCount === 1 ? '' : 's'}</small> : null}
           </div>
           <div className="topbar-controls">
-            <CommandCenter routes={commandRoutes} />
+            <CommandCenter routes={commandRoutes} onRefresh={refreshActiveReads} />
             <ContextSelector selection={selection} />
             <StatusBadge />
           </div>
@@ -120,16 +138,9 @@ export function App() {
   return (
     <Routes>
       <Route element={<Shell />}>
-        <Route index element={<DashboardPage />} />
-        <Route path="workloads" element={<WorkloadsPage />} />
-        <Route path="pods" element={<PodsPage />} />
-        <Route path="logs" element={<LogsPage />} />
-        <Route path="events" element={<EventsPage />} />
-        <Route path="network" element={<NetworkPage />} />
-        <Route path="config" element={<ConfigPage />} />
-        <Route path="namespaces" element={<NamespaceScopeEditor />} />
-        <Route path="permissions" element={<PermissionsMatrixPage />} />
-        <Route path="settings" element={<SettingsPage />} />
+        {applicationDestinations.map(({ path, page: Page }) => path === '/'
+          ? <Route key={path} index element={<Page />} />
+          : <Route key={path} path={path.slice(1)} element={<Page />} />)}
         <Route path="*" element={<StatePanel kind="error" title="Page not found">Return to Overview using the navigation.</StatePanel>} />
       </Route>
     </Routes>

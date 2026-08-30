@@ -16,11 +16,21 @@ function CurrentPath() {
   return <span data-testid="current-path">{useLocation().pathname}</span>
 }
 
-function renderCommandCenter(extra?: React.ReactNode) {
+function renderCommandCenter({
+  extra,
+  onRefresh,
+  initialEntries = ['/'],
+  initialIndex = initialEntries.length - 1,
+}: {
+  extra?: React.ReactNode
+  onRefresh?: () => void | Promise<unknown>
+  initialEntries?: string[]
+  initialIndex?: number
+} = {}) {
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={initialEntries} initialIndex={initialIndex}>
       {extra}
-      <CommandCenter routes={routes} />
+      <CommandCenter routes={routes} onRefresh={onRefresh} />
       <CurrentPath />
     </MemoryRouter>,
   )
@@ -29,6 +39,7 @@ function renderCommandCenter(extra?: React.ReactNode) {
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+  window.history.replaceState(null, '')
   window.localStorage.clear()
   window.sessionStorage.clear()
 })
@@ -51,7 +62,8 @@ describe('CommandCenter', () => {
   })
 
   it('opens shortcut help with ? only outside editable fields', () => {
-    renderCommandCenter(<label>Scratch input<input aria-label="Scratch input" /></label>)
+    const onRefresh = vi.fn()
+    renderCommandCenter({ extra: <label>Scratch input<input aria-label="Scratch input" /></label>, onRefresh })
 
     const editable = screen.getByRole('textbox', { name: 'Scratch input' })
     editable.focus()
@@ -61,11 +73,97 @@ describe('CommandCenter', () => {
     fireEvent.keyDown(document.body, { key: '?', shiftKey: true })
     const dialog = screen.getByRole('dialog', { name: 'Keyboard shortcuts' })
     expect(dialog).toHaveClass('command-center-dialog--help')
+    expect(dialog).toHaveTextContent('Refresh repeats only active read queries; no shortcut mutates Kubernetes resources.')
     expect(dialog).toHaveTextContent('Open page search from anywhere.')
+    expect(dialog).toHaveTextContent('Refresh active read-only views instead of reloading the browser.')
+    expect(dialog).toHaveTextContent('Focus and select the current page search')
+    expect(dialog).toHaveTextContent('Open and focus the Kubernetes context selector when it is available.')
+    expect(dialog).toHaveTextContent('Go back when local application history has an earlier entry.')
     expect(dialog).toHaveTextContent('Open this help outside editable fields.')
+
+    expect(fireEvent.keyDown(within(dialog).getByRole('button', { name: 'Close command center' }), { key: 'r', ctrlKey: true })).toBe(true)
+    expect(onRefresh).not.toHaveBeenCalled()
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Search pages' }))
     expect(screen.getByRole('dialog', { name: 'Command center' })).toHaveClass('command-center-dialog--commands')
+  })
+
+  it('refreshes and focuses safe targets with Ctrl/Meta only outside editors', () => {
+    const onRefresh = vi.fn()
+    renderCommandCenter({
+      onRefresh,
+      extra: <>
+        <label>Page search<input data-app-shortcut="search" aria-label="Page search" defaultValue="pods" /></label>
+        <label>Context<select data-app-shortcut="context-selector" aria-label="Context"><option>development</option></select></label>
+        <div contentEditable role="textbox" aria-label="Notes" />
+      </>,
+    })
+
+    const pageSearch = screen.getByRole('textbox', { name: 'Page search' }) as HTMLInputElement
+    const context = screen.getByRole('combobox', { name: 'Context' })
+    const notes = screen.getByRole('textbox', { name: 'Notes' })
+    const showPicker = vi.fn()
+    Object.defineProperty(context, 'showPicker', { configurable: true, value: showPicker })
+
+    pageSearch.focus()
+    expect(fireEvent.keyDown(pageSearch, { key: 'r', ctrlKey: true })).toBe(true)
+    expect(fireEvent.keyDown(pageSearch, { key: 'k', metaKey: true })).toBe(true)
+    expect(onRefresh).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+
+    notes.focus()
+    expect(fireEvent.keyDown(notes, { key: 'r', metaKey: true })).toBe(true)
+    expect(onRefresh).not.toHaveBeenCalled()
+
+    expect(fireEvent.keyDown(document.body, { key: 'r', ctrlKey: true })).toBe(false)
+    expect(fireEvent.keyDown(document.body, { key: 'r', metaKey: true })).toBe(false)
+    expect(onRefresh).toHaveBeenCalledTimes(2)
+
+    expect(fireEvent.keyDown(document.body, { key: 'f', metaKey: true })).toBe(false)
+    expect(pageSearch).toHaveFocus()
+    expect(pageSearch.selectionStart).toBe(0)
+    expect(pageSearch.selectionEnd).toBe(pageSearch.value.length)
+
+    document.body.focus()
+    expect(fireEvent.keyDown(document.body, { key: 'o', ctrlKey: true })).toBe(false)
+    expect(context).toHaveFocus()
+    expect(showPicker).toHaveBeenCalledOnce()
+    expect(fireEvent.keyDown(context, { key: 'ArrowDown' })).toBe(true)
+  })
+
+  it('ignores composing, Process and repeated shortcut events', () => {
+    const onRefresh = vi.fn()
+    renderCommandCenter({ onRefresh })
+
+    expect(fireEvent.keyDown(document.body, { key: 'r', ctrlKey: true, isComposing: true })).toBe(true)
+    expect(fireEvent.keyDown(document.body, { key: 'Process', ctrlKey: true })).toBe(true)
+    expect(fireEvent.keyDown(document.body, { key: 'r', ctrlKey: true, keyCode: 229 })).toBe(true)
+    expect(fireEvent.keyDown(document.body, { key: 'r', ctrlKey: true, which: 229 })).toBe(true)
+    expect(fireEvent.keyDown(document.body, { key: 'r', ctrlKey: true, repeat: true })).toBe(true)
+    expect(onRefresh).not.toHaveBeenCalled()
+
+    fireEvent.keyDown(document.body, { key: 'k', metaKey: true, isComposing: true })
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it.each([
+    ['Control', { ctrlKey: true }],
+    ['Meta', { metaKey: true }],
+  ])('goes back through router history with %s+B', (_label, modifier) => {
+    window.history.replaceState({ idx: 1 }, '')
+    renderCommandCenter({ initialEntries: ['/pods', '/logs'] })
+    expect(screen.getByTestId('current-path')).toHaveTextContent('/logs')
+
+    expect(fireEvent.keyDown(document.body, { key: 'b', ...modifier })).toBe(false)
+    expect(screen.getByTestId('current-path')).toHaveTextContent('/pods')
+  })
+
+  it('leaves browser Find and Open untouched when no matching target is available', () => {
+    renderCommandCenter()
+
+    expect(fireEvent.keyDown(document.body, { key: 'f', ctrlKey: true })).toBe(true)
+    expect(fireEvent.keyDown(document.body, { key: 'o', metaKey: true })).toBe(true)
+    expect(fireEvent.keyDown(document.body, { key: 'b', ctrlKey: true })).toBe(true)
   })
 
   it('filters only the supplied static routes without issuing a request', () => {

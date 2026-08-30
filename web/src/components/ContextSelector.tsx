@@ -151,6 +151,8 @@ export function ContextSelector({ selection, onSelected }: ContextSelectorProps)
         <span>Context</span>
         <select
           aria-label="Kubernetes context"
+          aria-keyshortcuts="Control+O Meta+O"
+          data-app-shortcut="context-selector"
           value={effectiveContextName}
           disabled={contexts.isPending || contexts.isError || contextList.length === 0}
           onChange={(event) => {

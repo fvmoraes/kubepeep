@@ -1,5 +1,5 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -27,11 +27,12 @@ function localStatus() {
   }
 }
 
-function renderApp(path = '/') {
+function renderApp(path = '/', extra?: React.ReactNode) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[path]}>
+        {extra}
         <App />
       </MemoryRouter>
     </QueryClientProvider>,
@@ -141,6 +142,29 @@ describe('application shell', () => {
     fireEvent.change(screen.getByRole('combobox', { name: 'Search application pages' }), { target: { value: 'rbac' } })
     expect(screen.getByRole('option', { name: /Permissions/ })).toBeInTheDocument()
     expect(screen.queryByRole('option', { name: /Overview/ })).not.toBeInTheDocument()
+  })
+
+  it('globally refreshes only explicitly allowlisted active read queries', async () => {
+    const unsafeQuery = vi.fn().mockResolvedValue('unsafe-result')
+    const fetch = vi.fn((input: string | URL | Request) => Promise.resolve(
+      String(input) === '/api/v1/cluster/profiles' ? json([]) : json(localStatus()),
+    ))
+    vi.stubGlobal('fetch', fetch)
+
+    function UnsafeActiveQuery() {
+      useQuery({ queryKey: ['future-unreviewed-query'], queryFn: unsafeQuery })
+      return null
+    }
+
+    renderApp('/', <UnsafeActiveQuery />)
+    await screen.findByRole('heading', { name: 'Choose a Kubernetes context' })
+    await waitFor(() => expect(unsafeQuery).toHaveBeenCalledOnce())
+    const statusCalls = () => fetch.mock.calls.filter(([input]) => String(input) === '/api/v1/status').length
+    const statusCallsBeforeRefresh = statusCalls()
+
+    expect(fireEvent.keyDown(document.body, { key: 'r', ctrlKey: true })).toBe(false)
+    await waitFor(() => expect(statusCalls()).toBeGreaterThan(statusCallsBeforeRefresh))
+    expect(unsafeQuery).toHaveBeenCalledOnce()
   })
 
   it('renders the explicit not-found error route', () => {

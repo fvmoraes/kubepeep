@@ -64,6 +64,8 @@ describe('context selector cancellation and states', () => {
     fireEvent.change(profiles, { target: { value: '2' } })
 
     expect(await screen.findByRole('option', { name: 'staging · stage-cluster' })).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: 'Kubernetes context' })).toHaveAttribute('data-app-shortcut', 'context-selector')
+    expect(screen.getByRole('combobox', { name: 'Kubernetes context' })).toHaveAttribute('aria-keyshortcuts', 'Control+O Meta+O')
     await waitFor(() => expect(firstAborted).toBe(true))
   })
 

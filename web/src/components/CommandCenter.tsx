@@ -11,6 +11,7 @@ export interface CommandRoute {
 
 interface CommandCenterProps {
   routes: readonly CommandRoute[]
+  onRefresh?: () => void | Promise<unknown>
 }
 
 type CommandCenterView = 'commands' | 'help' | null
@@ -20,6 +21,41 @@ function isEditableTarget(target: EventTarget | null) {
   return target.isContentEditable || target.closest('input, textarea, select, [contenteditable="true"], [contenteditable=""], [role="textbox"]') !== null
 }
 
+function usesPrimaryModifier(event: KeyboardEvent) {
+  return event.ctrlKey !== event.metaKey && !event.altKey && !event.shiftKey
+}
+
+function isComposingShortcutEvent(event: KeyboardEvent) {
+  return event.isComposing || event.key === 'Process' || event.keyCode === 229 || event.which === 229
+}
+
+function activateShortcutTarget(name: 'context-selector' | 'search') {
+  const targets = Array.from(document.querySelectorAll<HTMLElement>(`[data-app-shortcut="${name}"]`))
+  const target = targets.find((candidate) => (
+    !candidate.matches(':disabled, [aria-disabled="true"]')
+    && candidate.closest('[hidden], [aria-hidden="true"]') === null
+  ))
+  if (!target) return false
+  target.focus({ preventScroll: true })
+  if (document.activeElement !== target) return false
+  if (target instanceof HTMLInputElement) target.select()
+  if (name === 'context-selector' && target instanceof HTMLSelectElement && typeof target.showPicker === 'function') {
+    try {
+      target.showPicker()
+    } catch {
+      // Focus remains a keyboard-accessible fallback when the browser refuses a programmatic native picker.
+    }
+  }
+  return true
+}
+
+function hasLocalHistoryEntry() {
+  const state = window.history.state as unknown
+  if (typeof state !== 'object' || state === null || !('idx' in state)) return false
+  const index = (state as { idx?: unknown }).idx
+  return typeof index === 'number' && Number.isInteger(index) && index > 0
+}
+
 function matchesQuery(route: CommandRoute, query: string) {
   const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
   if (terms.length === 0) return true
@@ -27,7 +63,7 @@ function matchesQuery(route: CommandRoute, query: string) {
   return terms.every((term) => searchable.includes(term))
 }
 
-export function CommandCenter({ routes }: CommandCenterProps) {
+export function CommandCenter({ routes, onRefresh }: CommandCenterProps) {
   const navigate = useNavigate()
   const [view, setView] = useState<CommandCenterView>(null)
   const [query, setQuery] = useState('')
@@ -57,21 +93,43 @@ export function CommandCenter({ routes }: CommandCenterProps) {
 
   useEffect(() => {
     const onGlobalKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented) return
-      if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === 'k') {
-        event.preventDefault()
-        open('commands')
-        return
+      if (event.defaultPrevented || event.repeat || isComposingShortcutEvent(event) || isEditableTarget(event.target)) return
+      if (view !== null) return
+      const key = event.key.toLowerCase()
+      if (usesPrimaryModifier(event)) {
+        if (key === 'k') {
+          event.preventDefault()
+          open('commands')
+          return
+        }
+        if (key === 'r' && onRefresh) {
+          event.preventDefault()
+          void onRefresh()
+          return
+        }
+        if (key === 'f' && activateShortcutTarget('search')) {
+          event.preventDefault()
+          return
+        }
+        if (key === 'o' && activateShortcutTarget('context-selector')) {
+          event.preventDefault()
+          return
+        }
+        if (key === 'b' && hasLocalHistoryEntry()) {
+          event.preventDefault()
+          navigate(-1)
+          return
+        }
       }
       const opensHelp = event.key === '?' || (event.key === '/' && event.shiftKey)
-      if (opensHelp && !event.metaKey && !event.ctrlKey && !event.altKey && !isEditableTarget(event.target)) {
+      if (opensHelp && !event.metaKey && !event.ctrlKey && !event.altKey) {
         event.preventDefault()
         open('help')
       }
     }
     document.addEventListener('keydown', onGlobalKeyDown)
     return () => document.removeEventListener('keydown', onGlobalKeyDown)
-  }, [open])
+  }, [navigate, onRefresh, open, view])
 
   useEffect(() => {
     if (view === null) return
@@ -233,9 +291,13 @@ export function CommandCenter({ routes }: CommandCenterProps) {
               </>
             ) : (
               <>
-                <p id={descriptionId} className="command-center-description">Navigation stays local and the shortcuts do not read or mutate Kubernetes resources.</p>
+                <p id={descriptionId} className="command-center-description">Navigation and focus stay local. Refresh repeats only active read queries; no shortcut mutates Kubernetes resources.</p>
                 <dl className="command-center-help">
                   <div><dt><kbd>⌘/Ctrl K</kbd></dt><dd>Open page search from anywhere.</dd></div>
+                  <div><dt><kbd>⌘/Ctrl R</kbd></dt><dd>Refresh active read-only views instead of reloading the browser.</dd></div>
+                  <div><dt><kbd>⌘/Ctrl F</kbd></dt><dd>Focus and select the current page search; browser Find remains available when no page search exists.</dd></div>
+                  <div><dt><kbd>⌘/Ctrl O</kbd></dt><dd>Open and focus the Kubernetes context selector when it is available.</dd></div>
+                  <div><dt><kbd>⌘/Ctrl B</kbd></dt><dd>Go back when local application history has an earlier entry.</dd></div>
                   <div><dt><kbd>?</kbd></dt><dd>Open this help outside editable fields.</dd></div>
                   <div><dt><kbd>↑</kbd> <kbd>↓</kbd></dt><dd>Move through matching pages.</dd></div>
                   <div><dt><kbd>Enter</kbd></dt><dd>Open the selected page.</dd></div>
