@@ -103,38 +103,54 @@ guard_cluster() {
 
 namespace_is_managed_or_absent() {
 	namespace=$1
-	if ! kube get namespace "$namespace" >/dev/null 2>&1; then
-		return 0
+	if ! namespace_identity=$(kube get namespace "$namespace" --ignore-not-found \
+		-o 'jsonpath={.metadata.labels.app\.kubernetes\.io/managed-by}{"|"}{.metadata.uid}' 2>/dev/null); then
+		fail "namespace $namespace ownership could not be verified"
 	fi
-	owner=$(kube get namespace "$namespace" \
-		-o 'jsonpath={.metadata.labels.app\.kubernetes\.io/managed-by}' 2>/dev/null || true)
-	[ "$owner" = "$managed_value" ] ||
-		fail "namespace $namespace already exists and is not owned by this harness"
+	managed_uid_from_identity "namespace $namespace" "$namespace_identity" >/dev/null
 }
 
 cluster_resource_is_managed_or_absent() {
 	resource=$1
 	name=$2
-	if ! kube get "$resource" "$name" >/dev/null 2>&1; then
-		return 0
+	if ! cluster_identity=$(kube get "$resource" "$name" --ignore-not-found \
+		-o 'jsonpath={.metadata.labels.app\.kubernetes\.io/managed-by}{"|"}{.metadata.uid}' 2>/dev/null); then
+		fail "$resource/$name ownership could not be verified"
 	fi
-	owner=$(kube get "$resource" "$name" \
-		-o 'jsonpath={.metadata.labels.app\.kubernetes\.io/managed-by}' 2>/dev/null || true)
-	[ "$owner" = "$managed_value" ] ||
-		fail "$resource/$name already exists and is not owned by this harness"
+	managed_uid_from_identity "$resource/$name" "$cluster_identity" >/dev/null
 }
 
-namespaced_resource_is_managed_or_absent() {
+managed_uid_from_identity() (
+	managed_description=$1
+	managed_identity=$2
+	[ -n "$managed_identity" ] || return 0
+	case "$managed_identity" in
+	*'|'*) ;;
+	*) fail "$managed_description returned an invalid ownership identity" ;;
+	esac
+	managed_owner=${managed_identity%%|*}
+	managed_uid=${managed_identity#*|}
+	[ "$managed_owner" = "$managed_value" ] ||
+		fail "$managed_description already exists and is not owned by this harness"
+	case "$managed_uid" in
+	'' | *[!0-9a-f-]*) fail "$managed_description returned an invalid UID" ;;
+	esac
+	printf '%s\n' "$managed_uid"
+)
+
+namespaced_managed_uid_or_absent() (
 	resource=$1
 	namespace=$2
 	name=$3
-	if ! kube get "$resource" "$name" --namespace="$namespace" >/dev/null 2>&1; then
-		return 0
+	if ! namespaced_identity=$(kube get "$resource" "$name" --namespace="$namespace" --ignore-not-found \
+		-o 'jsonpath={.metadata.labels.app\.kubernetes\.io/managed-by}{"|"}{.metadata.uid}' 2>/dev/null); then
+		fail "$resource $namespace/$name ownership could not be verified"
 	fi
-	owner=$(kube get "$resource" "$name" --namespace="$namespace" \
-		-o 'jsonpath={.metadata.labels.app\.kubernetes\.io/managed-by}' 2>/dev/null || true)
-	[ "$owner" = "$managed_value" ] ||
-		fail "$resource $namespace/$name already exists and is not owned by this harness"
+	managed_uid_from_identity "$resource $namespace/$name" "$namespaced_identity"
+)
+
+namespaced_resource_is_managed_or_absent() {
+	namespaced_managed_uid_or_absent "$@" >/dev/null
 }
 
 apply_fixtures() {
@@ -181,7 +197,10 @@ apply_fixtures() {
 	namespaced_resource_is_managed_or_absent pod kp-denied kp-fixture
 	namespaced_resource_is_managed_or_absent deployment kp-allowed kp-degraded
 	namespaced_resource_is_managed_or_absent pod kp-allowed kp-restarting
+	# Keep accepting the earlier synthetic Event name so a reused dedicated
+	# cluster can migrate it without touching an object owned by someone else.
 	namespaced_resource_is_managed_or_absent event kp-allowed kp-warning
+	namespaced_resource_is_managed_or_absent event kp-allowed 000-kp-warning
 	for fixture_resource in \
 		"configmap kp-allowed kp-config" \
 		"secret kp-allowed kp-secret-metadata" \
@@ -204,6 +223,13 @@ apply_fixtures() {
 		namespaced_resource_is_managed_or_absent "$1" "$2" "$3"
 	done
 	kube apply --server-side --field-manager=kubepeep-kind-harness -f "$fixture_file"
+	# Recreate one time-sensitive fixture at a time only after the complete
+	# manifest passed a real apply. Each deletion is UID-preconditioned and has
+	# an immediate canonical recovery trap, so a reused cluster never trusts a
+	# stale ownership read or removes both fixtures before replacement.
+	recreate_managed_core_fixture pod pods Pod kp-allowed kp-restarting
+	remove_managed_core_fixture event events kp-allowed kp-warning
+	recreate_managed_core_fixture event events Event kp-allowed 000-kp-warning
 	hydrate_secret_fixture
 }
 
@@ -313,13 +339,7 @@ wait_can_i() {
 }
 
 refresh_binding_is_managed_or_absent() {
-	if ! kube get rolebinding "$refresh_binding" --namespace=kp-denied >/dev/null 2>&1; then
-		return 0
-	fi
-	owner=$(kube get rolebinding "$refresh_binding" --namespace=kp-denied \
-		-o 'jsonpath={.metadata.labels.app\.kubernetes\.io/managed-by}' 2>/dev/null || true)
-	[ "$owner" = "$managed_value" ] ||
-		fail "rolebinding kp-denied/$refresh_binding exists and is not owned by this harness"
+	namespaced_resource_is_managed_or_absent rolebinding kp-denied "$refresh_binding"
 }
 
 grant_refresh_access() {
@@ -345,8 +365,7 @@ EOF
 }
 
 revoke_refresh_access() {
-	refresh_binding_is_managed_or_absent
-	kube delete rolebinding "$refresh_binding" --namespace=kp-denied --ignore-not-found >/dev/null
+	remove_managed_rolebinding kp-denied "$refresh_binding"
 }
 
 validate_baseline() {
@@ -381,7 +400,7 @@ validate_baseline() {
 	kube get namespace kp-allowed --as="$lister_subject" -o name >/dev/null
 	kube get deployment kp-degraded --namespace=kp-allowed --as="$dashboard_subject" -o name >/dev/null
 	kube get events --namespace=kp-allowed --as="$dashboard_subject" -o name | \
-		grep -Fx 'event/kp-warning' >/dev/null || fail "dashboard viewer could not list the Warning fixture"
+		grep -Fx 'event/000-kp-warning' >/dev/null || fail "dashboard viewer could not list the Warning fixture"
 	if kube get --raw=/apis/metrics.k8s.io/v1beta1 >/dev/null 2>&1; then
 		fail "the canonical dashboard fixture requires Metrics API to be absent"
 	fi
@@ -495,7 +514,7 @@ validate_resource_operations() {
 		kube get "$list_resource" --namespace=kp-allowed --as="$resource_subject" -o name >/dev/null
 	done
 	kube get events --namespace=kp-allowed --as="$resource_subject" -o name | \
-		grep -Fx 'event/kp-warning' >/dev/null || fail "F6 event LIST omitted the Warning fixture"
+		grep -Fx 'event/000-kp-warning' >/dev/null || fail "F6 event LIST omitted the Warning fixture"
 	for fixture_resource in \
 		"deployment kp-action-deployment" \
 		"statefulset kp-action-statefulset" \
@@ -648,6 +667,169 @@ END {
 ' "$fixture_file" >"$object_file" || fail "canonical fixture object was not found exactly once"
 )
 
+request_core_resource_delete_with_uid() (
+	delete_resource=$1
+	delete_collection=$2
+	delete_namespace=$3
+	delete_name=$4
+	delete_uid=$5
+	delete_as=${6:-}
+	case "$delete_resource:$delete_collection" in
+	pod:pods | event:events) ;;
+	*) fail "unsupported core fixture deletion target" ;;
+	esac
+	case "$delete_namespace/$delete_name" in
+	'' | *[!a-z0-9./-]*) fail "invalid core fixture deletion target" ;;
+	esac
+	case "$delete_uid" in
+	'' | *[!0-9a-f-]*) fail "invalid core fixture deletion UID" ;;
+	esac
+	case "$delete_as" in
+	'' | "$delete_subject") ;;
+	*) fail "unsupported core fixture deletion identity" ;;
+	esac
+	set -- delete --raw="/api/v1/namespaces/$delete_namespace/$delete_collection/$delete_name" -f -
+	[ -z "$delete_as" ] || set -- "$@" --as="$delete_as"
+	printf '{"apiVersion":"v1","kind":"DeleteOptions","gracePeriodSeconds":0,"preconditions":{"uid":"%s"}}\n' "$delete_uid" |
+		kube "$@"
+)
+
+delete_core_resource_with_uid() (
+	delete_resource=$1
+	delete_namespace=$3
+	delete_name=$4
+	if ! request_core_resource_delete_with_uid "$@" >/dev/null 2>&1; then
+		fail "$delete_resource $delete_namespace/$delete_name changed before its guarded deletion"
+	fi
+)
+
+wait_for_core_resource_absent() (
+	wait_resource=$1
+	wait_namespace=$2
+	wait_name=$3
+	kube wait --for=delete "$wait_resource/$wait_name" --namespace="$wait_namespace" \
+		--timeout=60s >/dev/null 2>&1 ||
+		fail "$wait_resource $wait_namespace/$wait_name deletion did not complete"
+)
+
+remove_managed_core_fixture() (
+	remove_resource=$1
+	remove_collection=$2
+	remove_namespace=$3
+	remove_name=$4
+	remove_uid=$(namespaced_managed_uid_or_absent "$remove_resource" "$remove_namespace" "$remove_name")
+	[ -n "$remove_uid" ] || return 0
+	delete_core_resource_with_uid "$remove_resource" "$remove_collection" \
+		"$remove_namespace" "$remove_name" "$remove_uid"
+	wait_for_core_resource_absent "$remove_resource" "$remove_namespace" "$remove_name"
+)
+
+remove_managed_rolebinding() (
+	remove_namespace=$1
+	remove_name=$2
+	remove_required=${3:-no}
+	remove_uid=$(namespaced_managed_uid_or_absent rolebinding "$remove_namespace" "$remove_name")
+	if [ -z "$remove_uid" ]; then
+		[ "$remove_required" != yes ] || fail "rolebinding $remove_namespace/$remove_name is absent"
+		return 0
+	fi
+	case "$remove_namespace/$remove_name" in
+	'' | *[!a-z0-9./-]*) fail "invalid RoleBinding deletion target" ;;
+	esac
+	if ! printf '{"apiVersion":"v1","kind":"DeleteOptions","preconditions":{"uid":"%s"}}\n' "$remove_uid" |
+		kube delete --raw="/apis/rbac.authorization.k8s.io/v1/namespaces/$remove_namespace/rolebindings/$remove_name" \
+			-f - >/dev/null 2>&1; then
+		fail "rolebinding $remove_namespace/$remove_name changed before its guarded deletion"
+	fi
+	kube wait --for=delete "rolebinding/$remove_name" --namespace="$remove_namespace" \
+		--timeout=60s >/dev/null 2>&1 ||
+		fail "rolebinding $remove_namespace/$remove_name deletion did not complete"
+)
+
+recreate_managed_core_fixture() (
+	recreate_resource=$1
+	recreate_collection=$2
+	recreate_kind=$3
+	recreate_namespace=$4
+	recreate_name=$5
+	recreate_file=$(mktemp)
+	recreate_recovery_armed=no
+	recover_recreated_fixture() {
+		trap - 0
+		trap '' HUP INT TERM
+		if [ "${recreate_recovery_armed:-no}" = yes ]; then
+			recovery_attempt=0
+			while [ "$recovery_attempt" -lt 60 ]; do
+				if recovery_identity=$(kube get "$recreate_resource" "$recreate_name" \
+					--namespace="$recreate_namespace" --ignore-not-found \
+					-o 'jsonpath={.metadata.labels.app\.kubernetes\.io/managed-by}{"|"}{.metadata.uid}{"|"}{.metadata.deletionTimestamp}' \
+					2>/dev/null); then
+					if [ -z "$recovery_identity" ]; then
+						if kube create --field-manager=kubepeep-kind-harness \
+							-f "$recreate_file" >/dev/null 2>&1; then
+							recreate_recovery_armed=no
+							break
+						fi
+					else
+						case "$recovery_identity" in
+						*'|'*'|'*)
+							recovery_owner=${recovery_identity%%|*}
+							recovery_remainder=${recovery_identity#*|}
+							recovery_uid=${recovery_remainder%%|*}
+							recovery_deletion_timestamp=${recovery_remainder#*|}
+							if [ "$recovery_owner" != "$managed_value" ]; then
+								break
+							fi
+							case "$recovery_uid" in
+							'' | *[!0-9a-f-]*) break ;;
+							esac
+							if [ "$recovery_uid" != "$recreate_uid" ] &&
+								[ -z "$recovery_deletion_timestamp" ]; then
+								recreate_recovery_armed=no
+								break
+							fi
+							if [ "$recovery_uid" = "$recreate_uid" ]; then
+								# Converge even when the first DELETE response was lost or
+								# a signal arrived immediately before the request was sent.
+								request_core_resource_delete_with_uid "$recreate_resource" \
+									"$recreate_collection" "$recreate_namespace" "$recreate_name" \
+									"$recreate_uid" >/dev/null 2>&1 || true
+							fi
+							;;
+						esac
+					fi
+				fi
+				recovery_attempt=$((recovery_attempt + 1))
+				sleep 1
+			done
+			if [ "${recreate_recovery_armed:-no}" = yes ]; then
+				printf '%s\n' "kind-harness: canonical fixture recovery could not be confirmed" >&2
+			fi
+		fi
+		rm -f -- "${recreate_file:-}"
+	}
+	trap recover_recreated_fixture 0
+	trap 'exit 129' HUP
+	trap 'exit 130' INT
+	trap 'exit 143' TERM
+	extract_fixture_object "$recreate_kind" "$recreate_namespace" "$recreate_name" "$recreate_file"
+	kube apply --server-side --field-manager=kubepeep-kind-harness --dry-run=server \
+		-f "$recreate_file" >/dev/null || fail "canonical fixture failed server-side validation"
+	recreate_uid=$(namespaced_managed_uid_or_absent "$recreate_resource" "$recreate_namespace" "$recreate_name")
+	if [ -n "$recreate_uid" ]; then
+		recreate_recovery_armed=yes
+		delete_core_resource_with_uid "$recreate_resource" "$recreate_collection" \
+			"$recreate_namespace" "$recreate_name" "$recreate_uid"
+		wait_for_core_resource_absent "$recreate_resource" "$recreate_namespace" "$recreate_name"
+	fi
+	kube create --field-manager=kubepeep-kind-harness -f "$recreate_file" >/dev/null ||
+		fail "canonical fixture could not be recreated"
+	recreate_recovery_armed=no
+	rm -f -- "$recreate_file"
+	recreate_file=
+	trap - 0 HUP INT TERM
+)
+
 reapply_fixture_object() (
 	object_kind=$1
 	object_namespace=$2
@@ -661,53 +843,45 @@ reapply_fixture_object() (
 	trap - 0 HUP INT TERM
 )
 
+create_fixture_object() (
+	object_kind=$1
+	object_namespace=$2
+	object_name=$3
+	object_file=$(mktemp)
+	trap 'rm -f -- "${object_file:-}"' 0 HUP INT TERM
+	extract_fixture_object "$object_kind" "$object_namespace" "$object_name" "$object_file"
+	kube create --field-manager=kubepeep-kind-harness -f "$object_file" >/dev/null
+	rm -f -- "$object_file"
+	object_file=
+	trap - 0 HUP INT TERM
+)
+
 restore_fixture_pod() (
 	object_namespace=$1
 	object_name=$2
-	if kube get pod "$object_name" --namespace="$object_namespace" >/dev/null 2>&1; then
+	object_uid=$(namespaced_managed_uid_or_absent pod "$object_namespace" "$object_name")
+	if [ -n "$object_uid" ]; then
 		deletion_timestamp=$(kube get pod "$object_name" --namespace="$object_namespace" \
-			-o 'jsonpath={.metadata.deletionTimestamp}' 2>/dev/null || true)
+			-o 'jsonpath={.metadata.deletionTimestamp}' 2>/dev/null) || return 1
 		if [ -n "$deletion_timestamp" ]; then
-			attempt=0
-			while kube get pod "$object_name" --namespace="$object_namespace" >/dev/null 2>&1; do
-				[ "$attempt" -lt 60 ] || return 1
-				attempt=$((attempt + 1))
-				sleep 1
-			done
+			wait_for_core_resource_absent pod "$object_namespace" "$object_name"
+		else
+			return 0
 		fi
 	fi
-	namespaced_resource_is_managed_or_absent pod "$object_namespace" "$object_name"
-	reapply_fixture_object Pod "$object_namespace" "$object_name"
+	create_fixture_object Pod "$object_namespace" "$object_name"
 )
-
-wait_for_pod_absent() (
-	object_namespace=$1
-	object_name=$2
-	attempt=0
-	while kube get pod "$object_name" --namespace="$object_namespace" >/dev/null 2>&1; do
-		[ "$attempt" -lt 60 ] || return 1
-		attempt=$((attempt + 1))
-		sleep 1
-	done
-)
-
-rolebinding_is_managed() {
-	binding_name=$1
-	owner=$(kube get rolebinding "$binding_name" --namespace=kp-allowed \
-		-o 'jsonpath={.metadata.labels.app\.kubernetes\.io/managed-by}' 2>/dev/null || true)
-	[ "$owner" = "$managed_value" ] || fail "rolebinding kp-allowed/$binding_name is absent or not harness-owned"
-}
 
 revoke_action_binding() {
 	binding_name=$1
-	rolebinding_is_managed "$binding_name"
-	kube delete rolebinding "$binding_name" --namespace=kp-allowed >/dev/null
+	remove_managed_rolebinding kp-allowed "$binding_name" yes
 }
 
 restore_action_binding() {
 	binding_name=$1
-	namespaced_resource_is_managed_or_absent rolebinding kp-allowed "$binding_name"
-	reapply_fixture_object RoleBinding kp-allowed "$binding_name"
+	binding_uid=$(namespaced_managed_uid_or_absent rolebinding kp-allowed "$binding_name")
+	[ -z "$binding_uid" ] || return 0
+	create_fixture_object RoleBinding kp-allowed "$binding_name"
 }
 
 patch_resource_as() (
@@ -871,14 +1045,25 @@ validate_delete_operation() {
 		fi
 	}
 	trap delete_cleanup 0 HUP INT TERM
-	kube delete pod kp-delete-probe --namespace=kp-allowed --as="$delete_subject" --wait=false >/dev/null
-	wait_for_pod_absent kp-allowed kp-delete-probe || fail "authorized Pod deletion did not complete"
+	delete_probe_uid=$(namespaced_managed_uid_or_absent pod kp-allowed kp-delete-probe)
+	[ -n "$delete_probe_uid" ] || fail "authorized Pod deletion fixture is absent"
+	delete_core_resource_with_uid pod pods kp-allowed kp-delete-probe "$delete_probe_uid" "$delete_subject"
+	wait_for_core_resource_absent pod kp-allowed kp-delete-probe
 	restore_fixture_pod kp-allowed kp-delete-probe || fail "deleted Pod fixture could not be restored"
-	if kube delete pod kp-delete-probe --namespace=kp-denied --as="$delete_subject" \
-		--wait=false >/dev/null 2>&1; then
+	denied_delete_uid=$(namespaced_managed_uid_or_absent pod kp-denied kp-delete-probe)
+	[ -n "$denied_delete_uid" ] || fail "denied Pod deletion fixture is absent"
+	denied_delete_error=
+	if denied_delete_error=$(request_core_resource_delete_with_uid pod pods kp-denied \
+		kp-delete-probe "$denied_delete_uid" "$delete_subject" 2>&1 >/dev/null); then
 		fail "Pod deletion unexpectedly succeeded in kp-denied"
 	fi
-	kube get pod kp-delete-probe --namespace=kp-denied -o name >/dev/null
+	if ! printf '%s\n' "$denied_delete_error" | LC_ALL=C grep -Eq '^Error from server \(Forbidden\):'; then
+		fail "denied Pod deletion did not return an authoritative Forbidden status"
+	fi
+	denied_delete_error=
+	denied_delete_uid_after=$(namespaced_managed_uid_or_absent pod kp-denied kp-delete-probe)
+	[ "$denied_delete_uid_after" = "$denied_delete_uid" ] ||
+		fail "denied Pod deletion fixture identity changed"
 	delete_restore_needed=no
 	trap - 0 HUP INT TERM
 	say "ok: Pod delete is authorized only in kp-allowed and the fixture is restored"
@@ -977,8 +1162,8 @@ validate_portforward_operation() {
 	''|*[!0-9]*) fail "authorized port-forward did not expose a loopback port" ;;
 	esac
 	probe_portforward_http "$local_port"
-	revoke_action_binding kp-portforward-action
 	portforward_binding_revoked=yes
+	revoke_action_binding kp-portforward-action
 	wait_can_i no "$portforward_subject" create pods/portforward kp-allowed "new port-forward is denied after revocation" kp-interactive
 	probe_portforward_http "$local_port"
 	bounded_denied_portforward kp-allowed
@@ -998,14 +1183,15 @@ validate_exec_operation() {
 		-- /bin/true >/dev/null 2>&1; then
 		fail "exec unexpectedly succeeded in kp-denied"
 	fi
-	revoke_action_binding kp-exec-action
-	exec_binding_revoked=yes
+	exec_binding_revoked=no
 	exec_revocation_cleanup() {
 		if [ "${exec_binding_revoked:-no}" = yes ]; then
 			restore_action_binding kp-exec-action >/dev/null 2>&1 || true
 		fi
 	}
 	trap exec_revocation_cleanup 0 HUP INT TERM
+	exec_binding_revoked=yes
+	revoke_action_binding kp-exec-action
 	wait_can_i no "$exec_subject" create pods/exec kp-allowed "exec is denied after ticket-time revocation" kp-interactive
 	if kube exec kp-interactive --namespace=kp-allowed --container=utility --as="$exec_subject" \
 		-- /bin/true >/dev/null 2>&1; then
@@ -1212,11 +1398,21 @@ wait_app_driver_marker() {
 
 coordinate_allowed_driver() {
 	wait_app_driver_marker f6-ready 240
-	revoke_action_binding kp-f6-resource-reader
 	app_f6_binding_revoked=yes
+	revoke_action_binding kp-f6-resource-reader
 	wait_can_i no "$app_e2e_subject" list pods kp-allowed "app F6 pod list revocation is visible"
 	wait_can_i no "$app_e2e_subject" watch pods kp-allowed "app F6 pod watch revocation is visible"
 	wait_can_i no "$app_e2e_subject" get pods/log kp-allowed "app F6 log revocation is visible" kp-interactive
+	kube get pod kp-restarting --namespace=kp-allowed --request-timeout=10s >/dev/null 2>&1 ||
+		fail "app F6 direct denial probe fixture is unavailable"
+	app_get_error=
+	if app_get_error=$(kube get pod kp-restarting --namespace=kp-allowed --as="$app_e2e_subject" --request-timeout=10s 2>&1 >/dev/null); then
+		fail "app F6 ordinary Pod read remained allowed after revocation"
+	fi
+	if ! printf '%s\n' "$app_get_error" | LC_ALL=C grep -Eq '^Error from server \(Forbidden\):'; then
+		fail "app F6 ordinary Pod read did not return an authoritative Forbidden status"
+	fi
+	app_get_error=
 	touch "$app_control_dir/f6-revoked"
 	wait_app_driver_marker f6-done 100
 	restore_action_binding kp-f6-resource-reader
@@ -1224,8 +1420,8 @@ coordinate_allowed_driver() {
 	app_f6_binding_revoked=no
 	touch "$app_control_dir/f6-restored"
 	wait_app_driver_marker exec-ready 40
-	revoke_action_binding kp-exec-action
 	app_exec_binding_revoked=yes
+	revoke_action_binding kp-exec-action
 	touch "$app_control_dir/exec-revoked"
 	wait_app_driver_marker exec-done 40
 	restore_action_binding kp-exec-action
@@ -1562,7 +1758,7 @@ required = {
     ("Pod", "kp-denied", "kp-fixture"),
     ("Deployment", "kp-allowed", "kp-degraded"),
     ("Pod", "kp-allowed", "kp-restarting"),
-    ("Event", "kp-allowed", "kp-warning"),
+    ("Event", "kp-allowed", "000-kp-warning"),
     ("Deployment", "kp-allowed", "kp-action-deployment"),
     ("StatefulSet", "kp-allowed", "kp-action-statefulset"),
     ("DaemonSet", "kp-allowed", "kp-daemonset"),
@@ -1665,7 +1861,7 @@ for binding_name, expected_subjects in expected_binding_subjects.items():
 secret = indexed[("Secret", "kp-allowed", "kp-secret-metadata")]
 if "data" in secret or "stringData" in secret or secret.get("type") != "Opaque":
     raise SystemExit("the versioned Secret fixture must contain metadata only")
-warning = indexed[("Event", "kp-allowed", "kp-warning")]
+warning = indexed[("Event", "kp-allowed", "000-kp-warning")]
 if warning.get("type") != "Warning" or warning.get("count") != 3:
     raise SystemExit("dashboard Warning event fixture is not canonical")
 degraded = indexed[("Deployment", "kp-allowed", "kp-degraded")]

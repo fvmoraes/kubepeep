@@ -76,6 +76,29 @@ func (function originListerFunc[T]) ListPage(ctx context.Context, request resour
 	return function(ctx, request)
 }
 
+func collectFilteredResource[T resources.ListItem](
+	ctx context.Context,
+	backend *ResourceBackend,
+	binding namespaces.SelectionBinding,
+	resolution namespaces.ScopeResolution,
+	collection resources.Collection,
+	options resources.ListOptions,
+	cursor *resources.CompositeCursor[T],
+	less func(T, T) bool,
+	list originListerFunc[T],
+	filterSort func([]T, resources.ListOptions) []T,
+) (resources.ListResult[T], error) {
+	normalized, err := resources.NormalizeListOptions(collection, options)
+	if err != nil {
+		return resources.ListResult[T]{}, err
+	}
+	result, err := collectResource(ctx, backend, binding, resolution, collection, normalized, cursor, less, list)
+	if err == nil {
+		result.Items = filterSort(result.Items, normalized)
+	}
+	return result, err
+}
+
 func collectResource[T resources.ListItem](
 	ctx context.Context,
 	backend *ResourceBackend,
@@ -87,10 +110,6 @@ func collectResource[T resources.ListItem](
 	less func(T, T) bool,
 	list originListerFunc[T],
 ) (resources.ListResult[T], error) {
-	options, err := resources.NormalizeListOptions(collection, options)
-	if err != nil {
-		return resources.ListResult[T]{}, err
-	}
 	cursorGlobal, cursorNamespaced, err := listCursorMode(cursor)
 	if err != nil {
 		return resources.ListResult[T]{}, err
@@ -175,83 +194,51 @@ func globalListDecision(ctx context.Context, checker resources.AuthorizationChec
 }
 
 func (backend *ResourceBackend) ListWorkloads(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, options resources.ListOptions, cursor *resources.CompositeCursor[resources.WorkloadDTO]) (resources.ListResult[resources.WorkloadDTO], error) {
-	result, err := collectResource(ctx, backend, binding, resolution, resources.CollectionWorkloads, options, cursor, workloadIdentityLess, func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[resources.WorkloadDTO], error) {
+	return collectFilteredResource(ctx, backend, binding, resolution, resources.CollectionWorkloads, options, cursor, workloadIdentityLess, func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[resources.WorkloadDTO], error) {
 		return backend.listWorkloadPage(ctx, binding, page)
-	})
-	if err == nil {
-		result.Items = filterSortWorkloads(result.Items, options)
-	}
-	return result, err
+	}, filterSortWorkloads)
 }
 
 func (backend *ResourceBackend) ListPods(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, options resources.ListOptions, cursor *resources.CompositeCursor[resources.PodDTO]) (resources.ListResult[resources.PodDTO], error) {
-	result, err := collectResource(ctx, backend, binding, resolution, resources.CollectionPods, options, cursor, podIdentityLess, func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[resources.PodDTO], error) {
+	return collectFilteredResource(ctx, backend, binding, resolution, resources.CollectionPods, options, cursor, podIdentityLess, func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[resources.PodDTO], error) {
 		return backend.listPodPage(ctx, binding, page)
-	})
-	if err == nil {
-		result.Items = filterSortPods(result.Items, options)
-	}
-	return result, err
+	}, filterSortPods)
 }
 
 func (backend *ResourceBackend) ListEvents(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, options resources.ListOptions, cursor *resources.CompositeCursor[resources.EventDTO]) (resources.ListResult[resources.EventDTO], error) {
-	result, err := collectResource(ctx, backend, binding, resolution, resources.CollectionEvents, options, cursor, eventIdentityLess, func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[resources.EventDTO], error) {
+	return collectFilteredResource(ctx, backend, binding, resolution, resources.CollectionEvents, options, cursor, eventIdentityLess, func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[resources.EventDTO], error) {
 		return backend.listEventPage(ctx, binding, page)
-	})
-	if err == nil {
-		result.Items = filterSortEvents(result.Items, options)
-	}
-	return result, err
+	}, filterSortEvents)
 }
 
 func (backend *ResourceBackend) ListServices(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, options resources.ListOptions, cursor *resources.CompositeCursor[resources.ServiceDTO]) (resources.ListResult[resources.ServiceDTO], error) {
-	result, err := collectResource(ctx, backend, binding, resolution, resources.CollectionServices, options, cursor, serviceIdentityLess, func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[resources.ServiceDTO], error) {
+	return collectFilteredResource(ctx, backend, binding, resolution, resources.CollectionServices, options, cursor, serviceIdentityLess, func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[resources.ServiceDTO], error) {
 		return backend.listServicePage(ctx, binding, page)
-	})
-	if err == nil {
-		result.Items = filterSortServices(result.Items, options)
-	}
-	return result, err
+	}, filterSortServices)
 }
 
 func (backend *ResourceBackend) ListIngresses(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, options resources.ListOptions, cursor *resources.CompositeCursor[resources.IngressDTO]) (resources.ListResult[resources.IngressDTO], error) {
-	result, err := collectResource(ctx, backend, binding, resolution, resources.CollectionIngresses, options, cursor, ingressIdentityLess, func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[resources.IngressDTO], error) {
+	return collectFilteredResource(ctx, backend, binding, resolution, resources.CollectionIngresses, options, cursor, ingressIdentityLess, func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[resources.IngressDTO], error) {
 		return backend.listIngressPage(ctx, binding, page)
-	})
-	if err == nil {
-		result.Items = filterSortIngresses(result.Items, options)
-	}
-	return result, err
+	}, filterSortIngresses)
 }
 
 func (backend *ResourceBackend) ListEndpointSlices(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, options resources.ListOptions, cursor *resources.CompositeCursor[resources.EndpointSliceDTO]) (resources.ListResult[resources.EndpointSliceDTO], error) {
-	result, err := collectResource(ctx, backend, binding, resolution, resources.CollectionEndpointSlices, options, cursor, endpointSliceIdentityLess, func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[resources.EndpointSliceDTO], error) {
+	return collectFilteredResource(ctx, backend, binding, resolution, resources.CollectionEndpointSlices, options, cursor, endpointSliceIdentityLess, func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[resources.EndpointSliceDTO], error) {
 		return backend.listEndpointSlicePage(ctx, binding, page)
-	})
-	if err == nil {
-		result.Items = filterSortEndpointSlices(result.Items, options)
-	}
-	return result, err
+	}, filterSortEndpointSlices)
 }
 
 func (backend *ResourceBackend) ListConfigMaps(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, options resources.ListOptions, cursor *resources.CompositeCursor[resources.ConfigMapListDTO]) (resources.ListResult[resources.ConfigMapListDTO], error) {
-	result, err := collectResource(ctx, backend, binding, resolution, resources.CollectionConfigMaps, options, cursor, configMapIdentityLess, func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[resources.ConfigMapListDTO], error) {
+	return collectFilteredResource(ctx, backend, binding, resolution, resources.CollectionConfigMaps, options, cursor, configMapIdentityLess, func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[resources.ConfigMapListDTO], error) {
 		return backend.listConfigMapPage(ctx, binding, page)
-	})
-	if err == nil {
-		result.Items = filterSortConfigMaps(result.Items, options)
-	}
-	return result, err
+	}, filterSortConfigMaps)
 }
 
 func (backend *ResourceBackend) ListSecrets(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, options resources.ListOptions, cursor *resources.CompositeCursor[resources.SecretMetadataDTO]) (resources.ListResult[resources.SecretMetadataDTO], error) {
-	result, err := collectResource(ctx, backend, binding, resolution, resources.CollectionSecrets, options, cursor, secretIdentityLess, func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[resources.SecretMetadataDTO], error) {
+	return collectFilteredResource(ctx, backend, binding, resolution, resources.CollectionSecrets, options, cursor, secretIdentityLess, func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[resources.SecretMetadataDTO], error) {
 		return backend.listSecretPage(ctx, binding, page)
-	})
-	if err == nil {
-		result.Items = filterSortSecrets(result.Items, options)
-	}
-	return result, err
+	}, filterSortSecrets)
 }
 
 func workloadIdentityLess(left, right resources.WorkloadDTO) bool {
@@ -336,25 +323,17 @@ func filterSortWorkloads(items []resources.WorkloadDTO, options resources.ListOp
 	}
 	sort.SliceStable(result, func(i, j int) bool {
 		left, right := result[i], result[j]
-		var less bool
+		canonical := workloadPageCanonicalCompare(left, right)
+		primary := workloadPageIdentityCompare(left, right)
 		switch options.Sort {
 		case "name":
-			less = tuple(left.Name, left.Namespace, left.Kind) < tuple(right.Name, right.Namespace, right.Kind)
+			primary = naturalTextCompare(left.Name, right.Name)
 		case "age":
-			if left.AgeSeconds != right.AgeSeconds {
-				less = left.AgeSeconds < right.AgeSeconds
-			} else {
-				less = workloadIdentityLess(left, right)
-			}
+			primary = int64Compare(left.AgeSeconds, right.AgeSeconds)
 		case "status":
-			less = tuple(string(left.Status), left.Namespace, left.Name) < tuple(string(right.Status), right.Namespace, right.Name)
-		default:
-			less = workloadIdentityLess(left, right)
+			primary = naturalTextCompare(string(left.Status), string(right.Status))
 		}
-		if options.Order == resources.OrderDescending {
-			return reverseStable(less, equivalentWorkload(left, right, options.Sort))
-		}
-		return less
+		return pageSortLess(primary, canonical, options.Order == resources.OrderDescending)
 	})
 	return result
 }
@@ -389,30 +368,19 @@ func filterSortPods(items []resources.PodDTO, options resources.ListOptions) []r
 	}
 	sort.SliceStable(result, func(i, j int) bool {
 		left, right := result[i], result[j]
-		less := podIdentityLess(left, right)
-		equal := left.Namespace == right.Namespace && left.Name == right.Name
+		canonical := podPageCanonicalCompare(left, right)
+		primary := podPageIdentityCompare(left, right)
 		switch options.Sort {
 		case "name":
-			less = tuple(left.Name, left.Namespace) < tuple(right.Name, right.Namespace)
-			equal = left.Name == right.Name && left.Namespace == right.Namespace
+			primary = naturalTextCompare(left.Name, right.Name)
 		case "age":
-			if left.AgeSeconds != right.AgeSeconds {
-				less = left.AgeSeconds < right.AgeSeconds
-				equal = false
-			}
+			primary = int64Compare(left.AgeSeconds, right.AgeSeconds)
 		case "restarts":
-			if left.Restarts != right.Restarts {
-				less = left.Restarts < right.Restarts
-				equal = false
-			}
+			primary = int64Compare(left.Restarts, right.Restarts)
 		case "status":
-			less = tuple(left.Status, left.Namespace, left.Name) < tuple(right.Status, right.Namespace, right.Name)
-			equal = left.Status == right.Status && left.Namespace == right.Namespace && left.Name == right.Name
+			primary = naturalTextCompare(left.Status, right.Status)
 		}
-		if options.Order == resources.OrderDescending {
-			return reverseStable(less, equal)
-		}
-		return less
+		return pageSortLess(primary, canonical, options.Order == resources.OrderDescending)
 	})
 	return result
 }
@@ -436,30 +404,18 @@ func filterSortEvents(items []resources.EventDTO, options resources.ListOptions)
 		result = append(result, item)
 	}
 	sort.SliceStable(result, func(i, j int) bool {
-		l, r := result[i], result[j]
-		if options.Order == resources.OrderDescending {
-			return eventPageLess(r, l, options.Sort)
+		left, right := result[i], result[j]
+		canonical := eventPageCanonicalCompare(left, right)
+		primary := strings.Compare(pointerString(left.Timestamp), pointerString(right.Timestamp))
+		switch options.Sort {
+		case "count":
+			primary = int64Compare(left.Count, right.Count)
+		case "identity":
+			primary = eventPageIdentityCompare(left, right)
 		}
-		return eventPageLess(l, r, options.Sort)
+		return pageSortLess(primary, canonical, options.Order == resources.OrderDescending)
 	})
 	return result
-}
-
-func eventPageLess(left, right resources.EventDTO, sortKey string) bool {
-	switch sortKey {
-	case "count":
-		if left.Count != right.Count {
-			return left.Count < right.Count
-		}
-	case "identity":
-		return tuple(left.Namespace, left.ObjectKind, left.ObjectName, left.Reason) < tuple(right.Namespace, right.ObjectKind, right.ObjectName, right.Reason)
-	default:
-		leftTimestamp, rightTimestamp := pointerString(left.Timestamp), pointerString(right.Timestamp)
-		if leftTimestamp != rightTimestamp {
-			return leftTimestamp < rightTimestamp
-		}
-	}
-	return tuple(left.Namespace, left.ObjectKind, left.ObjectName, left.Reason) < tuple(right.Namespace, right.ObjectKind, right.ObjectName, right.Reason)
 }
 
 func filterSortServices(items []resources.ServiceDTO, options resources.ListOptions) []resources.ServiceDTO {
@@ -472,17 +428,15 @@ func filterSortServices(items []resources.ServiceDTO, options resources.ListOpti
 	}
 	sort.SliceStable(result, func(i, j int) bool {
 		l, r := result[i], result[j]
-		less := serviceIdentityLess(l, r)
-		equal := l.Namespace == r.Namespace && l.Name == r.Name
-		if options.Sort == "name" {
-			less = tuple(l.Name, l.Namespace) < tuple(r.Name, r.Namespace)
-		} else if options.Sort == "type" {
-			less = tuple(l.Type, l.Namespace, l.Name) < tuple(r.Type, r.Namespace, r.Name)
+		canonical := servicePageCanonicalCompare(l, r)
+		primary := servicePageIdentityCompare(l, r)
+		switch options.Sort {
+		case "name":
+			primary = naturalTextCompare(l.Name, r.Name)
+		case "type":
+			primary = naturalTextCompare(l.Type, r.Type)
 		}
-		if options.Order == resources.OrderDescending {
-			return reverseStable(less, equal)
-		}
-		return less
+		return pageSortLess(primary, canonical, options.Order == resources.OrderDescending)
 	})
 	return result
 }
@@ -495,15 +449,12 @@ func filterSortIngresses(items []resources.IngressDTO, options resources.ListOpt
 	}
 	sort.SliceStable(result, func(i, j int) bool {
 		l, r := result[i], result[j]
-		less := ingressIdentityLess(l, r)
-		equal := l.Namespace == r.Namespace && l.Name == r.Name
+		canonical := ingressPageCanonicalCompare(l, r)
+		primary := ingressPageIdentityCompare(l, r)
 		if options.Sort == "name" {
-			less = tuple(l.Name, l.Namespace) < tuple(r.Name, r.Namespace)
+			primary = naturalTextCompare(l.Name, r.Name)
 		}
-		if options.Order == resources.OrderDescending {
-			return reverseStable(less, equal)
-		}
-		return less
+		return pageSortLess(primary, canonical, options.Order == resources.OrderDescending)
 	})
 	return result
 }
@@ -523,18 +474,15 @@ func filterSortEndpointSlices(items []resources.EndpointSliceDTO, options resour
 	}
 	sort.SliceStable(result, func(i, j int) bool {
 		l, r := result[i], result[j]
-		less := endpointSliceIdentityLess(l, r)
-		equal := l.Namespace == r.Namespace && l.Name == r.Name
+		canonical := endpointSlicePageCanonicalCompare(l, r)
+		primary := endpointSlicePageIdentityCompare(l, r)
 		switch options.Sort {
 		case "name":
-			less = tuple(l.Name, l.Namespace) < tuple(r.Name, r.Namespace)
+			primary = naturalTextCompare(l.Name, r.Name)
 		case "addressType":
-			less = tuple(l.AddressType, l.Namespace, l.Name) < tuple(r.AddressType, r.Namespace, r.Name)
+			primary = naturalTextCompare(l.AddressType, r.AddressType)
 		}
-		if options.Order == resources.OrderDescending {
-			return reverseStable(less, equal)
-		}
-		return less
+		return pageSortLess(primary, canonical, options.Order == resources.OrderDescending)
 	})
 	return result
 }
@@ -547,18 +495,15 @@ func filterSortConfigMaps(items []resources.ConfigMapListDTO, options resources.
 	}
 	sort.SliceStable(result, func(i, j int) bool {
 		l, r := result[i], result[j]
-		less := configMapIdentityLess(l, r)
-		equal := l.Namespace == r.Namespace && l.Name == r.Name && l.UID == r.UID
+		canonical := configMapPageCanonicalCompare(l, r)
+		primary := configMapPageIdentityCompare(l, r)
 		switch options.Sort {
 		case "name":
-			less = tuple(l.Name, l.Namespace, l.UID) < tuple(r.Name, r.Namespace, r.UID)
+			primary = naturalTextCompare(l.Name, r.Name)
 		case "createdAt":
-			less = tuple(l.CreationTimestamp, l.Namespace, l.Name, l.UID) < tuple(r.CreationTimestamp, r.Namespace, r.Name, r.UID)
+			primary = strings.Compare(l.CreationTimestamp, r.CreationTimestamp)
 		}
-		if options.Order == resources.OrderDescending {
-			return reverseStable(less, equal)
-		}
-		return less
+		return pageSortLess(primary, canonical, options.Order == resources.OrderDescending)
 	})
 	return result
 }
@@ -571,18 +516,15 @@ func filterSortSecrets(items []resources.SecretMetadataDTO, options resources.Li
 	}
 	sort.SliceStable(result, func(i, j int) bool {
 		l, r := result[i], result[j]
-		less := secretIdentityLess(l, r)
-		equal := l.Metadata.Namespace == r.Metadata.Namespace && l.Metadata.Name == r.Metadata.Name && l.Metadata.UID == r.Metadata.UID
+		canonical := secretPageCanonicalCompare(l, r)
+		primary := secretPageIdentityCompare(l, r)
 		switch options.Sort {
 		case "name":
-			less = tuple(l.Metadata.Name, l.Metadata.Namespace, l.Metadata.UID) < tuple(r.Metadata.Name, r.Metadata.Namespace, r.Metadata.UID)
+			primary = naturalTextCompare(l.Metadata.Name, r.Metadata.Name)
 		case "createdAt":
-			less = tuple(l.Metadata.CreationTimestamp, l.Metadata.Namespace, l.Metadata.Name, l.Metadata.UID) < tuple(r.Metadata.CreationTimestamp, r.Metadata.Namespace, r.Metadata.Name, r.Metadata.UID)
+			primary = strings.Compare(l.Metadata.CreationTimestamp, r.Metadata.CreationTimestamp)
 		}
-		if options.Order == resources.OrderDescending {
-			return reverseStable(less, equal)
-		}
-		return less
+		return pageSortLess(primary, canonical, options.Order == resources.OrderDescending)
 	})
 	return result
 }
@@ -601,7 +543,6 @@ func pointerString(value *string) string {
 	}
 	return *value
 }
-func tuple(values ...string) string { return strings.Join(values, "\x00") }
 func stringSet(values []string) map[string]bool {
 	result := make(map[string]bool, len(values))
 	for _, value := range values {
@@ -637,18 +578,5 @@ func restartMatches(value int64, filter resources.RestartFilter) bool {
 		return value >= 10
 	default:
 		return false
-	}
-}
-func reverseStable(less, equal bool) bool { return !less && !equal }
-func equivalentWorkload(left, right resources.WorkloadDTO, sortKey string) bool {
-	switch sortKey {
-	case "age":
-		return left.AgeSeconds == right.AgeSeconds && left.Namespace == right.Namespace && left.Name == right.Name && left.Kind == right.Kind
-	case "status":
-		return left.Status == right.Status && left.Namespace == right.Namespace && left.Name == right.Name
-	case "name":
-		return left.Name == right.Name && left.Namespace == right.Namespace && left.Kind == right.Kind
-	default:
-		return !workloadIdentityLess(left, right) && !workloadIdentityLess(right, left)
 	}
 }

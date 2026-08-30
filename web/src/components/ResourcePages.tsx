@@ -47,6 +47,8 @@ import type {
   Workload,
 } from '../api/types'
 import { PodActions, WorkloadActions } from './ResourceActions'
+import { ResourceListControls } from './ResourceListControls'
+import type { ActiveListFilter, ListSortOrder, ListSortOption } from './ResourceListControls'
 import { ResourceLiveUpdates } from './ResourceLiveUpdates'
 import { SavedFilterControls } from './SavedFilterControls'
 import { StatePanel } from './StatePanel'
@@ -73,19 +75,6 @@ function PageHeading({ title, description, action }: { title: string; descriptio
       <div><span className="eyebrow">cluster resources</span><h1>{title}</h1><p>{description}</p></div>
       {action}
     </header>
-  )
-}
-
-function SearchBar({ value, onChange, onApply, onRefresh, children }: { value: string; onChange: (value: string) => void; onApply: () => void; onRefresh: () => void; children?: ReactNode }) {
-  return (
-    <form className="resource-filters" onSubmit={(event) => { event.preventDefault(); onApply() }}>
-      <label className="resource-search">Search this bounded page<input value={value} maxLength={256} onChange={(event) => onChange(event.target.value)} /></label>
-      {children}
-      <div className="resource-filter-actions">
-        <button className="button" type="submit">Apply filters</button>
-        <button className="button button--secondary" type="button" onClick={onRefresh}>Refresh</button>
-      </div>
-    </form>
   )
 }
 
@@ -163,6 +152,23 @@ function useGenerationRequests(generation: string | undefined) {
   return { run, abortAll }
 }
 
+function useGenerationCursor(generation: string | undefined): [string, (value: string) => void] {
+  const [state, setState] = useState<{ generation: string | undefined; value: string }>({ generation, value: '' })
+  const value = state.generation === generation ? state.value : ''
+  const setValue = useCallback((next: string) => setState({ generation, value: next }), [generation])
+  return [value, setValue]
+}
+
+function useGenerationCursorMap<K extends string>(generation: string | undefined, empty: Record<K, string>): [Record<K, string>, (key: K, value: string) => void] {
+  const [state, setState] = useState<{ generation: string | undefined; values: Record<K, string> }>(() => ({ generation, values: { ...empty } }))
+  const values = state.generation === generation ? state.values : empty
+  const setValue = useCallback((key: K, value: string) => setState((current) => ({
+    generation,
+    values: { ...(current.generation === generation ? current.values : empty), [key]: value },
+  })), [empty, generation])
+  return [values, setValue]
+}
+
 function workloadKindPath(kind: Workload['kind']): string {
   return ({ Deployment: 'deployments', StatefulSet: 'statefulsets', DaemonSet: 'daemonsets', Job: 'jobs', CronJob: 'cronjobs' } as const)[kind]
 }
@@ -202,27 +208,102 @@ function savedNamespaces(query: Record<string, unknown>): string {
   return Array.isArray(values) ? values.filter((value): value is string => typeof value === 'string').join(', ') : ''
 }
 
+function savedSort(query: Record<string, unknown>, allowed: readonly string[], fallback: string): string {
+  return savedString(query, 'sort', allowed) || fallback
+}
+
+function savedOrder(query: Record<string, unknown>, fallback: ListSortOrder): ListSortOrder {
+  const value = savedString(query, 'order', ['asc', 'desc'])
+  return value === 'asc' || value === 'desc' ? value : fallback
+}
+
+function optionalSort(sort: string, order: ListSortOrder, defaultSort: string, defaultOrder: ListSortOrder): { sort?: string; order?: ListSortOrder } {
+  return sort === defaultSort && order === defaultOrder ? {} : { sort, order }
+}
+
+function activeFilter(id: string, label: string, value: string | string[]): ActiveListFilter[] {
+  const display = Array.isArray(value) ? value.join(', ') : value
+  return display === '' ? [] : [{ id, label, value: display }]
+}
+
 const workloadKinds = ['deployments', 'statefulsets', 'daemonsets', 'jobs', 'cronjobs'] as const
 const workloadStatuses = ['Healthy', 'Progressing', 'Degraded', 'Suspended', 'Completed', 'Failed', 'Unknown'] as const
 const podStatuses = ['Running', 'Pending', 'Succeeded', 'Failed', 'Unknown'] as const
 const restartFilters = ['any', 'gt0', 'gte3', 'gte10'] as const
 const eventTypes = ['Normal', 'Warning', 'Unknown'] as const
+const workloadSorts = ['identity', 'name', 'age', 'status'] as const
+const podSorts = ['identity', 'name', 'age', 'restarts', 'status'] as const
+const eventSorts = ['timestamp', 'count', 'identity'] as const
+const workloadSortOptions: readonly ListSortOption[] = [
+  { value: 'identity', label: 'Namespace, kind and name' },
+  { value: 'name', label: 'Name' },
+  { value: 'age', label: 'Age' },
+  { value: 'status', label: 'Status' },
+]
+const podSortOptions: readonly ListSortOption[] = [
+  { value: 'identity', label: 'Namespace and name' },
+  { value: 'name', label: 'Name' },
+  { value: 'age', label: 'Age' },
+  { value: 'restarts', label: 'Restarts' },
+  { value: 'status', label: 'Status' },
+]
+const eventSortOptions: readonly ListSortOption[] = [
+  { value: 'timestamp', label: 'Timestamp' },
+  { value: 'count', label: 'Count' },
+  { value: 'identity', label: 'Object identity' },
+]
+
+interface WorkloadListState {
+  search: string
+  namespace: string
+  kind: string
+  workloadStatus: string
+  sort: string
+  order: ListSortOrder
+}
+
+interface PodListState {
+  search: string
+  namespace: string
+  podStatus: string
+  workload: string
+  node: string
+  restarts: string
+  problematic: string
+  sort: string
+  order: ListSortOrder
+}
+
+interface EventListState {
+  search: string
+  namespace: string
+  eventType: string
+  objectKind: string
+  reason: string
+  sort: string
+  order: ListSortOrder
+}
+
+const defaultWorkloadList: WorkloadListState = { search: '', namespace: '', kind: '', workloadStatus: '', sort: 'identity', order: 'asc' }
+const defaultPodList: PodListState = { search: '', namespace: '', podStatus: '', workload: '', node: '', restarts: 'any', problematic: '', sort: 'identity', order: 'asc' }
+const defaultEventList: EventListState = { search: '', namespace: '', eventType: '', objectKind: '', reason: '', sort: 'timestamp', order: 'desc' }
+
+function sameListState<T extends object>(left: T, right: T): boolean {
+  return (Object.keys(left) as Array<keyof T>).every((key) => left[key] === right[key])
+}
 
 export function WorkloadsPage() {
   const { status, selection } = useActiveSelection()
-  const [search, setSearch] = useState('')
-  const [appliedSearch, setAppliedSearch] = useState('')
-  const [namespace, setNamespace] = useState('')
-  const [kind, setKind] = useState('')
-  const [workloadStatus, setWorkloadStatus] = useState('')
-  const [cursor, setCursor] = useState('')
+  const [draft, setDraft] = useState<WorkloadListState>({ ...defaultWorkloadList })
+  const [applied, setApplied] = useState<WorkloadListState>({ ...defaultWorkloadList })
+  const [cursor, setCursor] = useGenerationCursor(selection?.generation)
   const [selected, setSelected] = useState<GenerationSelection<Workload> | null>(null)
   const queryClient = useQueryClient()
   const requests = useGenerationRequests(selection?.generation)
   const activeSelected = selected && selected.generation === selection?.generation ? selected.item : null
   const list = useQuery({
-    queryKey: ['resources', 'workloads', selection?.generation, appliedSearch, namespace, kind, workloadStatus, cursor],
-    queryFn: ({ signal }) => getWorkloads({ limit: 100, search: appliedSearch || undefined, namespaces: namespaceValues(namespace), kinds: kind ? [kind] : undefined, statuses: workloadStatus ? [workloadStatus] : undefined, continueToken: cursor || undefined }, signal, selection?.generation),
+    queryKey: ['resources', 'workloads', selection?.generation, applied, cursor],
+    queryFn: ({ signal }) => getWorkloads({ limit: 100, search: applied.search || undefined, namespaces: namespaceValues(applied.namespace), kinds: applied.kind ? [applied.kind] : undefined, statuses: applied.workloadStatus ? [applied.workloadStatus] : undefined, ...optionalSort(applied.sort, applied.order, 'identity', 'asc'), continueToken: cursor || undefined }, signal, selection?.generation),
     enabled: Boolean(selection),
   })
   const detail = useQuery({
@@ -241,20 +322,26 @@ export function WorkloadsPage() {
   return (
     <div className="resource-page">
       <PageHeading title="Workloads" description="Deployments, StatefulSets, DaemonSets, Jobs and CronJobs in the active scope." action={selection ? <ResourceLiveUpdates key={`workloads/${selection.generation}`} generation={selection.generation} topics={['workloads']} queryKeys={[["resources", "workloads"]]} /> : null} />
-      <SearchBar value={search} onChange={setSearch} onApply={() => { setCursor(''); setAppliedSearch(search); closeDetail() }} onRefresh={() => queryClient.invalidateQueries({ queryKey: ['resources', 'workloads'] })}>
-        <label>Namespace<input value={namespace} maxLength={256} placeholder="active scope; comma-separated" onChange={(event) => setNamespace(event.target.value)} /></label>
-        <label>Kind<select value={kind} onChange={(event) => setKind(event.target.value)}><option value="">All kinds</option><option value="deployments">Deployments</option><option value="statefulsets">StatefulSets</option><option value="daemonsets">DaemonSets</option><option value="jobs">Jobs</option><option value="cronjobs">CronJobs</option></select></label>
-        <label>Status<select value={workloadStatus} onChange={(event) => setWorkloadStatus(event.target.value)}><option value="">All statuses</option>{workloadStatuses.map((value) => <option key={value}>{value}</option>)}</select></label>
-      </SearchBar>
+      <ResourceListControls search={draft.search} appliedSearch={applied.search} onSearchChange={(value) => setDraft((current) => ({ ...current, search: value }))} onApply={() => { setApplied(draft); setCursor(''); closeDetail() }} onRefresh={() => queryClient.invalidateQueries({ queryKey: ['resources', 'workloads'] })} onClear={() => { setDraft({ ...defaultWorkloadList }); setApplied({ ...defaultWorkloadList }); setCursor(''); closeDetail() }} activeFilters={[
+        ...activeFilter('namespace', 'Namespace', namespaceValues(applied.namespace)), ...activeFilter('kind', 'Kind', applied.kind), ...activeFilter('status', 'Status', applied.workloadStatus),
+      ]} sort={draft.sort} order={draft.order} appliedSort={applied.sort} appliedOrder={applied.order} defaultSort="identity" defaultOrder="asc" hasPendingChanges={!sameListState(draft, applied)} sortOptions={workloadSortOptions} onSortChange={(value) => setDraft((current) => ({ ...current, sort: value }))} onOrderChange={(value) => setDraft((current) => ({ ...current, order: value }))}>
+        <label>Namespace<input value={draft.namespace} maxLength={256} placeholder="active scope; comma-separated" onChange={(event) => setDraft((current) => ({ ...current, namespace: event.target.value }))} /></label>
+        <label>Kind<select value={draft.kind} onChange={(event) => setDraft((current) => ({ ...current, kind: event.target.value }))}><option value="">All kinds</option><option value="deployments">Deployments</option><option value="statefulsets">StatefulSets</option><option value="daemonsets">DaemonSets</option><option value="jobs">Jobs</option><option value="cronjobs">CronJobs</option></select></label>
+        <label>Status<select value={draft.workloadStatus} onChange={(event) => setDraft((current) => ({ ...current, workloadStatus: event.target.value }))}><option value="">All statuses</option>{workloadStatuses.map((value) => <option key={value}>{value}</option>)}</select></label>
+      </ResourceListControls>
       {selection ? <SavedFilterControls collection="workloads" generation={selection.generation} currentQuery={compactFilterQuery([
-        ['namespace', namespaceValues(namespace)], ['search', search], ['kind', kind ? [kind] : []], ['status', workloadStatus ? [workloadStatus] : []],
+        ['namespace', namespaceValues(applied.namespace)], ['search', applied.search], ['kind', applied.kind ? [applied.kind] : []], ['status', applied.workloadStatus ? [applied.workloadStatus] : []], ['sort', applied.sort], ['order', applied.order],
       ])} onApply={(query) => {
-        const nextSearch = savedString(query, 'search')
-        setNamespace(savedNamespaces(query))
-        setSearch(nextSearch)
-        setAppliedSearch(nextSearch)
-        setKind(savedFirst(query, 'kind', workloadKinds))
-        setWorkloadStatus(savedFirst(query, 'status', workloadStatuses))
+        const next: WorkloadListState = {
+          search: savedString(query, 'search'),
+          namespace: savedNamespaces(query),
+          kind: savedFirst(query, 'kind', workloadKinds),
+          workloadStatus: savedFirst(query, 'status', workloadStatuses),
+          sort: savedSort(query, workloadSorts, 'identity'),
+          order: savedOrder(query, 'asc'),
+        }
+        setDraft(next)
+        setApplied(next)
         setCursor('')
         closeDetail()
       }} /> : null}
@@ -283,22 +370,16 @@ export function WorkloadsPage() {
 
 export function PodsPage() {
   const { status, selection } = useActiveSelection()
-  const [search, setSearch] = useState('')
-  const [appliedSearch, setAppliedSearch] = useState('')
-  const [namespace, setNamespace] = useState('')
-  const [podStatus, setPodStatus] = useState('')
-  const [workload, setWorkload] = useState('')
-  const [node, setNode] = useState('')
-  const [restarts, setRestarts] = useState('any')
-  const [problematic, setProblematic] = useState('')
-  const [cursor, setCursor] = useState('')
+  const [draft, setDraft] = useState<PodListState>({ ...defaultPodList })
+  const [applied, setApplied] = useState<PodListState>({ ...defaultPodList })
+  const [cursor, setCursor] = useGenerationCursor(selection?.generation)
   const [selected, setSelected] = useState<GenerationSelection<Pod> | null>(null)
   const queryClient = useQueryClient()
   const requests = useGenerationRequests(selection?.generation)
   const activeSelected = selected && selected.generation === selection?.generation ? selected.item : null
   const list = useQuery({
-    queryKey: ['resources', 'pods', selection?.generation, appliedSearch, namespace, podStatus, workload, node, restarts, problematic, cursor],
-    queryFn: ({ signal }) => getPods({ limit: 100, search: appliedSearch || undefined, namespaces: namespaceValues(namespace), statuses: podStatus ? [podStatus] : undefined, workload: workload || undefined, node: node || undefined, restarts: restarts as 'any' | 'gt0' | 'gte3' | 'gte10', problematic: problematic === '' ? undefined : problematic === 'true', continueToken: cursor || undefined }, signal, selection?.generation),
+    queryKey: ['resources', 'pods', selection?.generation, applied, cursor],
+    queryFn: ({ signal }) => getPods({ limit: 100, search: applied.search || undefined, namespaces: namespaceValues(applied.namespace), statuses: applied.podStatus ? [applied.podStatus] : undefined, workload: applied.workload || undefined, node: applied.node || undefined, restarts: applied.restarts as 'any' | 'gt0' | 'gte3' | 'gte10', problematic: applied.problematic === '' ? undefined : applied.problematic === 'true', ...optionalSort(applied.sort, applied.order, 'identity', 'asc'), continueToken: cursor || undefined }, signal, selection?.generation),
     enabled: Boolean(selection),
   })
   const detail = useQuery({ queryKey: ['resources', 'pod-detail', selection?.generation, activeSelected?.namespace, activeSelected?.name], queryFn: ({ signal }) => getPod(activeSelected!.namespace, activeSelected!.name, signal, selection!.generation), enabled: Boolean(selection && activeSelected) })
@@ -313,27 +394,33 @@ export function PodsPage() {
   return (
     <div className="resource-page">
       <PageHeading title="Pods" description="Bounded Pod inventory with readiness, restarts, owner and problem evidence." action={<div className="resource-header-actions"><Link className="button button--secondary" to="/logs">Open logs</Link>{selection ? <ResourceLiveUpdates key={`pods/${selection.generation}`} generation={selection.generation} topics={['pods']} queryKeys={[["resources", "pods"]]} /> : null}</div>} />
-      <SearchBar value={search} onChange={setSearch} onApply={() => { setCursor(''); setAppliedSearch(search); closeDetail() }} onRefresh={() => queryClient.invalidateQueries({ queryKey: ['resources', 'pods'] })}>
-        <label>Namespace<input value={namespace} maxLength={256} placeholder="active scope; comma-separated" onChange={(event) => setNamespace(event.target.value)} /></label>
-        <label>Workload owner<input value={workload} maxLength={256} placeholder="exact owner name" onChange={(event) => setWorkload(event.target.value)} /></label>
-        <label>Node<input value={node} maxLength={256} onChange={(event) => setNode(event.target.value)} /></label>
-        <label>Status<select value={podStatus} onChange={(event) => setPodStatus(event.target.value)}><option value="">All statuses</option>{podStatuses.map((value) => <option key={value}>{value}</option>)}</select></label>
-        <label>Restarts<select value={restarts} onChange={(event) => setRestarts(event.target.value)}><option value="any">Any</option><option value="gt0">More than 0</option><option value="gte3">At least 3</option><option value="gte10">At least 10</option></select></label>
-        <label>Problem evidence<select value={problematic} onChange={(event) => setProblematic(event.target.value)}><option value="">All Pods</option><option value="true">Problematic only</option><option value="false">Without evidence</option></select></label>
-      </SearchBar>
+      <ResourceListControls search={draft.search} appliedSearch={applied.search} onSearchChange={(value) => setDraft((current) => ({ ...current, search: value }))} onApply={() => { setApplied(draft); setCursor(''); closeDetail() }} onRefresh={() => queryClient.invalidateQueries({ queryKey: ['resources', 'pods'] })} onClear={() => { setDraft({ ...defaultPodList }); setApplied({ ...defaultPodList }); setCursor(''); closeDetail() }} activeFilters={[
+        ...activeFilter('namespace', 'Namespace', namespaceValues(applied.namespace)), ...activeFilter('workload', 'Workload owner', applied.workload), ...activeFilter('node', 'Node', applied.node), ...activeFilter('status', 'Status', applied.podStatus), ...activeFilter('restarts', 'Restarts', applied.restarts === 'any' ? '' : applied.restarts), ...activeFilter('problematic', 'Problem evidence', applied.problematic === 'true' ? 'problematic only' : applied.problematic === 'false' ? 'without evidence' : ''),
+      ]} sort={draft.sort} order={draft.order} appliedSort={applied.sort} appliedOrder={applied.order} defaultSort="identity" defaultOrder="asc" hasPendingChanges={!sameListState(draft, applied)} sortOptions={podSortOptions} onSortChange={(value) => setDraft((current) => ({ ...current, sort: value }))} onOrderChange={(value) => setDraft((current) => ({ ...current, order: value }))}>
+        <label>Namespace<input value={draft.namespace} maxLength={256} placeholder="active scope; comma-separated" onChange={(event) => setDraft((current) => ({ ...current, namespace: event.target.value }))} /></label>
+        <label>Workload owner<input value={draft.workload} maxLength={256} placeholder="exact owner name" onChange={(event) => setDraft((current) => ({ ...current, workload: event.target.value }))} /></label>
+        <label>Node<input value={draft.node} maxLength={256} onChange={(event) => setDraft((current) => ({ ...current, node: event.target.value }))} /></label>
+        <label>Status<select value={draft.podStatus} onChange={(event) => setDraft((current) => ({ ...current, podStatus: event.target.value }))}><option value="">All statuses</option>{podStatuses.map((value) => <option key={value}>{value}</option>)}</select></label>
+        <label>Restarts<select value={draft.restarts} onChange={(event) => setDraft((current) => ({ ...current, restarts: event.target.value }))}><option value="any">Any</option><option value="gt0">More than 0</option><option value="gte3">At least 3</option><option value="gte10">At least 10</option></select></label>
+        <label>Problem evidence<select value={draft.problematic} onChange={(event) => setDraft((current) => ({ ...current, problematic: event.target.value }))}><option value="">All Pods</option><option value="true">Problematic only</option><option value="false">Without evidence</option></select></label>
+      </ResourceListControls>
       {selection ? <SavedFilterControls collection="pods" generation={selection.generation} currentQuery={compactFilterQuery([
-        ['namespace', namespaceValues(namespace)], ['search', search], ['status', podStatus ? [podStatus] : []], ['workload', workload], ['node', node], ['restarts', restarts === 'any' ? '' : restarts], ['problematic', problematic === '' ? undefined : problematic === 'true'],
+        ['namespace', namespaceValues(applied.namespace)], ['search', applied.search], ['status', applied.podStatus ? [applied.podStatus] : []], ['workload', applied.workload], ['node', applied.node], ['restarts', applied.restarts === 'any' ? '' : applied.restarts], ['problematic', applied.problematic === '' ? undefined : applied.problematic === 'true'], ['sort', applied.sort], ['order', applied.order],
       ])} onApply={(query) => {
-        const nextSearch = savedString(query, 'search')
         const savedRestarts = savedString(query, 'restarts', restartFilters)
-        setNamespace(savedNamespaces(query))
-        setSearch(nextSearch)
-        setAppliedSearch(nextSearch)
-        setPodStatus(savedFirst(query, 'status', podStatuses))
-        setWorkload(savedString(query, 'workload'))
-        setNode(savedString(query, 'node'))
-        setRestarts(savedRestarts || 'any')
-        setProblematic(typeof query.problematic === 'boolean' ? String(query.problematic) : '')
+        const next: PodListState = {
+          search: savedString(query, 'search'),
+          namespace: savedNamespaces(query),
+          podStatus: savedFirst(query, 'status', podStatuses),
+          workload: savedString(query, 'workload'),
+          node: savedString(query, 'node'),
+          restarts: savedRestarts || 'any',
+          problematic: typeof query.problematic === 'boolean' ? String(query.problematic) : '',
+          sort: savedSort(query, podSorts, 'identity'),
+          order: savedOrder(query, 'asc'),
+        }
+        setDraft(next)
+        setApplied(next)
         setCursor('')
         closeDetail()
       }} /> : null}
@@ -350,34 +437,36 @@ export function PodsPage() {
 
 export function EventsPage() {
   const { status, selection } = useActiveSelection()
-  const [search, setSearch] = useState('')
-  const [appliedSearch, setAppliedSearch] = useState('')
-  const [namespace, setNamespace] = useState('')
-  const [eventType, setEventType] = useState('')
-  const [objectKind, setObjectKind] = useState('')
-  const [reason, setReason] = useState('')
-  const [cursor, setCursor] = useState('')
+  const [draft, setDraft] = useState<EventListState>({ ...defaultEventList })
+  const [applied, setApplied] = useState<EventListState>({ ...defaultEventList })
+  const [cursor, setCursor] = useGenerationCursor(selection?.generation)
   const queryClient = useQueryClient()
-  const list = useQuery({ queryKey: ['resources', 'events', selection?.generation, appliedSearch, namespace, eventType, objectKind, reason, cursor], queryFn: ({ signal }) => getEvents({ limit: 100, search: appliedSearch || undefined, namespaces: namespaceValues(namespace), statuses: eventType ? [eventType] : undefined, objectKind: objectKind || undefined, reason: reason || undefined, continueToken: cursor || undefined, sort: 'timestamp', order: 'desc' }, signal, selection?.generation), enabled: Boolean(selection) })
+  const list = useQuery({ queryKey: ['resources', 'events', selection?.generation, applied, cursor], queryFn: ({ signal }) => getEvents({ limit: 100, search: applied.search || undefined, namespaces: namespaceValues(applied.namespace), statuses: applied.eventType ? [applied.eventType] : undefined, objectKind: applied.objectKind || undefined, reason: applied.reason || undefined, continueToken: cursor || undefined, ...optionalSort(applied.sort, applied.order, 'timestamp', 'desc') }, signal, selection?.generation), enabled: Boolean(selection) })
   return (
     <div className="resource-page">
       <PageHeading title="Events" description="Real Kubernetes events ordered within the bounded page; type, source and count are preserved." action={selection ? <ResourceLiveUpdates key={`events/${selection.generation}`} generation={selection.generation} topics={['events']} queryKeys={[["resources", "events"]]} /> : null} />
-      <SearchBar value={search} onChange={setSearch} onApply={() => { setCursor(''); setAppliedSearch(search) }} onRefresh={() => queryClient.invalidateQueries({ queryKey: ['resources', 'events'] })}>
-        <label>Namespace<input value={namespace} maxLength={256} placeholder="active scope; comma-separated" onChange={(event) => setNamespace(event.target.value)} /></label>
-        <label>Type<select value={eventType} onChange={(event) => setEventType(event.target.value)}><option value="">All types</option>{eventTypes.map((value) => <option key={value}>{value}</option>)}</select></label>
-        <label>Object kind<input value={objectKind} maxLength={256} onChange={(event) => setObjectKind(event.target.value)} /></label>
-        <label>Reason<input value={reason} maxLength={256} onChange={(event) => setReason(event.target.value)} /></label>
-      </SearchBar>
+      <ResourceListControls search={draft.search} appliedSearch={applied.search} onSearchChange={(value) => setDraft((current) => ({ ...current, search: value }))} onApply={() => { setApplied(draft); setCursor('') }} onRefresh={() => queryClient.invalidateQueries({ queryKey: ['resources', 'events'] })} onClear={() => { setDraft({ ...defaultEventList }); setApplied({ ...defaultEventList }); setCursor('') }} activeFilters={[
+        ...activeFilter('namespace', 'Namespace', namespaceValues(applied.namespace)), ...activeFilter('type', 'Type', applied.eventType), ...activeFilter('objectKind', 'Object kind', applied.objectKind), ...activeFilter('reason', 'Reason', applied.reason),
+      ]} sort={draft.sort} order={draft.order} appliedSort={applied.sort} appliedOrder={applied.order} defaultSort="timestamp" defaultOrder="desc" hasPendingChanges={!sameListState(draft, applied)} sortOptions={eventSortOptions} onSortChange={(value) => setDraft((current) => ({ ...current, sort: value }))} onOrderChange={(value) => setDraft((current) => ({ ...current, order: value }))}>
+        <label>Namespace<input value={draft.namespace} maxLength={256} placeholder="active scope; comma-separated" onChange={(event) => setDraft((current) => ({ ...current, namespace: event.target.value }))} /></label>
+        <label>Type<select value={draft.eventType} onChange={(event) => setDraft((current) => ({ ...current, eventType: event.target.value }))}><option value="">All types</option>{eventTypes.map((value) => <option key={value}>{value}</option>)}</select></label>
+        <label>Object kind<input value={draft.objectKind} maxLength={256} onChange={(event) => setDraft((current) => ({ ...current, objectKind: event.target.value }))} /></label>
+        <label>Reason<input value={draft.reason} maxLength={256} onChange={(event) => setDraft((current) => ({ ...current, reason: event.target.value }))} /></label>
+      </ResourceListControls>
       {selection ? <SavedFilterControls collection="events" generation={selection.generation} currentQuery={compactFilterQuery([
-        ['namespace', namespaceValues(namespace)], ['search', search], ['status', eventType ? [eventType] : []], ['sort', 'timestamp'], ['order', 'desc'], ['objectKind', objectKind], ['reason', reason],
+        ['namespace', namespaceValues(applied.namespace)], ['search', applied.search], ['status', applied.eventType ? [applied.eventType] : []], ['sort', applied.sort], ['order', applied.order], ['objectKind', applied.objectKind], ['reason', applied.reason],
       ])} onApply={(query) => {
-        const nextSearch = savedString(query, 'search')
-        setNamespace(savedNamespaces(query))
-        setSearch(nextSearch)
-        setAppliedSearch(nextSearch)
-        setEventType(savedFirst(query, 'status', eventTypes))
-        setObjectKind(savedString(query, 'objectKind'))
-        setReason(savedString(query, 'reason'))
+        const next: EventListState = {
+          search: savedString(query, 'search'),
+          namespace: savedNamespaces(query),
+          eventType: savedFirst(query, 'status', eventTypes),
+          objectKind: savedString(query, 'objectKind'),
+          reason: savedString(query, 'reason'),
+          sort: savedSort(query, eventSorts, 'timestamp'),
+          order: savedOrder(query, 'desc'),
+        }
+        setDraft(next)
+        setApplied(next)
         setCursor('')
       }} /> : null}
       <SelectionGate pending={status.isPending} error={status.error} selected={Boolean(selection)}><QueryState pending={list.isPending} error={list.error} empty={list.data?.items.length === 0}><div className="resource-table-wrap"><table className="resource-table"><caption>Authorized event page</caption><thead><tr><th>Time</th><th>Namespace</th><th>Object</th><th>Type / reason</th><th>Count</th><th>Message</th></tr></thead><tbody>{list.data?.items.map((item, index) => <tr key={`${item.namespace}/${item.objectKind}/${item.objectName}/${item.timestamp ?? index}`}><td>{dateTime(item.timestamp)}</td><td>{item.namespace}</td><td>{item.objectKind}/{item.objectName}</td><td><span className={`event-type event-type--${item.type.toLowerCase()}`}>{item.type}</span><small>{item.reason}</small></td><td>{item.count}</td><td className="resource-message">{item.message}</td></tr>)}</tbody></table>{list.data ? <CollectionFooter result={list.data} onNext={setCursor} onRestart={() => setCursor('')} /> : null}</div></QueryState></SelectionGate>
@@ -386,8 +475,40 @@ export function EventsPage() {
 }
 
 type NetworkTab = 'services' | 'ingresses' | 'endpoint-slices' | 'port-forwards'
+type NetworkResourceTab = Exclude<NetworkTab, 'port-forwards'>
 type NetworkItem = ServiceResource | IngressResource | EndpointSliceResource
-type NetworkSelection = { generation: string; tab: Exclude<NetworkTab, 'port-forwards'>; namespace: string; name: string }
+type NetworkSelection = { generation: string; tab: NetworkResourceTab; namespace: string; name: string }
+
+interface SimpleListState {
+  search: string
+  sort: string
+  order: ListSortOrder
+}
+
+const defaultSimpleList: SimpleListState = { search: '', sort: 'identity', order: 'asc' }
+const defaultNetworkLists: Record<NetworkResourceTab, SimpleListState> = {
+  services: { ...defaultSimpleList },
+  ingresses: { ...defaultSimpleList },
+  'endpoint-slices': { ...defaultSimpleList },
+}
+const defaultNetworkCursors: Record<NetworkResourceTab, string> = { services: '', ingresses: '', 'endpoint-slices': '' }
+
+const networkSortOptions: Record<NetworkResourceTab, readonly ListSortOption[]> = {
+  services: [
+    { value: 'identity', label: 'Namespace and name' },
+    { value: 'name', label: 'Name' },
+    { value: 'type', label: 'Service type' },
+  ],
+  ingresses: [
+    { value: 'identity', label: 'Namespace and name' },
+    { value: 'name', label: 'Name' },
+  ],
+  'endpoint-slices': [
+    { value: 'identity', label: 'Namespace and name' },
+    { value: 'name', label: 'Name' },
+    { value: 'addressType', label: 'Address type' },
+  ],
+}
 
 function NetworkDetailView({ tab, service, ingress, slice }: { tab: NetworkSelection['tab']; service?: ServiceDetail; ingress?: IngressDetail; slice?: EndpointSliceDetail }) {
   if (tab === 'services' && service) return <><dl className="resource-facts"><div><dt>Type</dt><dd>{service.summary.type}</dd></div><div><dt>Cluster IPs</dt><dd>{service.summary.clusterIPs.join(', ') || 'none'}</dd></div><div><dt>Session affinity</dt><dd>{service.sessionAffinity}</dd></div><div><dt>Ports</dt><dd>{service.summary.ports.map((port) => `${port.port}/${port.protocol}`).join(', ') || 'none'}</dd></div></dl></>
@@ -399,18 +520,20 @@ function NetworkDetailView({ tab, service, ingress, slice }: { tab: NetworkSelec
 export function NetworkPage() {
   const { status, selection } = useActiveSelection()
   const [tab, setTab] = useState<NetworkTab>('services')
-  const [search, setSearch] = useState('')
-  const [appliedSearch, setAppliedSearch] = useState('')
-  const [cursors, setCursors] = useState<Record<Exclude<NetworkTab, 'port-forwards'>, string>>({ services: '', ingresses: '', 'endpoint-slices': '' })
+  const [cursors, setCursorValue] = useGenerationCursorMap(selection?.generation, defaultNetworkCursors)
+  const [drafts, setDrafts] = useState<Record<NetworkResourceTab, SimpleListState>>(() => structuredClone(defaultNetworkLists))
+  const [appliedLists, setAppliedLists] = useState<Record<NetworkResourceTab, SimpleListState>>(() => structuredClone(defaultNetworkLists))
   const [selected, setSelected] = useState<NetworkSelection | null>(null)
   const queryClient = useQueryClient()
   const requests = useGenerationRequests(selection?.generation)
-  const currentCursor = tab === 'port-forwards' ? '' : cursors[tab]
+  const resourceTab: NetworkResourceTab = tab === 'port-forwards' ? 'services' : tab
+  const draft = drafts[resourceTab]
+  const applied = appliedLists[resourceTab]
   const activeSelected = selected?.generation === selection?.generation ? selected : null
-  const options = { limit: 100, search: appliedSearch || undefined, continueToken: currentCursor || undefined }
-  const services = useQuery({ queryKey: ['resources', 'services', selection?.generation, appliedSearch, cursors.services], queryFn: ({ signal }) => getServices(options, signal, selection?.generation), enabled: Boolean(selection && tab === 'services') })
-  const ingresses = useQuery({ queryKey: ['resources', 'ingresses', selection?.generation, appliedSearch, cursors.ingresses], queryFn: ({ signal }) => getIngresses(options, signal, selection?.generation), enabled: Boolean(selection && tab === 'ingresses') })
-  const slices = useQuery({ queryKey: ['resources', 'endpoint-slices', selection?.generation, appliedSearch, cursors['endpoint-slices']], queryFn: ({ signal }) => getEndpointSlices(options, signal, selection?.generation), enabled: Boolean(selection && tab === 'endpoint-slices') })
+  const networkOptions = (value: NetworkResourceTab) => ({ limit: 100, search: appliedLists[value].search || undefined, continueToken: cursors[value] || undefined, ...optionalSort(appliedLists[value].sort, appliedLists[value].order, 'identity', 'asc') })
+  const services = useQuery({ queryKey: ['resources', 'services', selection?.generation, appliedLists.services, cursors.services], queryFn: ({ signal }) => getServices(networkOptions('services'), signal, selection?.generation), enabled: Boolean(selection && tab === 'services') })
+  const ingresses = useQuery({ queryKey: ['resources', 'ingresses', selection?.generation, appliedLists.ingresses, cursors.ingresses], queryFn: ({ signal }) => getIngresses(networkOptions('ingresses'), signal, selection?.generation), enabled: Boolean(selection && tab === 'ingresses') })
+  const slices = useQuery({ queryKey: ['resources', 'endpoint-slices', selection?.generation, appliedLists['endpoint-slices'], cursors['endpoint-slices']], queryFn: ({ signal }) => getEndpointSlices(networkOptions('endpoint-slices'), signal, selection?.generation), enabled: Boolean(selection && tab === 'endpoint-slices') })
   const forwards = useQuery({ queryKey: ['port-forwards', selection?.generation], queryFn: ({ signal }) => getPortForwards(signal, selection!.generation), enabled: Boolean(selection && tab === 'port-forwards'), refetchInterval: 10_000 })
   const serviceDetail = useQuery({ queryKey: ['resources', 'service-detail', selection?.generation, activeSelected?.namespace, activeSelected?.name], queryFn: ({ signal }) => getService(activeSelected!.namespace, activeSelected!.name, signal, selection!.generation), enabled: activeSelected?.tab === 'services' })
   const ingressDetail = useQuery({ queryKey: ['resources', 'ingress-detail', selection?.generation, activeSelected?.namespace, activeSelected?.name], queryFn: ({ signal }) => getIngress(activeSelected!.namespace, activeSelected!.name, signal, selection!.generation), enabled: activeSelected?.tab === 'ingresses' })
@@ -429,7 +552,7 @@ export function NetworkPage() {
 
   function setCursor(value: string) {
     if (tab === 'port-forwards') return
-    setCursors((current) => ({ ...current, [tab]: value }))
+    setCursorValue(tab, value)
     closeDetail()
   }
 
@@ -438,7 +561,7 @@ export function NetworkPage() {
       <PageHeading title="Network" description="Services, Ingresses, EndpointSlices and loopback-only port-forward sessions." />
       <div className="resource-tabs" role="tablist" aria-label="Network resource type">{(['services', 'ingresses', 'endpoint-slices', 'port-forwards'] as const).map((value) => <button type="button" role="tab" aria-selected={tab === value} aria-controls="network-panel" className={tab === value ? 'active' : ''} key={value} onClick={() => { setTab(value); closeDetail() }}>{value}</button>)}</div>
       {selection && tab !== 'port-forwards' ? <ResourceLiveUpdates key={`${tab}/${selection.generation}`} generation={selection.generation} topics={[tab]} queryKeys={[["resources", tab]]} /> : null}
-      {tab !== 'port-forwards' ? <SearchBar value={search} onChange={setSearch} onApply={() => { setCursor(''); setAppliedSearch(search) }} onRefresh={() => queryClient.invalidateQueries({ queryKey: ['resources', tab] })} /> : null}
+      {tab !== 'port-forwards' ? <ResourceListControls search={draft.search} appliedSearch={applied.search} onSearchChange={(value) => setDrafts((current) => ({ ...current, [resourceTab]: { ...current[resourceTab], search: value } }))} onApply={() => { setAppliedLists((current) => ({ ...current, [resourceTab]: { ...draft } })); setCursor(''); closeDetail() }} onRefresh={() => queryClient.invalidateQueries({ queryKey: ['resources', tab] })} onClear={() => { setDrafts((current) => ({ ...current, [resourceTab]: { ...defaultSimpleList } })); setAppliedLists((current) => ({ ...current, [resourceTab]: { ...defaultSimpleList } })); setCursor(''); closeDetail() }} sort={draft.sort} order={draft.order} appliedSort={applied.sort} appliedOrder={applied.order} defaultSort="identity" defaultOrder="asc" hasPendingChanges={!sameListState(draft, applied)} sortOptions={networkSortOptions[resourceTab]} onSortChange={(value) => setDrafts((current) => ({ ...current, [resourceTab]: { ...current[resourceTab], sort: value } }))} onOrderChange={(value) => setDrafts((current) => ({ ...current, [resourceTab]: { ...current[resourceTab], order: value } }))} /> : null}
       <div id="network-panel" role="tabpanel">
         <SelectionGate pending={status.isPending} error={status.error} selected={Boolean(selection)}>
           {tab === 'port-forwards' ? <QueryState pending={forwards.isPending} error={forwards.error ?? close.error} empty={forwards.data?.length === 0}><div className="session-grid">{forwards.data?.map((item) => <article key={item.id}><strong>{item.localAddress}:{item.localPort}</strong><span>{item.context} · {item.namespace}/{item.pod} → {item.remotePort}</span><small>{item.status} · created {dateTime(item.createdAt)} · expires {dateTime(item.expiresAt)}</small>{item.endedAt ? <small>ended {dateTime(item.endedAt)} · {item.endReason ?? item.status}</small> : null}{item.status === 'active' ? <button type="button" className="button button--danger button--compact" onClick={() => close.mutate(item.id)}>Close loopback session</button> : null}</article>)}</div></QueryState> : <QueryState pending={activeQuery.isPending} error={activeQuery.error} empty={active?.items.length === 0}><div className="resource-layout"><div className="resource-table-wrap"><table className="resource-table"><caption>Authorized {tab} page</caption><thead><tr><th>Namespace / name</th><th>Type</th><th>Summary</th></tr></thead><tbody>{active?.items.map((item) => <tr key={`${item.namespace}/${item.name}`}><td><button type="button" className="table-link" aria-label={`Open ${tab} ${item.name} in ${item.namespace}`} onClick={() => { closeDetail(); setSelected({ generation: selection!.generation, tab: tab as NetworkSelection['tab'], namespace: item.namespace, name: item.name }) }}><strong>{item.name}</strong><small>{item.namespace}</small></button></td><td>{'type' in item ? item.type : 'className' in item ? (item.className ?? 'Ingress') : item.addressType}</td><td>{'clusterIPs' in item ? item.clusterIPs.join(', ') : 'hosts' in item ? item.hosts.join(', ') : `${item.endpoints.length} endpoints`}</td></tr>)}</tbody></table>{active ? <CollectionFooter result={active} onNext={setCursor} onRestart={() => setCursor('')} /> : null}</div>{activeSelected ? <DetailCard title={`${activeSelected.namespace}/${activeSelected.name}`} onClose={closeDetail}>{currentDetail.isPending ? <p>Loading detail…</p> : currentDetail.isError ? <p className="field-error">{errorMessage(currentDetail.error)}</p> : <NetworkDetailView tab={activeSelected.tab} service={serviceDetail.data} ingress={ingressDetail.data} slice={sliceDetail.data} />}<YAMLViewer value={yaml.data} pending={yaml.isPending} error={yaml.error} onLoad={() => yaml.mutate(activeSelected)} /></DetailCard> : null}</div></QueryState>}
@@ -452,6 +575,17 @@ type ConfigTab = 'configmaps' | 'secrets'
 type ConfigItem = ConfigMapResource | SecretMetadata
 type ConfigSelection = { generation: string; namespace: string; name: string }
 
+const configSortOptions: readonly ListSortOption[] = [
+  { value: 'identity', label: 'Namespace and name' },
+  { value: 'name', label: 'Name' },
+  { value: 'createdAt', label: 'Creation time' },
+]
+const defaultConfigLists: Record<ConfigTab, SimpleListState> = {
+  configmaps: { ...defaultSimpleList },
+  secrets: { ...defaultSimpleList },
+}
+const defaultConfigCursors: Record<ConfigTab, string> = { configmaps: '', secrets: '' }
+
 function ConfigMapDetailView({ detail }: { detail: ConfigMapDetail }) {
   return <><dl className="resource-facts"><div><dt>Resource version</dt><dd>{detail.metadata.resourceVersion}</dd></div><div><dt>Total bytes</dt><dd>{detail.totalBytes}</dd></div><div><dt>Entries</dt><dd>{detail.entries.length}</dd></div><div><dt>Truncated</dt><dd>{detail.truncated ? 'yes' : 'no'}</dd></div></dl><div className="config-entry-list">{detail.entries.map((entry) => <details key={entry.key}><summary>{entry.key} · {entry.encoding}{entry.truncated ? ' · truncated' : ''}</summary><pre>{entry.value}</pre></details>)}</div></>
 }
@@ -463,16 +597,18 @@ function SecretMetadataView({ secret }: { secret: SecretMetadata }) {
 export function ConfigPage() {
   const { status, selection } = useActiveSelection()
   const [tab, setTab] = useState<ConfigTab>('configmaps')
-  const [search, setSearch] = useState('')
-  const [appliedSearch, setAppliedSearch] = useState('')
-  const [cursors, setCursors] = useState<Record<ConfigTab, string>>({ configmaps: '', secrets: '' })
+  const [cursors, setCursorValue] = useGenerationCursorMap(selection?.generation, defaultConfigCursors)
+  const [drafts, setDrafts] = useState<Record<ConfigTab, SimpleListState>>(() => structuredClone(defaultConfigLists))
+  const [appliedLists, setAppliedLists] = useState<Record<ConfigTab, SimpleListState>>(() => structuredClone(defaultConfigLists))
   const [selected, setSelected] = useState<ConfigSelection | null>(null)
   const queryClient = useQueryClient()
   const requests = useGenerationRequests(selection?.generation)
   const activeSelected = selected?.generation === selection?.generation ? selected : null
-  const options = { limit: 100, search: appliedSearch || undefined, continueToken: cursors[tab] || undefined }
-  const configMaps = useQuery({ queryKey: ['resources', 'configmaps', selection?.generation, appliedSearch, cursors.configmaps], queryFn: ({ signal }) => getConfigMaps(options, signal, selection?.generation), enabled: Boolean(selection && tab === 'configmaps') })
-  const secrets = useQuery({ queryKey: ['resources', 'secrets', selection?.generation, appliedSearch, cursors.secrets], queryFn: ({ signal }) => getSecrets(options, signal, selection?.generation), enabled: Boolean(selection && tab === 'secrets') })
+  const draft = drafts[tab]
+  const applied = appliedLists[tab]
+  const configOptions = (value: ConfigTab) => ({ limit: 100, search: appliedLists[value].search || undefined, continueToken: cursors[value] || undefined, ...optionalSort(appliedLists[value].sort, appliedLists[value].order, 'identity', 'asc') })
+  const configMaps = useQuery({ queryKey: ['resources', 'configmaps', selection?.generation, appliedLists.configmaps, cursors.configmaps], queryFn: ({ signal }) => getConfigMaps(configOptions('configmaps'), signal, selection?.generation), enabled: Boolean(selection && tab === 'configmaps') })
+  const secrets = useQuery({ queryKey: ['resources', 'secrets', selection?.generation, appliedLists.secrets, cursors.secrets], queryFn: ({ signal }) => getSecrets(configOptions('secrets'), signal, selection?.generation), enabled: Boolean(selection && tab === 'secrets') })
   const configDetail = useQuery({ queryKey: ['resources', 'configmap-detail', selection?.generation, activeSelected?.namespace, activeSelected?.name], queryFn: ({ signal }) => getConfigMap(activeSelected!.namespace, activeSelected!.name, signal, selection!.generation), enabled: Boolean(activeSelected && tab === 'configmaps') })
   const secretDetail = useQuery({ queryKey: ['resources', 'secret-detail', selection?.generation, activeSelected?.namespace, activeSelected?.name], queryFn: ({ signal }) => getSecret(activeSelected!.namespace, activeSelected!.name, signal, selection!.generation), enabled: Boolean(activeSelected && tab === 'secrets') })
   const yaml = useMutation({ mutationFn: (value: ConfigSelection) => requests.run((signal) => getConfigMapYAML(value.namespace, value.name, signal)) })
@@ -486,7 +622,7 @@ export function ConfigPage() {
   }
 
   function setCursor(value: string) {
-    setCursors((current) => ({ ...current, [tab]: value }))
+    setCursorValue(tab, value)
     closeDetail()
   }
 
@@ -495,7 +631,7 @@ export function ConfigPage() {
       <PageHeading title="Config" description="ConfigMaps are fetched on detail; Secrets remain metadata-only and never expose values or YAML." />
       <div className="resource-tabs" role="tablist" aria-label="Configuration resource type">{(['configmaps', 'secrets'] as const).map((value) => <button type="button" role="tab" aria-selected={tab === value} aria-controls="config-panel" className={tab === value ? 'active' : ''} key={value} onClick={() => { setTab(value); closeDetail() }}>{value}</button>)}</div>
       {selection && tab === 'configmaps' ? <ResourceLiveUpdates key={`configmaps/${selection.generation}`} generation={selection.generation} topics={['configmaps']} queryKeys={[["resources", "configmaps"]]} /> : null}
-      <SearchBar value={search} onChange={setSearch} onApply={() => { setCursor(''); setAppliedSearch(search) }} onRefresh={() => queryClient.invalidateQueries({ queryKey: ['resources', tab] })} />
+      <ResourceListControls search={draft.search} appliedSearch={applied.search} onSearchChange={(value) => setDrafts((current) => ({ ...current, [tab]: { ...current[tab], search: value } }))} onApply={() => { setAppliedLists((current) => ({ ...current, [tab]: { ...draft } })); setCursor(''); closeDetail() }} onRefresh={() => queryClient.invalidateQueries({ queryKey: ['resources', tab] })} onClear={() => { setDrafts((current) => ({ ...current, [tab]: { ...defaultSimpleList } })); setAppliedLists((current) => ({ ...current, [tab]: { ...defaultSimpleList } })); setCursor(''); closeDetail() }} sort={draft.sort} order={draft.order} appliedSort={applied.sort} appliedOrder={applied.order} defaultSort="identity" defaultOrder="asc" hasPendingChanges={!sameListState(draft, applied)} sortOptions={configSortOptions} onSortChange={(value) => setDrafts((current) => ({ ...current, [tab]: { ...current[tab], sort: value } }))} onOrderChange={(value) => setDrafts((current) => ({ ...current, [tab]: { ...current[tab], order: value } }))} />
       <div id="config-panel" role="tabpanel"><SelectionGate pending={status.isPending} error={status.error} selected={Boolean(selection)}><QueryState pending={activeQuery.isPending} error={activeQuery.error} empty={active?.items.length === 0}><div className="resource-layout"><div className="resource-table-wrap"><table className="resource-table"><caption>Authorized {tab} metadata page</caption><thead><tr><th>Namespace / name</th><th>UID</th><th>Created</th></tr></thead><tbody>{active?.items.map((item) => { const value = 'metadata' in item ? item.metadata : item; return <tr key={`${value.namespace}/${value.name}`}><td><button type="button" className="table-link" aria-label={`Open ${tab === 'secrets' ? 'Secret' : 'ConfigMap'} ${value.name} in ${value.namespace}`} onClick={() => { closeDetail(); setSelected({ generation: selection!.generation, namespace: value.namespace, name: value.name }) }}><strong>{value.name}</strong><small>{value.namespace}</small></button></td><td>{value.uid}</td><td>{dateTime(value.creationTimestamp)}</td></tr> })}</tbody></table>{active ? <CollectionFooter result={active} onNext={setCursor} onRestart={() => setCursor('')} /> : null}</div>{activeSelected ? <DetailCard title={`${tab === 'secrets' ? 'Secret metadata' : 'ConfigMap'} ${activeSelected.namespace}/${activeSelected.name}`} onClose={closeDetail}>{tab === 'configmaps' ? configDetail.isPending ? <p>Loading authorized entries…</p> : configDetail.isError ? <p className="field-error">{errorMessage(configDetail.error)}</p> : configDetail.data ? <ConfigMapDetailView detail={configDetail.data} /> : null : secretDetail.isPending ? <p>Loading metadata…</p> : secretDetail.isError ? <p className="field-error">{errorMessage(secretDetail.error)}</p> : secretDetail.data ? <SecretMetadataView secret={secretDetail.data} /> : null}{tab === 'configmaps' ? <YAMLViewer value={yaml.data} pending={yaml.isPending} error={yaml.error} onLoad={() => yaml.mutate(activeSelected)} /> : null}</DetailCard> : null}</div></QueryState></SelectionGate></div>
     </div>
   )

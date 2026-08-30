@@ -1,6 +1,6 @@
 # Fase 6 — Recursos somente leitura
 
-**Estado atual:** implementação local concluída (66/67); E2E real no Kind pendente
+**Estado atual:** concluída (67/67); E2E real no Kind comprovado localmente
 
 **Evidência:** [relatório rastreável da Fase 6](../docs/research/phase6-evidence.md)
 
@@ -105,7 +105,7 @@ Implementar navegação paginada, detalhes, YAML seguro e streams para os recurs
 - [x] **F6-54** Completar logs com toggle de timestamps, fonte monoespaçada e estado claro de follow/pausa.
 - [x] **F6-55** Implementar as rotas de YAML sob demanda definidas na Fase 2, sem incluir YAML em respostas de lista.
 - [x] **F6-56** Estender o harness restrito com workloads, logs atuais/anteriores, Service, Ingress, ConfigMap e Secret sintético.
-- [ ] **F6-57** Executar E2E lista → detalhe → YAML/logs nos caminhos permitido e negado.
+- [x] **F6-57** Executar E2E lista → detalhe → YAML/logs nos caminhos permitido e negado.
 - [x] **F6-58** Revalidar ou encerrar streams longos segundo a política RBAC definida e testar cada tópico/GVR, cardinalidade/duplicata/desconhecido, Secret proibido, list/watch negado all-or-nothing, descarte de snapshot excedente, resume válido, ID malformado, ring expirado, slow consumer, 410/relist em nova conexão, generation change e cada evento terminal, sem prometer detecção instantânea de mudança de permissão.
 - [x] **F6-59** Testar cursor composto com namespaces em páginas diferentes, autorização parcial, retomada e ordenação determinística.
 - [x] **F6-60** Executar e registrar `ginger inspect`, `ginger doctor`, testes, lint e build no fechamento da fase.
@@ -172,6 +172,9 @@ Cada fatia inclui port, adapter, service, handler/DTO, frontend e testes antes d
 
 O usuário navega das listas aos detalhes/YAML de todos os recursos somente leitura do MVP, visualiza logs permitidos e streams canceláveis, recebe paginação e filtros limitados; valores de Secret nunca entram na memória/resposta, e nenhum objeto interno do client-go é devolvido.
 
-As provas locais de serviço, adapter, protocolo e frontend estão concluídas.
-F6-56 e F6-57 permanecem abertas até lista → detalhe → YAML/logs ser executado
-contra o Kind canônico nos caminhos permitido e negado.
+As provas de serviço, adapter, protocolo, frontend e harness estão concluídas.
+O E2E local contra o Kind canônico percorreu lista → detalhe → YAML/logs nos
+caminhos permitido e negado, incluindo logs atuais/anteriores, Secret
+metadata-only, watch/SSE, replay e revogação. A recriação controlada do Pod de
+previous-log e do Event inicial `000-kp-warning` mantém a prova repetível em um
+cluster dedicado reutilizado, sem registrar conteúdo remoto na evidência.

@@ -32,6 +32,8 @@ id_ed25519*
 
 # Dependencies, builds and test output
 node_modules/
+__pycache__/
+*.py[cod]
 dist/
 build/
 bin/

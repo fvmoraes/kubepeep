@@ -9,7 +9,7 @@ estiverem concluídos.
 ## Resultado esperado
 
 Ao final da Fase 8, o Kube Peep deve ser um binário local autocontido,
-construído com Go 1.25 e Ginger v1.4.4, contendo a interface React embutida,
+construído com Go 1.26 e Ginger v1.4.4, contendo a interface React embutida,
 operando com o kubeconfig do usuário e respeitando integralmente o RBAC do
 cluster. A Fase 9 preserva essa base e acrescenta facilitadores de navegação,
 exploração e troubleshooting com identidade própria.
@@ -53,19 +53,25 @@ As fases seguem a ordem determinada pelo prompt. Para evitar duplicação, a Fas
 | [1 — Descoberta](01-descoberta.md) | DWYT, Ginger e riscos | concluída (44/44) | [Fase 1](../docs/research/phase1-evidence.md) |
 | [2 — Especificação](02-especificacao.md) | Produto, arquitetura, API, segurança e dados | concluída | [Fase 2](../docs/research/phase2-validation.md) |
 | [3 — Fundação](03-fundacao.md) | Executável local, Ginger, Cobra, SQLite e React | concluída, inclusive workflow nativo | [Fase 3](../docs/research/phase3-evidence.md) |
-| [4 — Kubernetes e RBAC](04-kubernetes-rbac.md) | Kubeconfig, contextos, escopos e autorização | local 56/59; Kind pendente | [Fase 4](../docs/research/phase4-evidence.md) |
-| [5 — Dashboard](05-dashboard.md) | Saúde, problemas, restarts, eventos, logs e métricas | local 60/62; Kind pendente | [Fase 5](../docs/research/phase5-evidence.md) |
-| [6 — Recursos](06-recursos.md) | Consultas somente leitura e streaming | local 65/67; Kind pendente | [Fase 6](../docs/research/phase6-evidence.md) |
-| [7 — Ações](07-acoes.md) | Restart, scale, delete, port-forward e exec | local 45/47; Kind pendente | [Fase 7](../docs/research/phase7-evidence.md) |
-| [8 — Distribuição](08-distribuicao.md) | Releases, instaladores, CI e aceite | 33/50; nativos/CI/Kind pendentes | [Fase 8](../docs/research/phase8-evidence.md) |
-| [9 — Experiência operacional](09-experiencia-operacional.md) | Paleta, filtros, quick actions, logs, diff e leitura multi-contexto | em execução (10/84) | [Benchmark Aptakube](../docs/research/aptakube-ux-benchmark.md), [evidência F9](../docs/research/phase9-evidence.md) e [matriz UX](matriz-aceite-ux.md) |
+| [4 — Kubernetes e RBAC](04-kubernetes-rbac.md) | Kubeconfig, contextos, escopos e autorização | 58/59; gramática/corridas ampliadas pendentes | [Fase 4](../docs/research/phase4-evidence.md) |
+| [5 — Dashboard](05-dashboard.md) | Saúde, problemas, restarts, eventos, logs e métricas | concluída (62/62), inclusive Kind real | [Fase 5](../docs/research/phase5-evidence.md) |
+| [6 — Recursos](06-recursos.md) | Consultas somente leitura e streaming | concluída (67/67), inclusive Kind real | [Fase 6](../docs/research/phase6-evidence.md) |
+| [7 — Ações](07-acoes.md) | Restart, scale, delete, port-forward e exec | concluída (47/47), inclusive Kind real | [Fase 7](../docs/research/phase7-evidence.md) |
+| [8 — Distribuição](08-distribuicao.md) | Releases, instaladores, CI e aceite | 43/50; CI atual, Kind do zero e candidate pendentes | [Fase 8](../docs/research/phase8-evidence.md) |
+| [9 — Experiência operacional](09-experiencia-operacional.md) | Paleta, filtros, quick actions, logs, diff e leitura multi-contexto | em execução (12/84) | [Benchmark Aptakube](../docs/research/aptakube-ux-benchmark.md), [evidência F9](../docs/research/phase9-evidence.md) e [matriz UX](matriz-aceite-ux.md) |
 
-Estado atual: **as implementações locais das Fases 4 a 7 estão concluídas**.
-Os checkboxes remanescentes dessas fases são exclusivamente provas contra o
-Kind canônico. A Fase 8 está em fechamento e ainda exige snapshot final,
-PowerShell/Windows, smoke dos seis archives e execução dos workflows atuais.
-O único run nativo já aceito permanece o da Fase 3, `31392541114`; ele não é
-reutilizado como evidência para código posterior.
+Estado atual: **as Fases 5, 6 e 7 estão concluídas, inclusive no Kind real**.
+A Fase 4 está em 58/59: os fluxos reais e a revogação entre capability e
+operação passaram; somente a matriz ampliada de gramática/corridas de F4-49
+permanece aberta. O [workflow de verificação #23](https://github.com/fvmoraes/kubepeep/actions/runs/33289508322),
+executado no HEAD `9d7c2ea`, concluiu 10 de 11 jobs: build/test, runtimes
+nativos de macOS e Windows, snapshot e os seis smokes de archives passaram.
+Somente `restricted-kind` falhou. Depois desse run, o harness local reutilizou
+o cluster dedicado e concluiu `create`, `validate` e `app-e2e`; como não houve
+recriação do zero, F8-20 continua aberta, enquanto F8-21–26 foram fechadas.
+F8-34, F8-36 e F8-41 receberam evidência
+nativa histórica nesse HEAD, mas foram reabertas quando o toolchain mudou para
+Go 1.26.7; o novo CI precisa revalidá-las sem reutilizar o run anterior.
 
 O acompanhamento dos critérios originais está na [Matriz de aceite do
 MVP](matriz-aceite-mvp.md). Os requisitos adicionais permanecem separados na
@@ -158,17 +164,19 @@ Uma tarefa funcional somente pode ser marcada como concluída quando, conforme a
 
 ## Estado do plano
 
-As Fases 1–3 estão concluídas. F4–F7 fecharam todo o trabalho comprovável
-localmente e aguardam nove tarefas Kind no total: F4-48–50, F5-56/F5-59,
-F6-56/F6-57 e F7-43/F7-44. A Fase 8 possui 33 de 50 tarefas comprovadas.
-Esses números serão atualizados após a execução Kind/CI atualmente em
-fechamento. A Fase 9 foi especificada em 2026-08-25 e inicia com 84 tarefas e
-15 critérios adicionais, dos quais `UX-M02` possui evidência local aceita; CI
-do commit funcional permanece obrigatória.
+As Fases 1–3 e 5–7 estão concluídas. A Fase 4 possui 58 de 59 tarefas, com
+somente F4-49 aberta. A Fase 8 possui 43 de 50 tarefas comprovadas; permanecem
+abertas F8-20, F8-34, F8-36, F8-41–42, F8-46 e F8-48, sem reutilizar o run #23
+para o novo pin nem confundir o Kind local reutilizado com criação limpa. As
+Fases 1–8 somam 436/444 tarefas (98,20%); com F9 em 12/84, o plano completo
+soma 448/528 (84,85%). A Fase 9
+foi especificada em 2026-08-25 e inicia com 84
+tarefas e 15 critérios adicionais, dos quais `UX-M02` possui evidência local
+aceita; CI do commit funcional permanece obrigatória.
 
-Na matriz final, 22 de 27 critérios do MVP possuem evidência local ou nativa
-anterior aplicável. Permanecem abertos os critérios que exigem Kind real,
-pipeline completo, snapshot final ou ambos. Evidência de configuração, teste
+Na matriz final, 25 de 27 critérios do MVP possuem evidência local ou nativa
+aplicável. Permanecem abertos o pipeline completo do estado atual e os
+instaladores contra uma candidate imutável. Evidência de configuração, teste
 estático, cross-build ou spike nunca substitui execução nativa/Kind quando o
 critério a exige.
 

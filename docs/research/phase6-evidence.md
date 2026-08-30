@@ -1,8 +1,9 @@
 # Evidências da Fase 6 — Recursos somente leitura
 
 **Data da validação local:** 2026-08-24
+**Data da validação Kind:** 2026-08-30
 **Plataforma principal:** Linux amd64
-**Estado:** implementação local concluída; 66 de 67 tarefas comprovadas; E2E real no Kind pendente
+**Estado:** fase concluída; 67 de 67 tarefas comprovadas, incluindo o E2E real no Kind
 
 ## Resultado
 
@@ -11,6 +12,9 @@ implementadas com DTOs compactos, autorização, paginação/cursor composto,
 YAML sob demanda e respostas `no-store`. Logs e os sete tópicos de atualização
 possuem streams limitados e canceláveis. Secret permanece metadata-only e não
 oferece YAML.
+
+O fechamento dinâmico confirmou listas, detalhes, YAML permitido, logs atuais e
+anteriores, streams, replay e revogação contra uma API Kubernetes real.
 
 ## Rastreabilidade da implementação
 
@@ -40,18 +44,41 @@ oferece YAML.
 ## Gates locais executados
 
 A suíte completa Go 1.25.13, race detector, vet, build e `govulncheck` passaram.
-Frontend audit/lint/typecheck/build, 63 testes Vitest e três Playwright também
+Frontend audit/lint/typecheck/build, 73 testes Vitest e três Playwright também
 passaram. Ginger v1.4.4 `inspect` e `doctor` passaram com os diagnósticos
 intencionais já documentados. A validação estática do harness passou.
 
-## Pendências exatas
+## Evidência Kind canônica
 
-- **F6-57:** executar lista → detalhe → YAML/logs nos caminhos permitido e
-  negado pelo black-box:
-  `./test/kind/harness.sh validate`,
-  `./test/kind/harness.sh kubeconfigs` e
-  `./test/kind/harness.sh app-e2e ./kubePeep`.
+O fechamento local executou:
 
-Os cenários adversariais de protocolo permanecem cobertos localmente por
-testes Go/frontend; a pendência acima é exclusivamente a integração com API
-Kubernetes real. Não há URL de CI atual.
+```bash
+rtk ./test/kind/harness.sh create
+rtk ./test/kind/harness.sh validate
+rtk ./test/kind/harness.sh kubeconfigs
+rtk ./test/kind/harness.sh app-e2e ./dist/kubePeep
+```
+
+No perfil permitido, o black-box comprovou listas de Workloads, Pods, Events,
+Services, Ingresses, EndpointSlices e ConfigMaps; detalhe e YAML; detalhe de
+ConfigMap; Secret restrito a metadados e sem YAML; logs atuais e anteriores; e
+o ciclo snapshot, update, follow, replay e troca de geração. Os mesmos caminhos
+no perfil negado não ofereceram bypass de autorização.
+
+Durante a revogação, a ausência de uma decisão do SSAR tornou a autorização
+desconhecida: leituras e streams do produto falharam fechados com
+`503/AUTHORIZATION_UNAVAILABLE`. A leitura direta pela identidade revogada foi
+negada autoritativamente pela API Kubernetes com `Forbidden`, sem converter
+essa evidência em uma negação que o SSAR não retornou. A restauração do grant
+também foi comprovada.
+
+O harness recria de forma idempotente o Pod usado para previous-log e o Event
+inicial `000-kp-warning`, um por vez, com ownership estrito, precondição de UID
+e recuperação canônica armada antes da remoção. A recuperação repete um DELETE
+de resposta ambígua com a mesma UID, aguarda qualquer substituto em terminação
+e cria o manifesto canônico sem `apply`. Isso evita que idade, contador de
+restart ou ordenação de uma execução anterior contaminem a seguinte. Nenhum conteúdo de log,
+kubeconfig, token ou payload de Event foi copiado para esta evidência.
+
+Esta é evidência local do Kind; nenhum run adicional de CI é atribuído ao
+fechamento.

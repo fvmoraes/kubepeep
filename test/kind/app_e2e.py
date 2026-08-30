@@ -775,14 +775,22 @@ def wait_marker(control_dir: pathlib.Path, name: str, timeout: float) -> None:
     raise E2EFailure(f"harness did not publish bounded control marker {name}")
 
 
-def wait_http_status(client: Client, method: str, path: str, expected: int, timeout: float) -> None:
+def wait_http_status(
+    client: Client,
+    method: str,
+    path: str,
+    expected: int,
+    timeout: float,
+    expected_code: str | None = None,
+) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        status, _, _ = client.exchange(method, path, timeout=10)
-        if status == expected:
+        status, _, payload = client.exchange(method, path, timeout=10)
+        if status == expected and (expected_code is None or api_error_code(payload) == expected_code):
             return
         time.sleep(0.5)
-    raise E2EFailure(f"{method} {path} did not converge to HTTP {expected}")
+    code_expectation = "" if expected_code is None else f" with code {expected_code}"
+    raise E2EFailure(f"{method} {path} did not converge to HTTP {expected}{code_expectation}")
 
 
 def assert_values_absent(root: pathlib.Path, values: list[str]) -> None:
@@ -832,16 +840,24 @@ def check_periodic_revocation(
             code = str(payload.get("code", "")).upper() if isinstance(payload, dict) else ""
             # Kind's RBAC no-match is a successful SSAR with no opinion, which
             # remains unknown by policy. The streams must still fail closed;
-            # the ordinary read below then proves the authoritative 403.
+            # the harness separately proves the authoritative apiserver denial.
             if code != "AUTHORIZATION_UNAVAILABLE":
                 safe_code = code if code in public_error_codes else "UNKNOWN"
                 raise E2EFailure(
                     f"{stream_name} periodic reauthorization returned {safe_code} instead of AUTHORIZATION_UNAVAILABLE"
                 )
-        # The stream reauthorization deliberately bypasses the ordinary read
-        # cache. Once it has observed revocation, the product endpoint must use
-        # that denied capability as well.
-        wait_http_status(client, "GET", "/api/v1/workloads?limit=1", 403, 10)
+        # Kind reports an RBAC no-match as a successful SSAR with no opinion.
+        # The ordinary product read must therefore fail closed as unknown, not
+        # invent a denial. The harness separately proves that an apiserver read
+        # under this identity is authoritatively forbidden.
+        wait_http_status(
+            client,
+            "GET",
+            "/api/v1/pods?limit=1",
+            503,
+            10,
+            expected_code="AUTHORIZATION_UNAVAILABLE",
+        )
     finally:
         resource_stream.close()
         log_stream.close()
@@ -855,17 +871,17 @@ def check_periodic_revocation(
     )
     body.update({"container": "utility", "command": ["/bin/true"], "tty": False, "stdin": False})
     _, denied = client.request(
-        "POST", "/api/v1/pods/kp-allowed/kp-interactive/exec", body=body, expected=403, csrf=True
+        "POST", "/api/v1/pods/kp-allowed/kp-interactive/exec", body=body, expected=503, csrf=True
     )
-    if api_error_code(denied) != "FORBIDDEN":
-        raise E2EFailure("new product exec action did not observe RBAC revocation")
+    if api_error_code(denied) != "AUTHORIZATION_UNAVAILABLE":
+        raise E2EFailure("new product exec action did not fail closed after RBAC revocation")
     denied_status, denied_socket = RawWebSocket.open(
         client, pending_ticket["websocketUrl"], pending_ticket["protocols"]
     )
     if denied_socket is not None:
         denied_socket.close()
-    if denied_status != 403:
-        raise E2EFailure("existing exec ticket did not reauthorize before WebSocket upgrade")
+    if denied_status != 503:
+        raise E2EFailure("existing exec ticket did not fail closed during WebSocket reauthorization")
     assert_values_absent(
         scan_root,
         [
@@ -1057,18 +1073,31 @@ def check_denied(client: Client, status: dict[str, Any], args: argparse.Namespac
         f"/api/v1/pods/{namespace}/kp-interactive/yaml",
         f"/api/v1/pods/{namespace}/kp-interactive/logs?container=utility&tailLines=1",
         "/api/v1/secrets?limit=1",
-        "/api/v1/dashboard/summary",
     )
     for path in denied_reads:
-        _, payload = client.request("GET", path, expected=403)
-        if api_error_code(payload) != "FORBIDDEN":
-            raise E2EFailure(f"denied product read did not return FORBIDDEN: {path}")
+        _, payload = client.request("GET", path, expected=503)
+        if api_error_code(payload) != "AUTHORIZATION_UNAVAILABLE":
+            raise E2EFailure(f"denied product read did not fail closed: {path}")
+    dashboard = client.data("GET", "/api/v1/dashboard/summary")
+    dashboard_errors = dashboard.get("errors") if isinstance(dashboard, dict) else None
+    if (
+        not isinstance(dashboard, dict)
+        or dashboard.get("complete") is not False
+        or not isinstance(dashboard_errors, list)
+        or not any(
+            isinstance(item, dict)
+            and item.get("namespace") == namespace
+            and item.get("code") == "FORBIDDEN"
+            for item in dashboard_errors
+        )
+    ):
+        raise E2EFailure("denied dashboard did not preserve its explicit partial authorization state")
     _, stream_denied = client.request(
-        "GET", "/api/v1/stream?topic=pods", accept="text/event-stream", csrf=True, expected=403
+        "GET", "/api/v1/stream?topic=pods", accept="text/event-stream", csrf=True, expected=503
     )
-    if api_error_code(stream_denied) != "FORBIDDEN":
+    if api_error_code(stream_denied) != "AUTHORIZATION_UNAVAILABLE":
         raise E2EFailure("denied resource stream did not fail before opening")
-    cases: tuple[tuple[str, str, dict[str, Any], str | None], ...] = (
+    cases: tuple[tuple[str, str, dict[str, Any], str | None, int, str], ...] = (
         (
             "POST",
             f"/api/v1/workloads/deployments/{namespace}/kp-action-deployment/restart",
@@ -1077,6 +1106,8 @@ def check_denied(client: Client, status: dict[str, Any], args: argparse.Namespac
                 "expectedResourceVersion": args.deployment_rv,
             },
             "kp-e2e-denied-restart-" + uuid.uuid4().hex,
+            503,
+            "AUTHORIZATION_UNAVAILABLE",
         ),
         (
             "PUT",
@@ -1087,6 +1118,8 @@ def check_denied(client: Client, status: dict[str, Any], args: argparse.Namespac
                 "expectedResourceVersion": args.deployment_rv,
             },
             None,
+            503,
+            "AUTHORIZATION_UNAVAILABLE",
         ),
         (
             "DELETE",
@@ -1097,6 +1130,8 @@ def check_denied(client: Client, status: dict[str, Any], args: argparse.Namespac
                 "expectedResourceVersion": args.pod_rv,
             },
             None,
+            503,
+            "AUTHORIZATION_UNAVAILABLE",
         ),
         (
             "POST",
@@ -1107,6 +1142,8 @@ def check_denied(client: Client, status: dict[str, Any], args: argparse.Namespac
                 "localPort": None,
             },
             "kp-e2e-denied-pf-" + uuid.uuid4().hex,
+            503,
+            "AUTHORIZATION_UNAVAILABLE",
         ),
         (
             "POST",
@@ -1119,12 +1156,16 @@ def check_denied(client: Client, status: dict[str, Any], args: argparse.Namespac
                 "stdin": False,
             },
             None,
+            403,
+            "FORBIDDEN",
         ),
     )
-    for method, path, body, key in cases:
-        _, payload = client.request(method, path, body=body, expected=403, csrf=True, idempotency_key=key)
-        if api_error_code(payload) != "FORBIDDEN":
-            raise E2EFailure(f"denied product action did not return FORBIDDEN: {method} {path}")
+    for method, path, body, key, expected_status, expected_code in cases:
+        _, payload = client.request(
+            method, path, body=body, expected=expected_status, csrf=True, idempotency_key=key
+        )
+        if api_error_code(payload) != expected_code:
+            raise E2EFailure(f"denied product action returned an unexpected public error: {method} {path}")
 
 
 def check_offline(client: Client) -> None:

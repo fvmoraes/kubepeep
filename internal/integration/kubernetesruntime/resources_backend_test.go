@@ -109,14 +109,14 @@ func TestPageLocalWorkloadAndPodFiltersAndSorts(t *testing.T) {
 	}
 }
 
-func TestPageLocalEventDefaultDescendingIsStrictAndDeterministic(t *testing.T) {
+func TestPageLocalEventDefaultDescendingKeepsCanonicalTiesAscending(t *testing.T) {
 	one, two := "2026-01-01T00:00:00Z", "2026-01-02T00:00:00Z"
 	items := []resources.EventDTO{{Timestamp: &one, Namespace: "b", ObjectKind: "Pod", ObjectName: "z"}, {Timestamp: &two, Namespace: "a", ObjectKind: "Pod", ObjectName: "a"}, {Timestamp: &one, Namespace: "a", ObjectKind: "Pod", ObjectName: "b"}}
 	result := filterSortEvents(items, resources.ListOptions{Sort: "timestamp", Order: resources.OrderDescending})
 	if len(result) != 3 || result[0].Timestamp == nil || *result[0].Timestamp != two {
 		t.Fatalf("timestamp sort mismatch: %#v", result)
 	}
-	if result[1].Namespace != "b" || result[2].Namespace != "a" {
+	if result[1].Namespace != "a" || result[2].Namespace != "b" {
 		t.Fatalf("descending tie-break mismatch: %#v", result)
 	}
 }
@@ -286,6 +286,37 @@ func TestResourceBackendListsPodsThroughAuthorizedDTOBoundary(t *testing.T) {
 	}
 	if len(authorizer.keys) != 1 || authorizer.keys[0].Verb != "list" || authorizer.keys[0].Resource != "pods" {
 		t.Fatalf("authorization keys=%#v", authorizer.keys)
+	}
+}
+
+func TestResourceBackendAppliesNormalizedEventDefaultsToPageSort(t *testing.T) {
+	observedAt := time.Date(2026, time.August, 30, 12, 0, 0, 0, time.UTC)
+	client := kubefake.NewSimpleClientset(
+		&corev1.Event{
+			ObjectMeta:     metav1.ObjectMeta{Namespace: "default", Name: "older", CreationTimestamp: metav1.NewTime(observedAt.Add(-time.Minute))},
+			InvolvedObject: corev1.ObjectReference{Kind: "Pod", Name: "older"},
+			Reason:         "Older",
+		},
+		&corev1.Event{
+			ObjectMeta:     metav1.ObjectMeta{Namespace: "default", Name: "newer", CreationTimestamp: metav1.NewTime(observedAt)},
+			InvolvedObject: corev1.ObjectReference{Kind: "Pod", Name: "newer"},
+			Reason:         "Newer",
+		},
+	)
+	backend := &ResourceBackend{
+		clients:    fixedResourceClientProvider{set: resourceClientSet{kubernetes: client}},
+		authorizer: &allowResourceAuthorization{},
+		now:        func() time.Time { return observedAt },
+	}
+	binding := namespaces.SelectionBinding{ClusterProfileID: 1, Context: "ctx", Generation: "gen"}
+	resolution := namespaces.ScopeResolution{ScopeName: "scope", Namespaces: []string{"default"}}
+
+	result, err := backend.ListEvents(context.Background(), binding, resolution, resources.ListOptions{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Items) != 2 || result.Items[0].Reason != "Newer" || result.Items[1].Reason != "Older" {
+		t.Fatalf("default event order=%#v", result.Items)
 	}
 }
 

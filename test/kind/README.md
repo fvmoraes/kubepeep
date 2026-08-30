@@ -107,7 +107,7 @@ arquivo não regular ou kubeconfig de outro contexto.
 Com as fixtures já criadas, informe um binário executável:
 
 ```sh
-./test/kind/harness.sh app-e2e ./kubePeep
+./test/kind/harness.sh app-e2e ./dist/kubePeep
 ```
 
 O comando cria kubeconfigs e diretórios HOME/XDG temporários, inicia quatro
@@ -116,17 +116,22 @@ instâncias isoladas (`kp-allowed`, `kp-denied`, `all` e `offline`), descobre a 
 obtidos em `/api/v1/session`. Ele
 seleciona o contexto real; cria e seleciona scopes `single`, `list` e `all`;
 prova `all` permitido somente com `list namespaces` e negado sem essa
-capacidade; verifica dashboard completo, parcial e offline; e exige 403 das
-leituras e ações do produto no namespace negado.
+capacidade; verifica dashboard completo, parcial e offline; e exige falha
+fechada das leituras e ações do produto no namespace negado. Um no-match de
+SSAR permanece `503/AUTHORIZATION_UNAVAILABLE`; somente uma negação
+autoritativa observada diretamente é publicada como `403/FORBIDDEN`.
 
 No fluxo permitido, o próprio produto abre SSE de recursos e logs, observa
 snapshot/live, reconecta com `Last-Event-ID` para replay e permanece conectado
 enquanto o harness revoga a RoleBinding F6. Ambos os streams precisam terminar
 por reautorização periódica. Exec usa ticket efêmero e WebSocket RFC 6455 real:
 valida `ready`, heartbeat com eco, canais stdout/stderr, terminal, fechamento e
-ticket one-shot. Outro ticket é criado antes da revogação de RBAC e o upgrade,
-assim como uma nova ação exec do produto, precisa retornar 403. Todas as
-RoleBindings, Pods e escalas são restauradas em traps.
+ticket one-shot. Outro ticket é criado antes da revogação de RBAC. Como um
+RBAC no-match do Kind produz SSAR sem opinião, tanto o upgrade quanto uma nova
+ação exec do produto precisam falhar fechados com
+`503/AUTHORIZATION_UNAVAILABLE`; o harness comprova separadamente o `Forbidden`
+autoritativo em uma leitura direta do apiserver. Todas as RoleBindings, Pods e
+escalas são restauradas em traps.
 
 O driver nunca imprime bodies, CSRF, kubeconfig, ticket, logs ou dados de
 cluster. Depois de parar cada processo e antes de apagar seu diretório, o
@@ -134,6 +139,18 @@ harness compara o estado/output contra o token do kubeconfig e contra o payload
 aleatório real do Secret; o driver também procura CSRF, protocolos efêmeros e
 linhas cruas de log. A instância offline usa somente um token sintético e um
 endpoint loopback fechado, sem derrubar nem alterar o cluster Kind.
+
+Em cluster reutilizado, verificações de ownership distinguem `NotFound` de
+falha do apiserver. O Pod de previous-log e o Event inicial são substituídos um
+por vez, somente após reaplicar/validar o conjunto; os deletes de fixtures e
+RoleBindings levam a UID observada como precondição, e cada fixture removida
+possui recuperação canônica imediata. A recuperação é armada antes do DELETE:
+HUP/INT/TERM encerram o fluxo pelo trap de saída, uma resposta de DELETE perdida
+é reconciliada repetindo a operação com a mesma UID e um objeto novo em
+terminação nunca é aceito como restaurado. O teste negativo de delete também
+valida ownership, exige `Forbidden` autoritativo e confirma que a UID negada
+permaneceu inalterada. Restaurações normais usam `create`, não `apply`, para não
+adotar um homônimo surgido entre a leitura e a recuperação.
 
 Para outro cluster Kind dedicado, defina `KUBEPEEP_KIND_CLUSTER`. Não existe
 comando de destruição automática; remover o cluster é sempre decisão manual.

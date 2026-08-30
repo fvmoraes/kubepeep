@@ -1,6 +1,6 @@
 # Fase 8 — Distribuição
 
-**Estado atual:** em fechamento (37/50); Kind, gates nativos/CI e candidate publicada pendentes
+**Estado atual:** em fechamento (43/50); recriação Kind do zero, CI nativa atual e candidate publicada pendentes
 
 **Evidência:** [relatório rastreável da Fase 8](../docs/research/phase8-evidence.md)
 
@@ -28,7 +28,7 @@ Transformar o projeto testado em artefatos reprodutíveis para Linux, macOS e Wi
 
 ### Build reprodutível
 
-- [x] **F8-01** Reproduzir Go 1.25, Node 24.18.0 e npm 11.16.0 já fixados e fixar uma versão GoReleaser v2 exata na CI/release antes do primeiro snapshot.
+- [x] **F8-01** Fixar uma linha Go ainda suportada e corrigida (Go 1.26.7 nesta atualização), Node 24.18.0, npm 11.16.0 e uma versão GoReleaser v2 exata na CI/release.
 - [x] **F8-02** Criar pipeline determinístico: instalar frontend com lockfile, testar, compilar assets e só então compilar Go.
 - [x] **F8-03** Fazer o build falhar claramente quando os assets necessários ao `go:embed` estiverem ausentes.
 - [x] **F8-04** Embutir frontend, migrations e assets sem versionar binários compilados no Git.
@@ -57,12 +57,12 @@ Transformar o projeto testado em artefatos reprodutíveis para Linux, macOS e Wi
 ### E2E restritivo
 
 - [ ] **F8-20** Consolidar e recriar do zero o cluster Kind canônico incremental das Fases 4 a 7; K3d permanece apenas alternativa local equivalente.
-- [ ] **F8-21** Validar novamente namespace permitido/negado e Role/RoleBinding restritos.
-- [ ] **F8-22** Validar novamente Deployment saudável/degradado, pod com restart e logs sintéticos.
-- [ ] **F8-23** Validar novamente evento `Warning`, Service, Ingress e recursos necessários a cada ação.
-- [ ] **F8-24** Validar seleção/escopos, dashboard, listas, logs, permissions e ações permitidas/negadas.
-- [ ] **F8-25** Provar que, sem `list namespaces`, `all` é recusado com fallback manual; com `list`, a interface usa exatamente a resposta da API e continua autorizando recursos separadamente em cada namespace.
-- [ ] **F8-26** Executar inspeção do SQLite e logs após o E2E para ausência de credenciais/conteúdo proibido.
+- [x] **F8-21** Validar novamente namespace permitido/negado e Role/RoleBinding restritos.
+- [x] **F8-22** Validar novamente Deployment saudável/degradado, pod com restart e logs sintéticos.
+- [x] **F8-23** Validar novamente evento `Warning`, Service, Ingress e recursos necessários a cada ação.
+- [x] **F8-24** Validar seleção/escopos, dashboard, listas, logs, permissions e ações permitidas/negadas.
+- [x] **F8-25** Provar que, sem `list namespaces`, `all` é recusado com fallback manual; com `list`, a interface usa exatamente a resposta da API e continua autorizando recursos separadamente em cada namespace.
+- [x] **F8-26** Executar inspeção do SQLite e logs após o E2E para ausência de credenciais/conteúdo proibido.
 
 ### Instaladores
 
@@ -144,6 +144,31 @@ Os instaladores nunca devem solicitar um archive que a release não publica.
 | Cross-build compilar mas não iniciar | Smoke test do archive em runner nativo |
 | Remoção apagar dados do usuário | Escopos separados e confirmação explícita |
 
+## Evidência local mais recente
+
+Em 2026-08-30, o GoReleaser v2.17.1 produziu um snapshot com o toolchain atual
+Go 1.26.7 para os seis alvos Linux/macOS/Windows × amd64/arm64. O smoke do
+binário gerado passou.
+
+No Kind local, `create` reutilizou o cluster canônico já existente; depois,
+`validate` e `app-e2e ./dist/kubePeep` passaram. As fixtures foram tornadas
+idempotentes para o Pod usado em `previous-log` e para o Event
+`000-kp-warning`, permitindo repetir a validação sem herdar estado inválido.
+Os cenários comprovaram negação autoritativa como HTTP 403, autorização
+indisponível/no-opinion fail-closed como HTTP 503 e dashboard parcialmente
+autorizado como HTTP 200 com falhas isoladas.
+
+Essa execução fecha F8-21–F8-26. F8-20 permanece aberta: reutilizar um cluster
+existente não comprova sua remoção e recriação do zero. F8-34, F8-36 e F8-41
+também permanecem abertas até o workflow atual executar instalador, updater e
+archives nativamente com Go 1.26.7.
+
+Após fetch/prune, somente `origin/main` estava presente e não havia tags.
+`scripts/security_check.sh origin/main` passou sobre os 25 commits alcançáveis;
+nesse escopo, não há evidência de segredo remoto nem ref que precise ser
+reescrito. Essa conclusão não afirma purga de objetos ou caches fora dos refs
+visíveis pelo Git.
+
 ## Fora de escopo
 
 - Servidor cloud obrigatório.
@@ -155,6 +180,7 @@ Os instaladores nunca devem solicitar um archive que a release não publica.
 
 Todos os critérios `MVP-01` a `MVP-27` e todos os gates técnicos complementares possuem evidência executada; suítes e E2E passam; GoReleaser produz archives coerentes; instaladores e update validam SHA-256; os binários rodam sem Node.js em runtime; e a release pode ser publicada para Linux, macOS e Windows com limitações explicitamente documentadas.
 
-Este gate ainda não está fechado. As 13 tarefas abertas estão discriminadas
-no relatório de evidências e dependem do Kind dinâmico, de PowerShell/Windows,
-da matriz nativa dos archives/instaladores na CI e de uma candidate publicada.
+Este gate ainda não está fechado. As sete tarefas abertas estão discriminadas
+no relatório de evidências: F8-20, F8-34, F8-36, F8-41–42, F8-46 e F8-48.
+Elas dependem da recriação Kind do zero, da CI nativa do toolchain atual, do
+fechamento da matriz de aceite e de uma candidate publicada.

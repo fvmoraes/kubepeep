@@ -1,6 +1,6 @@
 # Fase 7 — Ações autorizadas
 
-**Estado atual:** implementação local concluída (46/47); matriz dinâmica no Kind pendente
+**Estado atual:** concluída (47/47); matriz dinâmica no Kind comprovada localmente
 
 **Evidência:** [relatório rastreável da Fase 7](../docs/research/phase7-evidence.md)
 
@@ -84,7 +84,7 @@ Adicionar restart, scale, exclusão de pod, port-forward e exec sem criar uma au
 ### E2E e fechamento
 
 - [x] **F7-43** Estender o harness restrito com identidades separadas para restart, scale, delete, port-forward e exec.
-- [ ] **F7-44** Executar cada ação no caminho permitido e provar 403 no caminho negado, inclusive após revogação de RBAC.
+- [x] **F7-44** Executar cada ação no caminho permitido e comprovar falha fechada no caminho sem concessão e após revogação de RBAC: SSAR sem opinião retorna `503/AUTHORIZATION_UNAVAILABLE`; somente uma negação autoritativa da API Kubernetes retorna `403/FORBIDDEN`.
 - [x] **F7-45** Verificar que confirmações exibem o alvo correto e que nenhuma sessão, porta ou goroutine permanece após cancelamento.
 - [x] **F7-46** Inspecionar logs e SQLite após exec/port-forward para provar ausência de comando, saída e payload.
 - [x] **F7-47** Executar e registrar `ginger inspect`, `ginger doctor`, testes, lint e build no fechamento da fase.
@@ -129,8 +129,15 @@ Antes de iniciar a ação seguinte, a atual precisa comprovar:
 
 ## Critério de saída
 
-As cinco ações funcionam apenas para identidades autorizadas; negações aparecem corretamente na interface e retornam 403 no backend; operações destrutivas exigem confirmação; streams e sessões encerram de forma determinística; nenhum comando ou conteúdo é persistido/logado.
+As cinco ações funcionam apenas para identidades autorizadas; `denied` e
+`unknown` aparecem corretamente na interface e permanecem desabilitados. O
+backend falha fechado: SSAR sem opinião produz
+`503/AUTHORIZATION_UNAVAILABLE`, enquanto `403/FORBIDDEN` é reservado à
+negação autoritativa da operação real pela API Kubernetes. Operações
+destrutivas exigem confirmação; streams e sessões encerram de forma
+determinística; nenhum comando ou conteúdo é persistido/logado.
 
-Os caminhos locais, wire contracts e cleanup estão comprovados. F7-43 e
-F7-44 permanecem abertos até as cinco identidades e a revogação serem
-exercitadas contra a API Kubernetes real.
+Os caminhos locais, wire contracts, cleanup, cinco identidades de ação e
+revogação estão comprovados contra a API Kubernetes real no Kind canônico. A
+execução diferenciou indisponibilidade de autorização, negação autoritativa e
+restauração da concessão sem deixar sessão, porta ou estado efêmero persistido.

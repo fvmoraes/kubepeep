@@ -1,6 +1,6 @@
 # Fase 5 — Dashboard
 
-**Estado atual:** implementação local concluída (61/62); cenário dinâmico no Kind pendente
+**Estado atual:** concluída (62/62); cenário dinâmico no Kind comprovado localmente
 
 **Evidência:** [relatório rastreável da Fase 5](../docs/research/phase5-evidence.md)
 
@@ -106,7 +106,7 @@ Entregar um overview rápido e orientado a problemas. Cada bloco deve carregar i
 - [x] **F5-56** Estender o harness restrito com pod em restart, workload degradado, evento `Warning`, logs sintéticos e Metrics API ausente.
 - [x] **F5-57** Testar parsing e ordenação de `resource.Quantity` para CPU/memória, incluindo unidades distintas.
 - [x] **F5-58** Distinguir visualmente “scan ainda não executado”, zero correspondências, acesso negado e falha parcial.
-- [ ] **F5-59** Executar no harness o dashboard permitido, parcialmente negado, sem métricas e com cluster temporariamente offline.
+- [x] **F5-59** Executar no harness o dashboard permitido, parcialmente negado, sem métricas e com cluster temporariamente offline.
 - [x] **F5-60** Executar e registrar `ginger inspect`, `ginger doctor`, testes, lint e build no fechamento da fase.
 
 ### Limites finais
@@ -156,6 +156,10 @@ Entregar um overview rápido e orientado a problemas. Cada bloco deve carregar i
 
 O overview responde às perguntas centrais do prompt com blocos independentes; exibe problemas, restarts, workloads e eventos `Warning`; o scan obedece todos os limites e sanitizações; a ausência de logs, eventos ou métricas não impede o uso das demais áreas.
 
-O comportamento está comprovado localmente. F5-56 e F5-59 continuam abertos
-somente para repetir o cenário com fixtures e autorização de um cluster Kind
-real.
+O comportamento, a extensão estática e o cenário dinâmico do harness estão
+comprovados localmente contra o Kind canônico. A execução cobriu dashboard
+completo, negação parcial isolada, Metrics API ausente e cluster offline sem
+transformar uma dependência degradada em falha global. As fixtures sensíveis ao
+tempo são recriadas de forma controlada: o Pod de previous-log volta ao primeiro
+restart útil e o Event inicial `000-kp-warning` permanece observável em uma
+página limitada mesmo quando o cluster dedicado é reutilizado.

@@ -1,15 +1,16 @@
 # Evidências da Fase 9 — Experiência operacional
 
-**Estado:** primeira fatia vertical validada localmente; demais facilitadores em
-execução.
+**Estado:** duas fatias verticais validadas localmente; demais facilitadores
+em execução.
 
 **Baseline de requisitos:** `5f24a1a`.
 
 ## 1. Escopo desta evidência
 
-Esta primeira entrega fecha o núcleo seguro da paleta de navegação. Ela não
-afirma conclusão de filtros avançados, favoritos, quick actions, diff, logs
-agregados, gerenciador de port-forward ou leitura multi-contexto.
+As entregas registradas fecham o núcleo seguro da paleta de navegação e o
+estado canônico/visível das listas paginadas. Elas não afirmam conclusão de
+filtros negativos/multitermo, favoritos, quick actions, diff, logs agregados,
+gerenciador de port-forward ou leitura multi-contexto.
 
 Fontes funcionais do benchmark:
 
@@ -138,7 +139,109 @@ Casos específicos comprovados:
 - F9-13/F9-14/F9-15: foco/teclado, ausência de mutações e ajuda de atalhos.
 - F9-76: threat-model delta versionado em `docs/security.md`.
 
-## 7. Pendências
+## 7. Segunda fatia: filtros e ordenação de página
+
+### Contrato de estado
+
+Workloads, Pods e Events agora mantêm objetos serializáveis distintos para
+`draft` e `applied`. Network e Config mantêm o mesmo contrato separadamente
+por aba. Apenas `applied` alimenta:
+
+- a chave do TanStack Query;
+- a query enviada à API local;
+- o resumo acessível de filtros ativos;
+- o payload allowlisted de um filtro salvo.
+
+Digitar ou escolher um filtro/ordenação muda somente `draft` e publica o
+estado textual “Filter changes pending”. `Apply filters` promove a cópia
+completa, fecha detalhe/YAML em memória e reinicia a paginação. `Clear filters`
+restaura filtros e ordenação padrão nos dois estados. Aplicar filtro salvo faz
+o mesmo por uma query clonada e sanitizada contra enums locais fechados.
+
+Os cursores são vinculados à `generation`; quando a seleção muda, o valor da
+geração anterior deixa de compor a query sem precisar persistir ou interpretar
+o token no browser. Network e Config preservam rascunho, estado aplicado,
+ordenação e cursor independentes por tipo de recurso.
+
+### Ordenação e honestidade
+
+O catálogo visual reproduz exatamente os campos aceitos pelo backend para
+Workloads, Pods, Events, Services, Ingresses, EndpointSlices, ConfigMaps e
+Secrets. `sort` e `order` seguem para a API; não existe ordenação local de um
+resultado paginado. A interface usa “Sort this bounded page” e
+“Bounded-page order”, pois `filterScope: page` não promete ordenação global de
+uma coleção incompleta.
+
+Valores de filtro salvo ausentes ou fora do catálogo retornam ao default.
+`problematic: false` é preservado como boolean e não é confundido com ausência.
+`limit`, `continue`, cursor, corpo de recurso, YAML e log não entram no estado
+persistível.
+
+O runtime aplica comparação natural aos campos textuais das oito coleções
+atuais: sequências ASCII numéricas são comparadas pelo valor, sem converter para
+inteiros e sem risco de overflow (`pod-2` precede `pod-10`). A direção altera
+somente a chave primária; empates usam identidade canônica lexical ascendente.
+Os comparadores que definem a identidade/cursor Kubernetes não foram alterados,
+portanto a melhoria é restrita à ordenação honesta da página já coletada.
+
+### Superfície e segurança
+
+`ResourceListControls` centraliza:
+
+- busca em rascunho;
+- filtros ativos efetivamente aplicados;
+- aviso de alterações pendentes;
+- ordenação/direção do backend;
+- apply, refresh e reset explícito;
+- status textual que não depende somente de cor.
+
+O catálogo de Config/Secrets contém somente identidade, nome e instante de
+criação. Nenhum valor, annotation, label arbitrária, `Secret.data`,
+`Secret.stringData`, YAML ou campo remoto livre pode virar opção persistida.
+Não houve nova dependência nem uso de localStorage, sessionStorage, IndexedDB,
+Cache API ou service worker.
+
+### Evidência local executada
+
+| Gate | Resultado observado |
+| --- | --- |
+| ESLint | passou |
+| TypeScript | passou sem emissão |
+| Vitest/Testing Library | 17 arquivos, 73 testes, todos passaram |
+| build Vite | 1.904 módulos transformados; bundle de produção gerado |
+| Playwright Chromium | 3 de 3 cenários passaram |
+| storage do browser | localStorage/sessionStorage permaneceram vazios nos testes de recursos |
+| Go — runtime Kubernetes | 48 testes passaram; os mesmos 48 passaram com detector de corrida |
+| Go vet | passou para todos os pacotes |
+
+Casos específicos comprovados:
+
+- nenhuma consulta nova antes de `Apply filters`;
+- `sort`/`order` allowlisted na URL e defaults omitidos de forma equivalente;
+- filtros ativos mostram somente o estado aplicado;
+- busca, filtro, ordenação e cursor removidos no reset;
+- `continue` nunca entra em filtro salvo;
+- valor salvo inválido volta ao default fechado;
+- `problematic=false` permanece filtro explícito;
+- Network mantém estado independente por aba;
+- troca real de `generation` descarta o cursor obtido na geração anterior;
+- aplicação de filtro salvo preserva ordenação;
+- Secret continua metadata-only e sem ação de YAML;
+- jornada Playwright cobre aplicar, ordenar, limpar, recuperar e salvar.
+- nomes e demais chaves textuais usam ordem natural sem parsing inteiro;
+- direção descendente preserva tie-breaker canônico ascendente;
+- ConfigMaps, Secrets, Services, Ingresses, EndpointSlices, Pods, Workloads e
+  Events possuem cobertura da comparação textual aplicável e do catálogo exato
+  de campos de ordenação aceitos pelo backend.
+
+Esta fatia fecha F9-19 e F9-20. A parcela de ordenação natural de F9-21 está
+implementada para as coleções de contexto único, mas a tarefa permanece aberta:
+a futura agregação multi-contexto ainda precisa tornar a origem explícita e
+participar do desempate. `UX-M03` também permanece aberto até a conclusão e
+evidência de filtros positivos/negativos/multitermo, colunas allowlisted e alta
+cardinalidade.
+
+## 8. Pendências
 
 - ampliar catálogo com contextos/scopes somente depois de definir
   classificação e ciclo de vida em memória;
@@ -149,7 +252,7 @@ Casos específicos comprovados:
 - CI do commit funcional e smoke nativo do frontend embutido;
 - demais critérios `UX-M` da matriz.
 
-## 8. Regra de atualização
+## 9. Regra de atualização
 
 Este relatório só recebe evidência CI depois que o workflow do commit que
 contém a implementação terminar. Uma execução verde anterior não é

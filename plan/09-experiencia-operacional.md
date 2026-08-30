@@ -1,6 +1,6 @@
 # Fase 9 — Experiência operacional
 
-**Estado atual:** em execução (10/84)
+**Estado atual:** em execução (12/84)
 
 **Benchmark:** [facilitadores oficiais do Aptakube](../docs/research/aptakube-ux-benchmark.md)
 
@@ -79,8 +79,8 @@ absoluta de Secret. Ela não é condição para concluir a Fase 9.
 
 ### Listas, filtros, colunas, favoritos e recentes
 
-- [ ] **F9-19** Centralizar busca/filtro/ordenação em estado serializável e validado, sem incluir corpo de recurso.
-- [ ] **F9-20** Oferecer botão explícito de limpar filtros e mostrar quais filtros estão ativos.
+- [x] **F9-19** Centralizar busca/filtro/ordenação em estado serializável e validado, sem incluir corpo de recurso.
+- [x] **F9-20** Oferecer botão explícito de limpar filtros e mostrar quais filtros estão ativos.
 - [ ] **F9-21** Implementar ordenação natural estável, com tie-breaker determinístico e origem explícita em agregações.
 - [ ] **F9-22** Preservar filtros por tela/escopo somente em preferências allowlisted e limitadas.
 - [ ] **F9-23** Implementar filtros positivos, negativos e por múltiplos termos com parser determinístico e mensagens acessíveis.

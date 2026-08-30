@@ -99,7 +99,7 @@ test('filters Pods, persists allowlisted saved filters and builds the Logs catal
     dashboard: { logScanWindow: '15m', sectionOrder: ['summary'], hiddenSections: [] as string[] },
     filters: {
       workloads: empty,
-      pods: { version: 1, items: [{ id: 'saved-worker', name: 'Worker failures', query: { namespace: ['payments'], status: ['Failed'], node: 'worker-9' } }] },
+      pods: { version: 1, items: [{ id: 'saved-worker', name: 'Worker failures', query: { namespace: ['payments'], status: ['Failed'], node: 'worker-9', sort: 'age', order: 'desc' } }] },
       events: empty,
       logs: empty,
     },
@@ -141,24 +141,44 @@ test('filters Pods, persists allowlisted saved filters and builds the Logs catal
 
   await page.goto('/pods')
   await expect(page.getByRole('heading', { name: 'Pods' })).toBeVisible()
-  await page.getByLabel('Namespace').fill('payments')
+  await expect.poll(() => podRequests.length).toBeGreaterThan(0)
+  const initialPodRequests = podRequests.length
+  await page.getByLabel('Namespace', { exact: true }).fill('payments')
   await page.getByLabel('Workload owner').fill('api')
   await page.getByLabel('Node').fill('worker-1')
   await page.getByLabel('Search this bounded page').fill('backend')
+  await page.getByLabel('Sort this bounded page').selectOption('restarts')
+  await page.getByLabel('Order').selectOption('desc')
+  await expect(page.getByText('Filter changes pending; apply filters to update the bounded result.', { exact: true })).toBeVisible()
+  expect(podRequests).toHaveLength(initialPodRequests)
   await page.getByRole('button', { name: 'Apply filters' }).click()
   await expect.poll(() => podRequests.some((value) => {
     const query = new URL(value, 'http://127.0.0.1').searchParams
-    return query.get('namespace') === 'payments' && query.get('workload') === 'api' && query.get('node') === 'worker-1' && query.get('search') === 'backend'
+    return query.get('namespace') === 'payments' && query.get('workload') === 'api' && query.get('node') === 'worker-1' && query.get('search') === 'backend' && query.get('sort') === 'restarts' && query.get('order') === 'desc'
   })).toBe(true)
+  await expect(page.getByText('Restarts · descending')).toBeVisible()
+
+  const requestsBeforeClear = podRequests.length
+  await page.getByRole('button', { name: 'Clear filters' }).click()
+  await expect.poll(() => podRequests.slice(requestsBeforeClear).some((value) => {
+    const query = new URL(value, 'http://127.0.0.1').searchParams
+    return !query.has('namespace') && !query.has('search') && !query.has('sort') && !query.has('order') && !query.has('continue')
+  })).toBe(true)
+  await expect(page.getByText('None')).toBeVisible()
 
   await page.getByRole('combobox', { name: 'Saved filter', exact: true }).selectOption('saved-worker')
   await page.getByRole('button', { name: 'Apply saved filter' }).click()
   await expect(page.getByLabel('Node')).toHaveValue('worker-9')
-  await expect(page.getByLabel('Status')).toHaveValue('Failed')
+  await expect(page.getByRole('combobox', { name: 'Status', exact: true })).toHaveValue('Failed')
+  await expect(page.getByLabel('Sort this bounded page')).toHaveValue('age')
+  await expect(page.getByLabel('Order')).toHaveValue('desc')
   await page.getByLabel('Save current filter as').fill('Saved from browser')
   await page.getByRole('button', { name: 'Save current filter' }).click()
   await expect(page.getByText('Current bounded filter saved.')).toBeVisible()
-  expect(preferences.filters.pods.items.some((value) => value.name === 'Saved from browser')).toBe(true)
+  const savedFromBrowser = preferences.filters.pods.items.find((value) => value.name === 'Saved from browser')
+  expect(savedFromBrowser).toBeDefined()
+  expect(savedFromBrowser?.query).not.toHaveProperty('limit')
+  expect(savedFromBrowser?.query).not.toHaveProperty('continue')
 
   await page.getByRole('link', { name: 'Logs', exact: true }).click()
   await expect(page.getByText('1 log-authorized Pod available in the complete bounded catalog.')).toBeVisible()

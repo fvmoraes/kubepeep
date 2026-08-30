@@ -1,8 +1,8 @@
 # Evidências da Fase 4 — Kubernetes e RBAC
 
-**Data da validação local:** 2026-08-24
+**Data da validação local mais recente:** 2026-08-30
 **Plataforma principal:** Linux amd64
-**Estado:** implementação local concluída; 57 de 59 tarefas comprovadas; validação dinâmica no Kind pendente
+**Estado:** 58 de 59 tarefas comprovadas; Kind real concluiu F4-50 e F4-49 permanece aberta
 
 ## Resultado
 
@@ -12,9 +12,21 @@ com Go 1.25.13 passou, incluindo race detector, `go vet`, build e
 `govulncheck` sem vulnerabilidade alcançável. O frontend também passou por
 lint, typecheck, build, 63 testes Vitest e três cenários Playwright.
 
-Não há run atual de CI nem execução dinâmica do harness Kind a registrar. O
-harness canônico e a validação offline com o binário real passaram, mas Docker
-está indisponível nesta estação; por isso F4-49 e F4-50 permanecem abertas.
+Na validação mais recente, o harness criou o cluster Kind dedicado e também
+comprovou sua reutilização segura. `./test/kind/harness.sh validate` passou
+contra os recursos e RoleBindings reais. O black-box
+`./test/kind/harness.sh app-e2e ./dist/kubePeep` também passou com o binário
+real, cobrindo scopes `single`, `list` e `all`, leituras, streams, ações e
+revogação periódica sem conceder `cluster-admin`. Essa evidência fecha F4-50;
+ela não cobre automaticamente toda a matriz ampliada descrita em F4-49.
+
+O resultado preserva três contratos distintos. Quando o SSAR bem-sucedido não
+oferece opinião, a decisão é `unknown` e o produto falha fechado com HTTP `503`
+e código `AUTHORIZATION_UNAVAILABLE`; ele não fabrica uma negação. Quando a
+operação real no apiserver nega acesso, o `403` é autoritativo e é traduzido
+como `FORBIDDEN`. Em agregações que aceitam cobertura parcial, namespaces
+permitidos continuam disponíveis em HTTP `200`, com `complete=false` e o erro
+`FORBIDDEN` isolado para o namespace negado.
 
 ## Rastreabilidade da implementação
 
@@ -56,14 +68,17 @@ está indisponível nesta estação; por isso F4-49 e F4-50 permanecem abertas.
 | Vitest / Playwright | 63 / 3 testes passaram |
 | Ginger v1.4.4 `inspect` / `doctor` | passou; diagnósticos heurísticos conhecidos continuam documentados |
 | `./test/kind/harness.sh static` e driver `offline` | passaram; o segundo usou o binário real |
+| `./test/kind/harness.sh create` | passou tanto na criação quanto na reutilização do cluster dedicado |
+| `./test/kind/harness.sh validate` | passou contra a API Kubernetes e os bindings restritos reais |
+| `./test/kind/harness.sh app-e2e ./dist/kubePeep` | passou com API HTTP/CSRF, scopes, leituras, ações, streams e revogação reais |
 
 ## Pendências exatas
 
-- **F4-49:** executar a matriz real de contexto, escopos, permissões e mudança
-  de RBAC: `./test/kind/harness.sh validate`;
-- **F4-50:** completar a prova contra a API real, inclusive revogação entre
-  capability e operação. Ela faz parte do mesmo `validate` e do black-box
-  `./test/kind/harness.sh app-e2e ./kubePeep`.
+- **F4-49:** completar e registrar a matriz extensa de `/permissions`, nonce e
+  rebootstrap, falhas pré/pós-commit e corridas mistas entre seleção de
+  contexto, seleção/PUT/DELETE de scope. O `validate` e o `app-e2e` reais
+  executados são evidência parcial relevante, mas não provam todos esses
+  subcenários.
 
-A indisponibilidade do Docker e os checks offline executados estão registrados
-em `test/kind/VALIDATION.md`. Nenhum URL de run foi inventado.
+F4-50 está concluída pela execução real acima. Não se atribuiu à execução local
+um URL de CI, e nenhum cenário não observado foi marcado como aprovado.

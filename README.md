@@ -116,7 +116,7 @@ files or any file outside Kube Peep's canonical data root.
 
 ## Development
 
-Pinned toolchain versions are Go 1.25.13, Node.js 24.18.0, npm 11.16.0,
+Pinned toolchain versions are Go 1.26.7, Node.js 24.18.0, npm 11.16.0,
 Ginger v1.4.4, and GoReleaser v2.17.1.
 
 ```sh

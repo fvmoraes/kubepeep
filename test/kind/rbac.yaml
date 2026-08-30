@@ -1021,10 +1021,12 @@ spec:
 apiVersion: v1
 kind: Event
 metadata:
-  name: kp-warning
+  # Core Event pages are key-ordered before the product applies its bounded
+  # page-local sort. Keep the canonical fixture first even in a reused cluster.
+  name: 000-kp-warning
   namespace: kp-allowed
   labels:
-    app.kubernetes.io/name: kp-warning
+    app.kubernetes.io/name: 000-kp-warning
     app.kubernetes.io/part-of: kubepeep-kind-harness
     app.kubernetes.io/managed-by: kubepeep-kind-harness
 type: Warning
@@ -1037,8 +1039,6 @@ involvedObject:
   name: kp-restarting
 source:
   component: kubepeep-kind-harness
-firstTimestamp: "2026-08-10T12:00:00Z"
-lastTimestamp: "2026-08-10T12:00:00Z"
 count: 3
 ---
 apiVersion: v1

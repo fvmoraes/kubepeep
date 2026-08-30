@@ -1,6 +1,6 @@
 # Fase 4 — Kubernetes e RBAC
 
-**Estado atual:** implementação local concluída (57/59); execução dinâmica no Kind pendente
+**Estado atual:** implementação e prova dinâmica parcial concluídas (58/59); a matriz ampliada de F4-49 permanece pendente
 
 **Evidência:** [relatório rastreável da Fase 4](../docs/research/phase4-evidence.md)
 
@@ -95,7 +95,7 @@ Implementar a conexão Kubernetes, seleção de contexto, escopos de namespaces 
 - [x] **F4-47** Tratar plugin `exec` ausente, não executável, interativo/incompatível ou com saída sensível por diagnóstico sanitizado.
 - [x] **F4-48** Criar o harness mínimo canônico em Kind, com recursos permitidos em um namespace, recursos negados em outro e identidade sem `cluster-admin`; K3d é apenas alternativa local equivalente.
 - [ ] **F4-49** Executar no harness os fluxos de contexto, `single`, `list`, `all`, acesso negado e refresh de permissões; testar a gramática de `/permissions` (limites 20/100/20, target/resourceName, produto ≤100, refresh, ID inválido, parcial unknown e 503 total), nonce antigo/rebootstrap, offline pós-commit sem rollback, erro pré-commit preservando banco/generation e corridas mistas entre context select, scope select, PUT e DELETE, inclusive scope inativo que vira ativo antes do commit.
-- [ ] **F4-50** Testar mudança de RBAC entre capability exibida e operação real, garantindo que a API Kubernetes continue sendo a autoridade final.
+- [x] **F4-50** Testar mudança de RBAC entre capability exibida e operação real, garantindo que a API Kubernetes continue sendo a autoridade final. O Kind real comprovou reautorização e fail-closed após revogação: uma revisão sem opinião continua `unknown` e retorna `503 AUTHORIZATION_UNAVAILABLE`, sem inventar um `403`; negação efetiva da operação no apiserver permanece autoritativa, e agregações podem responder `200` parcial com `complete=false` e erro `FORBIDDEN` isolado.
 - [x] **F4-51** Conectar `--kubeconfig`, `--context` e `--namespace` ao bootstrap real, profile/escopo ativo e cache de clients; `--namespace` cria um `single` efêmero aplicado uma vez, sem SQLite. Testar precedência, `*`/valor inválido, contexto inicialmente ausente, consumo após seleção explícita e efeito observado.
 - [x] **F4-52** Fixar `k8s.io/client-go`, `k8s.io/api`, `k8s.io/apimachinery` e `k8s.io/metrics` exatamente em v0.35.7; manter Metrics no adapter opcional e validar version skew e `go list -m`.
 - [x] **F4-53** Criar testes frontend de importação por todos os delimitadores, JSON/YAML simples, vazios, duplicados, inválidos, quatro contadores, `single`, `list`, `all` e cancelamento ao trocar contexto.
@@ -151,6 +151,9 @@ Usar fake clientset para comportamento simples, servidor HTTP de teste para resp
 
 Contextos e escopos funcionam nos modos `single`, `list` e `all`; o banco não contém credenciais nem `*`; capabilities permitidas, negadas e desconhecidas são representadas corretamente; mutações falham fechado, leituras respeitam a resposta real da API; troca de contexto cancela trabalho anterior; e os cenários RBAC principais passam.
 
-O critério está comprovado por testes locais, exceto pelos cenários F4-49 e
-F4-50 contra uma API Kubernetes real. Eles permanecem abertos até a execução
-dinâmica documentada no relatório de evidências.
+O harness criou e reutilizou o cluster Kind dedicado, `validate` passou e o
+black-box `app-e2e` passou com `./dist/kubePeep`. Essa execução fecha F4-50 e
+comprova os principais cenários RBAC contra uma API Kubernetes real. F4-49
+permanece aberta porque reúne uma matriz maior de gramática de `/permissions`,
+falhas pré/pós-commit, rebootstrap e corridas mistas que não deve ser inferida
+como concluída apenas a partir desse E2E.

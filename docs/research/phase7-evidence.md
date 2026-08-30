@@ -1,8 +1,9 @@
 # Evidências da Fase 7 — Ações autorizadas
 
 **Data da validação local:** 2026-08-24
+**Data da validação Kind:** 2026-08-30
 **Plataforma principal:** Linux amd64
-**Estado:** implementação local concluída; 46 de 47 tarefas comprovadas; matriz dinâmica permitida/negada no Kind pendente
+**Estado:** fase concluída; 47 de 47 tarefas comprovadas, incluindo a matriz dinâmica no Kind
 
 ## Resultado
 
@@ -10,6 +11,9 @@ Restart, scale, delete de Pod, port-forward e exec estão implementados sobre o
 mesmo `AuthorizationService` da Fase 4. Capabilities da interface são apenas
 informativas: cada mutação ou upgrade revalida o SAR exato no backend. Tickets,
 sessões, listeners e streams têm owner, geração, limites e cleanup.
+
+O fechamento dinâmico confirmou restart, scale, delete de Pod, port-forward e
+exec nos caminhos permitido, negado e revogado contra uma API Kubernetes real.
 
 ## Rastreabilidade da implementação
 
@@ -41,16 +45,45 @@ sessões, listeners e streams têm owner, geração, limites e cleanup.
 
 Go 1.25.13 `test`, race, vet, build e `govulncheck` passaram. Os testes
 black-box locais de lifecycle de port-forward/exec e os testes adversariais do
-wire passaram. O frontend passou audit/lint/typecheck/build, 63 Vitest e três
+wire passaram. O frontend passou audit/lint/typecheck/build, 73 Vitest e três
 Playwright. Ginger v1.4.4 `inspect`/`doctor` também passou.
 
-## Pendências exatas
+## Evidência Kind canônica
 
-- **F7-44:** executar cada subresource real no caminho permitido, negado e
-  revogado: `./test/kind/harness.sh validate`; para os quatro caminhos HTTP do
-  produto, completar também
-  `./test/kind/harness.sh app-e2e ./kubePeep`.
+O fechamento local executou:
 
-F7-45 e F7-46 estão fechadas por testes locais de confirmação, cleanup e
-inspeção de persistência. A API Kubernetes real continua sendo o único gate
-aberto; não há run atual de CI a citar.
+```bash
+rtk ./test/kind/harness.sh create
+rtk ./test/kind/harness.sh validate
+rtk ./test/kind/harness.sh kubeconfigs
+rtk ./test/kind/harness.sh app-e2e ./dist/kubePeep
+```
+
+No perfil permitido, o black-box comprovou restart, scale, delete de Pod,
+port-forward e exec reais. No perfil sem grants, restart, scale, delete e
+port-forward receberam `503/AUTHORIZATION_UNAVAILABLE`, pois o SSAR não emitiu
+decisão; exec recebeu `403/FORBIDDEN` quando a negação da operação alvo pela API
+Kubernetes foi autoritativa.
+
+Na revogação periódica, uma nova ação de exec e a reautorização de um ticket
+WebSocket existente falharam fechadas com `503/AUTHORIZATION_UNAVAILABLE`. A
+leitura direta do Pod pela identidade revogada confirmou, separadamente, a
+negação autoritativa `Forbidden` da API Kubernetes. O cleanup restaurou os
+bindings, recriou o Pod excluído, restaurou escala e anotação de restart e
+removeu sessões, listeners e grant temporário.
+
+As fixtures compartilhadas também recriaram de forma idempotente, sequencial e
+com precondição de UID o Pod de previous-log e o Event inicial
+`000-kp-warning`. A prova negativa de delete usa a UID do Pod gerenciado, exige
+`Forbidden` autoritativo e confirma que a identidade permaneceu igual. A
+recuperação fica armada antes de qualquer remoção, converge respostas ambíguas
+e não incorpora conteúdo de nenhum recurso à evidência.
+
+A inspeção negativa não encontrou comando, saída, ticket, conteúdo de log,
+kubeconfig, token ou payload operacional persistido. O contrato final é:
+operações falham fechadas; SSAR sem decisão resulta em
+`503/AUTHORIZATION_UNAVAILABLE`; somente uma negação direta e autoritativa
+resulta em `403/FORBIDDEN`.
+
+Esta é evidência local do Kind; nenhum run adicional de CI é atribuído ao
+fechamento.

@@ -1,8 +1,9 @@
 # Evidências da Fase 5 — Dashboard
 
 **Data da validação local:** 2026-08-24
+**Data da validação Kind:** 2026-08-30
 **Plataforma principal:** Linux amd64
-**Estado:** implementação local concluída; 61 de 62 tarefas comprovadas; cenário dinâmico no Kind pendente
+**Estado:** fase concluída; 62 de 62 tarefas comprovadas, incluindo o cenário dinâmico no Kind
 
 ## Resultado
 
@@ -11,6 +12,10 @@ erros parciais explícitos. Pods problemáticos, restarts, workloads, eventos,
 scan limitado de logs e Metrics API opcional possuem classificadores e budgets
 próprios. A interface mantém os demais blocos utilizáveis quando uma fonte é
 negada ou indisponível.
+
+O fechamento dinâmico confirmou os quatro estados exigidos: dashboard completo,
+dashboard parcialmente negado, Metrics API ausente sem falha global e perfil
+offline com término limitado.
 
 ## Rastreabilidade da implementação
 
@@ -40,16 +45,37 @@ negada ou indisponível.
 ## Gates locais executados
 
 Os gates Go 1.25.13 (`test`, race, vet, build e `govulncheck`), os gates de
-frontend (audit sem vulnerabilidades, lint, typecheck, build, 63 Vitest e três
+frontend (audit sem vulnerabilidades, lint, typecheck, build, 73 Vitest e três
 Playwright) e Ginger v1.4.4 (`inspect`/`doctor`) passaram no fechamento local.
 O segundo cenário Playwright prova o dashboard parcial e o scan explícito.
 
-## Pendências exatas
+## Evidência Kind canônica
 
-- **F5-59:** executar o dashboard contra a API Kubernetes real nos caminhos
-  permitido, parcialmente negado, sem métricas e offline:
-  `./test/kind/harness.sh validate` e
-  `./test/kind/harness.sh app-e2e ./kubePeep`.
+O fechamento local executou:
 
-O harness e suas fixtures passaram na validação estática, mas os comandos
-dinâmicos aguardam Docker. Não existe run atual de CI a citar.
+```bash
+rtk ./test/kind/harness.sh create
+rtk ./test/kind/harness.sh validate
+rtk ./test/kind/harness.sh kubeconfigs
+rtk ./test/kind/harness.sh app-e2e ./dist/kubePeep
+```
+
+O black-box comprovou o dashboard completo no perfil permitido, a degradação
+parcial com `FORBIDDEN` sem bloquear os demais cartões, a ausência opcional da
+Metrics API e o encerramento limitado do perfil offline. A fixture também
+comprovou um Pod com log anterior após restart e o Event inicial
+`000-kp-warning`, necessário para exercitar paginação e ordenação reais.
+
+Para tornar execuções repetidas determinísticas, o harness primeiro valida a
+propriedade e reaplica o conjunto completo; depois substitui, uma por vez,
+somente as fixtures sensíveis ao tempo. Cada delete usa a UID observada como
+precondição, e cada substituição arma a recuperação antes do DELETE. Sinais
+encerram o fluxo pelo trap de saída; resposta perdida converge repetindo o
+DELETE precondicionado, e a restauração é feita por criação canônica. Assim, o
+restart volta a produzir previous-log e o Event recebe timestamp e posição de
+ordenação novos. A evidência registra apenas os
+estados e identificadores sintéticos necessários: nenhum conteúdo de log,
+kubeconfig, token ou payload de Event foi copiado para este documento.
+
+Esta é evidência local do Kind; nenhum run adicional de CI é atribuído ao
+fechamento.
