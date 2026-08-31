@@ -55,7 +55,7 @@ func TestPortForwardTerminalPathsReleaseLoopbackPortAndAdapterGoroutine(t *testi
 		t.Run(test.name, func(t *testing.T) {
 			generations := &generationStub{generation: "gen_1"}
 			adapter := newCleanupPortForwardAdapter()
-			manager, err := newPortForwardService(
+			manager, err := newPortForwardService(context.Background(), 
 				&authorizerStub{}, generations, adapter, netLoopbackBinder{}, NoopAuditSink{},
 				systemClock{}, &identifierStub{}, test.duration, time.Minute, time.Second, time.Minute,
 			)
@@ -98,11 +98,19 @@ func TestPortForwardTerminalPathsReleaseLoopbackPortAndAdapterGoroutine(t *testi
 			if _, err := client.Read(make([]byte, 1)); err == nil {
 				t.Fatal("accepted loopback connection survived termination")
 			}
-			probe, err := net.Listen("tcp", net.JoinHostPort(dto.LocalAddress, strconv.Itoa(dto.LocalPort)))
-			if err != nil {
-				t.Fatalf("loopback port remained allocated: %v", err)
+			var probe net.Listener
+			deadline := time.Now().Add(2 * time.Second)
+			for {
+				probe, err = net.Listen("tcp", net.JoinHostPort(dto.LocalAddress, strconv.Itoa(dto.LocalPort)))
+				if err == nil {
+					_ = probe.Close()
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("loopback port remained allocated: %v", err)
+				}
+				time.Sleep(10 * time.Millisecond)
 			}
-			_ = probe.Close()
 
 			rows, err := manager.List(testBinding(test.generation))
 			if err != nil {
@@ -171,7 +179,7 @@ func TestExecTerminalPathsReleaseWaitGoroutineAndSession(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			generations := &generationStub{generation: "gen_1"}
 			adapter := newCleanupExecAdapter()
-			manager, err := NewExecService(
+			manager, err := NewExecService(context.Background(), 
 				&authorizerStub{}, generations,
 				&execInspectorStub{state: ExecTargetState{PodExists: true, ContainerExists: true, ContainerRunning: true}},
 				adapter, NoopAuditSink{},

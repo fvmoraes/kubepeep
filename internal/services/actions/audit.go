@@ -27,7 +27,7 @@ type NoopAuditSink struct{}
 
 func (NoopAuditSink) Record(context.Context, AuditEvent) {}
 
-func recordAudit(sink AuditSink, clock Clock, started time.Time, operation string, target MutationTarget, err error) {
+func recordAudit(ctx context.Context, sink AuditSink, clock Clock, started time.Time, operation string, target MutationTarget, err error) {
 	if sink == nil {
 		return
 	}
@@ -40,7 +40,7 @@ func recordAudit(sink AuditSink, clock Clock, started time.Time, operation strin
 		}
 	}
 	now := clock.Now().UTC()
-	sink.Record(context.Background(), AuditEvent{
+	sink.Record(ctx, AuditEvent{
 		Timestamp: now,
 		Level:     level,
 		Component: "actions",

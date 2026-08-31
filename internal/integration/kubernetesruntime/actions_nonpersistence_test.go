@@ -46,6 +46,7 @@ func TestExecSecretsNeverReachAuditLogOrSQLiteArtifacts(t *testing.T) {
 
 	remote := newNonPersistenceRemote(stdoutNeedle, stderrNeedle)
 	manager, err := actions.NewExecService(
+		context.Background(),
 		nonPersistenceAuthorizer{},
 		nonPersistenceGeneration("gen_evidence"),
 		nonPersistenceInspector{},

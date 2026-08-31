@@ -10,7 +10,7 @@ import (
 
 func newTestExecManager(t *testing.T, generations *generationStub, authorizer *authorizerStub, inspector *execInspectorStub, adapter *execAdapterStub, audit AuditSink) *ExecManager {
 	t.Helper()
-	manager, err := newExecService(authorizer, generations, inspector, adapter, audit, systemClock{}, &identifierStub{}, time.Second, time.Second, time.Second, time.Second)
+	manager, err := newExecService(context.Background(), authorizer, generations, inspector, adapter, audit, systemClock{}, &identifierStub{}, time.Second, time.Second, time.Second, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestExecTicketIsOneShotAndWrongTokenDoesNotConsumeIt(t *testing.T) {
 func TestExecTicketExpiryAndGenerationBinding(t *testing.T) {
 	clock := &fakeClock{now: time.Date(2026, 8, 17, 12, 0, 0, 0, time.UTC)}
 	generations := &generationStub{generation: "gen_1"}
-	manager, err := newExecService(&authorizerStub{}, generations, &execInspectorStub{state: ExecTargetState{PodExists: true, ContainerExists: true, ContainerRunning: true}}, &execAdapterStub{}, NoopAuditSink{}, clock, &identifierStub{}, 10*time.Second, time.Hour, time.Hour, time.Second)
+	manager, err := newExecService(context.Background(), &authorizerStub{}, generations, &execInspectorStub{state: ExecTargetState{PodExists: true, ContainerExists: true, ContainerRunning: true}}, &execAdapterStub{}, NoopAuditSink{}, clock, &identifierStub{}, 10*time.Second, time.Hour, time.Hour, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +189,7 @@ func TestExecCancellationGenerationIdleAndDurationAreDeterministic(t *testing.T)
 	newManager := func(idle, duration time.Duration) (*ExecManager, *generationStub, *execAdapterStub) {
 		generations := &generationStub{generation: "gen_1"}
 		adapter := &execAdapterStub{}
-		manager, err := newExecService(&authorizerStub{}, generations, &execInspectorStub{state: ExecTargetState{PodExists: true, ContainerExists: true, ContainerRunning: true}}, adapter, NoopAuditSink{}, systemClock{}, &identifierStub{}, time.Second, duration, idle, time.Second)
+		manager, err := newExecService(context.Background(), &authorizerStub{}, generations, &execInspectorStub{state: ExecTargetState{PodExists: true, ContainerExists: true, ContainerRunning: true}}, adapter, NoopAuditSink{}, systemClock{}, &identifierStub{}, time.Second, duration, idle, time.Second)
 		if err != nil {
 			t.Fatal(err)
 		}

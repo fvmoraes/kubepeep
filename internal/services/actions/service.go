@@ -19,6 +19,7 @@ type Service struct {
 	audit       AuditSink
 	clock       Clock
 	restarts    *idempotencyRegistry[ActionAcceptedDTO]
+	rootCtx     context.Context
 
 	mu             sync.Mutex
 	nextOperation  uint64
@@ -32,11 +33,14 @@ type generationOperation struct {
 	cancel     context.CancelFunc
 }
 
-func NewActionService(authorizer AuthorizationService, generations GenerationReader, adapter KubernetesActions, audit AuditSink) (*Service, error) {
-	return newActionService(authorizer, generations, adapter, audit, systemClock{}, DefaultActionTimeout, DefaultIdempotencyTTL)
+func NewActionService(rootCtx context.Context, authorizer AuthorizationService, generations GenerationReader, adapter KubernetesActions, audit AuditSink) (*Service, error) {
+	return newActionService(rootCtx, authorizer, generations, adapter, audit, systemClock{}, DefaultActionTimeout, DefaultIdempotencyTTL)
 }
 
-func newActionService(authorizer AuthorizationService, generations GenerationReader, adapter KubernetesActions, audit AuditSink, clock Clock, operationLimit, idempotencyTTL time.Duration) (*Service, error) {
+func newActionService(rootCtx context.Context, authorizer AuthorizationService, generations GenerationReader, adapter KubernetesActions, audit AuditSink, clock Clock, operationLimit, idempotencyTTL time.Duration) (*Service, error) {
+	if rootCtx == nil {
+		return nil, errors.New("actions: root context is required")
+	}
 	if authorizer == nil || generations == nil || adapter == nil || audit == nil || clock == nil {
 		return nil, errors.New("actions: authorizer, generation reader, adapter, audit sink, and clock are required")
 	}
@@ -50,14 +54,25 @@ func newActionService(authorizer AuthorizationService, generations GenerationRea
 		audit:          audit,
 		clock:          clock,
 		restarts:       newIdempotencyRegistry[ActionAcceptedDTO](clock, idempotencyTTL),
+		rootCtx:        rootCtx,
 		operations:     make(map[uint64]generationOperation),
 		operationLimit: operationLimit,
 	}, nil
 }
 
-func (s *Service) Restart(ctx context.Context, binding namespaces.SelectionBinding, route RouteTarget, idempotencyKey string, request RestartRequest) (ActionAcceptedDTO, bool, error) {
+func validateContext(ctx context.Context) error {
 	if ctx == nil {
-		ctx = context.Background()
+		return validationError(FieldViolation{Field: "context", Rule: "required"})
+	}
+	if err := ctx.Err(); err != nil {
+		return translateError(err)
+	}
+	return nil
+}
+
+func (s *Service) Restart(ctx context.Context, binding namespaces.SelectionBinding, route RouteTarget, idempotencyKey string, request RestartRequest) (ActionAcceptedDTO, bool, error) {
+	if err := validateContext(ctx); err != nil {
+		return ActionAcceptedDTO{}, false, err
 	}
 	if err := validateRestart(binding, route, request); err != nil {
 		return ActionAcceptedDTO{}, false, err
@@ -87,7 +102,7 @@ func (s *Service) Restart(ctx context.Context, binding namespaces.SelectionBindi
 func (s *Service) restartOnce(ctx context.Context, binding namespaces.SelectionBinding, request RestartRequest) (result ActionAcceptedDTO, returnedErr error) {
 	target := mutationTarget(binding, request.Target)
 	started := s.clock.Now().UTC()
-	defer func() { recordAudit(s.audit, s.clock, started, "restart", target, returnedErr) }()
+	defer func() { recordAudit(ctx, s.audit, s.clock, started, "restart", target, returnedErr) }()
 	key, err := authorization.KeyForCapability(binding.Generation, target.Namespace, "deployments.restart", target.Name)
 	if err != nil {
 		return result, translateError(err)
@@ -119,8 +134,8 @@ func (s *Service) restartOnce(ctx context.Context, binding namespaces.SelectionB
 }
 
 func (s *Service) Scale(ctx context.Context, binding namespaces.SelectionBinding, route RouteTarget, request ScaleRequest) (result ScaleResultDTO, returnedErr error) {
-	if ctx == nil {
-		ctx = context.Background()
+	if err := validateContext(ctx); err != nil {
+		return result, err
 	}
 	if err := validateScale(binding, route, request); err != nil {
 		return result, err
@@ -130,7 +145,7 @@ func (s *Service) Scale(ctx context.Context, binding namespaces.SelectionBinding
 	}
 	target := mutationTarget(binding, request.Target)
 	started := s.clock.Now().UTC()
-	defer func() { recordAudit(s.audit, s.clock, started, "scale", target, returnedErr) }()
+	defer func() { recordAudit(ctx, s.audit, s.clock, started, "scale", target, returnedErr) }()
 	capabilityID := "deployments.scale"
 	if route.Kind == "statefulsets" {
 		capabilityID = "statefulsets.scale"
@@ -169,8 +184,8 @@ func (s *Service) Scale(ctx context.Context, binding namespaces.SelectionBinding
 }
 
 func (s *Service) DeletePod(ctx context.Context, binding namespaces.SelectionBinding, route RouteTarget, request PodDeleteRequest) (result ActionAcceptedDTO, returnedErr error) {
-	if ctx == nil {
-		ctx = context.Background()
+	if err := validateContext(ctx); err != nil {
+		return result, err
 	}
 	if err := validateDeletePod(binding, route, request); err != nil {
 		return result, err
@@ -180,7 +195,7 @@ func (s *Service) DeletePod(ctx context.Context, binding namespaces.SelectionBin
 	}
 	target := mutationTarget(binding, request.Target)
 	started := s.clock.Now().UTC()
-	defer func() { recordAudit(s.audit, s.clock, started, "delete_pod", target, returnedErr) }()
+	defer func() { recordAudit(ctx, s.audit, s.clock, started, "delete_pod", target, returnedErr) }()
 	key, err := authorization.KeyForCapability(binding.Generation, target.Namespace, "pods.delete", target.Name)
 	if err != nil {
 		return result, translateError(err)
@@ -219,7 +234,7 @@ func (s *Service) guarded(ctx context.Context, generation string, key authorizat
 			operationErr = err
 			return err
 		}
-		operationContext, release, err := s.beginOperation(generation)
+		operationContext, release, err := s.beginOperation(ctx, generation)
 		if err != nil {
 			operationErr = err
 			return err
@@ -247,7 +262,7 @@ func (s *Service) guarded(ctx context.Context, generation string, key authorizat
 	return nil
 }
 
-func (s *Service) beginOperation(generation string) (context.Context, func(), error) {
+func (s *Service) beginOperation(ctx context.Context, generation string) (context.Context, func(), error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.shutdown {
@@ -255,7 +270,7 @@ func (s *Service) beginOperation(generation string) (context.Context, func(), er
 	}
 	s.nextOperation++
 	id := s.nextOperation
-	operationContext, cancel := context.WithTimeout(context.Background(), s.operationLimit)
+	operationContext, cancel := context.WithTimeout(ctx, s.operationLimit)
 	s.operations[id] = generationOperation{generation: generation, cancel: cancel}
 	return operationContext, func() {
 		cancel()

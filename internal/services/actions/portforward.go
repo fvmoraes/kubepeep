@@ -61,6 +61,7 @@ type PortForwardManager struct {
 	duration    time.Duration
 	retention   time.Duration
 	setupLimit  time.Duration
+	rootCtx     context.Context
 
 	mu        sync.Mutex
 	sessions  map[string]*portForwardSession
@@ -69,11 +70,14 @@ type PortForwardManager struct {
 	shutdown  bool
 }
 
-func NewPortForwardService(authorizer AuthorizationService, generations GenerationReader, adapter PortForwardAdapter, audit AuditSink) (*PortForwardManager, error) {
-	return newPortForwardService(authorizer, generations, adapter, netLoopbackBinder{}, audit, systemClock{}, cryptoIdentifiers{}, DefaultPortForwardDuration, DefaultPortForwardRetention, DefaultPortForwardSetup, DefaultIdempotencyTTL)
+func NewPortForwardService(rootCtx context.Context, authorizer AuthorizationService, generations GenerationReader, adapter PortForwardAdapter, audit AuditSink) (*PortForwardManager, error) {
+	return newPortForwardService(rootCtx, authorizer, generations, adapter, netLoopbackBinder{}, audit, systemClock{}, cryptoIdentifiers{}, DefaultPortForwardDuration, DefaultPortForwardRetention, DefaultPortForwardSetup, DefaultIdempotencyTTL)
 }
 
-func newPortForwardService(authorizer AuthorizationService, generations GenerationReader, adapter PortForwardAdapter, binder LoopbackBinder, audit AuditSink, clock Clock, identifiers IdentifierSource, duration, retention, setupLimit, idempotencyTTL time.Duration) (*PortForwardManager, error) {
+func newPortForwardService(rootCtx context.Context, authorizer AuthorizationService, generations GenerationReader, adapter PortForwardAdapter, binder LoopbackBinder, audit AuditSink, clock Clock, identifiers IdentifierSource, duration, retention, setupLimit, idempotencyTTL time.Duration) (*PortForwardManager, error) {
+	if rootCtx == nil {
+		return nil, errors.New("actions: root context is required")
+	}
 	if authorizer == nil || generations == nil || adapter == nil || binder == nil || audit == nil || clock == nil || identifiers == nil {
 		return nil, errors.New("actions: port-forward dependencies are required")
 	}
@@ -92,14 +96,15 @@ func newPortForwardService(authorizer AuthorizationService, generations Generati
 		duration:    duration,
 		retention:   retention,
 		setupLimit:  setupLimit,
+		rootCtx:     rootCtx,
 		sessions:    make(map[string]*portForwardSession),
 		starts:      make(map[uint64]portForwardStart),
 	}, nil
 }
 
 func (m *PortForwardManager) Create(ctx context.Context, binding namespaces.SelectionBinding, route RouteTarget, idempotencyKey string, request PortForwardCreateRequest) (PortForwardDTO, bool, error) {
-	if ctx == nil {
-		ctx = context.Background()
+	if err := validateContext(ctx); err != nil {
+		return PortForwardDTO{}, false, err
 	}
 	if err := validatePortForward(binding, route, request); err != nil {
 		return PortForwardDTO{}, false, err
@@ -130,7 +135,7 @@ func (m *PortForwardManager) Create(ctx context.Context, binding namespaces.Sele
 func (m *PortForwardManager) createOnce(ctx context.Context, binding namespaces.SelectionBinding, request PortForwardCreateRequest) (dto PortForwardDTO, returnedErr error) {
 	target := mutationTarget(binding, request.Target)
 	started := m.clock.Now().UTC()
-	defer func() { recordAudit(m.audit, m.clock, started, "port_forward_start", target, returnedErr) }()
+	defer func() { recordAudit(ctx, m.audit, m.clock, started, "port_forward_start", target, returnedErr) }()
 	key, err := authorization.KeyForCapability(binding.Generation, target.Namespace, "pods.portforward.create", target.Name)
 	if err != nil {
 		return dto, translateError(err)
@@ -156,7 +161,7 @@ func (m *PortForwardManager) createOnce(ctx context.Context, binding namespaces.
 			return operationErr
 		}
 		reserved = true
-		lifetimeCtx, cancel = context.WithCancel(context.Background())
+		lifetimeCtx, cancel = context.WithCancel(m.rootCtx)
 		if err := m.attachReservation(startID, cancel); err != nil {
 			operationErr = err
 			return err
@@ -352,7 +357,7 @@ func (m *PortForwardManager) finish(identifier string, status PortForwardStatus)
 	target := session.target
 	m.mu.Unlock()
 	session.stop()
-	recordAudit(m.audit, m.clock, session.dto.CreatedAt, "port_forward_end", target, terminalStatusError(status))
+	recordAudit(m.rootCtx, m.audit, m.clock, session.dto.CreatedAt, "port_forward_end", target, terminalStatusError(status))
 }
 
 func terminalStatusError(status PortForwardStatus) error {
@@ -388,8 +393,8 @@ func (m *PortForwardManager) List(binding namespaces.SelectionBinding) ([]PortFo
 }
 
 func (m *PortForwardManager) Close(ctx context.Context, binding namespaces.SelectionBinding, identifier string, request PortForwardDeleteRequest) error {
-	if ctx == nil {
-		ctx = context.Background()
+	if err := validateContext(ctx); err != nil {
+		return err
 	}
 	if err := validateBinding(binding); err != nil {
 		return err
@@ -405,9 +410,6 @@ func (m *PortForwardManager) Close(ctx context.Context, binding namespaces.Selec
 	}
 	if err := m.requireCurrent(binding.Generation); err != nil {
 		return err
-	}
-	if err := ctx.Err(); err != nil {
-		return translateError(err)
 	}
 	m.mu.Lock()
 	m.pruneLocked(m.clock.Now())
@@ -432,7 +434,7 @@ func (m *PortForwardManager) Close(ctx context.Context, binding namespaces.Selec
 	target := session.target
 	m.mu.Unlock()
 	session.stop()
-	recordAudit(m.audit, m.clock, now, "port_forward_end", target, nil)
+	recordAudit(m.rootCtx, m.audit, m.clock, now, "port_forward_end", target, nil)
 	return nil
 }
 
@@ -462,7 +464,7 @@ func (m *PortForwardManager) OnGeneration(current string) {
 	}
 	for _, session := range stale {
 		session.stop()
-		recordAudit(m.audit, m.clock, session.dto.CreatedAt, "port_forward_end", session.target, publicError(CodeGenerationChanged, http.StatusConflict, false, nil))
+		recordAudit(m.rootCtx, m.audit, m.clock, session.dto.CreatedAt, "port_forward_end", session.target, publicError(CodeGenerationChanged, http.StatusConflict, false, nil))
 	}
 }
 
@@ -492,7 +494,7 @@ func (m *PortForwardManager) Shutdown() {
 	}
 	for _, session := range sessions {
 		session.stop()
-		recordAudit(m.audit, m.clock, session.dto.CreatedAt, "port_forward_end", session.target, publicError(CodeServerShutdown, http.StatusServiceUnavailable, true, nil))
+		recordAudit(m.rootCtx, m.audit, m.clock, session.dto.CreatedAt, "port_forward_end", session.target, publicError(CodeServerShutdown, http.StatusServiceUnavailable, true, nil))
 	}
 }
 

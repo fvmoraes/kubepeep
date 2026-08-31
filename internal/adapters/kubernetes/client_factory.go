@@ -32,6 +32,18 @@ var execAuthenticatorConstruction sync.Mutex
 
 var discardedExecPluginStderr, discardedExecPluginStderrError = os.OpenFile(os.DevNull, os.O_WRONLY, 0)
 
+// withDiscardedStderr temporarily redirects the process's os.Stderr to the
+// platform null device. It must be called with execAuthenticatorConstruction
+// held. The returned function restores the previous stderr and must be called
+// exactly once, even if a panic occurs.
+func withDiscardedStderr() (restore func()) {
+	previousStderr := os.Stderr
+	os.Stderr = discardedExecPluginStderr
+	return func() {
+		os.Stderr = previousStderr
+	}
+}
+
 const (
 	DefaultUnaryTimeout = 15 * time.Second
 	defaultUserAgent    = "kubePeep"
@@ -202,17 +214,14 @@ func (factory *ClientFactory) Build(ctx context.Context, resolution *Resolution)
 	base.Burst = factory.burst
 	base.Impersonate = rest.ImpersonationConfig{}
 
-	execAuthenticatorConstruction.Lock()
-	previousStderr := os.Stderr
 	if discardedExecPluginStderrError != nil || discardedExecPluginStderr == nil {
-		execAuthenticatorConstruction.Unlock()
 		return nil, safeError(CodeClientUnavailable, "The Kubernetes authentication output could not be isolated.", false)
 	}
-	os.Stderr = discardedExecPluginStderr
-	defer func() {
-		os.Stderr = previousStderr
-		execAuthenticatorConstruction.Unlock()
-	}()
+
+	execAuthenticatorConstruction.Lock()
+	defer execAuthenticatorConstruction.Unlock()
+	restoreStderr := withDiscardedStderr()
+	defer restoreStderr()
 
 	unaryConfig := rest.CopyConfig(base)
 	unaryConfig.Timeout = factory.unaryTimeout

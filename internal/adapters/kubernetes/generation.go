@@ -112,6 +112,8 @@ func (stream *StreamContext) Context() context.Context {
 }
 
 // Activity resets the idle deadline and reports whether the stream is active.
+// It stops the current timer before resetting it so that a timer firing
+// concurrently with the heartbeat cannot close the stream after the reset.
 func (stream *StreamContext) Activity() bool {
 	if stream == nil {
 		return false
@@ -119,6 +121,10 @@ func (stream *StreamContext) Activity() bool {
 	stream.mu.Lock()
 	defer stream.mu.Unlock()
 	if stream.closed || stream.ctx.Err() != nil {
+		return false
+	}
+	if !stream.timer.Stop() {
+		// The timer already fired; the stream is closing or closed.
 		return false
 	}
 	stream.timer.Reset(stream.idleTimeout)

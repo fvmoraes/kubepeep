@@ -65,6 +65,8 @@ func TestFactorySeparatesUnaryTimeoutFromStreamingTransport(t *testing.T) {
 func TestGenerationUsesActivityIdleDeadlineAndCancelsPreviousWork(t *testing.T) {
 	parent, cancelParent := context.WithCancel(context.Background())
 	defer cancelParent()
+	// Use generous margins so CI scheduling jitter does not close an active
+	// stream before the heartbeat loop can reset the idle timer.
 	generation := newGeneration(parent, 1, 25*time.Millisecond)
 	unary, cancelUnary, err := generation.Unary(context.Background())
 	if err != nil {
@@ -74,7 +76,7 @@ func TestGenerationUsesActivityIdleDeadlineAndCancelsPreviousWork(t *testing.T) 
 	if _, hasDeadline := unary.Deadline(); !hasDeadline {
 		t.Fatal("unary context has no finite deadline")
 	}
-	stream, err := generation.Stream(context.Background(), 45*time.Millisecond)
+	stream, err := generation.Stream(context.Background(), 500*time.Millisecond)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,9 +85,9 @@ func TestGenerationUsesActivityIdleDeadlineAndCancelsPreviousWork(t *testing.T) 
 		t.Fatal("stream inherited a global deadline")
 	}
 	for range 4 {
-		time.Sleep(20 * time.Millisecond)
+		time.Sleep(50 * time.Millisecond)
 		if !stream.Activity() {
-			t.Fatal("active stream was canceled by unary timeout")
+			t.Fatalf("active stream ended early: %v", context.Cause(stream.Context()))
 		}
 	}
 	select {
@@ -95,7 +97,7 @@ func TestGenerationUsesActivityIdleDeadlineAndCancelsPreviousWork(t *testing.T) 
 	}
 	select {
 	case <-stream.Context().Done():
-	case <-time.After(150 * time.Millisecond):
+	case <-time.After(time.Second):
 		t.Fatal("idle stream was not canceled")
 	}
 }

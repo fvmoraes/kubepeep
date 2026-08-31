@@ -163,16 +163,16 @@ func Compose(ctx context.Context, options Options) (*Platform, error) {
 		return nil, err
 	}
 	actionAudit := kuberuntime.NewActionAuditSink(logger)
-	actions, err := actionservice.NewActionService(authorizationService, kubernetesRuntime, actionBackends.Mutations, actionAudit)
+	actions, err := actionservice.NewActionService(ctx, authorizationService, kubernetesRuntime, actionBackends.Mutations, actionAudit)
 	if err != nil {
 		return nil, err
 	}
-	portForwards, err := actionservice.NewPortForwardService(authorizationService, kubernetesRuntime, actionBackends.PortForward, actionAudit)
+	portForwards, err := actionservice.NewPortForwardService(ctx, authorizationService, kubernetesRuntime, actionBackends.PortForward, actionAudit)
 	if err != nil {
 		actions.Shutdown()
 		return nil, err
 	}
-	execSessions, err := actionservice.NewExecService(authorizationService, kubernetesRuntime, actionBackends.Mutations, actionBackends.Exec, actionAudit)
+	execSessions, err := actionservice.NewExecService(ctx, authorizationService, kubernetesRuntime, actionBackends.Mutations, actionBackends.Exec, actionAudit)
 	if err != nil {
 		portForwards.Shutdown()
 		actions.Shutdown()

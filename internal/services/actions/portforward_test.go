@@ -13,7 +13,7 @@ func TestPortForwardUsesExactSARAndOwnsLoopbackLifecycle(t *testing.T) {
 	authorizer := &authorizerStub{}
 	adapter := &portForwardAdapterStub{}
 	audit := &auditStub{}
-	manager, err := NewPortForwardService(authorizer, generations, adapter, audit)
+	manager, err := NewPortForwardService(context.Background(), authorizer, generations, adapter, audit)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestPortForwardValidationAndOccupiedPortFailSafely(t *testing.T) {
 	generations := &generationStub{generation: "gen_1"}
 	authorizer := &authorizerStub{}
 	adapter := &portForwardAdapterStub{}
-	manager, err := NewPortForwardService(authorizer, generations, adapter, NoopAuditSink{})
+	manager, err := NewPortForwardService(context.Background(), authorizer, generations, adapter, NoopAuditSink{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,7 +92,7 @@ func TestPortForwardValidationAndOccupiedPortFailSafely(t *testing.T) {
 func TestPortForwardLimitIsExactlyEightAndGenerationCleansAll(t *testing.T) {
 	generations := &generationStub{generation: "gen_1"}
 	adapter := &portForwardAdapterStub{}
-	manager, err := NewPortForwardService(&authorizerStub{}, generations, adapter, NoopAuditSink{})
+	manager, err := NewPortForwardService(context.Background(), &authorizerStub{}, generations, adapter, NoopAuditSink{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func TestPortForwardLimitIsExactlyEightAndGenerationCleansAll(t *testing.T) {
 func TestPortForwardIdempotencyPreventsSecondListener(t *testing.T) {
 	generations := &generationStub{generation: "gen_1"}
 	adapter := &portForwardAdapterStub{started: make(chan struct{}, 1), release: make(chan struct{})}
-	manager, err := NewPortForwardService(&authorizerStub{}, generations, adapter, NoopAuditSink{})
+	manager, err := NewPortForwardService(context.Background(), &authorizerStub{}, generations, adapter, NoopAuditSink{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +178,7 @@ func TestPortForwardIdempotencyPreventsSecondListener(t *testing.T) {
 func TestPortForwardExpiryPodGoneAndTerminalRetention(t *testing.T) {
 	generations := &generationStub{generation: "gen_1"}
 	adapter := &portForwardAdapterStub{}
-	manager, err := newPortForwardService(&authorizerStub{}, generations, adapter, netLoopbackBinder{}, NoopAuditSink{}, systemClock{}, &identifierStub{}, 20*time.Millisecond, 30*time.Millisecond, time.Second, time.Minute)
+	manager, err := newPortForwardService(context.Background(), &authorizerStub{}, generations, adapter, netLoopbackBinder{}, NoopAuditSink{}, systemClock{}, &identifierStub{}, 20*time.Millisecond, 30*time.Millisecond, time.Second, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +199,7 @@ func TestPortForwardExpiryPodGoneAndTerminalRetention(t *testing.T) {
 	}
 
 	adapter2 := &portForwardAdapterStub{}
-	manager2, err := NewPortForwardService(&authorizerStub{}, generations, adapter2, NoopAuditSink{})
+	manager2, err := NewPortForwardService(context.Background(), &authorizerStub{}, generations, adapter2, NoopAuditSink{})
 	if err != nil {
 		t.Fatal(err)
 	}

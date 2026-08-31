@@ -18,7 +18,7 @@ func TestActionsUseExactAuthorizationAndNarrowCommands(t *testing.T) {
 	authorizer := &authorizerStub{}
 	adapter := &actionAdapterStub{}
 	audit := &auditStub{}
-	service, err := newActionService(authorizer, generations, adapter, audit, clock, time.Second, time.Minute)
+	service, err := newActionService(context.Background(), authorizer, generations, adapter, audit, clock, time.Second, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestActionValidationPrecedesAuthorizationAndOperation(t *testing.T) {
 	generations := &generationStub{generation: "gen_1"}
 	authorizer := &authorizerStub{}
 	adapter := &actionAdapterStub{}
-	service, err := NewActionService(authorizer, generations, adapter, NoopAuditSink{})
+	service, err := NewActionService(context.Background(), authorizer, generations, adapter, NoopAuditSink{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestRestartIdempotencySharesConcurrentExecutionAndReplaysResult(t *testing.
 	generations := &generationStub{generation: "gen_1"}
 	authorizer := &authorizerStub{}
 	adapter := &actionAdapterStub{started: make(chan struct{}, 1), release: make(chan struct{})}
-	service, err := NewActionService(authorizer, generations, adapter, NoopAuditSink{})
+	service, err := NewActionService(context.Background(), authorizer, generations, adapter, NoopAuditSink{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +140,7 @@ func TestRestartIdempotencySharesConcurrentExecutionAndReplaysResult(t *testing.
 
 func TestRestartIdempotencyBindsBodyPathProfileAndGeneration(t *testing.T) {
 	generations := &generationStub{generation: "gen_1"}
-	service, err := NewActionService(&authorizerStub{}, generations, &actionAdapterStub{}, NoopAuditSink{})
+	service, err := NewActionService(context.Background(), &authorizerStub{}, generations, &actionAdapterStub{}, NoopAuditSink{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +177,7 @@ func TestRestartIdempotencyBindsBodyPathProfileAndGeneration(t *testing.T) {
 func TestActionOperationErrorsAreAuthoritativeAndSanitized(t *testing.T) {
 	generations := &generationStub{generation: "gen_1"}
 	adapter := &actionAdapterStub{restartErr: apierrors.NewConflict(schema.GroupResource{Group: "apps", Resource: "deployments"}, "api", errors.New("secret upstream detail"))}
-	service, err := NewActionService(&authorizerStub{}, generations, adapter, NoopAuditSink{})
+	service, err := NewActionService(context.Background(), &authorizerStub{}, generations, adapter, NoopAuditSink{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -188,10 +188,10 @@ func TestActionOperationErrorsAreAuthoritativeAndSanitized(t *testing.T) {
 	}
 }
 
-func TestMutationDetachesOnlyAfterDispatchAndGenerationCancelsIt(t *testing.T) {
+func TestMutationRespectsRequestCancellationAndGenerationCancelsIt(t *testing.T) {
 	generations := &generationStub{generation: "gen_1"}
 	adapter := &actionAdapterStub{started: make(chan struct{}, 1), release: make(chan struct{})}
-	service, err := NewActionService(&authorizerStub{}, generations, adapter, NoopAuditSink{})
+	service, err := NewActionService(context.Background(), &authorizerStub{}, generations, adapter, NoopAuditSink{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -204,12 +204,10 @@ func TestMutationDetachesOnlyAfterDispatchAndGenerationCancelsIt(t *testing.T) {
 	<-adapter.started
 	cancelRequest()
 	close(adapter.release)
-	if err := <-result; err != nil {
-		t.Fatalf("request cancellation after dispatch canceled mutation: %v", err)
-	}
+	requireCode(t, <-result, CodeClientCanceled)
 
 	adapter = &actionAdapterStub{started: make(chan struct{}, 1), release: make(chan struct{})}
-	service, err = NewActionService(&authorizerStub{}, generations, adapter, NoopAuditSink{})
+	service, err = NewActionService(context.Background(), &authorizerStub{}, generations, adapter, NoopAuditSink{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,7 +225,7 @@ func TestMutationDetachesOnlyAfterDispatchAndGenerationCancelsIt(t *testing.T) {
 func TestActionAuditContainsOnlyAllowlistedMetadata(t *testing.T) {
 	generations := &generationStub{generation: "gen_1"}
 	audit := &auditStub{}
-	service, err := NewActionService(&authorizerStub{}, generations, &actionAdapterStub{}, audit)
+	service, err := NewActionService(context.Background(), &authorizerStub{}, generations, &actionAdapterStub{}, audit)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -242,7 +240,7 @@ func TestActionAuditContainsOnlyAllowlistedMetadata(t *testing.T) {
 
 func TestConcurrentActionCallsAreRaceSafe(t *testing.T) {
 	generations := &generationStub{generation: "gen_1"}
-	service, err := NewActionService(&authorizerStub{}, generations, &actionAdapterStub{}, NoopAuditSink{})
+	service, err := NewActionService(context.Background(), &authorizerStub{}, generations, &actionAdapterStub{}, NoopAuditSink{})
 	if err != nil {
 		t.Fatal(err)
 	}

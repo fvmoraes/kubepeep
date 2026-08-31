@@ -57,6 +57,7 @@ type ExecManager struct {
 	duration    time.Duration
 	idle        time.Duration
 	setupLimit  time.Duration
+	rootCtx     context.Context
 
 	mu       sync.Mutex
 	tickets  map[string]*execTicket
@@ -64,11 +65,14 @@ type ExecManager struct {
 	shutdown bool
 }
 
-func NewExecService(authorizer AuthorizationService, generations GenerationReader, inspector ExecTargetInspector, adapter ExecAdapter, audit AuditSink) (*ExecManager, error) {
-	return newExecService(authorizer, generations, inspector, adapter, audit, systemClock{}, cryptoIdentifiers{}, DefaultExecTicketTTL, DefaultExecDuration, DefaultExecIdleTimeout, DefaultExecSetupTimeout)
+func NewExecService(rootCtx context.Context, authorizer AuthorizationService, generations GenerationReader, inspector ExecTargetInspector, adapter ExecAdapter, audit AuditSink) (*ExecManager, error) {
+	return newExecService(rootCtx, authorizer, generations, inspector, adapter, audit, systemClock{}, cryptoIdentifiers{}, DefaultExecTicketTTL, DefaultExecDuration, DefaultExecIdleTimeout, DefaultExecSetupTimeout)
 }
 
-func newExecService(authorizer AuthorizationService, generations GenerationReader, inspector ExecTargetInspector, adapter ExecAdapter, audit AuditSink, clock Clock, identifiers IdentifierSource, ticketTTL, duration, idle, setupLimit time.Duration) (*ExecManager, error) {
+func newExecService(rootCtx context.Context, authorizer AuthorizationService, generations GenerationReader, inspector ExecTargetInspector, adapter ExecAdapter, audit AuditSink, clock Clock, identifiers IdentifierSource, ticketTTL, duration, idle, setupLimit time.Duration) (*ExecManager, error) {
+	if rootCtx == nil {
+		return nil, errors.New("actions: root context is required")
+	}
 	if authorizer == nil || generations == nil || inspector == nil || adapter == nil || audit == nil || clock == nil || identifiers == nil {
 		return nil, errors.New("actions: exec dependencies are required")
 	}
@@ -87,14 +91,15 @@ func newExecService(authorizer AuthorizationService, generations GenerationReade
 		duration:    duration,
 		idle:        idle,
 		setupLimit:  setupLimit,
+		rootCtx:     rootCtx,
 		tickets:     make(map[string]*execTicket),
 		sessions:    make(map[string]*execSessionState),
 	}, nil
 }
 
 func (m *ExecManager) CreateTicket(ctx context.Context, binding namespaces.SelectionBinding, route RouteTarget, request ExecInit) (dto ExecTicketDTO, returnedErr error) {
-	if ctx == nil {
-		ctx = context.Background()
+	if err := validateContext(ctx); err != nil {
+		return dto, err
 	}
 	if err := validateExec(binding, route, request); err != nil {
 		return dto, err
@@ -104,7 +109,7 @@ func (m *ExecManager) CreateTicket(ctx context.Context, binding namespaces.Selec
 	}
 	target := mutationTarget(binding, request.Target)
 	started := m.clock.Now().UTC()
-	defer func() { recordAudit(m.audit, m.clock, started, "exec_ticket_create", target, returnedErr) }()
+	defer func() { recordAudit(ctx, m.audit, m.clock, started, "exec_ticket_create", target, returnedErr) }()
 	if err := m.inspect(ctx, target, request.Container, false); err != nil {
 		return dto, err
 	}
@@ -168,8 +173,8 @@ func (m *ExecManager) CreateTicket(ctx context.Context, binding namespaces.Selec
 }
 
 func (m *ExecManager) AuthorizeUpgrade(ctx context.Context, binding namespaces.SelectionBinding, sessionID string, offeredProtocols []string) (grant ExecGrant, returnedErr error) {
-	if ctx == nil {
-		ctx = context.Background()
+	if err := validateContext(ctx); err != nil {
+		return grant, err
 	}
 	if err := validateBinding(binding); err != nil {
 		return grant, err
@@ -198,7 +203,7 @@ func (m *ExecManager) AuthorizeUpgrade(ctx context.Context, binding namespaces.S
 	m.mu.Unlock()
 
 	started := m.clock.Now().UTC()
-	defer func() { recordAudit(m.audit, m.clock, started, "exec_upgrade_authorize", ticket.target, returnedErr) }()
+	defer func() { recordAudit(ctx, m.audit, m.clock, started, "exec_upgrade_authorize", ticket.target, returnedErr) }()
 	if ticket.binding.ClusterProfileID != binding.ClusterProfileID || ticket.binding.Context != binding.Context || ticket.binding.Generation != binding.Generation {
 		return grant, publicError(CodeGenerationChanged, http.StatusConflict, false, nil)
 	}
@@ -255,11 +260,8 @@ func (m *ExecManager) AuthorizeUpgrade(ctx context.Context, binding namespaces.S
 }
 
 func (m *ExecManager) Start(ctx context.Context, grant ExecGrant) (active ActiveExec, returnedErr error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	if err := ctx.Err(); err != nil {
-		return active, translateError(err)
+	if err := validateContext(ctx); err != nil {
+		return active, err
 	}
 	m.mu.Lock()
 	state, ok := m.sessions[grant.SessionID]
@@ -278,11 +280,11 @@ func (m *ExecManager) Start(ctx context.Context, grant ExecGrant) (active Active
 		return active, publicError(CodeGenerationChanged, http.StatusConflict, false, nil)
 	}
 	state.reservationTimer.Stop()
-	lifetimeContext, cancel := context.WithCancel(context.Background())
+	lifetimeContext, cancel := context.WithCancel(m.rootCtx)
 	state.cancel = cancel
 	m.mu.Unlock()
 
-	setupContext, setupCancel := context.WithTimeout(context.Background(), m.setupLimit)
+	setupContext, setupCancel := context.WithTimeout(ctx, m.setupLimit)
 	defer setupCancel()
 	remote, err := m.adapter.Start(setupContext, lifetimeContext, ExecCommand{
 		Target:    state.target,
@@ -333,7 +335,7 @@ func (m *ExecManager) Start(ctx context.Context, grant ExecGrant) (active Active
 	state.startedAt = m.clock.Now().UTC()
 	m.mu.Unlock()
 	go m.monitor(state, lifetimeContext)
-	recordAudit(m.audit, m.clock, state.startedAt, "exec_start", state.target, nil)
+	recordAudit(ctx, m.audit, m.clock, state.startedAt, "exec_start", state.target, nil)
 	return ActiveExec{
 		SessionID:  state.id,
 		Generation: state.binding.Generation,
@@ -457,7 +459,7 @@ func (m *ExecManager) finish(state *execSessionState, terminal ExecTerminal) {
 		if terminal.Type == ExecTerminalError {
 			terminalErr = publicError(terminal.Code, statusForTerminal(terminal.Code), terminal.Retryable, nil)
 		}
-		recordAudit(m.audit, m.clock, state.startedAt, "exec_end", state.target, terminalErr)
+		recordAudit(m.rootCtx, m.audit, m.clock, state.startedAt, "exec_end", state.target, terminalErr)
 	})
 }
 
