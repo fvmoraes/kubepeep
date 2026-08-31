@@ -126,6 +126,8 @@ describe('namespace scope editor', () => {
     renderForm('ephemeral-token')
     fireEvent.change(screen.getByRole('textbox', { name: 'Namespace input' }), { target: { value: 'payments' } })
 
+    expect(screen.getByRole('button', { name: 'Validate with cluster' })).toBeDisabled()
+    fireEvent.change(screen.getByRole('textbox', { name: 'Scope name' }), { target: { value: 'Finance' } })
     fireEvent.click(screen.getByRole('button', { name: 'Validate with cluster' }))
 
     expect(await screen.findByText('Existence was not checked: NAMESPACE_LIST_FORBIDDEN.')).toBeInTheDocument()

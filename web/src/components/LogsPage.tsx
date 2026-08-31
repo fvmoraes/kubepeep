@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router'
 
 import { APIError, getPermissions, getPod, getPodLogs, getPods, getPreferences, getSession, getStatus } from '../api/client'
+import { streamURL } from '../api/desktop'
 import type { APIErrorPayload, CollectionResult, LogLine, Pod, Preferences, SelectionSummary } from '../api/types'
 import { SavedFilterControls } from './SavedFilterControls'
 import { StatePanel } from './StatePanel'
@@ -59,17 +60,35 @@ const defaultLogPreferences: Preferences['logs'] = { wrap: false, timestamps: tr
 
 interface LogCatalog {
   pods: Pod[]
-  source: CollectionResult<Pod>
   denied: number
   unknown: number
   permissionErrors: number
   complete: boolean
 }
 
+const CatalogPageSize = 500
+const MaximumCatalogPods = 4000
+
+function pageCoverageComplete(coverage: CollectionResult<Pod>['coverage']): boolean {
+  return coverage === null || coverage.completedNamespaces === coverage.requestedNamespaces && coverage.deniedNamespaces.length === 0 && coverage.failed.length === 0
+}
+
 async function loadLogCatalog(selection: SelectionSummary, signal?: AbortSignal): Promise<LogCatalog> {
-  const source = await getPods({ limit: 100 }, signal, selection.generation)
+  const source: Pod[] = []
+  let pagesComplete = true
+  let coverageComplete = true
+  let withinBudget = true
+  let continueToken: string | undefined = undefined
+  do {
+    const page = await getPods({ limit: CatalogPageSize, ...(continueToken ? { continueToken } : {}) }, signal, selection.generation)
+    source.push(...page.items)
+    if (!page.page.complete || page.page.truncated) pagesComplete = false
+    if (!pageCoverageComplete(page.coverage)) coverageComplete = false
+    continueToken = page.page.next === '' ? undefined : page.page.next
+    if (continueToken && source.length >= MaximumCatalogPods) withinBudget = false
+  } while (continueToken && withinBudget)
   const namesByNamespace = new Map<string, Set<string>>()
-  for (const pod of source.items) {
+  for (const pod of source) {
     const names = namesByNamespace.get(pod.namespace) ?? new Set<string>()
     names.add(pod.name)
     namesByNamespace.set(pod.namespace, names)
@@ -103,17 +122,15 @@ async function loadLogCatalog(selection: SelectionSummary, signal?: AbortSignal)
     }
   }
   await Promise.all(Array.from({ length: Math.min(4, batches.length) }, () => worker()))
-  const pods = source.items.filter((pod) => decisions.get(`${pod.namespace}\0${pod.name}`) === 'allowed')
-  const denied = source.items.filter((pod) => decisions.get(`${pod.namespace}\0${pod.name}`) === 'denied').length
-  const unknown = source.items.length - pods.length - denied
-  const coverageComplete = source.coverage === null || source.coverage.completedNamespaces === source.coverage.requestedNamespaces && source.coverage.deniedNamespaces.length === 0 && source.coverage.failed.length === 0
+  const pods = source.filter((pod) => decisions.get(`${pod.namespace}\0${pod.name}`) === 'allowed')
+  const denied = source.filter((pod) => decisions.get(`${pod.namespace}\0${pod.name}`) === 'denied').length
+  const unknown = source.length - pods.length - denied
   return {
     pods,
-    source,
     denied,
     unknown,
     permissionErrors,
-    complete: source.page.complete && !source.page.truncated && source.page.next === '' && coverageComplete && permissionsComplete,
+    complete: pagesComplete && coverageComplete && withinBudget && permissionsComplete,
   }
 }
 
@@ -220,7 +237,7 @@ function LogsWorkspace({ selection, params, defaults, preferencesUnavailable }: 
     try {
       const session = await getSession(controller.signal)
       if (session.generation !== selection.generation) throw new APIError(409, { code: 'GENERATION_CHANGED', message: 'The active selection changed.' })
-      const response = await fetch(logURL(namespace, pod, container, timestamps, tailLines, since), {
+      const response = await fetch(await streamURL(logURL(namespace, pod, container, timestamps, tailLines, since)), {
         method: 'GET',
         headers: { Accept: 'text/event-stream', 'X-KubePeep-CSRF': session.csrfToken },
         cache: 'no-store',
@@ -314,7 +331,7 @@ function LogsWorkspace({ selection, params, defaults, preferencesUnavailable }: 
       : catalog.isError ? <p className="field-error">Authorized log target catalog unavailable: {message(catalog.error)}</p>
         : catalog.data ? <p className={catalog.data.complete ? 'field-help' : 'permission-notice'} role="status">{catalog.data.complete
           ? `${catalog.data.pods.length} log-authorized Pod${catalog.data.pods.length === 1 ? '' : 's'} available in the complete bounded catalog.`
-          : `Partial catalog: ${catalog.data.pods.length} log-authorized Pod${catalog.data.pods.length === 1 ? '' : 's'} from this bounded page; ${catalog.data.denied} denied and ${catalog.data.unknown} unknown. Some authorized targets may be absent.`}</p> : null}
+          : `Partial catalog: ${catalog.data.pods.length} log-authorized Pod${catalog.data.pods.length === 1 ? '' : 's'} from the bounded catalog; ${catalog.data.denied} denied and ${catalog.data.unknown} unknown. Some authorized targets may be absent.`}</p> : null}
     <section className="log-controls" aria-label="Log query">
       <label>Namespace<select value={namespaces.includes(namespace) ? namespace : ''} disabled={catalog.isPending || namespaces.length === 0} onChange={(event) => changeTarget(() => { setNamespace(event.target.value); setPod(''); setContainer(''); setPrevious(false) })}><option value="">Choose an authorized namespace</option>{namespaces.map((value) => <option key={value}>{value}</option>)}</select></label>
       <label>Pod<select value={selectedPod?.name ?? ''} disabled={namespace === '' || catalogPods.length === 0} onChange={(event) => changeTarget(() => { setPod(event.target.value); setContainer(''); setPrevious(false) })}><option value="">Choose a log-authorized Pod</option>{catalogPods.map((value) => <option key={value.name}>{value.name}</option>)}</select></label>

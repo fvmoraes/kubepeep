@@ -1,8 +1,10 @@
 # Kube Peep
 
 Kube Peep is a local, self-contained Kubernetes dashboard. It uses the current
-user's kubeconfig and Kubernetes RBAC identity, listens only on
-`127.0.0.1`, and embeds its React interface in the Go binary.
+user's kubeconfig and Kubernetes RBAC identity, and embeds its React interface
+in the Go binary. It runs as a native desktop application (Wails) or as a
+loopback web server (`serve`); both modes share the same backend core, and no
+external browser is ever opened by the desktop build.
 
 The governing rule is simple: show only what the current identity may read and
 enable only what it may execute. Kube Peep does not ask for separate cluster
@@ -50,19 +52,22 @@ not require administrator privileges.
 ## Run
 
 ```sh
-kubePeep start
+kubepeep            # desktop window (desktop builds)
+kubepeep serve      # web server on 127.0.0.1 (always available)
 ```
 
-The root command is equivalent to `start`. Useful commands and flags:
+Useful commands and flags:
 
 ```text
-kubePeep start [--kubeconfig PATHS] [--context NAME] [--namespace NAME]
+kubepeep [--kubeconfig PATHS] [--context NAME] [--namespace NAME]
+         [--port 1024-65535] [--no-browser]
+kubepeep serve [--kubeconfig PATHS] [--context NAME] [--namespace NAME]
                [--port 1024-65535] [--no-browser]
-kubePeep status
-kubePeep stop
-kubePeep doctor [--json]
-kubePeep version
-kubePeep update --version X.Y.Z
+kubepeep status
+kubepeep stop
+kubepeep doctor [--json]
+kubepeep version
+kubepeep update --version X.Y.Z
 ```
 
 Local data lives under `~/.kubePeep/` on Linux/macOS and
@@ -117,13 +122,40 @@ files or any file outside Kube Peep's canonical data root.
 ## Development
 
 Pinned toolchain versions are Go 1.26.7, Node.js 24.18.0, npm 11.16.0,
-Ginger v1.4.4, and GoReleaser v2.17.1.
+Ginger v1.4.4, Wails v2.15.0, and GoReleaser v2.17.1.
 
 ```sh
 make web-install
 make verify
 make release-snapshot
 ```
+
+### Desktop (Wails)
+
+Native Wails dependencies are required before building the desktop binary:
+
+- Linux: `sudo apt install libgtk-3-dev libwebkit2gtk-4.0-dev` (Ubuntu 24.04
+  may need `libwebkit2gtk-4.1-dev` plus `-tags webkit2_41`);
+- macOS: Xcode command line tools (`xcode-select --install`);
+- Windows: WebView2 runtime (no CGO required).
+
+Install the Wails CLI (`go install github.com/wailsapp/wails/v2/cmd/wails@v2.15.0`),
+then:
+
+```sh
+make dev                    # hot reload: wails dev (React + Go rebuild)
+make build-desktop          # native desktop binary (dist/desktop/)
+make build-desktop-linux    # linux/amd64
+make build-desktop-windows  # windows/amd64
+make build-desktop-darwin   # darwin/amd64
+```
+
+The desktop build compiles with `-tags desktop`; the plain `make build` target
+produces the web binary (`kubepeep serve`). Bindings: JSON API calls travel
+through the in-process Wails bridge (`Bridge.Invoke` with a strict path
+allowlist); SSE streams and the exec WebSocket use an internal loopback
+listener because the Wails AssetServer cannot carry them. See
+[desktop architecture](docs/desktop-architecture.md) for the full design.
 
 Sensitive data is never allowed in Git history. Enable the repository's
 pre-commit and pre-push gates once per clone, and run the same check explicitly
@@ -147,6 +179,12 @@ migrations are embedded. See [the executable plan](plan/README.md),
 
 - The HTTP server binds only to `127.0.0.1` and enforces exact Host, Origin,
   CSRF, request-body, and no-store policies.
+- In desktop builds the web server binds only to `127.0.0.1` and is used
+  exclusively by streaming transports (SSE and the exec WebSocket); all other
+  API calls travel through the in-process Wails bridge without opening a
+  port. The WebView origins allowed by the desktop security profile
+  (`wails://wails`, `http(s)://wails.localhost`, `null`) are never accepted by
+  web builds.
 - Kubernetes remains the authorization authority. UI capabilities are hints;
   mutable operations are reauthorized immediately before execution.
 - Secret resources are metadata-only and have no YAML endpoint.
@@ -158,7 +196,17 @@ migrations are embedded. See [the executable plan](plan/README.md),
 
 ## Troubleshooting
 
-- Run `kubePeep doctor` (or `kubePeep doctor --json`) first. It separates local
+- Desktop does not start? The binary must be built with `-tags desktop` and
+  the platform's native Wails dependencies installed (Linux:
+  `libgtk-3-dev` + `libwebkit2gtk-4.0-dev`; macOS: Xcode CLT; Windows:
+  WebView2). Without the tag, `kubepeep` falls back to the web runtime — use
+  `kubepeep serve` and open `http://127.0.0.1:<port>` manually.
+- "A window does not appear and there is no error" on Linux usually means the
+  WebKit2GTK runtime is missing; install the packages listed above and retry.
+- Live updates or log follow stuck on "connecting" inside the desktop window
+  indicates the streaming transport is unavailable in the WebView; the
+  interface automatically falls back to bounded manual refresh.
+- Run `kubepeep doctor` (or `kubepeep doctor --json`) first. It separates local
   application, filesystem, SQLite, kubeconfig, context, cluster, and permission
   checks without printing credentials.
 - Use `kubePeep status` to find the active loopback port. If startup reports a

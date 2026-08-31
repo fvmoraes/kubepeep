@@ -21,6 +21,10 @@ const (
 	DefaultPort         = 2748
 	DefaultShutdownTime = 10 * time.Second
 	OTelHTTPProtobuf    = "http/protobuf"
+
+	MinDashboardBlockTimeout     = 1 * time.Second
+	DefaultDashboardBlockTimeout = 8 * time.Second
+	MaxDashboardBlockTimeout     = 60 * time.Second
 )
 
 var secondsPattern = regexp.MustCompile(`^[1-9][0-9]*s$`)
@@ -55,6 +59,7 @@ func (d *Duration) UnmarshalYAML(node *yaml.Node) error {
 type Config struct {
 	Version       int                 `yaml:"version"`
 	Server        ServerConfig        `yaml:"server"`
+	Dashboard     DashboardConfig     `yaml:"dashboard"`
 	Observability ObservabilityConfig `yaml:"observability"`
 }
 
@@ -62,6 +67,13 @@ type ServerConfig struct {
 	Port            *int     `yaml:"port"`
 	OpenBrowser     bool     `yaml:"openBrowser"`
 	ShutdownTimeout Duration `yaml:"shutdownTimeout"`
+}
+
+// DashboardConfig bounds every dashboard block's Kubernetes fan-out. Larger
+// clusters may need a higher block timeout; the ceiling protects the UI from
+// unbounded waits.
+type DashboardConfig struct {
+	BlockTimeout Duration `yaml:"blockTimeout"`
 }
 
 type ObservabilityConfig struct {
@@ -89,6 +101,9 @@ func Default() Config {
 		Server: ServerConfig{
 			OpenBrowser:     true,
 			ShutdownTimeout: Duration{Duration: DefaultShutdownTime},
+		},
+		Dashboard: DashboardConfig{
+			BlockTimeout: Duration{Duration: DefaultDashboardBlockTimeout},
 		},
 		Observability: ObservabilityConfig{OTel: OTelConfig{
 			Protocol: OTelHTTPProtobuf,
@@ -128,6 +143,9 @@ func (c Config) Validate() error {
 	}
 	if c.Server.ShutdownTimeout.Duration < time.Second || c.Server.ShutdownTimeout.Duration > 30*time.Second || c.Server.ShutdownTimeout.Duration%time.Second != 0 {
 		return fmt.Errorf("config: server.shutdownTimeout must be between 1s and 30s")
+	}
+	if c.Dashboard.BlockTimeout.Duration < MinDashboardBlockTimeout || c.Dashboard.BlockTimeout.Duration > MaxDashboardBlockTimeout || c.Dashboard.BlockTimeout.Duration%time.Second != 0 {
+		return fmt.Errorf("config: dashboard.blockTimeout must be between 1s and 60s")
 	}
 
 	otel := c.Observability.OTel

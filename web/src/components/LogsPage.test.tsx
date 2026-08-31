@@ -25,9 +25,9 @@ function preferences() {
 }
 
 function catalogResponse(path: string): Response | undefined {
-  if (path === '/api/v1/pods?limit=100') return json([{
+  if (path === '/api/v1/pods?limit=500') return json([{
     namespace: 'payments', name: 'api-abc', status: 'Running', ready: { current: 1, desired: 1 }, restarts: 2, node: 'worker-1', ip: '10.0.0.8', owner: { kind: 'Deployment', name: 'api' }, ageSeconds: 60, problematic: false,
-  }], { page: { limit: 100, next: '', complete: true, truncated: false, filterScope: 'collection' }, coverage: null })
+  }], { page: { limit: 500, next: '', complete: true, truncated: false, filterScope: 'collection' }, coverage: null })
   if (path === '/api/v1/permissions?namespace=payments&capability=pods.logs.get&resourceName=api-abc') return json({
     generation, complete: true, truncated: false, errors: [], decisions: [{ capabilityId: 'pods.logs.get', namespace: 'payments', resourceName: 'api-abc', decision: 'allowed', apiGroup: '', resource: 'pods', subresource: 'log', verb: 'get', reasonCode: 'SAR_ALLOWED', expiresAt: null }],
   })
@@ -84,10 +84,11 @@ describe('bounded log viewer', () => {
       const path = String(input)
       if (path === '/api/v1/status') return Promise.resolve(json(status()))
       if (path === '/api/v1/preferences') return Promise.resolve(json(preferences()))
-      if (path === '/api/v1/pods?limit=100') return Promise.resolve(json([
+      if (path === '/api/v1/pods?limit=500') return Promise.resolve(json([
         { namespace: 'payments', name: 'api-abc', status: 'Running', ready: { current: 1, desired: 1 }, restarts: 2, node: 'worker-1', ip: null, owner: null, ageSeconds: 60, problematic: false },
         { namespace: 'payments', name: 'admin', status: 'Running', ready: { current: 1, desired: 1 }, restarts: 0, node: 'worker-1', ip: null, owner: null, ageSeconds: 60, problematic: false },
-      ], { page: { limit: 100, next: 'opaque-next', complete: false, truncated: false, filterScope: 'page' }, coverage: { requestedNamespaces: 2, completedNamespaces: 1, deniedNamespaces: ['restricted'], failed: [] } }))
+      ], { page: { limit: 500, next: 'opaque-next', complete: false, truncated: false, filterScope: 'page' }, coverage: { requestedNamespaces: 2, completedNamespaces: 1, deniedNamespaces: ['restricted'], failed: [] } }))
+      if (path === '/api/v1/pods?limit=500&continue=opaque-next') return Promise.resolve(json([], { page: { limit: 500, next: '', complete: true, truncated: false, filterScope: 'page' }, coverage: { requestedNamespaces: 2, completedNamespaces: 1, deniedNamespaces: ['restricted'], failed: [] } }))
       if (path.startsWith('/api/v1/permissions?')) {
         permissionPath = path
         return Promise.resolve(json({ generation, complete: true, truncated: false, errors: [], decisions: [

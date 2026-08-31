@@ -22,7 +22,7 @@ describe('context selector cancellation and states', () => {
   it('shows loading and a distinct offline state', async () => {
     vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => undefined)))
     const view = renderSelector()
-    expect(screen.getByRole('status')).toHaveTextContent('Loading kubeconfig profiles')
+    expect(screen.getByRole('status')).toHaveTextContent('Loading kubeconfigs')
     view.unmount()
 
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('offline')))
@@ -30,14 +30,17 @@ describe('context selector cancellation and states', () => {
     expect(await screen.findByText('The local API is offline.')).toBeInTheDocument()
   })
 
-  it('aborts the previous context listing when the profile changes', async () => {
+  it('aborts the previous context listing when the kubeconfig changes', async () => {
     let firstAborted = false
     const fetch = vi.fn((input: string | URL | Request, init?: RequestInit) => {
       const url = String(input)
       if (url === '/api/v1/cluster/profiles') {
         return Promise.resolve(json([
-          { id: 1, name: 'Development', context: null, isDefault: true, kubeconfigFiles: [] },
-          { id: 2, name: 'Staging', context: null, isDefault: false, kubeconfigFiles: [] },
+          { id: 1, name: 'Development', context: null, isDefault: true, kubeconfigFiles: [{ position: 0, displayPath: '~/.kube/development' }] },
+          { id: 2, name: 'Staging', context: null, isDefault: false, kubeconfigFiles: [
+            { position: 1, displayPath: '~/.kube/overrides' },
+            { position: 0, displayPath: '~/.kube/staging' },
+          ] },
         ]))
       }
       if (url.endsWith('clusterProfileId=1')) {
@@ -59,17 +62,19 @@ describe('context selector cancellation and states', () => {
     vi.stubGlobal('fetch', fetch)
     renderSelector()
 
-    const profiles = await screen.findByRole('combobox', { name: 'Cluster profile' })
+    const profiles = await screen.findByRole('combobox', { name: 'Kubeconfig source' })
+    expect(screen.getByRole('option', { name: '~/.kube/development' })).toBeInTheDocument()
     await waitFor(() => expect(fetch).toHaveBeenCalledWith(expect.stringContaining('clusterProfileId=1'), expect.anything()))
     fireEvent.change(profiles, { target: { value: '2' } })
 
+    expect(await screen.findByRole('option', { name: '~/.kube/staging + ~/.kube/overrides' })).toBeInTheDocument()
     expect(await screen.findByRole('option', { name: 'staging · stage-cluster' })).toBeInTheDocument()
     expect(screen.getByRole('combobox', { name: 'Kubernetes context' })).toHaveAttribute('data-app-shortcut', 'context-selector')
     expect(screen.getByRole('combobox', { name: 'Kubernetes context' })).toHaveAttribute('aria-keyshortcuts', 'Control+O Meta+O')
     await waitFor(() => expect(firstAborted).toBe(true))
   })
 
-  it('reports a profile whose selected context no longer exists', async () => {
+  it('reports a kubeconfig whose selected context no longer exists', async () => {
     vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
       const url = String(input)
       if (url === '/api/v1/cluster/profiles') {
@@ -82,7 +87,7 @@ describe('context selector cancellation and states', () => {
     }))
     renderSelector()
 
-    expect(await screen.findByText('No contexts exist in this profile.')).toBeInTheDocument()
+    expect(await screen.findByText('No contexts exist in this kubeconfig.')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Select' })).toBeDisabled()
   })
 

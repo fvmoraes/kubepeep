@@ -41,6 +41,8 @@ type ResourceStreams struct {
 	registry  resourcecore.StreamRegistry
 	now       func() time.Time
 
+	extraOrigins []string
+
 	streamMu         sync.Mutex
 	streamSessions   map[string]*resourceStreamSession
 	instance         string
@@ -50,6 +52,28 @@ type ResourceStreams struct {
 
 func NewResourceStreams(service ResourceStreamService, selection SelectionReader, sessions *api.SessionStore, origin string) *ResourceStreams {
 	return &ResourceStreams{service: service, selection: selection, sessions: sessions, origin: origin, now: time.Now, streamSessions: map[string]*resourceStreamSession{}, instance: randomOpaque("ins_"), replayRetention: defaultResourceReplayRetention, reauthorizeEvery: defaultStreamReauthorizationInterval}
+}
+
+// WithExtraOrigins widens the strict origin policy for embedded desktop shells
+// only. The web runtime never calls it.
+func (handler *ResourceStreams) WithExtraOrigins(origins []string) *ResourceStreams {
+	if handler == nil {
+		return handler
+	}
+	handler.extraOrigins = append([]string(nil), origins...)
+	return handler
+}
+
+func (handler *ResourceStreams) originAllowed(origin string) bool {
+	if origin == handler.origin {
+		return true
+	}
+	for _, extra := range handler.extraOrigins {
+		if origin == extra {
+			return true
+		}
+	}
+	return false
 }
 
 func (handler *ResourceStreams) LogFollow(w http.ResponseWriter, r *http.Request) {
@@ -307,10 +331,10 @@ func (handler *ResourceStreams) preflight(w http.ResponseWriter, r *http.Request
 	if binding.ClusterProfileID <= 0 || binding.Context == "" || binding.Generation == "" || len(resolution.Namespaces) == 0 {
 		return binding, resolution, api.NewHTTPError(http.StatusConflict, api.CodeGenerationChanged, "No active Kubernetes resource scope is available.", nil, nil)
 	}
-	if r.Header.Get("Origin") != handler.origin || !handler.sessions.Validate(r.Header.Get("X-KubePeep-CSRF"), binding.Generation) {
+	if !handler.originAllowed(r.Header.Get("Origin")) || !handler.sessions.Validate(r.Header.Get("X-KubePeep-CSRF"), binding.Generation) {
 		return binding, resolution, api.NewHTTPError(http.StatusForbidden, api.CodeCSRFRejected, "The request did not pass local browser security checks.", nil, nil)
 	}
-	if site := r.Header.Get("Sec-Fetch-Site"); site != "" && site != "same-origin" && site != "none" {
+	if site := r.Header.Get("Sec-Fetch-Site"); site != "" && site != "same-origin" && site != "none" && !(len(handler.extraOrigins) > 0 && handler.originAllowed(r.Header.Get("Origin"))) {
 		return binding, resolution, api.NewHTTPError(http.StatusForbidden, api.CodeCSRFRejected, "The request did not pass local browser security checks.", nil, nil)
 	}
 	return binding, resolution, nil

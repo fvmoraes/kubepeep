@@ -34,7 +34,7 @@ func NewPodService(pods PodPort, events EventPort, owners OwnerResolver, clock C
 	if clock == nil {
 		clock = realClock{}
 	}
-	return &PodService{pods: pods, events: events, owners: owners, clock: clock, budget: budget.normalized()}
+	return &PodService{pods: pods, events: events, owners: owners, clock: clock, budget: budget.Normalized()}
 }
 
 func RestartSeverityFor(restarts int64) RestartSeverity {

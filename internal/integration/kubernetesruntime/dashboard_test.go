@@ -319,7 +319,7 @@ func TestWorkloadContinuationIsClosedAndRoundTrips(t *testing.T) {
 
 func TestDashboardBackendStoresOnlyGenerationScopedScanCounter(t *testing.T) {
 	provider, _, _ := dashboardTestClients(t)
-	backend := newDashboardBackend(provider, &dashboardAuthorizationStub{})
+	backend := newDashboardBackend(provider, &dashboardAuthorizationStub{}, dashboard.DefaultQueryBudget())
 	ctx, cancel, sequence := backend.beginScan(context.Background(), "gen-1")
 	result := dashboard.DashboardBlockDTO[[]dashboard.LogMatchDTO]{
 		Value:    []dashboard.LogMatchDTO{{Namespace: "payments", Pod: "api", Container: "api", Excerpt: "redacted"}},
@@ -354,7 +354,7 @@ func TestDashboardBackendStoresOnlyGenerationScopedScanCounter(t *testing.T) {
 }
 
 func TestDashboardBackendGenerationChangeCancelsScanAndDropsCounter(t *testing.T) {
-	backend := newDashboardBackend(&fixedDashboardClients{}, &dashboardAuthorizationStub{})
+	backend := newDashboardBackend(&fixedDashboardClients{}, &dashboardAuthorizationStub{}, dashboard.DefaultQueryBudget())
 	ctx, cancel, sequence := backend.beginScan(context.Background(), "gen-old")
 	defer cancel()
 	backend.OnGeneration("gen-new")
@@ -385,7 +385,7 @@ func TestDashboardBackendSummaryUsesBoundedServices(t *testing.T) {
 		Status:     appsv1.DeploymentStatus{ObservedGeneration: 1, Replicas: 1, ReadyReplicas: 1, AvailableReplicas: 1, UpdatedReplicas: 1},
 	}
 	provider, _, _ := dashboardTestClients(t, pod, deployment)
-	backend := newDashboardBackend(provider, &dashboardAuthorizationStub{})
+	backend := newDashboardBackend(provider, &dashboardAuthorizationStub{}, dashboard.DefaultQueryBudget())
 	result := backend.Summary(context.Background(), dashboardTestBinding(), namespaces.ScopeResolution{ScopeName: "payments", Namespaces: []string{"payments"}})
 	if !result.Complete || result.Value.PodsTotal.Value == nil || *result.Value.PodsTotal.Value != 1 || result.Value.Namespaces.Value == nil || *result.Value.Namespaces.Value != 1 {
 		t.Fatalf("summary = %+v", result)

@@ -111,6 +111,7 @@ export function NamespaceScopeForm({ selection, csrfToken, scope = null, onSaved
   const shownValidation = serverValidation ?? parsed.validation
   const modeError = parsed.error ?? validateNamespaceMode(mode, parsed.validation)
   const canContactServer = csrfToken !== null && !validation.isPending && !save.isPending
+  const canValidate = canContactServer && name.trim() !== '' && modeError === null
   const canSave = canContactServer && name.trim() !== '' && modeError === null
 
   const removeItem = (item: string) => {
@@ -178,12 +179,12 @@ export function NamespaceScopeForm({ selection, csrfToken, scope = null, onSaved
       {mode !== 'all' && (parsed.validation.valid.length > 0 || parsed.validation.invalid.length > 0) ? (
         <div className="namespace-chips" aria-label="Parsed namespaces">
           {parsed.validation.valid.map((namespace) => (
-            <button key={`valid-${namespace}`} type="button" className="namespace-chip" onClick={() => removeItem(namespace)} aria-label={`Remove namespace ${namespace}`}>
+            <button key={`valid-${namespace}`} type="button" className="namespace-chip" onClick={() => removeItem(namespace)} aria-label={`Remove namespace ${namespace}`} title="Remove this namespace from the input">
               {namespace}<span aria-hidden="true">×</span>
             </button>
           ))}
           {parsed.validation.invalid.map(({ input }) => (
-            <button key={`invalid-${input}`} type="button" className="namespace-chip namespace-chip--invalid" onClick={() => removeItem(input)} aria-label={`Remove invalid namespace ${input}`}>
+            <button key={`invalid-${input}`} type="button" className="namespace-chip namespace-chip--invalid" onClick={() => removeItem(input)} aria-label={`Remove invalid namespace ${input}`} title="Remove this entry from the input">
               {input}<span aria-hidden="true">×</span>
             </button>
           ))}
@@ -211,7 +212,7 @@ export function NamespaceScopeForm({ selection, csrfToken, scope = null, onSaved
       <div className="form-actions">
         {editing ? <button type="button" className="button button--secondary" onClick={onCancel} disabled={save.isPending}>Cancel edit</button> : null}
         <button type="button" className="button button--secondary" onClick={() => updateRawInput('')} disabled={mode === 'all' || rawInput === ''}>Clear</button>
-        <button type="button" className="button button--secondary" onClick={() => validation.mutate()} disabled={!canContactServer || parsed.error !== null}>
+        <button type="button" className="button button--secondary" onClick={() => validation.mutate()} disabled={!canValidate}>
           {validation.isPending ? 'Validating…' : 'Validate with cluster'}
         </button>
         <button type="button" className="button" onClick={() => save.mutate()} disabled={!canSave}>

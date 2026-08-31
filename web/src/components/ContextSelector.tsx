@@ -7,6 +7,7 @@ import {
   getContexts,
   getSession,
   selectContext,
+  type ClusterProfile,
   type SelectionData,
   type SelectionSummary,
 } from '../api/client'
@@ -27,6 +28,15 @@ function queryError(error: Error): string {
     return error.message
   }
   return 'The local API is offline.'
+}
+
+function kubeconfigLabel(profile: ClusterProfile): string {
+  const paths = profile.kubeconfigFiles
+    .slice()
+    .sort((left, right) => left.position - right.position)
+    .map((file) => file.displayPath.trim())
+    .filter(Boolean)
+  return paths.length > 0 ? paths.join(' + ') : 'Kubeconfig source unavailable'
 }
 
 export function ContextSelector({ selection, onSelected }: ContextSelectorProps) {
@@ -121,21 +131,21 @@ export function ContextSelector({ selection, onSelected }: ContextSelectorProps)
   }
 
   if (profiles.isPending) {
-    return <div className="context-selector context-selector--message" role="status">Loading kubeconfig profiles…</div>
+    return <div className="context-selector context-selector--message" role="status">Loading kubeconfigs…</div>
   }
   if (profiles.isError) {
     return <div className="context-selector context-selector--message context-selector--error" role="status">{queryError(profiles.error)}</div>
   }
   if (profileList.length === 0) {
-    return <div className="context-selector context-selector--message" role="status">No kubeconfig profile found</div>
+    return <div className="context-selector context-selector--message" role="status">No kubeconfig source found</div>
   }
 
   return (
     <div className="context-selector" aria-label="Kubernetes context selector">
       <label>
-        <span>Profile</span>
+        <span>Kubeconfig</span>
         <select
-          aria-label="Cluster profile"
+          aria-label="Kubeconfig source"
           value={effectiveProfileId ?? ''}
           onChange={(event) => {
             selectionController.current?.abort()
@@ -144,7 +154,19 @@ export function ContextSelector({ selection, onSelected }: ContextSelectorProps)
             setSelectionError(null)
           }}
         >
-          {profileList.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}
+          {profileList.map((profile) => <option key={profile.id} value={profile.id}>{kubeconfigLabel(profile)}</option>)}
+        </select>
+      </label>
+      <label>
+        <span>Cluster</span>
+        <select
+          className="cluster-display"
+          disabled
+          aria-label="Selected cluster"
+          value={preferredContext?.cluster ?? ''}
+          onChange={() => {}}
+        >
+          <option value="">{preferredContext?.cluster ?? 'Choose a context'}</option>
         </select>
       </label>
       <label>
@@ -161,7 +183,13 @@ export function ContextSelector({ selection, onSelected }: ContextSelectorProps)
             setSelectionError(null)
           }}
         >
-          <option value="">{contexts.isPending ? 'Loading contexts…' : contexts.isError ? 'Contexts unavailable' : 'Choose a context'}</option>
+          <option value="">{contexts.isPending
+            ? 'Loading contexts…'
+            : contexts.isError
+              ? 'Contexts unavailable'
+              : contextList.length > 0
+                ? `Choose a context (${contextList.length} available)`
+                : 'Choose a context'}</option>
           {contextList.map((context) => <option key={context.name} value={context.name}>{context.name} · {context.cluster}</option>)}
         </select>
       </label>
@@ -174,7 +202,7 @@ export function ContextSelector({ selection, onSelected }: ContextSelectorProps)
         {contextSelection.isPending ? 'Switching…' : 'Select'}
       </button>
       {contexts.isError ? <small className="field-error" role="status">{queryError(contexts.error)}</small> : null}
-      {contexts.data && contextList.length === 0 ? <small className="field-error" role="status">No contexts exist in this profile.</small> : null}
+      {contexts.data && contextList.length === 0 ? <small className="field-error" role="status">No contexts exist in this kubeconfig.</small> : null}
       {session.isError ? <small className="field-error" role="status">Session bootstrap is unavailable.</small> : null}
       {selectionError ? <small className="field-error" role="alert">{selectionError}</small> : null}
     </div>

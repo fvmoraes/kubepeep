@@ -1,0 +1,20 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "kubePeep",
+  "outputfilename": "kubePeep",
+  "build:tags": "desktop",
+  "frontend:dir": "web",
+  "frontend:install": "npm ci",
+  "frontend:build": "npm run build",
+  "frontend:dev:watcher": "npm run dev",
+  "frontend:dev:serverUrl": "auto",
+  "wailsjsdir": "web/src/wailsjs",
+  "author": {
+    "name": "fvmoraes",
+    "email": "fvmoraes@users.noreply.github.com"
+  },
+  "info": {
+    "productName": "Kube Peep",
+    "productVersion": "0.1.0"
+  }
+}

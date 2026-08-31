@@ -23,6 +23,11 @@ type SecurityConfig struct {
 	Origin     string
 	Sessions   *api.SessionStore
 	Generation api.GenerationSource
+	// ExtraHosts and ExtraOrigins widen the loopback-only policy for embedded
+	// desktop shells (Wails). They are never set by the web runtime, which
+	// keeps exact Host/Origin enforcement.
+	ExtraHosts   []string
+	ExtraOrigins []string
 }
 
 // RequestID sanitizes the optional caller-supplied ID before Ginger sees it,
@@ -72,12 +77,12 @@ func Recovery(log *logger.Logger) gingermiddleware.Func {
 	}
 }
 
-// Host requires the exact published authority, preventing DNS rebinding and
-// accidental alias expansion.
-func Host(expected string) gingermiddleware.Func {
+// Host requires the published authority, preventing DNS rebinding and
+// accidental alias expansion. Desktop shells may allow additional hosts.
+func Host(expected string, extras ...string) gingermiddleware.Func {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Host != expected {
+			if !hostAllowed(r.Host, expected, extras) {
 				api.WriteError(w, r, csrfRejected())
 				return
 			}
@@ -92,7 +97,7 @@ func BrowserAPI(config SecurityConfig) gingermiddleware.Func {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			setAPIHeaders(w.Header())
-			if r.Host != config.Host || !sameOriginIfPresent(r, config.Origin) {
+			if !hostAllowed(r.Host, config.Host, config.ExtraHosts) || !sameOriginIfPresent(r, config.Origin, config.ExtraOrigins) {
 				api.WriteError(w, r, csrfRejected())
 				return
 			}
@@ -101,7 +106,7 @@ func BrowserAPI(config SecurityConfig) gingermiddleware.Func {
 				return
 			}
 			if isMutable(r.Method) {
-				if r.Header.Get("Origin") != config.Origin || config.Sessions == nil || config.Generation == nil {
+				if !originAllowed(r.Header.Get("Origin"), config.Origin, config.ExtraOrigins) || config.Sessions == nil || config.Generation == nil {
 					api.WriteError(w, r, csrfRejected())
 					return
 				}
@@ -130,7 +135,7 @@ func BrowserAPI(config SecurityConfig) gingermiddleware.Func {
 func SameOriginRead(config SecurityConfig) gingermiddleware.Func {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Host != config.Host || !sameOriginIfPresent(r, config.Origin) {
+			if !hostAllowed(r.Host, config.Host, config.ExtraHosts) || !sameOriginIfPresent(r, config.Origin, config.ExtraOrigins) {
 				api.WriteError(w, r, csrfRejected())
 				return
 			}
@@ -181,9 +186,33 @@ func setAPIHeaders(header http.Header) {
 	header.Set("X-Content-Type-Options", "nosniff")
 }
 
-func sameOriginIfPresent(r *http.Request, expected string) bool {
+func sameOriginIfPresent(r *http.Request, expected string, extras []string) bool {
 	origin := r.Header.Get("Origin")
-	return origin == "" || origin == expected
+	return origin == "" || originAllowed(origin, expected, extras)
+}
+
+func originAllowed(origin, expected string, extras []string) bool {
+	if origin == expected {
+		return true
+	}
+	for _, extra := range extras {
+		if origin == extra {
+			return true
+		}
+	}
+	return false
+}
+
+func hostAllowed(host, expected string, extras []string) bool {
+	if host == expected {
+		return true
+	}
+	for _, extra := range extras {
+		if host == extra {
+			return true
+		}
+	}
+	return false
 }
 
 func csrfRejected() error {

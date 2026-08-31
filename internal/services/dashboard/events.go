@@ -287,7 +287,7 @@ type EventService struct {
 }
 
 func NewEventService(port EventPort, budget QueryBudget) *EventService {
-	return &EventService{port: port, budget: budget.normalized()}
+	return &EventService{port: port, budget: budget.Normalized()}
 }
 
 func (s *EventService) Warnings(ctx context.Context, selection Selection) DashboardBlockDTO[[]EventDTO] {

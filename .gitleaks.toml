@@ -15,3 +15,15 @@ id = "generic-api-key"
       '''^internal/api/handlers/actions_exec_wire_test\.go$''',
       '''^spikes/phase1/spike/(lifecycle_matrix_test|spike_test|ws_matrix_test)\.go$''',
     ]
+
+    [[rules.allowlists]]
+    description = "Explicitly labeled bad-example secrets in the security skill reference"
+    condition = "AND"
+    regexTarget = "secret"
+    regexes = [
+      '''^wJalrXUtnFEMI/K7MDENG$''',
+      '''^abc123-xyz789-secret-key$''',
+    ]
+    paths = [
+      '''^\.agents/skills/golang-security/references/secrets\.md$''',
+    ]

@@ -31,17 +31,17 @@ type DashboardBackend struct {
 	scanCounter    dashboard.CounterDTO
 }
 
-func NewDashboardBackend(runtime *Runtime, authorizer authorization.AuthorizationService) (*DashboardBackend, error) {
+func NewDashboardBackend(runtime *Runtime, authorizer authorization.AuthorizationService, queryBudget dashboard.QueryBudget) (*DashboardBackend, error) {
 	if runtime == nil || authorizer == nil {
 		return nil, errors.New("dashboard backend: Kubernetes runtime and authorization are required")
 	}
-	return newDashboardBackend(runtimeDashboardClientProvider{runtime: runtime}, authorizer), nil
+	return newDashboardBackend(runtimeDashboardClientProvider{runtime: runtime}, authorizer, queryBudget), nil
 }
 
-func newDashboardBackend(clients dashboardClientProvider, authorizer authorization.AuthorizationService) *DashboardBackend {
+func newDashboardBackend(clients dashboardClientProvider, authorizer authorization.AuthorizationService, queryBudget dashboard.QueryBudget) *DashboardBackend {
 	return &DashboardBackend{
 		clients: clients, authorization: authorizer,
-		queryBudget: dashboard.DefaultQueryBudget(), logBudget: dashboard.DefaultLogBudget(), now: time.Now,
+		queryBudget: queryBudget.Normalized(), logBudget: dashboard.DefaultLogBudget(), now: time.Now,
 		scanCounter: dashboard.EmptyCounter(dashboard.CounterNotCollected),
 	}
 }
@@ -99,7 +99,7 @@ func (backend *DashboardBackend) ScanLogs(ctx context.Context, binding namespace
 	}
 	scanContext, cancel, sequence := backend.beginScan(ctx, binding.Generation)
 	defer cancel()
-	scanContext, timeoutCancel := context.WithTimeout(scanContext, dashboard.DefaultBlockTimeout)
+	scanContext, timeoutCancel := context.WithTimeout(scanContext, backend.queryBudget.Timeout)
 	defer timeoutCancel()
 	service, adapter := backend.service(binding)
 	selection := dashboardSelection(binding, resolution)

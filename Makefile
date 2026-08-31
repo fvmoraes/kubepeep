@@ -19,7 +19,12 @@ LDFLAGS := -s -w \
 
 .PHONY: format format-check lint typecheck test-unit test-integration test-race \
 	test-e2e test web-install web-build build smoke cross-build verify-ginger \
-	verify release-snapshot clean
+	verify release-snapshot clean dev-desktop build-desktop build-desktop-linux \
+	build-desktop-windows build-desktop-darwin
+
+WAILS ?= $(shell $(GO) env GOPATH)/bin/wails
+DESKTOP_TAGS := desktop
+DESKTOP_OUT := $(DIST_DIR)/desktop
 
 format:
 	gofmt -w $(GO_FILES)
@@ -77,6 +82,25 @@ cross-build: web-build
 verify-ginger:
 	$(GINGER) inspect
 	$(GINGER) doctor
+
+# Desktop (Wails v2) targets. Linux builds require libgtk-3-dev and
+# libwebkit2gtk-4.0-dev; macOS builds require Xcode command line tools; Windows
+# builds require WebView2 (no CGO). Cross-platform releases are produced by the
+# per-OS native CI runners.
+dev-desktop:
+	$(WAILS) dev -tags "$(DESKTOP_TAGS)"
+
+build-desktop:
+	$(WAILS) build -tags "$(DESKTOP_TAGS)" -clean -o "$(DESKTOP_OUT)/kubePeep"
+
+build-desktop-linux:
+	$(WAILS) build -tags "$(DESKTOP_TAGS)" -clean -platform linux/amd64 -o "$(DESKTOP_OUT)/linux-amd64/kubePeep"
+
+build-desktop-windows:
+	$(WAILS) build -tags "$(DESKTOP_TAGS)" -clean -platform windows/amd64 -o "$(DESKTOP_OUT)/windows-amd64/kubePeep.exe"
+
+build-desktop-darwin:
+	$(WAILS) build -tags "$(DESKTOP_TAGS)" -clean -platform darwin/amd64 -o "$(DESKTOP_OUT)/darwin-amd64/kubePeep"
 
 verify: format-check lint typecheck test test-e2e build smoke verify-ginger
 

@@ -42,9 +42,9 @@ import type {
   SelectContextRequest,
   SelectionData,
   SelectNamespaceScopeRequest,
+  SecretMetadata,
   ServiceDetail,
   ServiceResource,
-  SecretMetadata,
   SessionData,
   StatusData,
   ResourceListQuery,
@@ -54,6 +54,7 @@ import type {
   Workload,
   WorkloadDetail,
 } from './types'
+import { desktopRequest } from './desktop'
 
 export type * from './types'
 
@@ -73,7 +74,7 @@ export class APIError extends Error {
   }
 }
 
-async function decodeJSON(response: Response): Promise<unknown> {
+async function decodeJSON(response: ResponseLike): Promise<unknown> {
   const contentType = response.headers.get('content-type') ?? ''
   if (!contentType.toLowerCase().startsWith('application/json')) {
     throw new APIError(response.status, { code: 'INVALID_RESPONSE' })
@@ -86,15 +87,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 async function requestEnvelope<T>(path: string, init: RequestInit = {}): Promise<Envelope<T>> {
-  const response = await fetch(path, {
-    ...init,
-    headers: {
-      Accept: 'application/json',
-      ...init.headers,
-    },
-    cache: 'no-store',
-    credentials: 'same-origin',
-  })
+  const response = await transport(path, init)
   if (response.status === 204) {
     return { data: undefined as T }
   }
@@ -108,6 +101,40 @@ async function requestEnvelope<T>(path: string, init: RequestInit = {}): Promise
   // Keep the local client compatible with an already-unwrapped block while
   // the public contract continues to use the standard data/meta envelope.
   return { data: body as T }
+}
+
+interface ResponseLike {
+  status: number
+  ok: boolean
+  headers: { get(name: string): string | null }
+  json(): Promise<unknown>
+  text(): Promise<string>
+}
+
+async function transport(path: string, init: RequestInit): Promise<ResponseLike> {
+  const method = init.method ?? 'GET'
+  if (method !== 'GET' && method !== 'POST' && method !== 'PUT' && method !== 'DELETE') {
+    return fetch(path, {
+      ...init,
+      headers: { Accept: 'application/json', ...init.headers },
+      cache: 'no-store',
+      credentials: 'same-origin',
+    })
+  }
+  const headers: Record<string, string> = { Accept: 'application/json' }
+  if (init.headers) {
+    for (const [name, value] of Object.entries(init.headers as Record<string, string>)) {
+      headers[name] = value
+    }
+  }
+  const desktop = await desktopRequest(method, path, headers, init.body ? String(init.body) : undefined)
+  if (desktop) return desktop
+  return fetch(path, {
+    ...init,
+    headers: { Accept: 'application/json', ...init.headers },
+    cache: 'no-store',
+    credentials: 'same-origin',
+  })
 }
 
 async function dashboardRequest<T>(path: string, init: RequestInit = {}, expectedGeneration?: string): Promise<DashboardResponse<T>> {
@@ -207,8 +234,18 @@ async function resourceRequest<T>(path: string, signal?: AbortSignal, expectedGe
 }
 
 async function requestYAML(path: string, signal?: AbortSignal): Promise<string> {
+  const method = 'GET'
+  const headers: Record<string, string> = { Accept: 'application/yaml, text/yaml' }
+  const desktop = await desktopRequest(method, path, headers)
+  if (desktop) {
+    const contentType = desktop.headers.get('content-type')?.toLowerCase() ?? ''
+    if (!contentType.includes('yaml')) {
+      throw new APIError(502, { code: 'INVALID_RESPONSE', message: 'The YAML response used an unexpected content type.' })
+    }
+    return desktop.text()
+  }
   const response = await fetch(path, {
-    method: 'GET',
+    method,
     headers: { Accept: 'application/yaml, text/yaml' },
     cache: 'no-store',
     credentials: 'same-origin',

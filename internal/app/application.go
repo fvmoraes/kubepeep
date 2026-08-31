@@ -46,6 +46,8 @@ type Options struct {
 	SessionTTL   time.Duration
 	Frontend     fs.FS
 	Logger       *gingerlogger.Logger
+	ExtraHosts   []string
+	ExtraOrigins []string
 }
 
 type Application struct {
@@ -104,10 +106,12 @@ func New(options Options) (*Application, error) {
 	origin := fmt.Sprintf("http://127.0.0.1:%d", options.Port)
 	host := fmt.Sprintf("127.0.0.1:%d", options.Port)
 	security := apiMiddleware.SecurityConfig{
-		Host:       host,
-		Origin:     origin,
-		Sessions:   sessions,
-		Generation: generation,
+		Host:         host,
+		Origin:       origin,
+		Sessions:     sessions,
+		Generation:   generation,
+		ExtraHosts:   append([]string(nil), options.ExtraHosts...),
+		ExtraOrigins: append([]string(nil), options.ExtraOrigins...),
 	}
 
 	gingerConfig := *options.Config
@@ -151,9 +155,10 @@ func New(options Options) (*Application, error) {
 		Origin:       origin,
 		Port:         options.Port,
 		Build:        options.Build,
+		ExtraOrigins: options.ExtraOrigins,
 	})
 	if options.Streams != nil && options.Selection != nil {
-		resourceStreams := handlers.NewResourceStreams(options.Streams, options.Selection, sessions, origin)
+		resourceStreams := handlers.NewResourceStreams(options.Streams, options.Selection, sessions, origin).WithExtraOrigins(options.ExtraOrigins)
 		application.Router.HandleRaw(
 			"GET /api/v1/pods/{namespace}/{name}/logs/stream",
 			apiMiddleware.RawChain(application.Logger, security, 4*time.Hour, http.HandlerFunc(resourceStreams.LogFollow)),
@@ -164,7 +169,7 @@ func New(options Options) (*Application, error) {
 		)
 	}
 	if options.Exec != nil && options.Selection != nil {
-		execStream := handlers.NewExecStream(options.Exec, options.Selection, origin)
+		execStream := handlers.NewExecStream(options.Exec, options.Selection, origin).WithExtraOrigins(options.ExtraOrigins)
 		application.Router.HandleRaw(
 			"GET /api/v1/exec/{sessionId}/stream",
 			apiMiddleware.RawChain(application.Logger, security, actionservice.DefaultExecDuration+time.Minute, execStream),
@@ -199,7 +204,7 @@ func New(options Options) (*Application, error) {
 	handler := gingermiddleware.Chain(
 		apiMiddleware.RequestID(),
 		apiMiddleware.Recovery(application.Logger),
-		apiMiddleware.Host(host),
+		apiMiddleware.Host(host, options.ExtraHosts...),
 	)(mux)
 
 	return &Application{

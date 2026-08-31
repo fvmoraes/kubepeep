@@ -45,10 +45,11 @@ type execStreamOptions struct {
 }
 
 type ExecStream struct {
-	service   ExecBridgeService
-	selection SelectionReader
-	origin    string
-	options   execStreamOptions
+	service      ExecBridgeService
+	selection    SelectionReader
+	origin       string
+	options      execStreamOptions
+	extraOrigins []string
 }
 
 func NewExecStream(service ExecBridgeService, selection SelectionReader, origin string) *ExecStream {
@@ -59,6 +60,16 @@ func NewExecStream(service ExecBridgeService, selection SelectionReader, origin 
 		pingTimeout:       execPingTimeout,
 		writeTimeout:      execWriteTimeout,
 	})
+}
+
+// WithExtraOrigins widens the WebSocket upgrade origin policy for embedded
+// desktop shells only. The web runtime never calls it.
+func (handler *ExecStream) WithExtraOrigins(origins []string) *ExecStream {
+	if handler == nil {
+		return handler
+	}
+	handler.extraOrigins = append([]string(nil), origins...)
+	return handler
 }
 
 func newExecStream(service ExecBridgeService, selection SelectionReader, origin string, options execStreamOptions) *ExecStream {
@@ -82,9 +93,10 @@ func (handler *ExecStream) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, r, actionHTTPError(err))
 		return
 	}
+	originPatterns := append([]string{handler.origin}, handler.extraOrigins...)
 	connection, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		Subprotocols:    []string{actionservice.ExecWebSocketProtocol},
-		OriginPatterns:  []string{handler.origin},
+		OriginPatterns:  originPatterns,
 		CompressionMode: websocket.CompressionDisabled,
 	})
 	if err != nil {

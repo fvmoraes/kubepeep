@@ -12,6 +12,7 @@ import {
   restartWorkload,
   scaleWorkload,
 } from '../api/client'
+import { streamURL } from '../api/desktop'
 import type {
   CapabilityDecision,
   CapabilityMatrix,
@@ -275,7 +276,7 @@ export function PodActions({ detail, selection }: { detail: PodDetail; selection
     setTerminal((lines) => appendTerminalBounded(lines, line))
   }
 
-  function openExecSocket(ticket: ExecTicket) {
+  async function openExecSocket(ticket: ExecTicket) {
     const previous = socketRef.current
     if (previous) {
       previous.onmessage = null
@@ -283,7 +284,7 @@ export function PodActions({ detail, selection }: { detail: PodDetail; selection
       previous.onclose = null
       previous.close(1000, 'replaced')
     }
-    const socket = new WebSocket(ticket.websocketUrl, ticket.protocols)
+    const socket = new WebSocket(await streamURL(ticket.websocketUrl), ticket.protocols)
     socket.binaryType = 'arraybuffer'
     socketRef.current = socket
     setSocketState('connecting')
@@ -391,7 +392,7 @@ export function PodActions({ detail, selection }: { detail: PodDetail; selection
         target: actionTarget,
         expectedGeneration: selection.generation,
       }, csrfToken, signal)
-      if (!signal.aborted) openExecSocket(ticket)
+      if (!signal.aborted) await openExecSocket(ticket)
     }),
     onSuccess: invalidateActionPermissions,
     onError: (error) => {

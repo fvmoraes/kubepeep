@@ -15,6 +15,8 @@ server:
   port: null
   openBrowser: true
   shutdownTimeout: 10s
+dashboard:
+  blockTimeout: 12s
 observability:
   otel:
     enabled: false
@@ -31,6 +33,9 @@ func TestLoadCreatesPrivateDefaultsAndReopens(t *testing.T) {
 	}
 	if first.Server.OpenBrowser != true || first.Server.Port != nil || first.Server.ShutdownTimeout.Duration != 10*time.Second {
 		t.Fatalf("unexpected defaults: %#v", first)
+	}
+	if first.Dashboard.BlockTimeout.Duration != DefaultDashboardBlockTimeout {
+		t.Fatalf("unexpected dashboard defaults: %#v", first.Dashboard)
 	}
 	info, err := os.Stat(path)
 	if err != nil {
@@ -148,6 +153,8 @@ func TestValidationMatrix(t *testing.T) {
 		"high port":         func(c *Config) { c.Server.Port = port(65536) },
 		"short shutdown":    func(c *Config) { c.Server.ShutdownTimeout.Duration = 0 },
 		"long shutdown":     func(c *Config) { c.Server.ShutdownTimeout.Duration = 31 * time.Second },
+		"short block":       func(c *Config) { c.Dashboard.BlockTimeout.Duration = 0 },
+		"long block":        func(c *Config) { c.Dashboard.BlockTimeout.Duration = 61 * time.Second },
 		"protocol":          func(c *Config) { c.Observability.OTel.Protocol = "grpc" },
 		"disabled endpoint": func(c *Config) { c.Observability.OTel.Endpoint = ptr("https://localhost") },
 		"missing endpoint":  func(c *Config) { c.Observability.OTel.Enabled = true },

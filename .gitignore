@@ -35,7 +35,8 @@ node_modules/
 __pycache__/
 *.py[cod]
 dist/
-build/
+build/*
+!build/appicon.png
 bin/
 coverage/
 /web/playwright-report/

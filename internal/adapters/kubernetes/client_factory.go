@@ -9,6 +9,13 @@ import (
 	"time"
 	"unicode"
 
+	// Register client-go authentication providers so kubeconfigs using
+	// auth-provider flows (oidc, gcp, azure) resolve exactly as kubectl
+	// does. Without these, real-world clusters fail with a sanitized
+	// KUBERNETES_CLIENT_UNAVAILABLE instead of authenticating.
+	_ "k8s.io/client-go/plugin/pkg/client/auth"
+	_ "k8s.io/client-go/plugin/pkg/client/auth/oidc"
+
 	"k8s.io/client-go/dynamic"
 	kubeclient "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/metadata"

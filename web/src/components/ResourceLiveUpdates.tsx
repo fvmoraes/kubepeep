@@ -2,6 +2,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { APIError, getSession } from '../api/client'
+import { streamURL } from '../api/desktop'
 import type { APIErrorPayload } from '../api/types'
 
 export type ResourceTopic = 'pods' | 'events' | 'workloads' | 'services' | 'ingresses' | 'endpoint-slices' | 'configmaps'
@@ -26,7 +27,7 @@ function parseSSEBlock(block: string): { event: string; data: string } | null {
   return data.length > 0 ? { event, data: data.join('\n') } : null
 }
 
-function streamURL(topics: ResourceTopic[]): string {
+function streamURLPath(topics: ResourceTopic[]): string {
   const query = new URLSearchParams()
   for (const topic of topicOrder) if (topics.includes(topic)) query.append('topic', topic)
   return `/api/v1/stream?${query.toString()}`
@@ -78,7 +79,7 @@ export function ResourceLiveUpdates({ generation, topics, queryKeys }: { generat
     try {
       const session = await getSession(controller.signal)
       if (session.generation !== generation) throw new APIError(409, { code: 'GENERATION_CHANGED', message: 'The active selection changed.' })
-      const response = await fetch(streamURL(topics), {
+      const response = await fetch(await streamURL(streamURLPath(topics)), {
         method: 'GET',
         headers: { Accept: 'text/event-stream', 'X-KubePeep-CSRF': session.csrfToken },
         cache: 'no-store',

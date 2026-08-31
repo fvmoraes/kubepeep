@@ -242,6 +242,8 @@ server:
   port: null
   openBrowser: true
   shutdownTimeout: 10s
+dashboard:
+  blockTimeout: 8s
 observability:
   otel:
     enabled: false
@@ -251,7 +253,10 @@ observability:
 ```
 
 `server.port` é null ou inteiro 1024–65535. `shutdownTimeout` usa inteiro
-positivo seguido de `s`, entre 1s e 30s. O endpoint OTel é obrigatório somente
+positivo seguido de `s`, entre 1s e 30s. `dashboard.blockTimeout` limita o
+tempo de cada bloco do dashboard (mesma sintaxe de duração), entre 1s e 60s;
+para clusters grandes, aumente o valor quando blocos do overview reportarem
+erros parciais de timeout. O endpoint OTel é obrigatório somente
 quando `enabled=true`: URL absoluta HTTP(S), máximo 2.048 bytes, sem userinfo,
 query ou fragment; HTTP exige host loopback e `insecure=true`. O protocolo do
 MVP é somente `http/protobuf`; headers/tokens não são configuráveis. Com

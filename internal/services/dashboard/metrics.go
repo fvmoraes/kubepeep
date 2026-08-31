@@ -124,7 +124,7 @@ func NewMetricsService(port MetricsPort, authorizer MetricsAuthorizer, clock Clo
 	if clock == nil {
 		clock = realClock{}
 	}
-	return &MetricsService{port: port, authorizer: authorizer, clock: clock, budget: budget.normalized()}
+	return &MetricsService{port: port, authorizer: authorizer, clock: clock, budget: budget.Normalized()}
 }
 
 func (s *MetricsService) Collect(ctx context.Context, selection Selection) DashboardBlockDTO[MetricsDTO] {

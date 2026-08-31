@@ -23,6 +23,7 @@ const (
 	MaximumProblemText    = 4 << 10
 	MaximumStatusBytes    = 256
 	DefaultBlockTimeout   = 8 * time.Second
+	MaximumBlockTimeout   = 60 * time.Second
 	DefaultLogWindow      = 15 * time.Minute
 	MaximumLogWindow      = 4 * time.Hour
 )
@@ -44,10 +45,27 @@ func DefaultQueryBudget() QueryBudget {
 	}
 }
 
-func (b QueryBudget) normalized() QueryBudget {
+// NewQueryBudget builds the default budget with a user-configured block
+// timeout. Non-positive values fall back to the default; normalized() clamps
+// the result to MaximumBlockTimeout.
+func NewQueryBudget(timeout time.Duration) QueryBudget {
+	budget := DefaultQueryBudget()
+	if timeout > 0 {
+		budget.Timeout = timeout
+	}
+	return budget
+}
+
+// Normalized fills unset fields with defaults and clamps the block timeout to
+// MaximumBlockTimeout. It is exported because runtime adapters compose budgets
+// outside this package.
+func (b QueryBudget) Normalized() QueryBudget {
 	defaults := DefaultQueryBudget()
-	if b.Timeout <= 0 || b.Timeout > DefaultBlockTimeout {
+	if b.Timeout <= 0 {
 		b.Timeout = defaults.Timeout
+	}
+	if b.Timeout > MaximumBlockTimeout {
+		b.Timeout = MaximumBlockTimeout
 	}
 	if b.PageSize <= 0 || b.PageSize > 500 {
 		b.PageSize = defaults.PageSize

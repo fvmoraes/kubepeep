@@ -525,7 +525,7 @@ export function DashboardPage() {
     return <StatePanel kind="offline" title="The local API is unavailable">Reload after the kubePeep process is ready.</StatePanel>
   }
   if (!status.data.selection) {
-    return <StatePanel kind="empty" title="Choose a Kubernetes context">The local application is ready. Use the context selector in the header to connect a kubeconfig profile.</StatePanel>
+    return <StatePanel kind="empty" title="Choose a Kubernetes context">The local application is ready. Use the context selector in the header to connect a kubeconfig.</StatePanel>
   }
   return <DashboardContent key={status.data.selection.generation} selection={status.data.selection} cluster={status.data.components.cluster} />
 }

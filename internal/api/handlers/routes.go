@@ -31,6 +31,7 @@ type Dependencies struct {
 	Origin       string
 	Port         int
 	Build        api.BuildInfo
+	ExtraOrigins []string
 }
 
 const (

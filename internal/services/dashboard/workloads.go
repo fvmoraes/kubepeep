@@ -321,7 +321,7 @@ func NewWorkloadService(port WorkloadPort, clock Clock, budget QueryBudget) *Wor
 	if clock == nil {
 		clock = realClock{}
 	}
-	return &WorkloadService{port: port, clock: clock, budget: budget.normalized()}
+	return &WorkloadService{port: port, clock: clock, budget: budget.Normalized()}
 }
 
 func (s *WorkloadService) List(ctx context.Context, selection Selection) DashboardBlockDTO[[]WorkloadDTO] {
