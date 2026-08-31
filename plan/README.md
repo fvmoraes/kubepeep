@@ -1,218 +1,83 @@
-# Plano de desenvolvimento do Kube Peep
+# Plano de Melhorias — Revisão Completa do KubePeep
 
-Este diretório transforma o [prompt inicial](initial_prompt.md) em uma sequência
-executável de trabalho. As oito fases originais permanecem rastreáveis e a
-Fase 9 adiciona a expansão de experiência operacional solicitada depois do
-prompt. Uma fase só termina quando seus entregáveis, testes e documentação
-estiverem concluídos.
+> **Status:** revisão técnica, funcional e visual concluída em 2026-08-31.
+> **Base:** HEAD `c7e291d` (`feat: desktop support and security hardening`).
+> **Objetivo:** transformar os achados da revisão em um plano executável de melhorias, preservando a identidade minimalista do KubePeep e aproximando a experiência de referência do Aptakube sem copiá-la.
 
-## Resultado esperado
+## 1. Propósito deste plano
 
-Ao final da Fase 8, o Kube Peep deve ser um binário local autocontido,
-construído com Go 1.26 e Ginger v1.4.4, contendo a interface React embutida,
-operando com o kubeconfig do usuário e respeitando integralmente o RBAC do
-cluster. A Fase 9 preserva essa base e acrescenta facilitadores de navegação,
-exploração e troubleshooting com identidade própria.
+Este diretório contém o resultado de uma revisão profunda do KubePeep, cobrindo:
 
-Princípio de produto que governa todas as decisões:
+- funcionamento real da aplicação;
+- arquitetura e qualidade técnica;
+- experiência do usuário e interface;
+- consistência visual e design system;
+- documentação e alinhamento com o código;
+- observabilidade, confiabilidade e desempenho;
+- evolução do produto.
 
-> Mostrar somente o que o usuário pode acessar e habilitar somente o que ele pode executar.
+O plano original de desenvolvimento (`01-descoberta.md` a `09-experiencia-operacional.md`, `matriz-aceite-mvp.md`, `matriz-aceite-ux.md`) continua vigente e deve ser consultado para rastreabilidade das fases de implementação. Este novo plano complementa o anterior com a visão do estado atual e o roteiro de melhorias priorizadas.
 
-## Referências de trabalho
+## 2. Índice
 
-- [DWYT](https://github.com/fvmoraes/dwyt): referência de organização, identidade visual, experiência local, embedding, instalação e distribuição. Não é fonte de regras de negócio.
-- [Ginger v1.4.4](https://github.com/fvmoraes/ginger/tree/v1.4.4): framework obrigatório do backend.
-- [Documentação do Ginger v1.4.4](https://pkg.go.dev/github.com/fvmoraes/ginger@v1.4.4): API pública fixada para o projeto.
-- [Aptakube](https://aptakube.com/) e seu [repositório oficial](https://github.com/aptakube/aptakube): benchmark funcional dos facilitadores da Fase 9. Não são fonte de código, marca, layout ou identidade visual; as adaptações e os desvios de segurança estão no [relatório de pesquisa](../docs/research/aptakube-ux-benchmark.md).
-
-A Fase 1 confirmou que os templates do Ginger para serviço HTTP e CLI Cobra
-são mutuamente exclusivos e que `ginger generate command` não se aplica a um
-projeto `service`. A decisão aceita é manter `project.type: service`, integrar
-Cobra manualmente e usar lifecycle próprio com os componentes Ginger.
-
-O DWYT foi analisado no commit imutável
-`a9386823272b928f2289c9020a9ae5951389e0f1`, com licença e limites de cópia
-registrados.
-
-O Ginger foi reproduzido na tag `v1.4.4`, commit
-`6073543b6281be01e4bc97d001dd6e11512f70db`. Scaffolds, diagnósticos,
-cross-builds, lifecycle e controle local nativo Linux/Windows estão rastreados
-em [Evidências da Fase 1](../docs/research/phase1-evidence.md). O probe isolado
-confirma a arquitetura; não substitui os testes da implementação de produção.
-
-## Sequência e gates
-
-```text
-Fase 1 ──> Fase 2 ──> Fase 3 ──> Fase 4 ──> Fase 5 ──> Fase 6 ──> Fase 7 ──> Fase 8 ──> Fase 9
-```
-
-As fases seguem a ordem determinada pelo prompt. Para evitar duplicação, a Fase 5 cria somente as consultas compartilhadas mínimas necessárias ao overview; a Fase 6 estende essas mesmas interfaces para listas e detalhes completos. A CI mínima começa na Fase 3 e cresce com cada fatia, mas o gate de distribuição só fecha na Fase 8.
-
-| Fase | Foco | Estado verificável | Evidência |
-| --- | --- | --- | --- |
-| [1 — Descoberta](01-descoberta.md) | DWYT, Ginger e riscos | concluída (44/44) | [Fase 1](../docs/research/phase1-evidence.md) |
-| [2 — Especificação](02-especificacao.md) | Produto, arquitetura, API, segurança e dados | concluída | [Fase 2](../docs/research/phase2-validation.md) |
-| [3 — Fundação](03-fundacao.md) | Executável local, Ginger, Cobra, SQLite e React | concluída, inclusive workflow nativo | [Fase 3](../docs/research/phase3-evidence.md) |
-| [4 — Kubernetes e RBAC](04-kubernetes-rbac.md) | Kubeconfig, contextos, escopos e autorização | 58/59; gramática/corridas ampliadas pendentes | [Fase 4](../docs/research/phase4-evidence.md) |
-| [5 — Dashboard](05-dashboard.md) | Saúde, problemas, restarts, eventos, logs e métricas | concluída (62/62), inclusive Kind real | [Fase 5](../docs/research/phase5-evidence.md) |
-| [6 — Recursos](06-recursos.md) | Consultas somente leitura e streaming | concluída (67/67), inclusive Kind real | [Fase 6](../docs/research/phase6-evidence.md) |
-| [7 — Ações](07-acoes.md) | Restart, scale, delete, port-forward e exec | concluída (47/47), inclusive Kind real | [Fase 7](../docs/research/phase7-evidence.md) |
-| [8 — Distribuição](08-distribuicao.md) | Releases, instaladores, CI e aceite | 47/50; somente candidate e fechamento integral dos gates pendentes | [Fase 8](../docs/research/phase8-evidence.md) |
-| [9 — Experiência operacional](09-experiencia-operacional.md) | Paleta, filtros, quick actions, logs, diff e leitura multi-contexto | em execução (15/84) | [Benchmark Aptakube](../docs/research/aptakube-ux-benchmark.md), [evidência F9](../docs/research/phase9-evidence.md) e [matriz UX](matriz-aceite-ux.md) |
-
-Estado atual: **as Fases 5, 6 e 7 estão concluídas, inclusive no Kind real**.
-A Fase 4 está em 58/59: os fluxos reais e a revogação entre capability e
-operação passaram; somente a matriz ampliada de gramática/corridas de F4-49
-permanece aberta. O [workflow de verificação #24](https://github.com/fvmoraes/kubepeep/actions/runs/33295350787),
-executado no head exato `4ce996b40914f729aefa8d949bde85f94873c8d9`,
-concluiu com `success` e 11/11 jobs verdes: build/test, runtimes nativos de
-macOS e Windows, snapshot, `restricted-kind` e os seis smokes de archives.
-No runner efêmero, Kind passou `create`, `validate`, `kubeconfigs` e `app-e2e`;
-o workflow executou `kind delete cluster` ao final. Por isso F8-20, F8-34,
-F8-36 e F8-41 estão fechadas. O
-[workflow #23](https://github.com/fvmoraes/kubepeep/actions/runs/33289508322),
-em Go 1.25.13 e com falha no `restricted-kind`, permanece apenas como histórico
-do head `9d7c2ea`, sem linguagem de pendência para o estado atual.
-
-Depois da CI #24, o commit `6b96a411d0ff52f0824933e3ea4e7689f72354bb`
-adicionou F9-16–F9-18: atalhos globais seguros `Ctrl/Meta+K/R/F/O/B`, refresh
-somente de queries ativas de leitura por allowlist explícita, bloqueios em
-campos editáveis/composição/repetição, seletor com `showPicker` e fallback de
-foco, e deep-link/reload/back para o catálogo único das dez rotas. A
-[CI #25](https://github.com/fvmoraes/kubepeep/actions/runs/33296687430)
-validou esse SHA exato com `success` em 11/11 jobs; localmente, a terceira fatia
-também passou 17 arquivos/79 testes Vitest e 3/3 Playwright.
-
-O acompanhamento dos critérios originais está na [Matriz de aceite do
-MVP](matriz-aceite-mvp.md). Os requisitos adicionais permanecem separados na
-[Matriz de aceite da experiência operacional](matriz-aceite-ux.md), evitando
-reescrever retroativamente o escopo e as evidências do prompt inicial.
-
-## Regras de execução
-
-1. Trabalhar em tarefas pequenas, seguindo a ordem de cada arquivo de fase.
-2. Não iniciar código de produção antes dos gates de descoberta e especificação.
-3. Instalar e usar a CLI do Ginger na versão `v1.4.4`; não usar `@latest` durante o desenvolvimento deste projeto.
-4. Executar `ginger add`, `ginger generate` e `ginger docs` primeiro com `--plan`; o campo `require_plan_before_apply` não é imposto automaticamente pela v1.4.4.
-5. Como `ginger new` e `ginger init` não oferecem `--plan`, gerar scaffolds comparativos apenas em diretório temporário e revisar qualquer inicialização antes de escrever no repositório.
-6. Nunca usar `--force` sem uma justificativa registrada.
-7. Implementar funcionalidades em fatias verticais: porta/serviço, adapter, handler/DTO, frontend e testes.
-8. Tratar o backend e a API Kubernetes como autoridades finais de autorização; a interface é apenas uma representação da capacidade atual.
-9. Não declarar uma tarefa ou fase concluída sem executar a evidência indicada.
-10. Atualizar documentação e ADRs na mesma mudança que altera um contrato ou uma decisão.
-
-## Definition of Done transversal
-
-Uma tarefa funcional somente pode ser marcada como concluída quando, conforme aplicável:
-
-- [ ] possui testes unitários;
-- [ ] possui teste de integração do caminho permitido;
-- [ ] possui teste explícito do caminho negado por RBAC;
-- [ ] respeita timeout e cancelamento de contexto;
-- [ ] não persiste kubeconfig, credenciais, Secrets ou logs de aplicações;
-- [ ] não registra tokens, certificados, cabeçalhos de autorização ou comandos de `exec`;
-- [ ] converte objetos Kubernetes em DTOs próprios;
-- [ ] mantém erros parciais isolados da funcionalidade restante;
-- [ ] atualiza contrato de API, documentação e ADR relacionado;
-- [ ] passa nas verificações de backend e frontend;
-- [ ] passa em `ginger inspect` e `ginger doctor`, ou documenta claramente um diagnóstico conhecido, sem tratar esses comandos heurísticos como substitutos dos testes;
-- [ ] registra os comandos executados e seus resultados na entrega da tarefa.
-
-## Guardrails permanentes
-
-- Ginger v1.4.4 é a camada principal de aplicação HTTP; Gin e frameworks equivalentes estão fora de escopo.
-- O frontend usa componentes próprios e pequenos; Electron, Material UI, Ant Design e kits visuais pesados estão fora de escopo.
-- A API escuta/publica somente `127.0.0.1` no MVP. Proteções de `Host`, `Origin` e requisições mutáveis seguem o threat model antes das ações da Fase 7.
-- Rotas SSE/WS não podem usar cegamente a cadeia padrão do Ginger v1.4.4, que não preserva `http.Flusher`/`http.Hijacker`; elas exigem `HandleRaw` e uma cadeia segura que preserve as interfaces.
-- `pkg/ws` não sustenta `exec`; o ADR 0003 fixou `coder/websocket v1.8.15` e o wire contract endurecido.
-- `SelfSubjectRulesReview` pode otimizar a exibição, mas não substitui `SelfSubjectAccessReview` nem a autorização da operação real.
-- O Kube Peep não faz impersonation, não pede credenciais adicionais e não cria autorização paralela ao Kubernetes.
-- O modo `all` significa apenas os namespaces retornados pela API para a identidade atual; nunca significa `*`.
-- Metrics API é opcional e sua ausência não torna a aplicação local indisponível.
-- OpenTelemetry é opcional, não entra no caminho crítico e permanece desativado por padrão.
-- Watches, streams, port-forwards e sessões de `exec` precisam ter dono, limite, cancelamento e encerramento observáveis.
-- Qualquer YAML de Secret deve omitir valores; o MVP exibe somente metadados de Secrets.
-- Paleta, busca global, favoritos, recentes, diff, colunas configuráveis e
-  agregações nunca incluem conteúdo ou YAML de Secret.
-- Agregação multi-contexto é somente leitura; capabilities, falhas e dados
-  permanecem isolados e identificados por origem. Toda mutação exige alvo único
-  e nova autorização no backend.
-- O scan de logs é limitado, cancelável, não persistente e apresenta “possíveis erros”, nunca diagnósticos inventados.
-- O banco não armazena snapshots do cluster. Preferências persistidas usam uma allowlist e nunca recebem credenciais, Secrets ou conteúdo de logs.
-- Respostas com dados Kubernetes, logs ou permissões usam política `no-store`; somente assets estáticos versionados podem receber cache longo.
-- “Sem dependências de runtime” significa não instalar dependências próprias do Kube Peep. Um plugin `exec` já referenciado pelo kubeconfig continua sendo responsabilidade do ambiente do usuário.
-- A SPA usa History API. O servidor entrega `index.html` apenas como fallback de
-  GET/HEAD que aceita HTML; `/api/v1`, `/health` e endpoints internos nunca
-  caem no fallback.
-- Instaladores, scripts auxiliares e downloads usam tag/commit ou asset de
-  release com versão exata e checksum; `raw/main`, `latest` e branch mutável não
-  são fontes de instalação.
-- A ausência de dados sensíveis é premissa inegociável: kubeconfigs,
-  credenciais, tokens, chaves privadas, Secrets, logs de aplicações, bancos
-  locais, PII privada e paths específicos da máquina nunca são enviados ao
-  repositório, CI, logs ou artefatos; somente evidência sanitizada é registrada.
-
-## Riscos que atravessam as fases
-
-| Risco | Tratamento planejado |
+| Arquivo | Conteúdo |
 | --- | --- |
-| Integração do lifecycle bloqueante do Ginger com Cobra | Spike/ADR F1 aprovados; reimplementar o coordenador no módulo F3 |
-| `pkg/app` fixar timeout de escrita enquanto SSE/WS precisam ser duradouros | F1 provou stream acima de 15 s; F3 aplica `WriteTimeout=0` e budgets por rota |
-| `app.Run()` não aceitar listener/contexto e poder pular hooks após falha de shutdown | ADR escolheu lifecycle próprio com componentes Ginger; repetir matriz de cleanup em F3 |
-| Defaults do Ginger aceitarem bind não-loopback | Sobrescrever e testar somente `127.0.0.1`; falhar fechado em configuração insegura |
-| Health do Ginger transformar todo checker falho em 503 e serializar seu erro | Registrar apenas checks locais críticos; status externo separado e sanitizado |
-| Middleware padrão remover `Flusher`/`Hijacker` | Rotas raw com middlewares próprios e testes de interface/segurança |
-| Logger do Ginger escrever apenas em stdout e redigir só por nome da chave | Estratégia explícita de arquivo/rotação e sanitização por conteúdo antes de logar |
-| Paginação Ginger ser page/per-page, diferente de `continue` | DTO cursor próprio mantendo o envelope `data` |
-| Cursor Kubernetes não cobrir fan-out multi-namespace/kind | Cursor composto ligado à query/generation, merge limitado e estado truncado explícito |
-| Resultado incompleto de `SelfSubjectRulesReview` | Cache apenas como dica; SAR e chamada Kubernetes continuam sendo autoridade |
-| Revisão RBAC indisponível ser confundida com negação | Capability tri-state; `FORBIDDEN` somente por negação explícita/operação real |
-| Plugins `exec` vazarem dados em erros | Sanitização central, allowlist de campos de log e testes com mensagens sensíveis |
-| Scan de logs causar carga ou expor segredo | Limites rígidos, concorrência controlada, redaction e nenhuma persistência |
-| Goroutines ou conexões sobreviverem à troca de contexto | Contextos hierárquicos, registro de sessões e testes de cancelamento |
-| Fake clientset não representar RBAC real | Casos simples com fake e cenários restritos no Kind canônico |
-| Diferenças de processos e paths entre sistemas | Adapters por plataforma e smoke tests dos artefatos reais |
-| PID/sinal não implementarem stop seguro no Windows | Probe F1 nativo validou lock/identidade/controle; reimplementar e repetir em F3 e nos archives F8 |
-| SQLite ou dependências quebrarem builds sem CGO | F1 validou `modernc.org/sqlite`; repetir a matriz com o módulo definitivo na Fase 3 |
-| Reuso do DWYT virar cópia indevida de negócio | Inventário explícito do que pode e não pode ser reaproveitado |
+| [00-current-state.md](00-current-state.md) | Estado atual do projeto, validações executadas e evidências coletadas. |
+| [01-functional-review.md](01-functional-review.md) | Revisão funcional completa: fluxos, estados, gaps e recomendações. |
+| [02-ui-ux-review.md](02-ui-ux-review.md) | Avaliação de interface, navegação, telas e experiência do usuário. |
+| [03-design-system.md](03-design-system.md) | Proposta de design system, tokens visuais e componentes reutilizáveis. |
+| [04-architecture-review.md](04-architecture-review.md) | Análise da arquitetura Go, qualidade técnica e débitos. |
+| [05-documentation-review.md](05-documentation-review.md) | Revisão da documentação existente e gaps encontrados. |
+| [06-improvement-roadmap.md](06-improvement-roadmap.md) | Roadmap por fases executáveis, com itens priorizados. |
+| [07-testing-strategy.md](07-testing-strategy.md) | Estratégia de testes para as melhorias propostas. |
+| [08-observability-plan.md](08-observability-plan.md) | Plano de logs internos, métricas, traces e OpenTelemetry. |
+| [09-risks-and-migrations.md](09-risks-and-migrations.md) | Riscos, estratégias de migração e rollback. |
+| [10-acceptance-checklist.md](10-acceptance-checklist.md) | Checklist objetivo de aceite por fase. |
 
-## Estado do plano
+## 3. Resumo executivo dos achados
 
-As Fases 1–3 e 5–7 estão concluídas. A Fase 4 possui 58 de 59 tarefas, com
-somente F4-49 aberta. A Fase 8 possui 47 de 50 tarefas comprovadas; permanecem
-abertas somente F8-42, F8-46 e F8-48. A CI #24 comprova o pin atual, os runners
-nativos e a criação Kind limpa; o run #23 fica preservado apenas como histórico.
-As Fases 1–8 somam 440/444 tarefas (99,10%); com F9 em 15/84, o plano completo
-soma 455/528 (86,17%). A Fase 9
-foi especificada em 2026-08-25 e inicia com 84
-tarefas e 15 critérios adicionais, dos quais `UX-M02` possui evidência aceita.
-O commit funcional mais recente passou integralmente na CI #25; os gates finais
-da fase continuam obrigatórios após as próximas fatias.
+### 3.1 O que funciona bem
 
-Na matriz final, 26 de 27 critérios do MVP possuem evidência local ou nativa
-aplicável. Somente MVP-26 permanece aberto: os instaladores contra uma
-candidate imutável. Evidência de configuração, teste
-estático, cross-build ou spike nunca substitui execução nativa/Kind quando o
-critério a exige.
+- **Base técnica sólida:** Go 1.26, Ginger v1.4.4, Cobra, SQLite sem CGO, client-go v0.35.7, React 19, Vite 8, React Router 8.
+- **Segurança bem fundamentada:** bind loopback, Host/Origin/CSRF, tokens de controle, Secret metadata-only, RBAC revalidado, redaction de logs.
+- **Testes verdes:** 730 testes Go em 36 pacotes, 79 testes Vitest, lint, typecheck, build, `govulncheck` e `npm audit` sem vulnerabilidades.
+- **Arquitetura de cancelamento:** geração monotônica, cancelamento hierárquico, invalidação de caches.
+- **MVP funcional:** dashboard, recursos somente leitura, logs, ações autorizadas, settings e preferências implementados.
+- **Desktop:** suporte inicial Wails v2.15.0 com bridge in-process e loopback interno para streams.
 
-## Convenção de nomes
+### 3.2 Principais problemas e oportunidades
 
-- Produto e textos de marca: **Kube Peep**.
-- Executável e comando literal: `kubePeep`.
-- Diretório Unix literal: `~/.kubePeep/`.
-- Diretório Windows literal: `%LOCALAPPDATA%\kubePeep\`.
-- Repositório e módulo Go: `github.com/fvmoraes/kubepeep`.
-- Nomes de telas e ações podem permanecer em inglês conforme o prompt; a documentação do plano permanece em português.
+1. **Frontend monolítico e sem design system:** CSS global único, componentes gigantes, tokens visuais ausentes, Tailwind importado mas não usado, SVGs da marca não integrados.
+2. **Inconsistência visual entre telas:** tabelas, formulários, estados de erro e espaçamentos variam arbitrariamente.
+3. **Backend com ports dispersos:** `internal/ports` está vazio; interfaces de port espalhadas por handlers e serviços.
+4. **Duplicação dashboard/resources:** classificação de pods/workloads e lógicas de listagem existem em duas camadas.
+5. **Testes flaky e races:** alguns testes falham com `-race`, indicando problemas reais de concorrência.
+6. **Fase 9 incompleta:** favoritos/recentes, diff, gerenciador de port-forward, multi-contexto e parser composto de filtros ainda não implementados.
+7. **Documentação fragmentada:** partes da Fase 9 e detalhes de UI/UX carecem de atualização.
 
-## Handoff obrigatório
+### 3.3 Decisões transversais
 
-Ao concluir cada tarefa relevante e cada gate de fase, registrar:
+- Manter a identidade visual própria; não copiar marca, cores ou layout do Aptakube.
+- Priorizar componentes reutilizáveis e tokens centralizados sobre correções isoladas.
+- Preservar a segurança como premissa inegociável em todas as melhorias.
+- Não introduzir edição/aplicação genérica de YAML durante este plano.
+- Continuar usando Kind canônico para validação de caminhos reais.
 
-- arquivos criados;
-- arquivos alterados;
-- comandos executados;
-- testes executados;
-- resultados observados;
-- pendências e exceções;
-- próxima tarefa recomendada;
-- caminhos das evidências produzidas.
+## 4. Próximos passos recomendados
+
+1. Executar a **Fase 0** (correções críticas) antes de qualquer refatoração ampla.
+2. Fechar **F4-49** (matriz exaustiva de RBAC) e criar uma **release candidate** para desbloquear F8-42/F8-46/F8-48.
+3. Implementar o **design system** e integrar os SVGs oficiais da marca.
+4. Refatorar componentes monolíticos do frontend em componentes menores e reutilizáveis.
+5. Centralizar ports no backend e consolidar dashboard/resources.
+6. Avançar a **Fase 9** com parser composto de filtros, YAML highlight, terminal profissional e gerenciador de port-forward.
+7. Atualizar a documentação em conjunto com cada mudança.
+
+## 5. Referências
+
+- Plano de desenvolvimento original: `01-descoberta.md` a `09-experiencia-operacional.md`.
+- Matrizes de aceite: `matriz-aceite-mvp.md`, `matriz-aceite-ux.md`.
+- Documentação normativa: `docs/product-spec.md`, `docs/architecture.md`, `docs/api.md`, `docs/security.md`, `docs/data-model.md`, `docs/implementation-plan.md`.
+- Benchmark de experiência: `docs/research/aptakube-ux-benchmark.md`.
+- Evidências de execução: `docs/research/phase1-evidence.md` a `phase9-evidence.md`.
+- Screenshots da revisão: `docs/research/screenshots-review/`.
