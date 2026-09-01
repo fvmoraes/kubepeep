@@ -76,9 +76,13 @@ func (generation *Generation) Stream(parent context.Context, idleTimeout time.Du
 		stopParent:  stopParent,
 		idleTimeout: idleTimeout,
 	}
+	// Assign the timer under the stream mutex before any callback can run so
+	// that closeWith and Activity never race on the timer field.
+	stream.mu.Lock()
 	stream.timer = time.AfterFunc(idleTimeout, func() {
 		stream.closeWith(errStreamIdle)
 	})
+	stream.mu.Unlock()
 	return stream, nil
 }
 
