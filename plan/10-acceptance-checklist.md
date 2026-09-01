@@ -155,3 +155,18 @@
 | E2E smoke manual | ✅ app + Kind `kubepeep-f4`, screenshots atualizados |
 
 ⏸ G-08/G-09/G-10 (harness Kind completo, Playwright E2E dedicado, build desktop) permanecem para o pipeline de release.
+
+---
+
+## 11. Follow-ups executados (2026-09-01, segunda rodada)
+
+| Item | Resultado | Commit |
+| --- | --- | --- |
+| F4-02 | ✅ Primitivas de classificação de pod consolidadas em `internal/services/podhealth` (`ControllingOwner` — antes triplicada; `Problematic` — definição canônica do badge). Workloads e redação já eram únicos. Zero mudança de comportamento. | `c0ab25b` |
+| O-05/O-02 | ✅ Eventos de lifecycle estruturados (startup/shutdown, `duration_ms` numérico); shutdown ordenado para LIFO rodar com o sink aberto. | `86b285f` |
+| O-04 | ✅ `APIError.requestId` populado com o header `X-Request-ID` do backend nos erros HTTP reais. | `86b285f` |
+| O-03 | ✅ `logging.Sampler` (burst→1/janela) no middleware Recovery contra spam de panics. | `86b285f` |
+| F5-04 | ✅ `doctor` com grupo observabilidade: `log_sink` e `metrics_endpoint` (pass/skip/warn por contrato opt-in). Validado E2E: `METRICS_READY` e `METRICS_DISABLED` observados. | `86b285f` |
+| G-08 | ✅ `test/kind/harness.sh validate` verde — todas as fases 4-7 de cenários Kubernetes/RBAC. Obs.: exigiu contorno ambiental (TLS interceptado no mirror do registry — `skip_verify` no containerd do nó de teste; imagem importada via host). | — |
+| G-09 | ✅ Playwright E2E 3/3, agora servindo o bundle de produção (`vite preview` em vez de dev server, que flakava por transform on-demand); asserção da marca atualizada para o SVG da Fase 1. | `968ff1e` |
+| G-10 | ◐ Parcial: `go vet -tags desktop ./...` limpo; build nativo segue bloqueado sem permissão para instalar `libgtk-3-dev`/`libwebkit2gtk-4.1-dev` (policy server rejeita sudo). | — |
