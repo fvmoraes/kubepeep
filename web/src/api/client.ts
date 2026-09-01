@@ -65,20 +65,26 @@ export class APIError extends Error {
   readonly requestId?: string
   readonly details?: unknown
 
-  constructor(status: number, payload: APIErrorPayload) {
+  constructor(status: number, payload: APIErrorPayload, requestId?: string) {
     super(payload.message ?? 'The local API returned an unexpected response.')
     this.name = 'APIError'
     this.status = status
     this.code = payload.code ?? 'UNKNOWN'
-    this.requestId = payload.requestId
+    this.requestId = requestId ?? payload.requestId
     this.details = payload.details
   }
+}
+
+// requestIdFrom extracts the backend correlation id (O-04) so support and
+// logs can be joined on the same identifier shown in the JSONL log file.
+function requestIdFrom(response: ResponseLike): string | undefined {
+  return response.headers.get('X-Request-ID') ?? undefined
 }
 
 async function decodeJSON(response: ResponseLike): Promise<unknown> {
   const contentType = response.headers.get('content-type') ?? ''
   if (!contentType.toLowerCase().startsWith('application/json')) {
-    throw new APIError(response.status, { code: 'INVALID_RESPONSE' })
+    throw new APIError(response.status, { code: 'INVALID_RESPONSE' }, requestIdFrom(response))
   }
   return response.json()
 }
@@ -94,7 +100,7 @@ async function requestEnvelope<T>(path: string, init: RequestInit = {}): Promise
   }
   const body = (await decodeJSON(response)) as Envelope<T> & APIErrorPayload
   if (!response.ok) {
-    throw new APIError(response.status, body)
+    throw new APIError(response.status, body, requestIdFrom(response))
   }
   if (body && typeof body === 'object' && 'data' in body) {
     return body
@@ -254,7 +260,7 @@ async function requestYAML(path: string, signal?: AbortSignal): Promise<string> 
   })
   if (!response.ok) {
     const payload = (await decodeJSON(response)) as APIErrorPayload
-    throw new APIError(response.status, payload)
+    throw new APIError(response.status, payload, requestIdFrom(response))
   }
   const contentType = response.headers.get('content-type')?.toLowerCase() ?? ''
   if (!contentType.includes('yaml')) {

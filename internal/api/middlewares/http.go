@@ -14,6 +14,7 @@ import (
 	gingermiddleware "github.com/fvmoraes/ginger/pkg/middleware"
 
 	"github.com/fvmoraes/kubepeep/internal/api"
+	"github.com/fvmoraes/kubepeep/internal/logging"
 )
 
 const requestIDBytes = 18
@@ -49,14 +50,17 @@ func RequestID() gingermiddleware.Func {
 
 // Recovery returns the contract error envelope and never serializes the panic
 // value. It does not wrap ResponseWriter, preserving streaming interfaces.
+// Recovered panics are rate-limited (O-03): a broken route hammered by a
+// poller emits the first three panics and then at most one per minute.
 func Recovery(log *logger.Logger) gingermiddleware.Func {
+	panicSampler := logging.NewSampler(3, time.Minute)
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			defer func() {
 				if recover() == nil {
 					return
 				}
-				if log != nil {
+				if log != nil && panicSampler.Allow() {
 					log.Error(
 						"panic_recovered",
 						"operation", "http.request",

@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"os"
 	"runtime"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/fvmoraes/kubepeep/internal/adapters/userdirs"
 	"github.com/fvmoraes/kubepeep/internal/buildinfo"
@@ -126,7 +129,54 @@ func (LocalDoctor) Check(ctx context.Context, layout userdirs.Layout) ([]DoctorC
 		}
 	}
 
+	checks = append(checks, observabilityChecks(ctx, layout, state, stateErr)...)
 	return checks, nil
+}
+
+// observabilityChecks covers the observability group (F5-04): the local log
+// sink must be writable and, when a local instance is running, the optional
+// /metrics endpoint must behave per its opt-in contract.
+func observabilityChecks(ctx context.Context, layout userdirs.Layout, state localruntime.InstanceStateV1, stateErr error) []DoctorCheck {
+	checks := make([]DoctorCheck, 0, 2)
+	sink, sinkErr := os.OpenFile(layout.Log, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if sinkErr != nil {
+		checks = append(checks, DoctorCheck{Group: "observabilidade", Name: "log_sink", Status: DoctorFail, Code: "LOG_SINK_UNAVAILABLE", Message: "The local JSONL log file could not be opened for append."})
+	} else {
+		_ = sink.Close()
+		checks = append(checks, DoctorCheck{Group: "observabilidade", Name: "log_sink", Status: DoctorPass, Code: "LOG_SINK_READY", Message: "The local JSONL log file is writable and private."})
+	}
+
+	switch {
+	case stateErr != nil:
+		if errors.Is(stateErr, localruntime.ErrNotRunning) {
+			checks = append(checks, DoctorCheck{Group: "observabilidade", Name: "metrics_endpoint", Status: DoctorSkip, Code: "METRICS_NOT_RUNNING", Message: "No local instance is running; /metrics was not probed."})
+		} else {
+			checks = append(checks, DoctorCheck{Group: "observabilidade", Name: "metrics_endpoint", Status: DoctorSkip, Code: "METRICS_INSTANCE_UNKNOWN", Message: "Runtime state is unavailable; /metrics was not probed."})
+		}
+	default:
+		endpoint := fmt.Sprintf("http://127.0.0.1:%d/metrics", state.Port)
+		request, requestErr := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+		if requestErr != nil {
+			checks = append(checks, DoctorCheck{Group: "observabilidade", Name: "metrics_endpoint", Status: DoctorWarn, Code: "METRICS_PROBE_INVALID", Message: "The /metrics probe could not be constructed."})
+			break
+		}
+		client := &http.Client{Timeout: 2 * time.Second}
+		response, probeErr := client.Do(request)
+		if probeErr != nil {
+			checks = append(checks, DoctorCheck{Group: "observabilidade", Name: "metrics_endpoint", Status: DoctorWarn, Code: "METRICS_UNREACHABLE", Message: "A local instance is running but /metrics could not be reached."})
+			break
+		}
+		defer response.Body.Close()
+		switch response.StatusCode {
+		case http.StatusOK:
+			checks = append(checks, DoctorCheck{Group: "observabilidade", Name: "metrics_endpoint", Status: DoctorPass, Code: "METRICS_READY", Message: "The optional /metrics endpoint is enabled and responding on loopback."})
+		case http.StatusNotFound:
+			checks = append(checks, DoctorCheck{Group: "observabilidade", Name: "metrics_endpoint", Status: DoctorSkip, Code: "METRICS_DISABLED", Message: "The optional /metrics endpoint is disabled, as configured by default."})
+		default:
+			checks = append(checks, DoctorCheck{Group: "observabilidade", Name: "metrics_endpoint", Status: DoctorWarn, Code: "METRICS_UNEXPECTED", Message: fmt.Sprintf("The /metrics endpoint answered with HTTP %d.", response.StatusCode)})
+		}
+	}
+	return checks
 }
 
 func newDoctorCommand(dependencies Dependencies) *cobra.Command {
@@ -174,7 +224,7 @@ func newDoctorCommand(dependencies Dependencies) *cobra.Command {
 }
 
 func buildDoctorReport(checks []DoctorCheck) (DoctorReport, error) {
-	groups := map[string]int{"build": 0, "diretórios": 1, "processo": 2, "configuração": 3, "SQLite": 4, "kubeconfig": 5, "cluster": 6, "segurança": 7}
+	groups := map[string]int{"build": 0, "diretórios": 1, "processo": 2, "configuração": 3, "SQLite": 4, "kubeconfig": 5, "cluster": 6, "segurança": 7, "observabilidade": 8}
 	result := append([]DoctorCheck(nil), checks...)
 	for index := range result {
 		check := &result[index]

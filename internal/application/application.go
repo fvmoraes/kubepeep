@@ -10,8 +10,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
+	"time"
 
 	gingerhealth "github.com/fvmoraes/ginger/pkg/health"
 
@@ -78,6 +80,7 @@ var _ gingerhealth.Checker = namedChecker{}
 // single source of truth for wiring; both the web runtime and the desktop
 // shell call it.
 func Compose(ctx context.Context, options Options) (*Platform, error) {
+	started := time.Now()
 	if options.Layout.Root == "" {
 		return nil, errors.New("startup: canonical layout is required")
 	}
@@ -298,6 +301,11 @@ func Compose(ctx context.Context, options Options) (*Platform, error) {
 	closeRuntimeOnError = false
 	closeCoordinatorOnError = false
 	closeActionsOnError = false
+	// Structured lifecycle events (O-05/O-02): the log handler emits both the
+	// human "duration" string and the numeric duration_ms for aggregation.
+	logger.Logger.LogAttrs(context.Background(), slog.LevelInfo, "startup",
+		slog.String("component", "lifecycle"),
+		slog.Duration("duration", time.Since(started)))
 	return &Platform{
 		Handler:    application.Handler,
 		Port:       options.Port,
@@ -316,6 +324,14 @@ func Compose(ctx context.Context, options Options) (*Platform, error) {
 			{Name: "Kubernetes clients", Func: func(context.Context) error { return kubernetesRuntime.Close() }},
 			{Name: "local log", Func: func(context.Context) error { return logSink.Close() }},
 			{Name: "SQLite", Func: func(context.Context) error { return store.Close() }},
+			// Cleanup registries run LIFO: being last makes this lifecycle
+			// event the first shutdown write, while the log sink is still open.
+			{Name: "lifecycle log", Func: func(context.Context) error {
+				logger.Logger.LogAttrs(context.Background(), slog.LevelInfo, "shutdown",
+					slog.String("component", "lifecycle"),
+					slog.Duration("duration", time.Since(started)))
+				return nil
+			}},
 		},
 	}, nil
 }
