@@ -55,7 +55,7 @@ func TestPortForwardTerminalPathsReleaseLoopbackPortAndAdapterGoroutine(t *testi
 		t.Run(test.name, func(t *testing.T) {
 			generations := &generationStub{generation: "gen_1"}
 			adapter := newCleanupPortForwardAdapter()
-			manager, err := newPortForwardService(context.Background(), 
+			manager, err := newPortForwardService(context.Background(),
 				&authorizerStub{}, generations, adapter, netLoopbackBinder{}, NoopAuditSink{},
 				systemClock{}, &identifierStub{}, test.duration, time.Minute, time.Second, time.Minute,
 			)
@@ -179,7 +179,7 @@ func TestExecTerminalPathsReleaseWaitGoroutineAndSession(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			generations := &generationStub{generation: "gen_1"}
 			adapter := newCleanupExecAdapter()
-			manager, err := NewExecService(context.Background(), 
+			manager, err := NewExecService(context.Background(),
 				&authorizerStub{}, generations,
 				&execInspectorStub{state: ExecTargetState{PodExists: true, ContainerExists: true, ContainerRunning: true}},
 				adapter, NoopAuditSink{},

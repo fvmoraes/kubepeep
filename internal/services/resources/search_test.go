@@ -63,13 +63,13 @@ func TestParseSearch(t *testing.T) {
 			},
 		},
 		{
-			name:  "empty",
-			input: "",
+			name:     "empty",
+			input:    "",
 			expected: SearchQuery{},
 		},
 		{
-			name:  "whitespace only",
-			input: "   ",
+			name:     "whitespace only",
+			input:    "   ",
 			expected: SearchQuery{},
 		},
 		{

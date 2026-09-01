@@ -12,6 +12,7 @@ import (
 //   - -term or !term negative word match
 //   - "exact phrase"  positive phrase match
 //   - -"phrase"       negative phrase match
+//
 // Multiple terms/phrases are combined with AND semantics for includes and
 // excludes. All includes must match and no exclude may match.
 type SearchQuery struct {

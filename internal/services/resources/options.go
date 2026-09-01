@@ -20,22 +20,22 @@ const (
 // ListOptions is the normalized domain representation of the common query.
 // Continue is the externally authenticated token and is never persisted.
 type ListOptions struct {
-	Limit        int
-	Continue     string
-	Search       string
-	SearchQuery  SearchQuery
-	Namespaces   []string
-	Statuses     []string
-	Kinds        []WorkloadKind
-	Sort         string
-	Order        SortOrder
-	Workload     string
-	Node         string
-	Restarts     RestartFilter
-	Problematic  *bool
-	ObjectKind   string
-	Reason       string
-	AddressType  string
+	Limit       int
+	Continue    string
+	Search      string
+	SearchQuery SearchQuery
+	Namespaces  []string
+	Statuses    []string
+	Kinds       []WorkloadKind
+	Sort        string
+	Order       SortOrder
+	Workload    string
+	Node        string
+	Restarts    RestartFilter
+	Problematic *bool
+	ObjectKind  string
+	Reason      string
+	AddressType string
 }
 
 type collectionRules struct {

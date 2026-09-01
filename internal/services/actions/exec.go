@@ -203,7 +203,9 @@ func (m *ExecManager) AuthorizeUpgrade(ctx context.Context, binding namespaces.S
 	m.mu.Unlock()
 
 	started := m.clock.Now().UTC()
-	defer func() { recordAudit(ctx, m.audit, m.clock, started, "exec_upgrade_authorize", ticket.target, returnedErr) }()
+	defer func() {
+		recordAudit(ctx, m.audit, m.clock, started, "exec_upgrade_authorize", ticket.target, returnedErr)
+	}()
 	if ticket.binding.ClusterProfileID != binding.ClusterProfileID || ticket.binding.Context != binding.Context || ticket.binding.Generation != binding.Generation {
 		return grant, publicError(CodeGenerationChanged, http.StatusConflict, false, nil)
 	}

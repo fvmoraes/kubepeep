@@ -18,6 +18,7 @@ import (
 	"github.com/fvmoraes/kubepeep/internal/api"
 	"github.com/fvmoraes/kubepeep/internal/api/handlers"
 	apiMiddleware "github.com/fvmoraes/kubepeep/internal/api/middlewares"
+	"github.com/fvmoraes/kubepeep/internal/observability"
 	actionservice "github.com/fvmoraes/kubepeep/internal/services/actions"
 	"github.com/fvmoraes/kubepeep/internal/web"
 )
@@ -48,6 +49,9 @@ type Options struct {
 	Logger       *gingerlogger.Logger
 	ExtraHosts   []string
 	ExtraOrigins []string
+	// Metrics optionally enables the local process metrics endpoint. A nil
+	// registry keeps /metrics unregistered; this is the default.
+	Metrics *observability.Registry
 }
 
 type Application struct {
@@ -199,13 +203,25 @@ func New(options Options) (*Application, error) {
 	health := handlers.NewHealth(options.Snapshots)
 	mux := http.NewServeMux()
 	mux.Handle("GET /health", health)
+	if options.Metrics != nil {
+		registry := options.Metrics
+		mux.Handle("GET /metrics", http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+			response.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
+			_, _ = response.Write([]byte(registry.Render()))
+		}))
+	}
 	mux.Handle("/", application.Router)
 
-	handler := gingermiddleware.Chain(
+	outerMiddlewares := []gingermiddleware.Func{
 		apiMiddleware.RequestID(),
 		apiMiddleware.Recovery(application.Logger),
-		apiMiddleware.Host(host, options.ExtraHosts...),
-	)(mux)
+	}
+	if options.Metrics != nil {
+		outerMiddlewares = append(outerMiddlewares, observability.RequestsMiddleware(options.Metrics))
+	}
+	outerMiddlewares = append(outerMiddlewares, apiMiddleware.Host(host, options.ExtraHosts...))
+
+	handler := gingermiddleware.Chain(outerMiddlewares...)(mux)
 
 	return &Application{
 		Ginger:     application,

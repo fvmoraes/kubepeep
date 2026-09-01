@@ -77,7 +77,15 @@ type DashboardConfig struct {
 }
 
 type ObservabilityConfig struct {
-	OTel OTelConfig `yaml:"otel"`
+	OTel    OTelConfig    `yaml:"otel"`
+	Metrics MetricsConfig `yaml:"metrics"`
+}
+
+// MetricsConfig controls the optional local process metrics endpoint. The
+// endpoint is disabled by default and, when enabled, only ever binds to the
+// same loopback address as the application itself.
+type MetricsConfig struct {
+	Enabled bool `yaml:"enabled"`
 }
 
 type OTelConfig struct {

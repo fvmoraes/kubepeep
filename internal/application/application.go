@@ -24,6 +24,7 @@ import (
 	productconfig "github.com/fvmoraes/kubepeep/internal/config"
 	kuberuntime "github.com/fvmoraes/kubepeep/internal/integration/kubernetesruntime"
 	"github.com/fvmoraes/kubepeep/internal/logging"
+	"github.com/fvmoraes/kubepeep/internal/observability"
 	localruntime "github.com/fvmoraes/kubepeep/internal/runtime"
 	actionservice "github.com/fvmoraes/kubepeep/internal/services/actions"
 	"github.com/fvmoraes/kubepeep/internal/services/authorization"
@@ -254,6 +255,10 @@ func Compose(ctx context.Context, options Options) (*Platform, error) {
 	namespaceService := namespaces.NewService(namespaceRepository, selectionState, kubernetesRuntime)
 
 	gingerConfig := options.Config.ToGinger(options.Layout.Database)
+	var metricsRegistry *observability.Registry
+	if options.Config.Observability.Metrics.Enabled {
+		metricsRegistry = observability.NewRegistry()
+	}
 	application, err := httpapp.New(httpapp.Options{
 		Config: &gingerConfig,
 		Port:   options.Port,
@@ -282,6 +287,7 @@ func Compose(ctx context.Context, options Options) (*Platform, error) {
 		Logger:       logger,
 		ExtraHosts:   options.ExtraHosts,
 		ExtraOrigins: options.ExtraOrigins,
+		Metrics:      metricsRegistry,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("startup: compose HTTP application: %w", err)

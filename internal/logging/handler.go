@@ -21,14 +21,15 @@ const (
 
 var (
 	allowedFields = map[string]struct{}{
-		"component":  {},
-		"operation":  {},
-		"request_id": {},
-		"context":    {},
-		"namespace":  {},
-		"resource":   {},
-		"duration":   {},
-		"error_code": {},
+		"component":   {},
+		"operation":   {},
+		"request_id":  {},
+		"context":     {},
+		"namespace":   {},
+		"resource":    {},
+		"duration":    {},
+		"duration_ms": {},
+		"error_code":  {},
 	}
 	sensitiveContent = []*regexp.Regexp{
 		regexp.MustCompile(`(?i)\b(?:bearer|basic)\s+[a-z0-9._~+/=-]+`),
@@ -122,6 +123,11 @@ func addAllowed(entry map[string]any, attr slog.Attr) {
 	switch value.Kind() {
 	case slog.KindDuration:
 		entry[key] = value.Duration().String()
+		if key == "duration" {
+			// Numeric companion for aggregation; the formatted string stays
+			// human-readable. Never negative and always integral millis.
+			entry["duration_ms"] = value.Duration().Milliseconds()
+		}
 	case slog.KindInt64:
 		entry[key] = value.Int64()
 	case slog.KindUint64:
