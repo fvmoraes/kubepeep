@@ -646,6 +646,32 @@ export interface Preferences {
   logs: { wrap: boolean; timestamps: boolean; tailLines: number }
   dashboard: { logScanWindow: '15m' | '30m' | '1h' | '4h'; sectionOrder: string[]; hiddenSections: string[] }
   filters: Record<SavedFilterCollection, SavedFilterSet>
+  favorites?: FavoriteSet
+}
+
+export type FavoriteKind =
+  | 'pod'
+  | 'deployment'
+  | 'statefulset'
+  | 'daemonset'
+  | 'job'
+  | 'cronjob'
+  | 'service'
+  | 'ingress'
+  | 'endpointslice'
+  | 'configmap'
+  | 'secret'
+
+export interface FavoriteItem {
+  id: string
+  kind: FavoriteKind
+  namespace: string
+  name: string
+}
+
+export interface FavoriteSet {
+  version: 1
+  items: FavoriteItem[]
 }
 
 export interface ActionTarget {

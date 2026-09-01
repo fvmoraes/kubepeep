@@ -14,15 +14,19 @@ const resources: CommandRoute[] = [
   { path: '/config/secrets/ops/store', label: 'store', description: 'Secret · ops', keywords: ['Secret', 'ops', 'secrets'] },
 ]
 
-function renderPalette(getResources: () => readonly CommandRoute[]) {
+function renderPalette(
+  getResources: () => readonly CommandRoute[],
+  getFavorites?: () => readonly CommandRoute[],
+) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={['/pods']}>
-        <CommandCenter routes={routes} getResources={getResources} />
+        <CommandCenter routes={routes} getFavorites={getFavorites} getResources={getResources} />
         <Routes>
           <Route path="/pods" element={<div>pods page</div>} />
           <Route path="/pods/:namespace/:name" element={<div>pod detail</div>} />
+          <Route path="/workloads/:kind/:namespace/:name" element={<div>workload detail</div>} />
           <Route path="/config/secrets/:namespace/:name" element={<div>secret detail</div>} />
         </Routes>
       </MemoryRouter>
@@ -61,5 +65,18 @@ describe('command center global resource search (F7-04)', () => {
     expect(screen.getByRole('option', { name: /api-abc/ })).toBeInTheDocument()
     expect(screen.queryByRole('option', { name: /store/ })).not.toBeInTheDocument()
     expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  it('renders saved favorites before pages and resources', () => {
+    const favorites: CommandRoute[] = [
+      { path: '/workloads/deployments/payments/api', label: 'api', description: 'deployment · payments', keywords: ['favorite', 'deployment'] },
+    ]
+    renderPalette(() => resources, () => favorites)
+    fireEvent.keyDown(document, { key: 'k', ctrlKey: true })
+    const options = screen.getAllByRole('option')
+    expect(options).toHaveLength(4)
+    expect(options[0].textContent).toContain('deployment · payments')
+    fireEvent.click(screen.getAllByRole('option')[0])
+    expect(screen.getByText('workload detail')).toBeInTheDocument()
   })
 })

@@ -43,7 +43,8 @@ func TestPreferencePutValidatesAndReplacesAllKeysTransactionally(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if saved.UI.Language != "pt-BR" || len(repository.replaced) != 11 {
+	// 11 legacy keys + the favorites section added with the same schema v1.
+	if saved.UI.Language != "pt-BR" || len(repository.replaced) != 12 {
 		t.Fatalf("saved=%#v records=%d", saved, len(repository.replaced))
 	}
 	for index := 1; index < len(repository.replaced); index++ {

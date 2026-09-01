@@ -18,6 +18,8 @@ interface CommandCenterProps {
   // opens so the index always reflects the freshest cache without reactive
   // subscriptions.
   getResources?: () => readonly CommandRoute[]
+  // Saved favorite targets (F7-01): resolved at open time, rendered first.
+  getFavorites?: () => readonly CommandRoute[]
   onRefresh?: () => void | Promise<unknown>
 }
 
@@ -70,8 +72,9 @@ function matchesQuery(route: CommandRoute, query: string) {
   return terms.every((term) => searchable.includes(term))
 }
 
-export function CommandCenter({ routes, getResources, onRefresh }: CommandCenterProps) {
+export function CommandCenter({ routes, getFavorites, getResources, onRefresh }: CommandCenterProps) {
   const [sessionResources, setSessionResources] = useState<readonly CommandRoute[]>([])
+  const [sessionFavorites, setSessionFavorites] = useState<readonly CommandRoute[]>([])
   const navigate = useNavigate()
   const [view, setView] = useState<CommandCenterView>(null)
   const [query, setQuery] = useState('')
@@ -88,15 +91,25 @@ export function CommandCenter({ routes, getResources, onRefresh }: CommandCenter
     () => (sessionResources.length > 0 ? sessionResources.filter((entry) => matchesQuery(entry, query)) : []),
     [query, sessionResources],
   )
-  const combinedResults = useMemo(() => (filteredResources.length > 0 ? [...filteredRoutes, ...filteredResources] : filteredRoutes), [filteredResources, filteredRoutes])
+  const filteredFavorites = useMemo(
+    () => (sessionFavorites.length > 0 ? sessionFavorites.filter((entry) => matchesQuery(entry, query)) : []),
+    [query, sessionFavorites],
+  )
+  const combinedResults = useMemo(
+    () => [...filteredFavorites, ...filteredRoutes, ...(filteredResources.length > 0 ? filteredResources : [])],
+    [filteredFavorites, filteredResources, filteredRoutes],
+  )
 
   const open = useCallback((nextView: Exclude<CommandCenterView, null>) => {
     if (view === null && document.activeElement instanceof HTMLElement) {
       returnFocusRef.current = document.activeElement
     }
-    if (nextView === 'commands') setSessionResources(getResources?.() ?? [])
+    if (nextView === 'commands') {
+      setSessionFavorites(getFavorites?.() ?? [])
+      setSessionResources(getResources?.() ?? [])
+    }
     setView(nextView)
-  }, [getResources, view])
+  }, [getFavorites, getResources, view])
 
   const close = useCallback(() => {
     setView(null)
@@ -275,8 +288,27 @@ export function CommandCenter({ routes, getResources, onRefresh }: CommandCenter
                 </div>
 
                 {combinedResults.length > 0 ? (
-                  <div id={listboxId} className="command-center-results" role="listbox" aria-label={sessionResources.length > 0 ? 'Application pages and visible resources' : 'Application pages'}>
-                    {filteredRoutes.map((route, index) => (
+                  <div id={listboxId} className="command-center-results" role="listbox" aria-label={sessionResources.length > 0 || sessionFavorites.length > 0 ? 'Favorites, application pages and visible resources' : 'Application pages'}>
+                    {filteredFavorites.map((entry, index) => (
+                      <button
+                        key={`favorite-${entry.path}`}
+                        id={`${listboxId}-option-${index}`}
+                        type="button"
+                        role="option"
+                        tabIndex={-1}
+                        aria-selected={index === activeIndex}
+                        className={index === activeIndex ? 'command-center-result command-center-result--active' : 'command-center-result'}
+                        onMouseEnter={() => setActiveIndex(index)}
+                        onFocus={() => setActiveIndex(index)}
+                        onClick={() => chooseRoute(entry)}
+                      >
+                        <span><strong>{entry.label}</strong><small>{entry.description}</small></span>
+                        <code>{entry.path}</code>
+                      </button>
+                    ))}
+                    {filteredRoutes.map((route, offset) => {
+                      const index = filteredFavorites.length + offset
+                      return (
                       <button
                         key={route.path}
                         id={`${listboxId}-option-${index}`}
@@ -292,9 +324,10 @@ export function CommandCenter({ routes, getResources, onRefresh }: CommandCenter
                         <span><strong>{route.label}</strong><small>{route.description}</small></span>
                         <code>{route.path}</code>
                       </button>
-                    ))}
+                      )
+                    })}
                     {filteredResources.map((entry, offset) => {
-                      const index = filteredRoutes.length + offset
+                      const index = filteredFavorites.length + filteredRoutes.length + offset
                       return (
                         <button
                           key={entry.path}

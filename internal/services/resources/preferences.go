@@ -20,6 +20,28 @@ type PreferencesDTO struct {
 	Logs      LogPreferences       `json:"logs"`
 	Dashboard DashboardPreferences `json:"dashboard"`
 	Filters   FilterPreferences    `json:"filters"`
+	Favorites FavoriteSet          `json:"favorites"`
+}
+
+// favoriteKindAllowlist bounds favorite targets to resources whose detail
+// views expose metadata only; Secrets are allowed because Secret detail is
+// metadata-only by product rule.
+var favoriteKindAllowlist = []string{"pod", "deployment", "statefulset", "daemonset", "job", "cronjob", "service", "ingress", "endpointslice", "configmap", "secret"}
+
+var favoriteResourceNamePattern = regexp.MustCompile(`^[a-z0-9](?:[-a-z0-9.]{0,250}[a-z0-9])?$`)
+
+// FavoriteSet stores pinned resources for quick navigation. Only resource
+// identity (kind, namespace, name) is stored — never labels, specs, or data.
+type FavoriteSet struct {
+	Version int            `json:"version"`
+	Items   []FavoriteItem `json:"items"`
+}
+
+type FavoriteItem struct {
+	ID        string `json:"id"`
+	Kind      string `json:"kind"`
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
 }
 type UIPreferences struct {
 	Language string `json:"language"`
@@ -52,7 +74,7 @@ type SavedFilter struct {
 
 func DefaultPreferences() PreferencesDTO {
 	empty := func() SavedFilterSet { return SavedFilterSet{Version: 1, Items: []SavedFilter{}} }
-	return PreferencesDTO{Version: 1, UI: UIPreferences{Language: "en"}, Logs: LogPreferences{Wrap: false, Timestamps: true, TailLines: 200}, Dashboard: DashboardPreferences{LogScanWindow: "15m", SectionOrder: append([]string(nil), dashboardSectionIDs...), HiddenSections: []string{}}, Filters: FilterPreferences{Workloads: empty(), Pods: empty(), Events: empty(), Logs: empty()}}
+	return PreferencesDTO{Version: 1, UI: UIPreferences{Language: "en"}, Logs: LogPreferences{Wrap: false, Timestamps: true, TailLines: 200}, Dashboard: DashboardPreferences{LogScanWindow: "15m", SectionOrder: append([]string(nil), dashboardSectionIDs...), HiddenSections: []string{}}, Filters: FilterPreferences{Workloads: empty(), Pods: empty(), Events: empty(), Logs: empty()}, Favorites: FavoriteSet{Version: 1, Items: []FavoriteItem{}}}
 }
 
 type PreferenceService struct {
@@ -138,6 +160,41 @@ func ValidatePreferences(value PreferencesDTO) error {
 		if err := validateFilterSet(set.name, set.value, set.collection); err != nil {
 			return err
 		}
+	}
+	return validateFavoriteSet(value.Favorites)
+}
+
+// validateFavoriteSet bounds favorites to 50 metadata-only targets. A zero
+// set is the backward-compatible empty value: older clients may omit the
+// section entirely.
+func validateFavoriteSet(set FavoriteSet) error {
+	if set.Version == 0 && len(set.Items) == 0 {
+		return nil
+	}
+	if set.Version != 1 {
+		return validationError("favorite set version must be 1")
+	}
+	if len(set.Items) > 50 {
+		return validationError("favorite set exceeds 50 items")
+	}
+	seen := map[string]struct{}{}
+	for _, item := range set.Items {
+		if item.ID == "" || len(item.ID) > 128 || !utf8.ValidString(item.ID) {
+			return validationError("favorite id is invalid")
+		}
+		if !contains(favoriteKindAllowlist, item.Kind) {
+			return validationError("favorite kind has an invalid value")
+		}
+		for _, text := range []string{item.Namespace, item.Name} {
+			if len(text) > 253 || !utf8.ValidString(text) || !favoriteResourceNamePattern.MatchString(text) {
+				return validationError("favorite namespace and name must be valid resource identifiers")
+			}
+		}
+		identity := item.Kind + "/" + item.Namespace + "/" + item.Name
+		if _, ok := seen[identity]; ok {
+			return validationError("favorite target must be unique")
+		}
+		seen[identity] = struct{}{}
 	}
 	return nil
 }
@@ -255,7 +312,7 @@ func stringSlice(value any) ([]string, bool) {
 }
 
 func preferenceRecords(value PreferencesDTO) ([]PreferenceRecord, error) {
-	pairs := map[string]any{"ui.language": value.UI.Language, "logs.wrap": value.Logs.Wrap, "logs.timestamps": value.Logs.Timestamps, "logs.tail_lines": value.Logs.TailLines, "dashboard.log_scan_window": value.Dashboard.LogScanWindow, "dashboard.section_order": value.Dashboard.SectionOrder, "dashboard.hidden_sections": value.Dashboard.HiddenSections, "filters.workloads": value.Filters.Workloads, "filters.pods": value.Filters.Pods, "filters.events": value.Filters.Events, "filters.logs": value.Filters.Logs}
+	pairs := map[string]any{"ui.language": value.UI.Language, "logs.wrap": value.Logs.Wrap, "logs.timestamps": value.Logs.Timestamps, "logs.tail_lines": value.Logs.TailLines, "dashboard.log_scan_window": value.Dashboard.LogScanWindow, "dashboard.section_order": value.Dashboard.SectionOrder, "dashboard.hidden_sections": value.Dashboard.HiddenSections, "filters.workloads": value.Filters.Workloads, "filters.pods": value.Filters.Pods, "filters.events": value.Filters.Events, "filters.logs": value.Filters.Logs, "favorites": favoritesOrDefault(value.Favorites)}
 	keys := make([]string, 0, len(pairs))
 	for key := range pairs {
 		keys = append(keys, key)
@@ -296,6 +353,8 @@ func applyPreferenceRecord(value *PreferencesDTO, record PreferenceRecord) error
 		return json.Unmarshal(record.ValueJSON, &value.Filters.Events)
 	case "filters.logs":
 		return json.Unmarshal(record.ValueJSON, &value.Filters.Logs)
+	case "favorites":
+		return json.Unmarshal(record.ValueJSON, &value.Favorites)
 	default:
 		return nil
 	}
@@ -307,4 +366,13 @@ var sensitivePreferencePattern = regexp.MustCompile(`(?i)(-----BEGIN [A-Z ]*PRIV
 
 func (DefaultSensitiveDetector) ContainsSensitiveValue(value string) bool {
 	return sensitivePreferencePattern.MatchString(strings.TrimSpace(value))
+}
+
+// favoritesOrDefault normalizes an omitted favorites section so the stored
+// record always carries the canonical versioned shape.
+func favoritesOrDefault(set FavoriteSet) FavoriteSet {
+	if set.Version == 0 {
+		return FavoriteSet{Version: 1, Items: []FavoriteItem{}}
+	}
+	return set
 }

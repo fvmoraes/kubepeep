@@ -14,11 +14,11 @@ import {
 } from 'lucide-react'
 import { NavLink, Outlet, Route, Routes } from 'react-router'
 
-import { getStatus } from './api/client'
+import { getPreferences, getStatus, type Preferences } from './api/client'
 import { BrandLogo } from './components/BrandLogo'
 import { BrandWordmark } from './components/BrandWordmark'
 import { Badge } from './components/ui/Badge'
-import { CommandCenter } from './components/CommandCenter'
+import { CommandCenter, type CommandRoute } from './components/CommandCenter'
 import { ContextSelector } from './components/ContextSelector'
 import { DashboardPage } from './components/Dashboard'
 import { NamespaceScopeEditor } from './components/NamespaceScopeEditor'
@@ -76,6 +76,50 @@ function resourceEntryPath(collection: unknown, item: { name?: string; namespace
 
 function resourceEntryKeywords(collection: string, item: { kind?: string; namespace?: string }): string[] {
   return [item.kind ?? '', item.namespace ?? '', collection]
+}
+
+function favoriteEntryPath(kind: string, namespace: string, name: string): string | null {
+  switch (kind) {
+    case 'pod':
+      return `/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`
+    case 'deployment':
+      return `/workloads/deployments/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`
+    case 'statefulset':
+      return `/workloads/statefulsets/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`
+    case 'daemonset':
+      return `/workloads/daemonsets/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`
+    case 'job':
+      return `/workloads/jobs/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`
+    case 'cronjob':
+      return `/workloads/cronjobs/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`
+    case 'service':
+      return `/network/services/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`
+    case 'ingress':
+      return `/network/ingresses/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`
+    case 'endpointslice':
+      return `/network/endpoint-slices/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`
+    case 'configmap':
+      return `/config/configmaps/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`
+    case 'secret':
+      return `/config/secrets/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`
+    default:
+      return null
+  }
+}
+
+function favoriteEntries(preferences: Preferences | undefined) {
+  const entries: CommandRoute[] = []
+  for (const item of preferences?.favorites?.items ?? []) {
+    const path = favoriteEntryPath(item.kind, item.namespace, item.name)
+    if (!path) continue
+    entries.push({
+      path,
+      label: item.name,
+      description: `${item.kind} · ${item.namespace}`,
+      keywords: [item.kind, item.namespace, 'favorite'],
+    })
+  }
+  return entries
 }
 
 function commandResourceEntries(queryClient: ReturnType<typeof useQueryClient>, generation: string | undefined) {
@@ -151,6 +195,11 @@ function Shell() {
   const selection = status.data?.selection ?? null
   const previousGeneration = useRef<string | null>(null)
   const refreshActiveReads = useCallback(() => queryClient.refetchQueries({ type: 'active', predicate: isSafeGlobalRefreshQuery }), [queryClient])
+  const preferences = useQuery({
+    queryKey: ['preferences'],
+    queryFn: ({ signal }) => getPreferences(signal),
+    staleTime: 60_000,
+  })
 
 
   useEffect(() => {
@@ -192,7 +241,7 @@ function Shell() {
             {selection ? <small>{selection.cluster} · {selection.namespaceCount} namespace{selection.namespaceCount === 1 ? '' : 's'}</small> : null}
           </div>
           <div className="topbar-controls">
-            <CommandCenter routes={commandRoutes} getResources={() => commandResourceEntries(queryClient, selection?.generation)} onRefresh={refreshActiveReads} />
+            <CommandCenter routes={commandRoutes} getFavorites={() => favoriteEntries(preferences.data)} getResources={() => commandResourceEntries(queryClient, selection?.generation)} onRefresh={refreshActiveReads} />
             <ContextSelector selection={selection} />
             <StatusBadge />
           </div>
