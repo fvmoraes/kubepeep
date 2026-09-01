@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react'
 
+import { Button, Input, Select } from './ui'
+
 export type ListSortOrder = 'asc' | 'desc'
 
 export interface ActiveListFilter {
@@ -63,14 +65,14 @@ export function ResourceListControls({
   return (
     <section className="resource-list-controls" aria-label="Resource list controls">
       <form className="resource-filters" onSubmit={(event) => { event.preventDefault(); onApply() }}>
-        <label className="resource-search">Search this bounded page<input type="search" data-app-shortcut="search" aria-keyshortcuts="Control+F Meta+F" value={search} maxLength={256} onChange={(event) => onSearchChange(event.target.value)} /></label>
+        <label className="resource-search">Search this bounded page<Input type="search" data-app-shortcut="search" aria-keyshortcuts="Control+F Meta+F" value={search} maxLength={256} onChange={(event) => onSearchChange(event.target.value)} /></label>
         {children}
-        <label>Sort this bounded page<select value={sort} onChange={(event) => onSortChange(event.target.value)}>{sortOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>
-        <label>Order<select value={order} onChange={(event) => onOrderChange(event.target.value as ListSortOrder)}><option value="asc">Ascending</option><option value="desc">Descending</option></select></label>
+        <label>Sort this bounded page<Select value={sort} onChange={(event) => onSortChange(event.target.value)}>{sortOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</Select></label>
+        <label>Order<Select value={order} onChange={(event) => onOrderChange(event.target.value as ListSortOrder)}><option value="asc">Ascending</option><option value="desc">Descending</option></Select></label>
         <div className="resource-filter-actions">
-          <button className="button" type="submit">Apply filters</button>
-          <button className="button button--secondary" type="button" aria-keyshortcuts="Control+R Meta+R" onClick={onRefresh}>Refresh</button>
-          <button className="button button--secondary" type="button" disabled={!canClear} onClick={onClear}>Clear filters</button>
+          <Button type="submit">Apply filters</Button>
+          <Button variant="secondary" aria-keyshortcuts="Control+R Meta+R" onClick={onRefresh}>Refresh</Button>
+          <Button variant="secondary" disabled={!canClear} onClick={onClear}>Clear filters</Button>
         </div>
       </form>
       <div className="active-filter-summary" aria-label="Applied resource list state" aria-live="polite">

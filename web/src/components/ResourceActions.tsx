@@ -21,6 +21,7 @@ import type {
   SelectionSummary,
   WorkloadDetail,
 } from '../api/types'
+import { Badge, Button, Input, Select } from './ui'
 
 function mutationError(error: unknown): string {
   if (error instanceof APIError) return `${error.code}: ${error.message}`
@@ -65,7 +66,8 @@ function CapabilityNotice({ label, value }: { label: string; value: CapabilityDe
       : value === 'unknown'
         ? 'could not be verified; action disabled'
         : 'checking Kubernetes permission'
-  return <li><strong>{label}:</strong> <span className={`permission-decision permission-decision--${value}`}>{copy}</span></li>
+  const variant = value === 'allowed' ? 'healthy' : value === 'denied' ? 'danger' : value === 'unknown' ? 'warning' : 'unknown'
+  return <li><strong>{label}:</strong> <Badge variant={variant}>{copy}</Badge></li>
 }
 
 function useGenerationRequests(generation: string) {
@@ -183,17 +185,17 @@ export function WorkloadActions({ detail, selection }: { detail: WorkloadDetail;
       </label>
       <div className="action-row">
         {detail.kind === 'Deployment' ? (
-          <button className="button button--danger" disabled={!confirmed || restartDecision !== 'allowed' || restart.isPending} onClick={() => restart.mutate()}>
+          <Button variant="danger" disabled={!confirmed || restartDecision !== 'allowed' || restart.isPending} onClick={() => restart.mutate()}>
             {restart.isPending ? 'Requesting restart…' : 'Restart Deployment'}
-          </button>
+          </Button>
         ) : null}
         <label>
           Replicas
-          <input aria-invalid={!replicasValid} type="number" min="0" max="10000" value={replicas} onChange={(event) => setReplicas(Number(event.target.value))} />
+          <Input aria-invalid={!replicasValid} type="number" min="0" max="10000" value={replicas} onChange={(event) => setReplicas(Number(event.target.value))} />
         </label>
-        <button className="button button--secondary" disabled={!confirmed || scaleDecision !== 'allowed' || scale.isPending || !replicasValid} onClick={() => scale.mutate()}>
+        <Button variant="secondary" disabled={!confirmed || scaleDecision !== 'allowed' || scale.isPending || !replicasValid} onClick={() => scale.mutate()}>
           {scale.isPending ? 'Scaling…' : 'Scale'}
-        </button>
+        </Button>
       </div>
       {!replicasValid ? <p className="field-error">Replicas must be a whole number from 0 through 10,000.</p> : null}
       {restart.isError ? <p className="field-error">{mutationError(restart.error)}</p> : null}
@@ -446,31 +448,31 @@ export function PodActions({ detail, selection }: { detail: PodDetail; selection
         I checked Pod {detail.metadata.namespace}/{detail.metadata.name} (UID {detail.metadata.uid}) and understand these consequences.
       </label>
       <div className="action-row">
-        <button className="button button--danger" disabled={!confirmed || deleteDecision !== 'allowed' || remove.isPending} onClick={() => remove.mutate()}>{remove.isPending ? 'Deleting…' : 'Delete Pod'}</button>
-        <label>Remote port<input aria-invalid={!remotePortValid} type="number" min="1" max="65535" value={remotePort} onChange={(event) => setRemotePort(Number(event.target.value))} /></label>
-        <label>Local port (optional)<input aria-invalid={!localPortValid} inputMode="numeric" value={localPort} onChange={(event) => setLocalPort(event.target.value)} placeholder="automatic" /></label>
-        <button className="button button--secondary" disabled={!confirmed || portForwardDecision !== 'allowed' || portForward.isPending || !remotePortValid || !localPortValid} onClick={() => portForward.mutate()}>{portForward.isPending ? 'Starting…' : 'Start port-forward'}</button>
+        <Button variant="danger" disabled={!confirmed || deleteDecision !== 'allowed' || remove.isPending} onClick={() => remove.mutate()}>{remove.isPending ? 'Deleting…' : 'Delete Pod'}</Button>
+        <label>Remote port<Input aria-invalid={!remotePortValid} type="number" min="1" max="65535" value={remotePort} onChange={(event) => setRemotePort(Number(event.target.value))} /></label>
+        <label>Local port (optional)<Input aria-invalid={!localPortValid} inputMode="numeric" value={localPort} onChange={(event) => setLocalPort(event.target.value)} placeholder="automatic" /></label>
+        <Button variant="secondary" disabled={!confirmed || portForwardDecision !== 'allowed' || portForward.isPending || !remotePortValid || !localPortValid} onClick={() => portForward.mutate()}>{portForward.isPending ? 'Starting…' : 'Start port-forward'}</Button>
       </div>
       {!remotePortValid || !localPortValid ? <p className="field-error">Remote port must be 1–65,535; an explicit local port must be 1,024–65,535.</p> : null}
       {portForward.data ? <p className="field-success" role="status">Loopback listener: <strong>{portForward.data.localAddress}:{portForward.data.localPort}</strong> → {portForward.data.namespace}/{portForward.data.pod}:{portForward.data.remotePort}.</p> : null}
       <div className="exec-controls">
-        <label>Container<select value={container} onChange={(event) => setContainer(event.target.value)}>{detail.containers.map((value) => <option key={value.spec.name}>{value.spec.name}</option>)}</select></label>
+        <label>Container<Select value={container} onChange={(event) => setContainer(event.target.value)}>{detail.containers.map((value) => <option key={value.spec.name}>{value.spec.name}</option>)}</Select></label>
         <label className="exec-command">Command argv (one item per line)<textarea value={command} onChange={(event) => setCommand(event.target.value)} /></label>
-        <button className="button button--secondary" disabled={!confirmed || execDecision !== 'allowed' || exec.isPending || container === '' || !commandValid} onClick={() => exec.mutate()}>{exec.isPending ? 'Authorizing…' : 'Open exec session'}</button>
+        <Button variant="secondary" disabled={!confirmed || execDecision !== 'allowed' || exec.isPending || container === '' || !commandValid} onClick={() => exec.mutate()}>{exec.isPending ? 'Authorizing…' : 'Open exec session'}</Button>
       </div>
       {!commandValid ? <p className="field-error">Provide 1–64 argv items, at most 4 KiB each and 32 KiB total, without NUL.</p> : null}
       {terminal.length > 0 ? (
         <div className="terminal-panel">
           <div className="terminal-toolbar">
             <span aria-live="polite">Exec: {socketState}</span>
-            <label>Columns<input type="number" min="1" max="4096" value={columns} onChange={(event) => setColumns(Number(event.target.value))} /></label>
-            <label>Rows<input type="number" min="1" max="4096" value={rows} onChange={(event) => setRows(Number(event.target.value))} /></label>
-            <button className="button button--compact button--secondary" disabled={socketState !== 'ready' || columns < 1 || columns > 4096 || rows < 1 || rows > 4096} onClick={resizeTerminal}>Resize</button>
-            <button className="button button--compact button--secondary" onClick={() => setTerminal([])}>Clear output</button>
-            <button className="button button--compact button--danger" disabled={socketState !== 'ready'} onClick={closeExec}>Close session</button>
+            <label>Columns<Input type="number" min="1" max="4096" value={columns} onChange={(event) => setColumns(Number(event.target.value))} /></label>
+            <label>Rows<Input type="number" min="1" max="4096" value={rows} onChange={(event) => setRows(Number(event.target.value))} /></label>
+            <Button size="compact" variant="secondary" disabled={socketState !== 'ready' || columns < 1 || columns > 4096 || rows < 1 || rows > 4096} onClick={resizeTerminal}>Resize</Button>
+            <Button size="compact" variant="secondary" onClick={() => setTerminal([])}>Clear output</Button>
+            <Button size="compact" variant="danger" disabled={socketState !== 'ready'} onClick={closeExec}>Close session</Button>
           </div>
           <pre aria-label="Exec terminal output">{terminal.map((line, index) => <span className={`terminal-${line.stream}`} key={`${index}-${line.stream}`}>{line.text}{'\n'}</span>)}</pre>
-          <div className="terminal-input"><input value={stdin} onChange={(event) => setStdin(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') sendStdin() }} aria-label="Terminal input" /><button className="button button--compact" disabled={socketState !== 'ready' || stdin === ''} onClick={sendStdin}>Send</button></div>
+          <div className="terminal-input"><Input value={stdin} onChange={(event) => setStdin(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') sendStdin() }} aria-label="Terminal input" /><Button size="compact" disabled={socketState !== 'ready' || stdin === ''} onClick={sendStdin}>Send</Button></div>
         </div>
       ) : null}
       {[remove, portForward, exec].map((operation, index) => operation.isError ? <p className="field-error" key={index}>{mutationError(operation.error)}</p> : null)}

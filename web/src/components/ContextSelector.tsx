@@ -11,6 +11,7 @@ import {
   type SelectionData,
   type SelectionSummary,
 } from '../api/client'
+import { Button, Select } from './ui'
 
 interface ContextSelectorProps {
   selection: SelectionSummary | null
@@ -144,7 +145,7 @@ export function ContextSelector({ selection, onSelected }: ContextSelectorProps)
     <div className="context-selector" aria-label="Kubernetes context selector">
       <label>
         <span>Kubeconfig</span>
-        <select
+        <Select
           aria-label="Kubeconfig source"
           value={effectiveProfileId ?? ''}
           onChange={(event) => {
@@ -155,11 +156,11 @@ export function ContextSelector({ selection, onSelected }: ContextSelectorProps)
           }}
         >
           {profileList.map((profile) => <option key={profile.id} value={profile.id}>{kubeconfigLabel(profile)}</option>)}
-        </select>
+        </Select>
       </label>
       <label>
         <span>Cluster</span>
-        <select
+        <Select
           className="cluster-display"
           disabled
           aria-label="Selected cluster"
@@ -167,11 +168,11 @@ export function ContextSelector({ selection, onSelected }: ContextSelectorProps)
           onChange={() => {}}
         >
           <option value="">{preferredContext?.cluster ?? 'Choose a context'}</option>
-        </select>
+        </Select>
       </label>
       <label>
         <span>Context</span>
-        <select
+        <Select
           aria-label="Kubernetes context"
           aria-keyshortcuts="Control+O Meta+O"
           data-app-shortcut="context-selector"
@@ -191,16 +192,16 @@ export function ContextSelector({ selection, onSelected }: ContextSelectorProps)
                 ? `Choose a context (${contextList.length} available)`
                 : 'Choose a context'}</option>
           {contextList.map((context) => <option key={context.name} value={context.name}>{context.name} · {context.cluster}</option>)}
-        </select>
+        </Select>
       </label>
-      <button
-        type="button"
-        className="button button--compact"
+      <Button
+        size="compact"
+        className="[grid-column:1/-1]"
         onClick={submitSelection}
         disabled={effectiveContextName === '' || session.isPending || session.isError}
       >
         {contextSelection.isPending ? 'Switching…' : 'Select'}
-      </button>
+      </Button>
       {contexts.isError ? <small className="field-error" role="status">{queryError(contexts.error)}</small> : null}
       {contexts.data && contextList.length === 0 ? <small className="field-error" role="status">No contexts exist in this kubeconfig.</small> : null}
       {session.isError ? <small className="field-error" role="status">Session bootstrap is unavailable.</small> : null}

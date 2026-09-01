@@ -18,6 +18,7 @@ import {
 } from '../api/client'
 import { NamespaceInputError, parseNamespaceInput, validateNamespaceMode } from '../namespaces/namespaceInput'
 import { StatePanel } from './StatePanel'
+import { Badge, Button, Card, CardContent, CardHeader, Input, Select } from './ui'
 
 interface NamespaceScopeFormProps {
   selection: SelectionSummary
@@ -123,103 +124,105 @@ export function NamespaceScopeForm({ selection, csrfToken, scope = null, onSaved
   }
 
   return (
-    <section className="feature-card scope-editor" aria-labelledby="scope-editor-title">
-      <div className="feature-heading">
-        <div>
-          <span className="eyebrow">namespace scope</span>
-          <h1 id="scope-editor-title">{editing ? `Edit ${scope.name}` : 'Create a namespace scope'}</h1>
+    <Card className="scope-editor" aria-labelledby="scope-editor-title">
+      <CardContent>
+        <CardHeader>
+          <div>
+            <span className="eyebrow">namespace scope</span>
+            <h1 id="scope-editor-title" className="text-xl text-kp-text mt-1">{editing ? `Edit ${scope.name}` : 'Create a namespace scope'}</h1>
+          </div>
+          <span className="text-kp-overlay-text text-xs">{selection.generation}</span>
+        </CardHeader>
+
+        <div className="scope-origin" aria-label="Scope origin">
+          <label>Profile<Input aria-label="Scope cluster profile" value={String(selection.clusterProfileId)} readOnly /></label>
+          <label>Context<Input aria-label="Scope context" value={selection.context} readOnly /></label>
+          <label>Name<Input aria-label="Scope name" value={name} maxLength={120} onChange={(event) => setName(event.target.value)} placeholder="Finance workloads" /></label>
         </div>
-        <span className="generation-label">{selection.generation}</span>
-      </div>
 
-      <div className="scope-origin" aria-label="Scope origin">
-        <label>Profile<input aria-label="Scope cluster profile" value={String(selection.clusterProfileId)} readOnly /></label>
-        <label>Context<input aria-label="Scope context" value={selection.context} readOnly /></label>
-        <label>Name<input aria-label="Scope name" value={name} maxLength={120} onChange={(event) => setName(event.target.value)} placeholder="Finance workloads" /></label>
-      </div>
-
-      <fieldset className="mode-picker">
-        <legend>Mode</legend>
-        {(['single', 'list', 'all'] as const).map((candidate) => (
-          <label key={candidate}>
-            <input type="radio" name="scope-mode" value={candidate} checked={mode === candidate} onChange={() => updateMode(candidate)} />
-            <span>{candidate}</span>
-          </label>
-        ))}
-      </fieldset>
-
-      {mode === 'all' ? (
-        <div className="scope-all-note" role="note">
-          All mode stores no wildcard. The backend will activate only namespaces returned by Kubernetes after confirming list permission.
-        </div>
-      ) : (
-        <>
-          <label className="textarea-field">
-            <span>Namespace input</span>
-            <textarea
-              aria-label="Namespace input"
-              value={rawInput}
-              onChange={(event) => updateRawInput(event.target.value)}
-              rows={8}
-              placeholder={'payments, billing\n---\n- invoices'}
-              spellCheck={false}
-            />
-          </label>
-          <p className="field-help">Plain delimiters, strict JSON arrays/objects, and simple YAML sequences are accepted.</p>
-        </>
-      )}
-
-      <div className="validation-counters" aria-label="Namespace validation counters">
-        <div><strong>{shownValidation.validCount}</strong><span>valid</span></div>
-        <div><strong>{shownValidation.duplicateCount}</strong><span>duplicates removed</span></div>
-        <div><strong>{shownValidation.discardedEmptyCount}</strong><span>empty removed</span></div>
-        <div><strong>{shownValidation.invalidCount}</strong><span>invalid</span></div>
-      </div>
-
-      {mode !== 'all' && (parsed.validation.valid.length > 0 || parsed.validation.invalid.length > 0) ? (
-        <div className="namespace-chips" aria-label="Parsed namespaces">
-          {parsed.validation.valid.map((namespace) => (
-            <button key={`valid-${namespace}`} type="button" className="namespace-chip" onClick={() => removeItem(namespace)} aria-label={`Remove namespace ${namespace}`} title="Remove this namespace from the input">
-              {namespace}<span aria-hidden="true">×</span>
-            </button>
+        <fieldset className="mode-picker">
+          <legend>Mode</legend>
+          {(['single', 'list', 'all'] as const).map((candidate) => (
+            <label key={candidate}>
+              <input type="radio" name="scope-mode" value={candidate} checked={mode === candidate} onChange={() => updateMode(candidate)} />
+              <span>{candidate}</span>
+            </label>
           ))}
-          {parsed.validation.invalid.map(({ input }) => (
-            <button key={`invalid-${input}`} type="button" className="namespace-chip namespace-chip--invalid" onClick={() => removeItem(input)} aria-label={`Remove invalid namespace ${input}`} title="Remove this entry from the input">
-              {input}<span aria-hidden="true">×</span>
-            </button>
-          ))}
+        </fieldset>
+
+        {mode === 'all' ? (
+          <div className="scope-all-note" role="note">
+            All mode stores no wildcard. The backend will activate only namespaces returned by Kubernetes after confirming list permission.
+          </div>
+        ) : (
+          <>
+            <label className="textarea-field">
+              <span>Namespace input</span>
+              <textarea
+                aria-label="Namespace input"
+                value={rawInput}
+                onChange={(event) => updateRawInput(event.target.value)}
+                rows={8}
+                placeholder={'payments, billing\n---\n- invoices'}
+                spellCheck={false}
+              />
+            </label>
+            <p className="field-help">Plain delimiters, strict JSON arrays/objects, and simple YAML sequences are accepted.</p>
+          </>
+        )}
+
+        <div className="validation-counters" aria-label="Namespace validation counters">
+          <div><strong>{shownValidation.validCount}</strong><span>valid</span></div>
+          <div><strong>{shownValidation.duplicateCount}</strong><span>duplicates removed</span></div>
+          <div><strong>{shownValidation.discardedEmptyCount}</strong><span>empty removed</span></div>
+          <div><strong>{shownValidation.invalidCount}</strong><span>invalid</span></div>
         </div>
-      ) : null}
 
-      {mode !== 'all' ? (
-        <label className="default-namespace">
-          <span>Default namespace</span>
-          <select aria-label="Default namespace" value={effectiveDefaultNamespace} onChange={(event) => setDefaultNamespace(event.target.value)} disabled={parsed.validation.valid.length === 0}>
-            <option value="">Choose a valid namespace</option>
-            {parsed.validation.valid.map((namespace) => <option key={namespace} value={namespace}>{namespace}</option>)}
-          </select>
-        </label>
-      ) : null}
+        {mode !== 'all' && (parsed.validation.valid.length > 0 || parsed.validation.invalid.length > 0) ? (
+          <div className="namespace-chips" aria-label="Parsed namespaces">
+            {parsed.validation.valid.map((namespace) => (
+              <button key={`valid-${namespace}`} type="button" className="namespace-chip" onClick={() => removeItem(namespace)} aria-label={`Remove namespace ${namespace}`} title="Remove this namespace from the input">
+                {namespace}<span aria-hidden="true">×</span>
+              </button>
+            ))}
+            {parsed.validation.invalid.map(({ input }) => (
+              <button key={`invalid-${input}`} type="button" className="namespace-chip namespace-chip--invalid" onClick={() => removeItem(input)} aria-label={`Remove invalid namespace ${input}`} title="Remove this entry from the input">
+                {input}<span aria-hidden="true">×</span>
+              </button>
+            ))}
+          </div>
+        ) : null}
 
-      {modeError ? <p className="field-error" role="alert">{modeError}</p> : null}
-      {serverValidation?.existence.checked === false && serverValidation.existence.reasonCode !== 'LOCAL_VALIDATION_ONLY' ? (
-        <p className="field-help" role="status">Existence was not checked: {serverValidation.existence.reasonCode ?? 'permission unavailable'}.</p>
-      ) : null}
-      {validation.isError ? <p className="field-error" role="alert">{messageFor(validation.error)}</p> : null}
-      {save.isError ? <p className="field-error" role="alert">{messageFor(save.error)}</p> : null}
-      {save.isSuccess ? <p className="field-success" role="status">Scope “{save.data.name}” was {editing ? 'updated' : 'saved'}.</p> : null}
+        {mode !== 'all' ? (
+          <label className="default-namespace">
+            <span>Default namespace</span>
+            <Select aria-label="Default namespace" value={effectiveDefaultNamespace} onChange={(event) => setDefaultNamespace(event.target.value)} disabled={parsed.validation.valid.length === 0}>
+              <option value="">Choose a valid namespace</option>
+              {parsed.validation.valid.map((namespace) => <option key={namespace} value={namespace}>{namespace}</option>)}
+            </Select>
+          </label>
+        ) : null}
 
-      <div className="form-actions">
-        {editing ? <button type="button" className="button button--secondary" onClick={onCancel} disabled={save.isPending}>Cancel edit</button> : null}
-        <button type="button" className="button button--secondary" onClick={() => updateRawInput('')} disabled={mode === 'all' || rawInput === ''}>Clear</button>
-        <button type="button" className="button button--secondary" onClick={() => validation.mutate()} disabled={!canValidate}>
-          {validation.isPending ? 'Validating…' : 'Validate with cluster'}
-        </button>
-        <button type="button" className="button" onClick={() => save.mutate()} disabled={!canSave}>
-          {save.isPending ? (editing ? 'Updating…' : 'Saving…') : (editing ? 'Update scope' : 'Save scope')}
-        </button>
-      </div>
-    </section>
+        {modeError ? <p className="field-error" role="alert">{modeError}</p> : null}
+        {serverValidation?.existence.checked === false && serverValidation.existence.reasonCode !== 'LOCAL_VALIDATION_ONLY' ? (
+          <p className="field-help" role="status">Existence was not checked: {serverValidation.existence.reasonCode ?? 'permission unavailable'}.</p>
+        ) : null}
+        {validation.isError ? <p className="field-error" role="alert">{messageFor(validation.error)}</p> : null}
+        {save.isError ? <p className="field-error" role="alert">{messageFor(save.error)}</p> : null}
+        {save.isSuccess ? <p className="field-success" role="status">Scope “{save.data.name}” was {editing ? 'updated' : 'saved'}.</p> : null}
+
+        <div className="form-actions">
+          {editing ? <Button variant="secondary" onClick={onCancel} disabled={save.isPending}>Cancel edit</Button> : null}
+          <Button variant="secondary" onClick={() => updateRawInput('')} disabled={mode === 'all' || rawInput === ''}>Clear</Button>
+          <Button variant="secondary" onClick={() => validation.mutate()} disabled={!canValidate}>
+            {validation.isPending ? 'Validating…' : 'Validate with cluster'}
+          </Button>
+          <Button onClick={() => save.mutate()} disabled={!canSave}>
+            {save.isPending ? (editing ? 'Updating…' : 'Saving…') : (editing ? 'Update scope' : 'Save scope')}
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   )
 }
 
@@ -296,62 +299,66 @@ export function NamespaceScopeEditor() {
         onCancel={() => setEditingScopeId(null)}
         onSaved={() => void reconcile()}
       />
-      <section className="feature-card" aria-labelledby="saved-scopes-title">
-        <div className="feature-heading"><div><span className="eyebrow">saved locally</span><h2 id="saved-scopes-title">Namespace scopes</h2></div></div>
-        {scopes.isPending ? <p role="status">Loading saved scopes…</p> : null}
-        {scopes.isError ? <p className="field-error" role="status">Saved scopes are temporarily unavailable.</p> : null}
-        {scopeList.length === 0 && scopes.isSuccess ? <p className="muted">No saved scopes for this local installation.</p> : null}
-        {scopeList.length ? (
-          <ul className="scope-list">
-            {scopeList.map((scope) => (
-              <li key={scope.id}>
-                <div><strong>{scope.name}</strong><small>{scope.context} · {scope.mode} · {scope.namespaces.length} namespaces</small></div>
-                <div className="scope-actions">
-                  {selection.scopeId === scope.id ? <span className="status-badge status-badge--healthy">active</span> : (
-                    <button type="button" className="button button--compact" disabled={!session.data || selectScope.isPending || deleteScope.isPending} onClick={() => selectScope.mutate(scope)}>Select {scope.name}</button>
-                  )}
-                  <button type="button" className="button button--compact button--secondary" disabled={selectScope.isPending || deleteScope.isPending} onClick={() => {
-                    setEditingScopeId(scope.id)
-                    setDeleteScopeId(null)
-                  }}>Edit {scope.name}</button>
-                  <button type="button" className="button button--compact button--danger" disabled={!session.data || selectScope.isPending || deleteScope.isPending} onClick={() => {
-                    setDeleteScopeId(scope.id)
-                    setReplacementScopeId(null)
-                  }}>Delete {scope.name}</button>
-                </div>
-              </li>
-            ))}
-          </ul>
-        ) : null}
-        {selectScope.isError ? <p className="field-error" role="alert">{messageFor(selectScope.error)}</p> : null}
-        {deleteScope.isError ? <p className="field-error" role="alert">{messageFor(deleteScope.error)}</p> : null}
-        {deleteTarget ? (
-          <div className="scope-delete-confirmation" role="alertdialog" aria-labelledby="scope-delete-title">
-            <div>
-              <strong id="scope-delete-title">Delete “{deleteTarget.name}”?</strong>
-              <p>This removes the local scope definition. Kubernetes resources are not modified.</p>
+      <Card aria-labelledby="saved-scopes-title">
+        <CardContent>
+          <CardHeader>
+            <div><span className="eyebrow">saved locally</span><h2 id="saved-scopes-title" className="text-xl text-kp-text mt-1">Namespace scopes</h2></div>
+          </CardHeader>
+          {scopes.isPending ? <p role="status">Loading saved scopes…</p> : null}
+          {scopes.isError ? <p className="field-error" role="status">Saved scopes are temporarily unavailable.</p> : null}
+          {scopeList.length === 0 && scopes.isSuccess ? <p className="muted">No saved scopes for this local installation.</p> : null}
+          {scopeList.length ? (
+            <ul className="scope-list">
+              {scopeList.map((scope) => (
+                <li key={scope.id}>
+                  <div><strong>{scope.name}</strong><small>{scope.context} · {scope.mode} · {scope.namespaces.length} namespaces</small></div>
+                  <div className="scope-actions">
+                    {selection.scopeId === scope.id ? <Badge variant="healthy">active</Badge> : (
+                      <Button size="compact" disabled={!session.data || selectScope.isPending || deleteScope.isPending} onClick={() => selectScope.mutate(scope)}>Select {scope.name}</Button>
+                    )}
+                    <Button variant="secondary" size="compact" disabled={selectScope.isPending || deleteScope.isPending} onClick={() => {
+                      setEditingScopeId(scope.id)
+                      setDeleteScopeId(null)
+                    }}>Edit {scope.name}</Button>
+                    <Button variant="danger" size="compact" disabled={!session.data || selectScope.isPending || deleteScope.isPending} onClick={() => {
+                      setDeleteScopeId(scope.id)
+                      setReplacementScopeId(null)
+                    }}>Delete {scope.name}</Button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {selectScope.isError ? <p className="field-error" role="alert">{messageFor(selectScope.error)}</p> : null}
+          {deleteScope.isError ? <p className="field-error" role="alert">{messageFor(deleteScope.error)}</p> : null}
+          {deleteTarget ? (
+            <div className="scope-delete-confirmation" role="alertdialog" aria-labelledby="scope-delete-title">
+              <div>
+                <strong id="scope-delete-title">Delete “{deleteTarget.name}”?</strong>
+                <p>This removes the local scope definition. Kubernetes resources are not modified.</p>
+              </div>
+              {deletingActive ? (
+                <label>Replacement scope
+                  <Select aria-label="Replacement scope" value={replacementScopeId ?? ''} onChange={(event) => setReplacementScopeId(event.target.value ? Number(event.target.value) : null)}>
+                    <option value="">Choose before deleting the active scope</option>
+                    {replacementCandidates.map((scope) => <option key={scope.id} value={scope.id}>{scope.name}</option>)}
+                  </Select>
+                </label>
+              ) : null}
+              {deletingActive && replacementCandidates.length === 0 ? <p className="field-error">Create another scope before deleting the active scope.</p> : null}
+              <div className="form-actions">
+                <Button variant="secondary" onClick={() => {
+                  setDeleteScopeId(null)
+                  setReplacementScopeId(null)
+                }} disabled={deleteScope.isPending}>Cancel deletion</Button>
+                <Button variant="danger" disabled={!deletionReady || deleteScope.isPending} onClick={() => deleteScope.mutate({ scope: deleteTarget, replacement: replacementScopeId })}>
+                  {deleteScope.isPending ? 'Deleting…' : `Confirm delete ${deleteTarget.name}`}
+                </Button>
+              </div>
             </div>
-            {deletingActive ? (
-              <label>Replacement scope
-                <select aria-label="Replacement scope" value={replacementScopeId ?? ''} onChange={(event) => setReplacementScopeId(event.target.value ? Number(event.target.value) : null)}>
-                  <option value="">Choose before deleting the active scope</option>
-                  {replacementCandidates.map((scope) => <option key={scope.id} value={scope.id}>{scope.name}</option>)}
-                </select>
-              </label>
-            ) : null}
-            {deletingActive && replacementCandidates.length === 0 ? <p className="field-error">Create another scope before deleting the active scope.</p> : null}
-            <div className="form-actions">
-              <button type="button" className="button button--secondary" onClick={() => {
-                setDeleteScopeId(null)
-                setReplacementScopeId(null)
-              }} disabled={deleteScope.isPending}>Cancel deletion</button>
-              <button type="button" className="button button--danger" disabled={!deletionReady || deleteScope.isPending} onClick={() => deleteScope.mutate({ scope: deleteTarget, replacement: replacementScopeId })}>
-                {deleteScope.isPending ? 'Deleting…' : `Confirm delete ${deleteTarget.name}`}
-              </button>
-            </div>
-          </div>
-        ) : null}
-      </section>
+          ) : null}
+        </CardContent>
+      </Card>
     </div>
   )
 }

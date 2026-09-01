@@ -37,6 +37,7 @@ import {
   type SelectionSummary,
 } from '../api/client'
 import { StatePanel } from './StatePanel'
+import { Badge, Button, Card, CardContent, DataTable, Select, type BadgeVariant } from './ui'
 
 const dashboardQueryDefaults = {
   staleTime: 30_000,
@@ -196,14 +197,33 @@ function ResultBody<T>({ pending, error, response, isEmpty, emptyCopy, optional 
 
 function DashboardSection({ id, eyebrow, title, action, children }: { id: string; eyebrow: string; title: string; action?: ReactNode; children: ReactNode }) {
   return (
-    <section className="dashboard-section" id={id} aria-labelledby={`${id}-title`}>
-      <div className="dashboard-section-heading">
-        <div><span className="eyebrow">{eyebrow}</span><h2 id={`${id}-title`}>{title}</h2></div>
-        {action}
-      </div>
-      {children}
-    </section>
+    <Card className="dashboard-section" id={id} aria-labelledby={`${id}-title`}>
+      <CardContent className="p-0">
+        <div className="dashboard-section-heading">
+          <div><span className="eyebrow">{eyebrow}</span><h2 id={`${id}-title`}>{title}</h2></div>
+          {action}
+        </div>
+        {children}
+      </CardContent>
+    </Card>
   )
+}
+
+function counterBadgeVariant(state: DashboardCounter['state']): BadgeVariant {
+  switch (state) {
+    case 'available':
+      return 'healthy'
+    case 'truncated':
+      return 'warning'
+    case 'collecting':
+      return 'info'
+    case 'denied':
+    case 'unavailable':
+      return 'danger'
+    case 'notCollected':
+    default:
+      return 'unknown'
+  }
 }
 
 function CounterCard({ label, counter, href, icon }: { label: string; counter: DashboardCounter; href: string; icon: ReactNode }) {
@@ -212,7 +232,7 @@ function CounterCard({ label, counter, href, icon }: { label: string; counter: D
       <span className="summary-card-icon" aria-hidden="true">{icon}</span>
       <span className="summary-card-label">{label}</span>
       <strong>{counter.value === null ? '—' : counter.value.toLocaleString()}</strong>
-      <small className={`counter-state counter-state--${counter.state}`}>{counterCopy[counter.state]}</small>
+      <Badge variant={counterBadgeVariant(counter.state)} className={`counter-state counter-state--${counter.state}`}>{counterCopy[counter.state]}</Badge>
     </>
   )
   if (counter.state === 'available' || counter.state === 'truncated') {
@@ -235,82 +255,171 @@ function SummaryCards({ summary, logCounter }: { summary: DashboardSummary; logC
   return <div className="summary-grid">{cards.map(([label, counter, href, icon]) => <CounterCard key={label} label={label} counter={counter} href={href} icon={icon} />)}</div>
 }
 
+function severityBadgeVariant(severity: DashboardProblem['severity']): BadgeVariant {
+  switch (severity) {
+    case 'critical':
+      return 'danger'
+    case 'warning':
+    default:
+      return 'warning'
+  }
+}
+
 function ProblemsTable({ values }: { values: DashboardProblem[] }) {
+  const columns = [
+    {
+      key: 'severity',
+      header: 'Severity',
+      cell: (problem: DashboardProblem) => <Badge variant={severityBadgeVariant(problem.severity)} className={`severity severity--${problem.severity}`}>{problem.severity}</Badge>,
+    },
+    {
+      key: 'pod',
+      header: 'Pod',
+      cell: (problem: DashboardProblem) => <><strong>{problem.pod}</strong><small>{problem.namespace}{problem.container ? ` · ${problem.container}` : ''}</small></>,
+    },
+    {
+      key: 'diagnosis',
+      header: 'Diagnosis',
+      cell: (problem: DashboardProblem) => <><strong>{problem.reason ?? 'No diagnosis reported'}</strong><small>{problem.message ?? `Source: ${problem.source}`}</small></>,
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      cell: (problem: DashboardProblem) => problem.status,
+    },
+    {
+      key: 'age',
+      header: 'Age',
+      cell: (problem: DashboardProblem) => formatDuration(problem.ageSeconds),
+    },
+  ]
   return (
-    <div className="table-scroll">
-      <table className="dashboard-table">
-        <caption>At most one prioritized diagnosis per pod</caption>
-        <thead><tr><th>Severity</th><th>Pod</th><th>Diagnosis</th><th>Status</th><th>Age</th></tr></thead>
-        <tbody>{values.map((problem) => (
-          <tr key={`${problem.namespace}/${problem.pod}`}>
-            <td><span className={`severity severity--${problem.severity}`}>{problem.severity}</span></td>
-            <td><strong>{problem.pod}</strong><small>{problem.namespace}{problem.container ? ` · ${problem.container}` : ''}</small></td>
-            <td><strong>{problem.reason ?? 'No diagnosis reported'}</strong><small>{problem.message ?? `Source: ${problem.source}`}</small></td>
-            <td>{problem.status}</td>
-            <td>{formatDuration(problem.ageSeconds)}</td>
-          </tr>
-        ))}</tbody>
-      </table>
-    </div>
+    <DataTable
+      caption="At most one prioritized diagnosis per pod"
+      columns={columns}
+      rows={values}
+      getRowKey={(problem) => `${problem.namespace}/${problem.pod}`}
+    />
   )
 }
 
+function restartSeverityBadgeVariant(severity: DashboardRestart['severity']): BadgeVariant {
+  switch (severity) {
+    case 'critical':
+      return 'danger'
+    case 'warning':
+      return 'warning'
+    case 'attention':
+      return 'info'
+    case 'healthy':
+    default:
+      return 'healthy'
+  }
+}
+
 function RestartsTable({ values }: { values: DashboardRestart[] }) {
+  const columns = [
+    {
+      key: 'restarts',
+      header: 'Restarts',
+      cell: (restart: DashboardRestart) => <Badge variant={restartSeverityBadgeVariant(restart.severity)} className={`severity severity--${restart.severity}`}>{restart.restarts}</Badge>,
+    },
+    {
+      key: 'pod',
+      header: 'Pod / owner',
+      cell: (restart: DashboardRestart) => <><strong>{restart.pod}</strong><small>{restart.namespace}{restart.owner ? ` · ${restart.owner.kind}/${restart.owner.name}` : ' · owner unavailable'}</small></>,
+    },
+    {
+      key: 'container',
+      header: 'Container',
+      cell: (restart: DashboardRestart) => <>{restart.container}<small>{restart.containerType}</small></>,
+    },
+    {
+      key: 'status',
+      header: 'Status',
+      cell: (restart: DashboardRestart) => restart.status || restart.lastReason || 'not reported',
+    },
+    {
+      key: 'age',
+      header: 'Age',
+      cell: (restart: DashboardRestart) => formatDuration(restart.ageSeconds),
+    },
+  ]
   return (
-    <div className="table-scroll">
-      <table className="dashboard-table">
-        <caption>Container restart ranking, highest count first</caption>
-        <thead><tr><th>Restarts</th><th>Pod / owner</th><th>Container</th><th>Status</th><th>Age</th></tr></thead>
-        <tbody>{values.map((restart) => (
-          <tr key={`${restart.namespace}/${restart.pod}/${restart.containerType}/${restart.container}`}>
-            <td><span className={`severity severity--${restart.severity}`}>{restart.restarts}</span></td>
-            <td><strong>{restart.pod}</strong><small>{restart.namespace}{restart.owner ? ` · ${restart.owner.kind}/${restart.owner.name}` : ' · owner unavailable'}</small></td>
-            <td>{restart.container}<small>{restart.containerType}</small></td>
-            <td>{restart.status || restart.lastReason || 'not reported'}</td>
-            <td>{formatDuration(restart.ageSeconds)}</td>
-          </tr>
-        ))}</tbody>
-      </table>
-    </div>
+    <DataTable
+      caption="Container restart ranking, highest count first"
+      columns={columns}
+      rows={values}
+      getRowKey={(restart) => `${restart.namespace}/${restart.pod}/${restart.containerType}/${restart.container}`}
+    />
   )
 }
 
 function EventsTable({ values }: { values: DashboardEvent[] }) {
+  const columns = [
+    {
+      key: 'last-seen',
+      header: 'Last seen',
+      cell: (event: DashboardEvent) => formatTimestamp(event.timestamp),
+    },
+    {
+      key: 'object',
+      header: 'Object',
+      cell: (event: DashboardEvent) => <><strong>{event.objectKind}/{event.objectName}</strong><small>{event.namespace}</small></>,
+    },
+    {
+      key: 'reason',
+      header: 'Reason',
+      cell: (event: DashboardEvent) => <><strong>{event.reason}</strong><small>{event.message}</small></>,
+    },
+    {
+      key: 'count',
+      header: 'Count',
+      cell: (event: DashboardEvent) => event.count,
+    },
+    {
+      key: 'source',
+      header: 'Source',
+      cell: (event: DashboardEvent) => event.source ?? 'not reported',
+    },
+  ]
   return (
-    <div className="table-scroll">
-      <table className="dashboard-table">
-        <caption>Grouped Kubernetes Warning events</caption>
-        <thead><tr><th>Last seen</th><th>Object</th><th>Reason</th><th>Count</th><th>Source</th></tr></thead>
-        <tbody>{values.map((event, index) => (
-          <tr key={`${event.namespace}/${event.objectKind}/${event.objectName}/${event.reason}/${index}`}>
-            <td>{formatTimestamp(event.timestamp)}</td>
-            <td><strong>{event.objectKind}/{event.objectName}</strong><small>{event.namespace}</small></td>
-            <td><strong>{event.reason}</strong><small>{event.message}</small></td>
-            <td>{event.count}</td>
-            <td>{event.source ?? 'not reported'}</td>
-          </tr>
-        ))}</tbody>
-      </table>
-    </div>
+    <DataTable
+      caption="Grouped Kubernetes Warning events"
+      columns={columns}
+      rows={values}
+      getRowKey={(event, index) => `${event.namespace}/${event.objectKind}/${event.objectName}/${event.reason}/${index}`}
+    />
   )
 }
 
 function MetricsTable({ title, values, metric }: { title: string; values: MetricRank[]; metric: 'cpu' | 'memory' }) {
+  const columns = [
+    {
+      key: 'pod',
+      header: 'Pod',
+      cell: (value: MetricRank) => <><strong>{value.pod}</strong><small>{value.namespace}</small></>,
+    },
+    {
+      key: 'cpu',
+      header: 'CPU',
+      cell: (value: MetricRank) => `${value.cpuMillicores.toLocaleString()}m`,
+    },
+    {
+      key: 'memory',
+      header: 'Memory',
+      cell: (value: MetricRank) => formatMemory(value.memoryBytes),
+    },
+  ]
   return (
     <div className="metrics-ranking">
       <h3>{title}</h3>
-      <div className="table-scroll">
-        <table className="dashboard-table dashboard-table--compact">
-          <thead><tr><th>Pod</th><th>CPU</th><th>Memory</th></tr></thead>
-          <tbody>{values.map((value) => (
-            <tr key={`${metric}/${value.namespace}/${value.pod}`}>
-              <td><strong>{value.pod}</strong><small>{value.namespace}</small></td>
-              <td>{value.cpuMillicores.toLocaleString()}m</td>
-              <td>{formatMemory(value.memoryBytes)}</td>
-            </tr>
-          ))}</tbody>
-        </table>
-      </div>
+      <DataTable
+        compact
+        columns={columns}
+        rows={values}
+        getRowKey={(value) => `${metric}/${value.namespace}/${value.pod}`}
+      />
     </div>
   )
 }
@@ -328,21 +437,35 @@ function MetricsView({ value }: { value: DashboardMetrics }) {
 }
 
 function LogMatchesTable({ values }: { values: DashboardLogMatch[] }) {
+  const columns = [
+    {
+      key: 'detected',
+      header: 'Detected',
+      cell: (match: DashboardLogMatch) => formatTimestamp(match.timestamp),
+    },
+    {
+      key: 'target',
+      header: 'Target',
+      cell: (match: DashboardLogMatch) => <><strong>{match.pod}/{match.container}</strong><small>{match.namespace}{match.workload ? ` · ${match.workload.kind}/${match.workload.name}` : ''}</small></>,
+    },
+    {
+      key: 'reason',
+      header: 'Reason',
+      cell: (match: DashboardLogMatch) => <><code className="text-kp-sky">{match.reasonCode}</code><small>{match.redacted ? 'sensitive value redacted' : 'no redaction needed'}{match.truncated ? ' · excerpt truncated' : ''}</small></>,
+    },
+    {
+      key: 'excerpt',
+      header: 'Sanitized excerpt',
+      cell: (match: DashboardLogMatch) => <code className="log-excerpt">{match.excerpt}</code>,
+    },
+  ]
   return (
-    <div className="table-scroll">
-      <table className="dashboard-table">
-        <caption>Possible matches only; excerpts are bounded and sanitized by the backend</caption>
-        <thead><tr><th>Detected</th><th>Target</th><th>Reason</th><th>Sanitized excerpt</th></tr></thead>
-        <tbody>{values.map((match, index) => (
-          <tr key={`${match.namespace}/${match.pod}/${match.container}/${match.timestamp ?? index}`}>
-            <td>{formatTimestamp(match.timestamp)}</td>
-            <td><strong>{match.pod}/{match.container}</strong><small>{match.namespace}{match.workload ? ` · ${match.workload.kind}/${match.workload.name}` : ''}</small></td>
-            <td><code>{match.reasonCode}</code><small>{match.redacted ? 'sensitive value redacted' : 'no redaction needed'}{match.truncated ? ' · excerpt truncated' : ''}</small></td>
-            <td><code className="log-excerpt">{match.excerpt}</code></td>
-          </tr>
-        ))}</tbody>
-      </table>
-    </div>
+    <DataTable
+      caption="Possible matches only; excerpts are bounded and sanitized by the backend"
+      columns={columns}
+      rows={values}
+      getRowKey={(match, index) => `${match.namespace}/${match.pod}/${match.container}/${match.timestamp ?? index}`}
+    />
   )
 }
 
@@ -431,9 +554,9 @@ function DashboardContent({ selection, cluster }: { selection: SelectionSummary;
           <h1>Cluster overview</h1>
           <p>Each block has its own budget, cancellation, and authorization result.</p>
         </div>
-        <button type="button" className="button button--secondary" onClick={refreshAll} disabled={isRefreshing}>
+        <Button variant="secondary" onClick={refreshAll} disabled={isRefreshing}>
           <RefreshCw size={15} aria-hidden="true" /> {isRefreshing ? 'Refreshing…' : 'Refresh dashboard'}
-        </button>
+        </Button>
       </header>
 
       <div className="dashboard-context" aria-label="Dashboard selection">
@@ -488,12 +611,12 @@ function DashboardContent({ selection, cluster }: { selection: SelectionSummary;
         title="Possible errors in logs"
         action={(
           <div className="log-scan-controls">
-            <label>Window<select aria-label="Log scan window" value={scanWindow} onChange={(event) => setScanWindow(event.target.value as LogScanRequest['window'])}>
+            <label>Window<Select aria-label="Log scan window" value={scanWindow} onChange={(event) => setScanWindow(event.target.value as LogScanRequest['window'])}>
               <option value="15m">15 min</option><option value="30m">30 min</option><option value="1h">1 hour</option><option value="4h">4 hours</option>
-            </select></label>
-            <button type="button" className="button" onClick={() => void runLogScan()} disabled={!session.data || session.isError}>
+            </Select></label>
+            <Button onClick={() => void runLogScan()} disabled={!session.data || session.isError}>
               <ScrollText size={15} aria-hidden="true" /> {logScan.kind === 'pending' ? 'Restart scan' : 'Scan logs now'}
-            </button>
+            </Button>
           </div>
         )}
       >

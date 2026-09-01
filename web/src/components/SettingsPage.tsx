@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { APIError, getPreferences, getSession, putPreferences } from '../api/client'
 import type { Preferences } from '../api/types'
 import { StatePanel } from './StatePanel'
+import { Button, Card, CardContent, Input, Select } from './ui'
 
 function errorMessage(error: unknown): string {
   return error instanceof APIError ? `${error.code}: ${error.message}` : 'Preferences could not be saved.'
@@ -66,12 +67,29 @@ function SettingsForm({ initial }: { initial: Preferences }) {
 
   return <>
     <section className="settings-grid">
-      <article><h2>Interface</h2><label>Language<select value={draft.ui.language} onChange={(event) => update({ ...draft, ui: { language: event.target.value as Preferences['ui']['language'] } })}><option value="en">English</option><option value="pt-BR">Português (Brasil)</option></select></label></article>
-      <article><h2>Logs</h2><label className="confirmation-check"><input type="checkbox" checked={draft.logs.wrap} onChange={(event) => update({ ...draft, logs: { ...draft.logs, wrap: event.target.checked } })} />Wrap long lines</label><label className="confirmation-check"><input type="checkbox" checked={draft.logs.timestamps} onChange={(event) => update({ ...draft, logs: { ...draft.logs, timestamps: event.target.checked } })} />Show timestamps</label><label>Default tail lines<input aria-invalid={!tailValid} type="number" min="1" max="2000" value={draft.logs.tailLines} onChange={(event) => update({ ...draft, logs: { ...draft.logs, tailLines: Number(event.target.value) } })} /></label>{!tailValid ? <p className="field-error">Tail lines must be a whole number from 1 through 2,000.</p> : null}</article>
-      <article><h2>Dashboard</h2><label>Log scan window<select value={draft.dashboard.logScanWindow} onChange={(event) => update({ ...draft, dashboard: { ...draft.dashboard, logScanWindow: event.target.value as Preferences['dashboard']['logScanWindow'] } })}><option value="15m">15 minutes</option><option value="30m">30 minutes</option><option value="1h">1 hour</option><option value="4h">4 hours</option></select></label><fieldset><legend>Hidden sections</legend>{draft.dashboard.sectionOrder.map((section) => <label className="confirmation-check" key={section}><input type="checkbox" checked={draft.dashboard.hiddenSections.includes(section)} onChange={(event) => update({ ...draft, dashboard: { ...draft.dashboard, hiddenSections: event.target.checked ? [...draft.dashboard.hiddenSections, section] : draft.dashboard.hiddenSections.filter((value) => value !== section) } })} />{section}</label>)}</fieldset></article>
-      <article className="saved-filters"><h2>Saved filters</h2><p>Create and apply filters on Workloads, Pods, Events or Logs. Manage removal here. Only schema-limited payloads are stored; pagination cursors and limits are never persisted.</p>{(Object.keys(draft.filters) as Array<keyof Preferences['filters']>).map((category) => <section key={category}><h3>{category}</h3>{draft.filters[category].items.length === 0 ? <small>No saved filters.</small> : <ul>{draft.filters[category].items.map((item) => <li key={item.id}><span>{item.name}</span><button type="button" className="button button--danger button--compact" onClick={() => removeFilter(category, item.id)}>Remove</button></li>)}</ul>}</section>)}</article>
+      <Card><CardContent className="grid content-start gap-3 p-4">
+        <h2 className="text-lg text-kp-text">Interface</h2>
+        <label>Language<Select value={draft.ui.language} onChange={(event) => update({ ...draft, ui: { language: event.target.value as Preferences['ui']['language'] } })}><option value="en">English</option><option value="pt-BR">Português (Brasil)</option></Select></label>
+      </CardContent></Card>
+      <Card><CardContent className="grid content-start gap-3 p-4">
+        <h2 className="text-lg text-kp-text">Logs</h2>
+        <label className="confirmation-check"><input type="checkbox" checked={draft.logs.wrap} onChange={(event) => update({ ...draft, logs: { ...draft.logs, wrap: event.target.checked } })} />Wrap long lines</label>
+        <label className="confirmation-check"><input type="checkbox" checked={draft.logs.timestamps} onChange={(event) => update({ ...draft, logs: { ...draft.logs, timestamps: event.target.checked } })} />Show timestamps</label>
+        <label>Default tail lines<Input aria-invalid={!tailValid} type="number" min="1" max="2000" value={draft.logs.tailLines} onChange={(event) => update({ ...draft, logs: { ...draft.logs, tailLines: Number(event.target.value) } })} /></label>
+        {!tailValid ? <p className="field-error">Tail lines must be a whole number from 1 through 2,000.</p> : null}
+      </CardContent></Card>
+      <Card><CardContent className="grid content-start gap-3 p-4">
+        <h2 className="text-lg text-kp-text">Dashboard</h2>
+        <label>Log scan window<Select value={draft.dashboard.logScanWindow} onChange={(event) => update({ ...draft, dashboard: { ...draft.dashboard, logScanWindow: event.target.value as Preferences['dashboard']['logScanWindow'] } })}><option value="15m">15 minutes</option><option value="30m">30 minutes</option><option value="1h">1 hour</option><option value="4h">4 hours</option></Select></label>
+        <fieldset><legend>Hidden sections</legend>{draft.dashboard.sectionOrder.map((section) => <label className="confirmation-check" key={section}><input type="checkbox" checked={draft.dashboard.hiddenSections.includes(section)} onChange={(event) => update({ ...draft, dashboard: { ...draft.dashboard, hiddenSections: event.target.checked ? [...draft.dashboard.hiddenSections, section] : draft.dashboard.hiddenSections.filter((value) => value !== section) } })} />{section}</label>)}</fieldset>
+      </CardContent></Card>
+      <Card><CardContent className="saved-filters">
+        <h2 className="text-lg text-kp-text">Saved filters</h2>
+        <p>Create and apply filters on Workloads, Pods, Events or Logs. Manage removal here. Only schema-limited payloads are stored; pagination cursors and limits are never persisted.</p>
+        {(Object.keys(draft.filters) as Array<keyof Preferences['filters']>).map((category) => <section key={category}><h3>{category}</h3>{draft.filters[category].items.length === 0 ? <small>No saved filters.</small> : <ul>{draft.filters[category].items.map((item) => <li key={item.id}><span>{item.name}</span><Button variant="danger" size="compact" onClick={() => removeFilter(category, item.id)}>Remove</Button></li>)}</ul>}</section>)}
+      </CardContent></Card>
     </section>
-    <div className="form-actions"><button type="button" className="button button--secondary" onClick={() => update(structuredClone(saved))}>Reset unsaved changes</button><button type="button" className="button" disabled={save.isPending || !tailValid} onClick={() => save.mutate(draft)}>{save.isPending ? 'Saving…' : 'Save settings'}</button></div>
+    <div className="form-actions"><Button variant="secondary" onClick={() => update(structuredClone(saved))}>Reset unsaved changes</Button><Button disabled={save.isPending || !tailValid} onClick={() => save.mutate(draft)}>{save.isPending ? 'Saving…' : 'Save settings'}</Button></div>
     {save.isError ? <p className="field-error">{errorMessage(save.error)}</p> : null}{save.isSuccess ? <p className="field-success" role="status">Preferences saved transactionally.</p> : null}
   </>
 }

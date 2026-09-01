@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 
 import { APIError, createIdempotencyKey, getPreferences, getSession, putPreferences } from '../api/client'
+import { Button, Input, Select } from './ui'
 import type { Preferences, SavedFilterCollection } from '../api/types'
 
 function errorMessage(error: unknown): string {
@@ -88,19 +89,19 @@ export function SavedFilterControls({
       <div>
         <label>
           Saved filter
-          <select value={selectedID} disabled={preferences.isPending || filters.length === 0} onChange={(event) => setSelectedID(event.target.value)}>
+          <Select value={selectedID} disabled={preferences.isPending || filters.length === 0} onChange={(event) => setSelectedID(event.target.value)}>
             <option value="">{preferences.isPending ? 'Loading filters…' : filters.length === 0 ? 'No saved filters' : 'Choose a filter'}</option>
             {filters.map((filter) => <option key={filter.id} value={filter.id}>{filter.name}</option>)}
-          </select>
+          </Select>
         </label>
-        <button type="button" className="button button--secondary button--compact" disabled={selectedID === ''} onClick={apply}>Apply saved filter</button>
+        <Button variant="secondary" size="compact" disabled={selectedID === ''} onClick={apply}>Apply saved filter</Button>
       </div>
       <div>
         <label>
           Save current filter as
-          <input value={name} maxLength={80} placeholder="My bounded view" onChange={(event) => { setName(event.target.value); setMessage('') }} />
+          <Input value={name} maxLength={80} placeholder="My bounded view" onChange={(event) => { setName(event.target.value); setMessage('') }} />
         </label>
-        <button type="button" className="button button--secondary button--compact" disabled={!canSave || save.isPending} onClick={() => save.mutate()}>{save.isPending ? 'Saving…' : 'Save current filter'}</button>
+        <Button variant="secondary" size="compact" disabled={!canSave || save.isPending} onClick={() => save.mutate()}>{save.isPending ? 'Saving…' : 'Save current filter'}</Button>
       </div>
       {preferences.isError ? <p className="field-error">Saved filters unavailable: {errorMessage(preferences.error)}</p> : null}
       {!validName(name) && name !== '' ? <p className="field-error">Filter name must contain 1–80 characters.</p> : null}

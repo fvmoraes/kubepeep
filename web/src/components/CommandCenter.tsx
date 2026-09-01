@@ -2,6 +2,8 @@ import { ArrowDown, ArrowUp, CornerDownLeft, Keyboard, Search, X } from 'lucide-
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router'
 
+import { Button, Input } from './ui'
+
 export interface CommandRoute {
   path: string
   label: string
@@ -189,8 +191,9 @@ export function CommandCenter({ routes, onRefresh }: CommandCenterProps) {
 
   return (
     <>
-      <button
-        type="button"
+      <Button
+        variant="ghost"
+        size="compact"
         className="command-center-trigger"
         aria-label="Open command center"
         aria-keyshortcuts="Control+K Meta+K"
@@ -199,7 +202,7 @@ export function CommandCenter({ routes, onRefresh }: CommandCenterProps) {
         <Search size={14} aria-hidden="true" />
         <span>Commands</span>
         <kbd>⌘/Ctrl K</kbd>
-      </button>
+      </Button>
 
       {view ? (
         <div
@@ -238,7 +241,7 @@ export function CommandCenter({ routes, onRefresh }: CommandCenterProps) {
                 <p id={descriptionId} className="command-center-description">Search the pages built into this local application. No cluster data is queried.</p>
                 <div className="command-center-search">
                   <Search size={17} aria-hidden="true" />
-                  <input
+                  <Input
                     ref={inputRef}
                     type="search"
                     role="combobox"
@@ -251,6 +254,7 @@ export function CommandCenter({ routes, onRefresh }: CommandCenterProps) {
                     spellCheck="false"
                     value={query}
                     placeholder="Search Overview, Pods, Logs…"
+                    className="bg-transparent border-0 rounded-none shadow-none focus:border-0 focus:shadow-none px-0 min-h-9"
                     onChange={(event) => {
                       setQuery(event.target.value)
                       setActiveIndex(0)

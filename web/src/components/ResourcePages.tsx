@@ -46,6 +46,8 @@ import type {
   ServiceResource,
   Workload,
 } from '../api/types'
+import { Badge, Button, Card, CardContent, CardHeader, CardTitle, DataTable, Input, Select } from '../components/ui'
+import type { BadgeVariant } from '../components/ui'
 import { PodActions, WorkloadActions } from './ResourceActions'
 import { ResourceListControls } from './ResourceListControls'
 import type { ActiveListFilter, ListSortOrder, ListSortOption } from './ResourceListControls'
@@ -88,8 +90,8 @@ function CollectionFooter<T>({ result, onNext, onRestart }: { result: Collection
         {coverage ? <small>{coverage.completedNamespaces}/{coverage.requestedNamespaces} namespaces completed · {coverage.deniedNamespaces.length} denied · {coverage.failed.length} failed</small> : null}
       </div>
       <div>
-        <button type="button" className="button button--secondary button--compact" onClick={onRestart}>First page</button>
-        <button type="button" className="button button--compact" disabled={!result.page.next} onClick={() => onNext(result.page.next)}>Next page</button>
+        <Button variant="secondary" size="compact" onClick={onRestart}>First page</Button>
+        <Button size="compact" disabled={!result.page.next} onClick={() => onNext(result.page.next)}>Next page</Button>
       </div>
     </footer>
   )
@@ -116,8 +118,13 @@ function QueryState({ pending, error, empty, children }: { pending: boolean; err
 function DetailCard({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
   return (
     <aside className="resource-detail" aria-label={`${title} details`}>
-      <div className="resource-detail-heading"><h2>{title}</h2><button type="button" className="button button--secondary button--compact" onClick={onClose}>Close</button></div>
-      {children}
+      <Card>
+        <CardHeader>
+          <CardTitle>{title}</CardTitle>
+          <Button variant="secondary" size="compact" onClick={onClose}>Close</Button>
+        </CardHeader>
+        <CardContent>{children}</CardContent>
+      </Card>
     </aside>
   )
 }
@@ -125,7 +132,7 @@ function DetailCard({ title, onClose, children }: { title: string; onClose: () =
 function YAMLViewer({ value, pending, error, onLoad }: { value?: string; pending: boolean; error: unknown; onLoad: () => void }) {
   return (
     <section className="yaml-viewer" aria-label="Authorized YAML">
-      <button type="button" className="button button--secondary button--compact" disabled={pending} onClick={onLoad}>{pending ? 'Loading YAML…' : 'Load authorized YAML'}</button>
+      <Button variant="secondary" size="compact" disabled={pending} onClick={onLoad}>{pending ? 'Loading YAML…' : 'Load authorized YAML'}</Button>
       {error ? <p className="field-error">{errorMessage(error)}</p> : null}
       {value !== undefined ? <pre aria-label="YAML document">{value}</pre> : <p>YAML is fetched only after this explicit action and remains in memory.</p>}
     </section>
@@ -224,6 +231,52 @@ function optionalSort(sort: string, order: ListSortOrder, defaultSort: string, d
 function activeFilter(id: string, label: string, value: string | string[]): ActiveListFilter[] {
   const display = Array.isArray(value) ? value.join(', ') : value
   return display === '' ? [] : [{ id, label, value: display }]
+}
+
+function statusBadgeVariant(status: string): BadgeVariant {
+  switch (status.toLowerCase()) {
+    case 'healthy':
+    case 'completed':
+    case 'running':
+    case 'succeeded':
+      return 'healthy'
+    case 'progressing':
+    case 'suspended':
+    case 'pending':
+      return 'warning'
+    case 'degraded':
+    case 'failed':
+      return 'danger'
+    default:
+      return 'unknown'
+  }
+}
+
+function eventBadgeVariant(type: string): BadgeVariant {
+  switch (type.toLowerCase()) {
+    case 'normal':
+      return 'healthy'
+    case 'warning':
+      return 'warning'
+    default:
+      return 'unknown'
+  }
+}
+
+interface TableLinkProps {
+  'aria-label': string
+  onClick: () => void
+  primary: ReactNode
+  secondary: ReactNode
+}
+
+function TableLink({ 'aria-label': label, onClick, primary, secondary }: TableLinkProps) {
+  return (
+    <Button type="button" variant="ghost" size="compact" className="h-auto p-0 justify-start text-left text-kp-sky hover:not-disabled:bg-transparent hover:not-disabled:text-kp-sky" aria-label={label} onClick={onClick}>
+      <strong className="block hover:underline">{primary}</strong>
+      <small className="block text-kp-overlay-text">{secondary}</small>
+    </Button>
+  )
 }
 
 const workloadKinds = ['deployments', 'statefulsets', 'daemonsets', 'jobs', 'cronjobs'] as const
@@ -325,9 +378,9 @@ export function WorkloadsPage() {
       <ResourceListControls search={draft.search} appliedSearch={applied.search} onSearchChange={(value) => setDraft((current) => ({ ...current, search: value }))} onApply={() => { setApplied(draft); setCursor(''); closeDetail() }} onRefresh={() => queryClient.invalidateQueries({ queryKey: ['resources', 'workloads'] })} onClear={() => { setDraft({ ...defaultWorkloadList }); setApplied({ ...defaultWorkloadList }); setCursor(''); closeDetail() }} activeFilters={[
         ...activeFilter('namespace', 'Namespace', namespaceValues(applied.namespace)), ...activeFilter('kind', 'Kind', applied.kind), ...activeFilter('status', 'Status', applied.workloadStatus),
       ]} sort={draft.sort} order={draft.order} appliedSort={applied.sort} appliedOrder={applied.order} defaultSort="identity" defaultOrder="asc" hasPendingChanges={!sameListState(draft, applied)} sortOptions={workloadSortOptions} onSortChange={(value) => setDraft((current) => ({ ...current, sort: value }))} onOrderChange={(value) => setDraft((current) => ({ ...current, order: value }))}>
-        <label>Namespace<input value={draft.namespace} maxLength={256} placeholder="active scope; comma-separated" onChange={(event) => setDraft((current) => ({ ...current, namespace: event.target.value }))} /></label>
-        <label>Kind<select value={draft.kind} onChange={(event) => setDraft((current) => ({ ...current, kind: event.target.value }))}><option value="">All kinds</option><option value="deployments">Deployments</option><option value="statefulsets">StatefulSets</option><option value="daemonsets">DaemonSets</option><option value="jobs">Jobs</option><option value="cronjobs">CronJobs</option></select></label>
-        <label>Status<select value={draft.workloadStatus} onChange={(event) => setDraft((current) => ({ ...current, workloadStatus: event.target.value }))}><option value="">All statuses</option>{workloadStatuses.map((value) => <option key={value}>{value}</option>)}</select></label>
+        <label>Namespace<Input value={draft.namespace} maxLength={256} placeholder="active scope; comma-separated" onChange={(event) => setDraft((current) => ({ ...current, namespace: event.target.value }))} /></label>
+        <label>Kind<Select value={draft.kind} onChange={(event) => setDraft((current) => ({ ...current, kind: event.target.value }))}><option value="">All kinds</option><option value="deployments">Deployments</option><option value="statefulsets">StatefulSets</option><option value="daemonsets">DaemonSets</option><option value="jobs">Jobs</option><option value="cronjobs">CronJobs</option></Select></label>
+        <label>Status<Select value={draft.workloadStatus} onChange={(event) => setDraft((current) => ({ ...current, workloadStatus: event.target.value }))}><option value="">All statuses</option>{workloadStatuses.map((value) => <option key={value}>{value}</option>)}</Select></label>
       </ResourceListControls>
       {selection ? <SavedFilterControls collection="workloads" generation={selection.generation} currentQuery={compactFilterQuery([
         ['namespace', namespaceValues(applied.namespace)], ['search', applied.search], ['kind', applied.kind ? [applied.kind] : []], ['status', applied.workloadStatus ? [applied.workloadStatus] : []], ['sort', applied.sort], ['order', applied.order],
@@ -349,9 +402,18 @@ export function WorkloadsPage() {
         <QueryState pending={list.isPending} error={list.error} empty={list.data?.items.length === 0}>
           <div className="resource-layout">
             <div className="resource-table-wrap">
-              <table className="resource-table"><caption>Authorized workload page</caption><thead><tr><th>Namespace</th><th>Kind / name</th><th>Ready</th><th>Status</th><th>Age</th></tr></thead>
-                <tbody>{list.data?.items.map((item) => <tr key={`${item.kind}/${item.namespace}/${item.name}`}><td>{item.namespace}</td><td><button type="button" className="table-link" aria-label={`Open ${item.kind} ${item.name} in ${item.namespace}`} onClick={() => { requests.abortAll(); setSelected({ generation: selection!.generation, item }); yaml.reset() }}><strong>{item.name}</strong><small>{item.kind}</small></button></td><td>{item.ready ?? '—'} / {item.desired ?? '—'}</td><td><span className={`resource-status resource-status--${item.status.toLowerCase()}`}>{item.status}</span></td><td>{age(item.ageSeconds)}</td></tr>)}</tbody>
-              </table>
+              <DataTable
+                caption="Authorized workload page"
+                rows={list.data?.items ?? []}
+                getRowKey={(item) => `${item.kind}/${item.namespace}/${item.name}`}
+                columns={[
+                  { key: 'namespace', header: 'Namespace', cell: (item) => item.namespace },
+                  { key: 'name', header: 'Kind / name', cell: (item) => <TableLink aria-label={`Open ${item.kind} ${item.name} in ${item.namespace}`} onClick={() => { requests.abortAll(); setSelected({ generation: selection!.generation, item }); yaml.reset() }} primary={item.name} secondary={item.kind} /> },
+                  { key: 'ready', header: 'Ready', cell: (item) => `${item.ready ?? '—'} / ${item.desired ?? '—'}` },
+                  { key: 'status', header: 'Status', cell: (item) => <Badge variant={statusBadgeVariant(item.status)}>{item.status}</Badge> },
+                  { key: 'age', header: 'Age', cell: (item) => age(item.ageSeconds) },
+                ]}
+              />
               {list.data ? <CollectionFooter result={list.data} onNext={(next) => { setCursor(next); closeDetail() }} onRestart={() => { setCursor(''); closeDetail() }} /> : null}
             </div>
             {activeSelected ? <DetailCard title={`${activeSelected.kind} ${activeSelected.namespace}/${activeSelected.name}`} onClose={closeDetail}>
@@ -397,12 +459,12 @@ export function PodsPage() {
       <ResourceListControls search={draft.search} appliedSearch={applied.search} onSearchChange={(value) => setDraft((current) => ({ ...current, search: value }))} onApply={() => { setApplied(draft); setCursor(''); closeDetail() }} onRefresh={() => queryClient.invalidateQueries({ queryKey: ['resources', 'pods'] })} onClear={() => { setDraft({ ...defaultPodList }); setApplied({ ...defaultPodList }); setCursor(''); closeDetail() }} activeFilters={[
         ...activeFilter('namespace', 'Namespace', namespaceValues(applied.namespace)), ...activeFilter('workload', 'Workload owner', applied.workload), ...activeFilter('node', 'Node', applied.node), ...activeFilter('status', 'Status', applied.podStatus), ...activeFilter('restarts', 'Restarts', applied.restarts === 'any' ? '' : applied.restarts), ...activeFilter('problematic', 'Problem evidence', applied.problematic === 'true' ? 'problematic only' : applied.problematic === 'false' ? 'without evidence' : ''),
       ]} sort={draft.sort} order={draft.order} appliedSort={applied.sort} appliedOrder={applied.order} defaultSort="identity" defaultOrder="asc" hasPendingChanges={!sameListState(draft, applied)} sortOptions={podSortOptions} onSortChange={(value) => setDraft((current) => ({ ...current, sort: value }))} onOrderChange={(value) => setDraft((current) => ({ ...current, order: value }))}>
-        <label>Namespace<input value={draft.namespace} maxLength={256} placeholder="active scope; comma-separated" onChange={(event) => setDraft((current) => ({ ...current, namespace: event.target.value }))} /></label>
-        <label>Workload owner<input value={draft.workload} maxLength={256} placeholder="exact owner name" onChange={(event) => setDraft((current) => ({ ...current, workload: event.target.value }))} /></label>
-        <label>Node<input value={draft.node} maxLength={256} onChange={(event) => setDraft((current) => ({ ...current, node: event.target.value }))} /></label>
-        <label>Status<select value={draft.podStatus} onChange={(event) => setDraft((current) => ({ ...current, podStatus: event.target.value }))}><option value="">All statuses</option>{podStatuses.map((value) => <option key={value}>{value}</option>)}</select></label>
-        <label>Restarts<select value={draft.restarts} onChange={(event) => setDraft((current) => ({ ...current, restarts: event.target.value }))}><option value="any">Any</option><option value="gt0">More than 0</option><option value="gte3">At least 3</option><option value="gte10">At least 10</option></select></label>
-        <label>Problem evidence<select value={draft.problematic} onChange={(event) => setDraft((current) => ({ ...current, problematic: event.target.value }))}><option value="">All Pods</option><option value="true">Problematic only</option><option value="false">Without evidence</option></select></label>
+        <label>Namespace<Input value={draft.namespace} maxLength={256} placeholder="active scope; comma-separated" onChange={(event) => setDraft((current) => ({ ...current, namespace: event.target.value }))} /></label>
+        <label>Workload owner<Input value={draft.workload} maxLength={256} placeholder="exact owner name" onChange={(event) => setDraft((current) => ({ ...current, workload: event.target.value }))} /></label>
+        <label>Node<Input value={draft.node} maxLength={256} onChange={(event) => setDraft((current) => ({ ...current, node: event.target.value }))} /></label>
+        <label>Status<Select value={draft.podStatus} onChange={(event) => setDraft((current) => ({ ...current, podStatus: event.target.value }))}><option value="">All statuses</option>{podStatuses.map((value) => <option key={value}>{value}</option>)}</Select></label>
+        <label>Restarts<Select value={draft.restarts} onChange={(event) => setDraft((current) => ({ ...current, restarts: event.target.value }))}><option value="any">Any</option><option value="gt0">More than 0</option><option value="gte3">At least 3</option><option value="gte10">At least 10</option></Select></label>
+        <label>Problem evidence<Select value={draft.problematic} onChange={(event) => setDraft((current) => ({ ...current, problematic: event.target.value }))}><option value="">All Pods</option><option value="true">Problematic only</option><option value="false">Without evidence</option></Select></label>
       </ResourceListControls>
       {selection ? <SavedFilterControls collection="pods" generation={selection.generation} currentQuery={compactFilterQuery([
         ['namespace', namespaceValues(applied.namespace)], ['search', applied.search], ['status', applied.podStatus ? [applied.podStatus] : []], ['workload', applied.workload], ['node', applied.node], ['restarts', applied.restarts === 'any' ? '' : applied.restarts], ['problematic', applied.problematic === '' ? undefined : applied.problematic === 'true'], ['sort', applied.sort], ['order', applied.order],
@@ -426,7 +488,21 @@ export function PodsPage() {
       }} /> : null}
       <SelectionGate pending={status.isPending} error={status.error} selected={Boolean(selection)}>
         <QueryState pending={list.isPending} error={list.error} empty={list.data?.items.length === 0}>
-          <div className="resource-layout"><div className="resource-table-wrap"><table className="resource-table"><caption>Authorized Pod page</caption><thead><tr><th>Namespace / Pod</th><th>Status</th><th>Ready</th><th>Restarts</th><th>Node</th><th>Age</th></tr></thead><tbody>{list.data?.items.map((item) => <tr className={item.problematic ? 'resource-row--problem' : ''} key={`${item.namespace}/${item.name}`}><td><button type="button" className="table-link" aria-label={`Open Pod ${item.name} in ${item.namespace}`} onClick={() => { requests.abortAll(); setSelected({ generation: selection!.generation, item }); yaml.reset() }}><strong>{item.name}</strong><small>{item.namespace}</small></button></td><td>{item.status}</td><td>{item.ready.current}/{item.ready.desired}</td><td>{item.restarts}</td><td>{item.node ?? '—'}</td><td>{age(item.ageSeconds)}</td></tr>)}</tbody></table>{list.data ? <CollectionFooter result={list.data} onNext={(next) => { setCursor(next); closeDetail() }} onRestart={() => { setCursor(''); closeDetail() }} /> : null}</div>
+          <div className="resource-layout"><div className="resource-table-wrap">
+            <DataTable
+              caption="Authorized Pod page"
+              rows={list.data?.items ?? []}
+              getRowKey={(item) => `${item.namespace}/${item.name}`}
+              columns={[
+                { key: 'namespace', header: 'Namespace / Pod', cell: (item) => <TableLink aria-label={`Open Pod ${item.name} in ${item.namespace}`} onClick={() => { requests.abortAll(); setSelected({ generation: selection!.generation, item }); yaml.reset() }} primary={<>{item.name}{item.problematic ? <Badge variant="danger" className="ml-2">problem</Badge> : null}</>} secondary={item.namespace} /> },
+                { key: 'status', header: 'Status', cell: (item) => <Badge variant={statusBadgeVariant(item.status)}>{item.status}</Badge> },
+                { key: 'ready', header: 'Ready', cell: (item) => `${item.ready.current}/${item.ready.desired}` },
+                { key: 'restarts', header: 'Restarts', cell: (item) => item.restarts },
+                { key: 'node', header: 'Node', cell: (item) => item.node ?? '—' },
+                { key: 'age', header: 'Age', cell: (item) => age(item.ageSeconds) },
+              ]}
+            />
+            {list.data ? <CollectionFooter result={list.data} onNext={(next) => { setCursor(next); closeDetail() }} onRestart={() => { setCursor(''); closeDetail() }} /> : null}</div>
             {activeSelected ? <DetailCard title={`Pod ${activeSelected.namespace}/${activeSelected.name}`} onClose={closeDetail}>{detail.isPending ? <p>Loading detail…</p> : detail.isError ? <p className="field-error">{errorMessage(detail.error)}</p> : detail.data ? <><dl className="resource-facts"><div><dt>UID</dt><dd>{detail.data.metadata.uid}</dd></div><div><dt>Owner</dt><dd>{detail.data.summary.owner ? `${detail.data.summary.owner.kind}/${detail.data.summary.owner.name}` : 'standalone'}</dd></div><div><dt>Containers</dt><dd>{detail.data.containers.map((value) => `${value.spec.name} (${value.state})`).join(', ') || 'none'}</dd></div><div><dt>IP</dt><dd>{detail.data.summary.ip ?? '—'}</dd></div></dl><Link className="button button--secondary button--compact" to={`/logs?namespace=${encodeURIComponent(activeSelected.namespace)}&pod=${encodeURIComponent(activeSelected.name)}&container=${encodeURIComponent(detail.data.containers[0]?.spec.name ?? '')}`}>View logs</Link><PodActions key={`${selection!.generation}/${detail.data.metadata.uid}`} detail={detail.data} selection={selection as SelectionSummary} /></> : null}<YAMLViewer value={yaml.data} pending={yaml.isPending} error={yaml.error} onLoad={() => yaml.mutate(activeSelected)} /></DetailCard> : null}
           </div>
         </QueryState>
@@ -448,10 +524,10 @@ export function EventsPage() {
       <ResourceListControls search={draft.search} appliedSearch={applied.search} onSearchChange={(value) => setDraft((current) => ({ ...current, search: value }))} onApply={() => { setApplied(draft); setCursor('') }} onRefresh={() => queryClient.invalidateQueries({ queryKey: ['resources', 'events'] })} onClear={() => { setDraft({ ...defaultEventList }); setApplied({ ...defaultEventList }); setCursor('') }} activeFilters={[
         ...activeFilter('namespace', 'Namespace', namespaceValues(applied.namespace)), ...activeFilter('type', 'Type', applied.eventType), ...activeFilter('objectKind', 'Object kind', applied.objectKind), ...activeFilter('reason', 'Reason', applied.reason),
       ]} sort={draft.sort} order={draft.order} appliedSort={applied.sort} appliedOrder={applied.order} defaultSort="timestamp" defaultOrder="desc" hasPendingChanges={!sameListState(draft, applied)} sortOptions={eventSortOptions} onSortChange={(value) => setDraft((current) => ({ ...current, sort: value }))} onOrderChange={(value) => setDraft((current) => ({ ...current, order: value }))}>
-        <label>Namespace<input value={draft.namespace} maxLength={256} placeholder="active scope; comma-separated" onChange={(event) => setDraft((current) => ({ ...current, namespace: event.target.value }))} /></label>
-        <label>Type<select value={draft.eventType} onChange={(event) => setDraft((current) => ({ ...current, eventType: event.target.value }))}><option value="">All types</option>{eventTypes.map((value) => <option key={value}>{value}</option>)}</select></label>
-        <label>Object kind<input value={draft.objectKind} maxLength={256} onChange={(event) => setDraft((current) => ({ ...current, objectKind: event.target.value }))} /></label>
-        <label>Reason<input value={draft.reason} maxLength={256} onChange={(event) => setDraft((current) => ({ ...current, reason: event.target.value }))} /></label>
+        <label>Namespace<Input value={draft.namespace} maxLength={256} placeholder="active scope; comma-separated" onChange={(event) => setDraft((current) => ({ ...current, namespace: event.target.value }))} /></label>
+        <label>Type<Select value={draft.eventType} onChange={(event) => setDraft((current) => ({ ...current, eventType: event.target.value }))}><option value="">All types</option>{eventTypes.map((value) => <option key={value}>{value}</option>)}</Select></label>
+        <label>Object kind<Input value={draft.objectKind} maxLength={256} onChange={(event) => setDraft((current) => ({ ...current, objectKind: event.target.value }))} /></label>
+        <label>Reason<Input value={draft.reason} maxLength={256} onChange={(event) => setDraft((current) => ({ ...current, reason: event.target.value }))} /></label>
       </ResourceListControls>
       {selection ? <SavedFilterControls collection="events" generation={selection.generation} currentQuery={compactFilterQuery([
         ['namespace', namespaceValues(applied.namespace)], ['search', applied.search], ['status', applied.eventType ? [applied.eventType] : []], ['sort', applied.sort], ['order', applied.order], ['objectKind', applied.objectKind], ['reason', applied.reason],
@@ -469,7 +545,21 @@ export function EventsPage() {
         setApplied(next)
         setCursor('')
       }} /> : null}
-      <SelectionGate pending={status.isPending} error={status.error} selected={Boolean(selection)}><QueryState pending={list.isPending} error={list.error} empty={list.data?.items.length === 0}><div className="resource-table-wrap"><table className="resource-table"><caption>Authorized event page</caption><thead><tr><th>Time</th><th>Namespace</th><th>Object</th><th>Type / reason</th><th>Count</th><th>Message</th></tr></thead><tbody>{list.data?.items.map((item, index) => <tr key={`${item.namespace}/${item.objectKind}/${item.objectName}/${item.timestamp ?? index}`}><td>{dateTime(item.timestamp)}</td><td>{item.namespace}</td><td>{item.objectKind}/{item.objectName}</td><td><span className={`event-type event-type--${item.type.toLowerCase()}`}>{item.type}</span><small>{item.reason}</small></td><td>{item.count}</td><td className="resource-message">{item.message}</td></tr>)}</tbody></table>{list.data ? <CollectionFooter result={list.data} onNext={setCursor} onRestart={() => setCursor('')} /> : null}</div></QueryState></SelectionGate>
+      <SelectionGate pending={status.isPending} error={status.error} selected={Boolean(selection)}><QueryState pending={list.isPending} error={list.error} empty={list.data?.items.length === 0}><div className="resource-table-wrap">
+        <DataTable
+          caption="Authorized event page"
+          rows={list.data?.items ?? []}
+          getRowKey={(item, index) => `${item.namespace}/${item.objectKind}/${item.objectName}/${item.timestamp ?? index}`}
+          columns={[
+            { key: 'time', header: 'Time', cell: (item) => dateTime(item.timestamp) },
+            { key: 'namespace', header: 'Namespace', cell: (item) => item.namespace },
+            { key: 'object', header: 'Object', cell: (item) => `${item.objectKind}/${item.objectName}` },
+            { key: 'type', header: 'Type / reason', cell: (item) => <><Badge variant={eventBadgeVariant(item.type)}>{item.type}</Badge><small className="block text-kp-overlay-text">{item.reason}</small></> },
+            { key: 'count', header: 'Count', cell: (item) => item.count },
+            { key: 'message', header: 'Message', cell: (item) => <span className="resource-message">{item.message}</span> },
+          ]}
+        />
+        {list.data ? <CollectionFooter result={list.data} onNext={setCursor} onRestart={() => setCursor('')} /> : null}</div></QueryState></SelectionGate>
     </div>
   )
 }
@@ -559,12 +649,21 @@ export function NetworkPage() {
   return (
     <div className="resource-page">
       <PageHeading title="Network" description="Services, Ingresses, EndpointSlices and loopback-only port-forward sessions." />
-      <div className="resource-tabs" role="tablist" aria-label="Network resource type">{(['services', 'ingresses', 'endpoint-slices', 'port-forwards'] as const).map((value) => <button type="button" role="tab" aria-selected={tab === value} aria-controls="network-panel" className={tab === value ? 'active' : ''} key={value} onClick={() => { setTab(value); closeDetail() }}>{value}</button>)}</div>
+      <div className="resource-tabs" role="tablist" aria-label="Network resource type">{(['services', 'ingresses', 'endpoint-slices', 'port-forwards'] as const).map((value) => <Button type="button" role="tab" aria-selected={tab === value} aria-controls="network-panel" variant={tab === value ? 'secondary' : 'ghost'} size="compact" key={value} onClick={() => { setTab(value); closeDetail() }}>{value}</Button>)}</div>
       {selection && tab !== 'port-forwards' ? <ResourceLiveUpdates key={`${tab}/${selection.generation}`} generation={selection.generation} topics={[tab]} queryKeys={[["resources", tab]]} /> : null}
       {tab !== 'port-forwards' ? <ResourceListControls search={draft.search} appliedSearch={applied.search} onSearchChange={(value) => setDrafts((current) => ({ ...current, [resourceTab]: { ...current[resourceTab], search: value } }))} onApply={() => { setAppliedLists((current) => ({ ...current, [resourceTab]: { ...draft } })); setCursor(''); closeDetail() }} onRefresh={() => queryClient.invalidateQueries({ queryKey: ['resources', tab] })} onClear={() => { setDrafts((current) => ({ ...current, [resourceTab]: { ...defaultSimpleList } })); setAppliedLists((current) => ({ ...current, [resourceTab]: { ...defaultSimpleList } })); setCursor(''); closeDetail() }} sort={draft.sort} order={draft.order} appliedSort={applied.sort} appliedOrder={applied.order} defaultSort="identity" defaultOrder="asc" hasPendingChanges={!sameListState(draft, applied)} sortOptions={networkSortOptions[resourceTab]} onSortChange={(value) => setDrafts((current) => ({ ...current, [resourceTab]: { ...current[resourceTab], sort: value } }))} onOrderChange={(value) => setDrafts((current) => ({ ...current, [resourceTab]: { ...current[resourceTab], order: value } }))} /> : null}
       <div id="network-panel" role="tabpanel">
         <SelectionGate pending={status.isPending} error={status.error} selected={Boolean(selection)}>
-          {tab === 'port-forwards' ? <QueryState pending={forwards.isPending} error={forwards.error ?? close.error} empty={forwards.data?.length === 0}><div className="session-grid">{forwards.data?.map((item) => <article key={item.id}><strong>{item.localAddress}:{item.localPort}</strong><span>{item.context} · {item.namespace}/{item.pod} → {item.remotePort}</span><small>{item.status} · created {dateTime(item.createdAt)} · expires {dateTime(item.expiresAt)}</small>{item.endedAt ? <small>ended {dateTime(item.endedAt)} · {item.endReason ?? item.status}</small> : null}{item.status === 'active' ? <button type="button" className="button button--danger button--compact" onClick={() => close.mutate(item.id)}>Close loopback session</button> : null}</article>)}</div></QueryState> : <QueryState pending={activeQuery.isPending} error={activeQuery.error} empty={active?.items.length === 0}><div className="resource-layout"><div className="resource-table-wrap"><table className="resource-table"><caption>Authorized {tab} page</caption><thead><tr><th>Namespace / name</th><th>Type</th><th>Summary</th></tr></thead><tbody>{active?.items.map((item) => <tr key={`${item.namespace}/${item.name}`}><td><button type="button" className="table-link" aria-label={`Open ${tab} ${item.name} in ${item.namespace}`} onClick={() => { closeDetail(); setSelected({ generation: selection!.generation, tab: tab as NetworkSelection['tab'], namespace: item.namespace, name: item.name }) }}><strong>{item.name}</strong><small>{item.namespace}</small></button></td><td>{'type' in item ? item.type : 'className' in item ? (item.className ?? 'Ingress') : item.addressType}</td><td>{'clusterIPs' in item ? item.clusterIPs.join(', ') : 'hosts' in item ? item.hosts.join(', ') : `${item.endpoints.length} endpoints`}</td></tr>)}</tbody></table>{active ? <CollectionFooter result={active} onNext={setCursor} onRestart={() => setCursor('')} /> : null}</div>{activeSelected ? <DetailCard title={`${activeSelected.namespace}/${activeSelected.name}`} onClose={closeDetail}>{currentDetail.isPending ? <p>Loading detail…</p> : currentDetail.isError ? <p className="field-error">{errorMessage(currentDetail.error)}</p> : <NetworkDetailView tab={activeSelected.tab} service={serviceDetail.data} ingress={ingressDetail.data} slice={sliceDetail.data} />}<YAMLViewer value={yaml.data} pending={yaml.isPending} error={yaml.error} onLoad={() => yaml.mutate(activeSelected)} /></DetailCard> : null}</div></QueryState>}
+          {tab === 'port-forwards' ? <QueryState pending={forwards.isPending} error={forwards.error ?? close.error} empty={forwards.data?.length === 0}><div className="session-grid">{forwards.data?.map((item) => <article key={item.id}><strong>{item.localAddress}:{item.localPort}</strong><span>{item.context} · {item.namespace}/{item.pod} → {item.remotePort}</span><small>{item.status} · created {dateTime(item.createdAt)} · expires {dateTime(item.expiresAt)}</small>{item.endedAt ? <small>ended {dateTime(item.endedAt)} · {item.endReason ?? item.status}</small> : null}{item.status === 'active' ? <Button variant="danger" size="compact" onClick={() => close.mutate(item.id)}>Close loopback session</Button> : null}</article>)}</div></QueryState> : <QueryState pending={activeQuery.isPending} error={activeQuery.error} empty={active?.items.length === 0}><div className="resource-layout"><div className="resource-table-wrap"><DataTable
+                  caption={`Authorized ${tab} page`}
+                  rows={active?.items ?? []}
+                  getRowKey={(item) => `${item.namespace}/${item.name}`}
+                  columns={[
+                    { key: 'namespace', header: 'Namespace / name', cell: (item) => <TableLink aria-label={`Open ${tab} ${item.name} in ${item.namespace}`} onClick={() => { closeDetail(); setSelected({ generation: selection!.generation, tab: tab as NetworkSelection['tab'], namespace: item.namespace, name: item.name }) }} primary={item.name} secondary={item.namespace} /> },
+                    { key: 'type', header: 'Type', cell: (item) => ('type' in item ? item.type : 'className' in item ? (item.className ?? 'Ingress') : item.addressType) },
+                    { key: 'summary', header: 'Summary', cell: (item) => ('clusterIPs' in item ? item.clusterIPs.join(', ') : 'hosts' in item ? item.hosts.join(', ') : `${item.endpoints.length} endpoints`) },
+                  ]}
+                />{active ? <CollectionFooter result={active} onNext={setCursor} onRestart={() => setCursor('')} /> : null}</div>{activeSelected ? <DetailCard title={`${activeSelected.namespace}/${activeSelected.name}`} onClose={closeDetail}>{currentDetail.isPending ? <p>Loading detail…</p> : currentDetail.isError ? <p className="field-error">{errorMessage(currentDetail.error)}</p> : <NetworkDetailView tab={activeSelected.tab} service={serviceDetail.data} ingress={ingressDetail.data} slice={sliceDetail.data} />}<YAMLViewer value={yaml.data} pending={yaml.isPending} error={yaml.error} onLoad={() => yaml.mutate(activeSelected)} /></DetailCard> : null}</div></QueryState>}
         </SelectionGate>
       </div>
     </div>
@@ -629,10 +728,19 @@ export function ConfigPage() {
   return (
     <div className="resource-page">
       <PageHeading title="Config" description="ConfigMaps are fetched on detail; Secrets remain metadata-only and never expose values or YAML." />
-      <div className="resource-tabs" role="tablist" aria-label="Configuration resource type">{(['configmaps', 'secrets'] as const).map((value) => <button type="button" role="tab" aria-selected={tab === value} aria-controls="config-panel" className={tab === value ? 'active' : ''} key={value} onClick={() => { setTab(value); closeDetail() }}>{value}</button>)}</div>
+      <div className="resource-tabs" role="tablist" aria-label="Configuration resource type">{(['configmaps', 'secrets'] as const).map((value) => <Button type="button" role="tab" aria-selected={tab === value} aria-controls="config-panel" variant={tab === value ? 'secondary' : 'ghost'} size="compact" key={value} onClick={() => { setTab(value); closeDetail() }}>{value}</Button>)}</div>
       {selection && tab === 'configmaps' ? <ResourceLiveUpdates key={`configmaps/${selection.generation}`} generation={selection.generation} topics={['configmaps']} queryKeys={[["resources", "configmaps"]]} /> : null}
       <ResourceListControls search={draft.search} appliedSearch={applied.search} onSearchChange={(value) => setDrafts((current) => ({ ...current, [tab]: { ...current[tab], search: value } }))} onApply={() => { setAppliedLists((current) => ({ ...current, [tab]: { ...draft } })); setCursor(''); closeDetail() }} onRefresh={() => queryClient.invalidateQueries({ queryKey: ['resources', tab] })} onClear={() => { setDrafts((current) => ({ ...current, [tab]: { ...defaultSimpleList } })); setAppliedLists((current) => ({ ...current, [tab]: { ...defaultSimpleList } })); setCursor(''); closeDetail() }} sort={draft.sort} order={draft.order} appliedSort={applied.sort} appliedOrder={applied.order} defaultSort="identity" defaultOrder="asc" hasPendingChanges={!sameListState(draft, applied)} sortOptions={configSortOptions} onSortChange={(value) => setDrafts((current) => ({ ...current, [tab]: { ...current[tab], sort: value } }))} onOrderChange={(value) => setDrafts((current) => ({ ...current, [tab]: { ...current[tab], order: value } }))} />
-      <div id="config-panel" role="tabpanel"><SelectionGate pending={status.isPending} error={status.error} selected={Boolean(selection)}><QueryState pending={activeQuery.isPending} error={activeQuery.error} empty={active?.items.length === 0}><div className="resource-layout"><div className="resource-table-wrap"><table className="resource-table"><caption>Authorized {tab} metadata page</caption><thead><tr><th>Namespace / name</th><th>UID</th><th>Created</th></tr></thead><tbody>{active?.items.map((item) => { const value = 'metadata' in item ? item.metadata : item; return <tr key={`${value.namespace}/${value.name}`}><td><button type="button" className="table-link" aria-label={`Open ${tab === 'secrets' ? 'Secret' : 'ConfigMap'} ${value.name} in ${value.namespace}`} onClick={() => { closeDetail(); setSelected({ generation: selection!.generation, namespace: value.namespace, name: value.name }) }}><strong>{value.name}</strong><small>{value.namespace}</small></button></td><td>{value.uid}</td><td>{dateTime(value.creationTimestamp)}</td></tr> })}</tbody></table>{active ? <CollectionFooter result={active} onNext={setCursor} onRestart={() => setCursor('')} /> : null}</div>{activeSelected ? <DetailCard title={`${tab === 'secrets' ? 'Secret metadata' : 'ConfigMap'} ${activeSelected.namespace}/${activeSelected.name}`} onClose={closeDetail}>{tab === 'configmaps' ? configDetail.isPending ? <p>Loading authorized entries…</p> : configDetail.isError ? <p className="field-error">{errorMessage(configDetail.error)}</p> : configDetail.data ? <ConfigMapDetailView detail={configDetail.data} /> : null : secretDetail.isPending ? <p>Loading metadata…</p> : secretDetail.isError ? <p className="field-error">{errorMessage(secretDetail.error)}</p> : secretDetail.data ? <SecretMetadataView secret={secretDetail.data} /> : null}{tab === 'configmaps' ? <YAMLViewer value={yaml.data} pending={yaml.isPending} error={yaml.error} onLoad={() => yaml.mutate(activeSelected)} /> : null}</DetailCard> : null}</div></QueryState></SelectionGate></div>
+      <div id="config-panel" role="tabpanel"><SelectionGate pending={status.isPending} error={status.error} selected={Boolean(selection)}><QueryState pending={activeQuery.isPending} error={activeQuery.error} empty={active?.items.length === 0}><div className="resource-layout"><div className="resource-table-wrap"><DataTable
+                  caption={`Authorized ${tab} metadata page`}
+                  rows={active?.items ?? []}
+                  getRowKey={(item) => { const value = 'metadata' in item ? item.metadata : item; return `${value.namespace}/${value.name}` }}
+                  columns={[
+                    { key: 'namespace', header: 'Namespace / name', cell: (item) => { const value = 'metadata' in item ? item.metadata : item; return <TableLink aria-label={`Open ${tab === 'secrets' ? 'Secret' : 'ConfigMap'} ${value.name} in ${value.namespace}`} onClick={() => { closeDetail(); setSelected({ generation: selection!.generation, namespace: value.namespace, name: value.name }) }} primary={value.name} secondary={value.namespace} /> } },
+                    { key: 'uid', header: 'UID', cell: (item) => { const value = 'metadata' in item ? item.metadata : item; return value.uid } },
+                    { key: 'created', header: 'Created', cell: (item) => { const value = 'metadata' in item ? item.metadata : item; return dateTime(value.creationTimestamp) } },
+                  ]}
+                />{active ? <CollectionFooter result={active} onNext={setCursor} onRestart={() => setCursor('')} /> : null}</div>{activeSelected ? <DetailCard title={`${tab === 'secrets' ? 'Secret metadata' : 'ConfigMap'} ${activeSelected.namespace}/${activeSelected.name}`} onClose={closeDetail}>{tab === 'configmaps' ? configDetail.isPending ? <p>Loading authorized entries…</p> : configDetail.isError ? <p className="field-error">{errorMessage(configDetail.error)}</p> : configDetail.data ? <ConfigMapDetailView detail={configDetail.data} /> : null : secretDetail.isPending ? <p>Loading metadata…</p> : secretDetail.isError ? <p className="field-error">{errorMessage(secretDetail.error)}</p> : secretDetail.data ? <SecretMetadataView secret={secretDetail.data} /> : null}{tab === 'configmaps' ? <YAMLViewer value={yaml.data} pending={yaml.isPending} error={yaml.error} onLoad={() => yaml.mutate(activeSelected)} /> : null}</DetailCard> : null}</div></QueryState></SelectionGate></div>
     </div>
   )
 }

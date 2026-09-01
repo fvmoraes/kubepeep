@@ -1,10 +1,11 @@
-import type { SelectHTMLAttributes } from 'react'
+import { forwardRef, type SelectHTMLAttributes } from 'react'
 
 export type SelectProps = SelectHTMLAttributes<HTMLSelectElement>
 
-export function Select({ className = '', children, ...props }: SelectProps) {
+export const Select = forwardRef<HTMLSelectElement, SelectProps>(function Select({ className = '', children, ...props }, ref) {
   return (
     <select
+      ref={ref}
       className={`
         min-h-9 w-full px-2.5 py-1.5
         text-kp-text text-base
@@ -18,4 +19,4 @@ export function Select({ className = '', children, ...props }: SelectProps) {
       {children}
     </select>
   )
-}
+})
