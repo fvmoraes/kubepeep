@@ -102,6 +102,8 @@ Regras verificáveis:
 Um teste arquitetural futuro deve falhar se `internal/api/handlers` importar `k8s.io/client-go/kubernetes` ou o adapter SQLite concreto.
 
 > **Implementado:** `internal/ports/architecture_test.go` falha se qualquer arquivo de `internal/api/handlers` importar `internal/adapters/...` ou `internal/integration/...`, e garante que o pacote `internal/ports` permaneça livre de dependências internas. Handlers dependem exclusivamente de interfaces de serviço e DTOs; a fiação concreta pertence a `internal/application.Compose` e aos runtimes (CLI/desktop).
+>
+> **Consolidação de classificadores (F4-02):** a classificação de workloads já é única (`resources.Convert*` → `dashboard.Classify*`), a redação de texto é única (`dashboard.Redact`) e as primitivas de pod agora vivem no pacote folha `internal/services/podhealth` — `ControllingOwner` (seleção do owner controller, antes triplicada em resources/dashboard/kubernetesruntime) e `Problematic` (definição canônica do badge "problem" das listas; o diagnóstico rico do dashboard permanece em `ClassifyProblemPod`, que é um refinamento com evidência/severidade e períodos de tolerância deliberadamente diferentes).
 
 ## 5. Ports
 

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/fvmoraes/kubepeep/internal/services/podhealth"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -147,10 +148,8 @@ func DirectPodOwner(pod *corev1.Pod) *ResourceRef {
 	if pod == nil {
 		return nil
 	}
-	for _, owner := range pod.OwnerReferences {
-		if owner.Controller != nil && *owner.Controller {
-			return resourceRef(owner.APIVersion, owner.Kind, pod.Namespace, owner.Name, owner.UID)
-		}
+	if owner := podhealth.ControllingOwner(pod.OwnerReferences); owner != nil {
+		return resourceRef(owner.APIVersion, owner.Kind, pod.Namespace, owner.Name, owner.UID)
 	}
 	return nil
 }

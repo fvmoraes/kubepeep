@@ -3,6 +3,7 @@ package resources
 import (
 	"time"
 
+	"github.com/fvmoraes/kubepeep/internal/services/podhealth"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -100,12 +101,10 @@ func directOwner(references []metav1.OwnerReference) *OwnerDTO {
 	if len(references) == 0 {
 		return nil
 	}
-	selected := references[0]
-	for _, reference := range references {
-		if reference.Controller != nil && *reference.Controller {
-			selected = reference
-			break
-		}
+	selected := podhealth.ControllingOwner(references)
+	if selected == nil {
+		// Historical behavior: no controller means the first reference wins.
+		selected = &references[0]
 	}
 	if selected.Kind == "" || selected.Name == "" {
 		return nil
@@ -114,21 +113,11 @@ func directOwner(references []metav1.OwnerReference) *OwnerDTO {
 }
 
 func podProblematic(value *corev1.Pod, summary PodDTO) bool {
-	if summary.Status == "Pending" || summary.Status == "Failed" || summary.Status == "Unknown" {
-		return true
+	var statusGroups [][]corev1.ContainerStatus
+	if value != nil {
+		statusGroups = append(statusGroups, value.Status.InitContainerStatuses, value.Status.ContainerStatuses)
 	}
-	if summary.Status == "Running" && summary.Ready.Current != summary.Ready.Desired {
-		return true
-	}
-	if summary.Restarts >= 3 {
-		return true
-	}
-	for _, status := range append(append([]corev1.ContainerStatus{}, value.Status.InitContainerStatuses...), value.Status.ContainerStatuses...) {
-		if status.State.Waiting != nil || (status.State.Terminated != nil && status.State.Terminated.ExitCode != 0) {
-			return true
-		}
-	}
-	return false
+	return podhealth.Problematic(summary.Status, summary.Ready.Current, summary.Ready.Desired, summary.Restarts, statusGroups...)
 }
 
 func regularContainerDTOs(specs []corev1.Container, statuses []corev1.ContainerStatus, containerType string) []PodContainerDTO {

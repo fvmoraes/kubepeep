@@ -81,14 +81,22 @@ func TestComposeBuildsServingPlatformAndCleanup(t *testing.T) {
 	}
 	var payload struct {
 		Data struct {
-			Status string `json:"status"`
+			Status     string `json:"status"`
+			Components map[string]struct {
+				Status string `json:"status"`
+			} `json:"components"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("health payload: %v", err)
 	}
-	if payload.Data.Status != "healthy" {
-		t.Fatalf("health status = %q", payload.Data.Status)
+	// The overall status legitimately degrades without an ambient kubeconfig
+	// (cluster check), so assert on the local components Compose owns.
+	if payload.Data.Components["application"].Status != "healthy" {
+		t.Fatalf("application component = %q", payload.Data.Components["application"].Status)
+	}
+	if payload.Data.Components["sqlite"].Status != "healthy" {
+		t.Fatalf("sqlite component = %q", payload.Data.Components["sqlite"].Status)
 	}
 
 	for _, cleanup := range platform.Cleanups {

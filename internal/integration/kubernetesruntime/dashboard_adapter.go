@@ -23,6 +23,7 @@ import (
 	"github.com/fvmoraes/kubepeep/internal/services/authorization"
 	"github.com/fvmoraes/kubepeep/internal/services/dashboard"
 	"github.com/fvmoraes/kubepeep/internal/services/namespaces"
+	"github.com/fvmoraes/kubepeep/internal/services/podhealth"
 )
 
 const maximumInternalContinueBytes = 16 << 10
@@ -566,13 +567,7 @@ func decodeWorkloadContinue(token string) (workloadContinue, error) {
 }
 
 func controllingOwner(values []metav1.OwnerReference) *metav1.OwnerReference {
-	for index := range values {
-		if values[index].Controller != nil && *values[index].Controller {
-			copy := values[index]
-			return &copy
-		}
-	}
-	return nil
+	return podhealth.ControllingOwner(values)
 }
 
 func ownerResourceRef(owner *metav1.OwnerReference, namespace string) *dashboard.ResourceRef {
