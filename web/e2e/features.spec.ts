@@ -34,12 +34,6 @@ let preferences = {
   favorites: { version: 1 as const, items: [] as Array<{ id: string; kind: string; namespace: string; name: string }> },
 }
 
-const block = (value: unknown) => ({
-  value, complete: true, truncated: false,
-  coverage: { requestedNamespaces: 1, completedNamespaces: 1, deniedNamespaces: [], failed: [] },
-  errors: [],
-})
-
 const meta = { generation }
 
 test.beforeEach(async ({ context }) => {
@@ -59,7 +53,6 @@ test.beforeEach(async ({ context }) => {
   await context.route('**/api/v1/**', async (route) => {
     const request = route.request()
     const url = new URL(request.url())
-    const path = `${url.pathname}${url.search}`
     let data: unknown = []
     let responseMeta: Record<string, unknown> = meta
     if (url.pathname === '/api/v1/status') data = statusPayload()

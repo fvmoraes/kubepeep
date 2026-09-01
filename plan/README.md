@@ -6,7 +6,9 @@
 >
 > **Execução (2026-09-01):** Fases 0–6 concluídas e publicadas no `main`.
 > Commits: F0 `deb4d02` · F1 `41a2adf`+`6681f70` · F2 `17e53fe` · F3 `6e142bd` · F4 `e010dcb` · F5 `f8dd8a6` · F6 `02d008e`.
-> Itens deliberadamente adiados: F4-02 (consolidação dashboard/resources — refactor de alto risco, feito como follow-up separado), O-02..O-08 parciais (OTel spans e correlação request_id) e toda a Fase 7 (evoluções futuras P3).
+> **Follow-ups (2026-09-01):** F4-02 `c0ab25b` · Observabilidade `86b285f` · G-09 `968ff1e` · G-08 via harness ✅ · F7-01 `3b10615` · F7-04 `07de7e7` · F7-05 `e77258b` · F7-02 `df3be10` · Consolidação E2E/docs `3fb08cb`.
+> **G-10 fechado:** build desktop via contêiner (`docs/desktop-build.md`) + RC artifacts (`dist/RC-checksums.txt`).
+> Restante: apenas F7-03 (multi-contexto, backlog XL permanente).
 
 ## 1. Propósito deste plano
 

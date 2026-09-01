@@ -169,7 +169,21 @@
 | F5-04 | ✅ `doctor` com grupo observabilidade: `log_sink` e `metrics_endpoint` (pass/skip/warn por contrato opt-in). Validado E2E: `METRICS_READY` e `METRICS_DISABLED` observados. | `86b285f` |
 | G-08 | ✅ `test/kind/harness.sh validate` verde — todas as fases 4-7 de cenários Kubernetes/RBAC. Obs.: exigiu contorno ambiental (TLS interceptado no mirror do registry — `skip_verify` no containerd do nó de teste; imagem importada via host). | — |
 | G-09 | ✅ Playwright E2E 3/3, agora servindo o bundle de produção (`vite preview` em vez de dev server, que flakava por transform on-demand); asserção da marca atualizada para o SVG da Fase 1. | `968ff1e` |
-| G-10 | ◐ Parcial: `go vet -tags desktop ./...` limpo; build nativo segue bloqueado sem permissão para instalar `libgtk-3-dev`/`libwebkit2gtk-4.1-dev` (policy server rejeita sudo). | — |
+| G-10 | ✅ **Fechado (2026-09-01):** build desktop linux/amd64 concluído via contêiner Ubuntu 22.04 com `webkit2gtk-4.0` exato (guia em `docs/desktop-build.md`); smoke headless (doctor inclui `FRONTEND_EMBEDDED`); `make verify` completo verde (format/lint/typecheck/test/e2e/build/smoke/verify-ginger). | — |
+
+## 13. Release candidate (2026-09-01)
+
+Artefatos locais em `dist/` (fora do git, checksums em `dist/RC-checksums.txt`):
+
+| Artefato | Caminho | SHA-256 (prefixo) |
+| --- | --- | --- |
+| Web binary | `dist/kubePeep` | `925da52f…` |
+| Desktop linux/amd64 | `dist/desktop/linux-amd64/kubePeep` | `e569152d…` |
+
+Gates de RC verificados: `make verify` (exit 0) e smoke headless do desktop.
+Publicação de tag/release permanece condicionada à decisão explícita do
+mantenedor. Único item restante do roadmap: F7-03 (multi-contexto, backlog XL
+permanente).
 
 ## 12. Fase 7 — evoluções futuras (2026-09-01, terceira rodada)
 
