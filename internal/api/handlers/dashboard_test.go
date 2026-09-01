@@ -64,6 +64,10 @@ func (stub *dashboardServiceStub) Summary(context.Context, namespaces.SelectionB
 	return dashboard.DashboardBlockDTO[dashboard.SummaryDTO]{Value: dashboard.SummaryDTO{Namespaces: dashboard.AvailableCounter(2)}, Complete: true, Errors: []dashboard.PartialError{}}
 }
 
+func (stub *dashboardServiceStub) NamespaceHealth(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution) dashboard.DashboardBlockDTO[[]dashboard.NamespaceHealthDTO] {
+	return dashboard.DashboardBlockDTO[[]dashboard.NamespaceHealthDTO]{Value: []dashboard.NamespaceHealthDTO{}, Complete: true, Errors: []dashboard.PartialError{}}
+}
+
 func (stub *dashboardServiceStub) Problems(_ context.Context, _ namespaces.SelectionBinding, resolution namespaces.ScopeResolution) dashboard.DashboardBlockDTO[[]dashboard.ProblemPodDTO] {
 	stub.problemsCalls++
 	stub.selectionSeen = resolution
@@ -163,6 +167,37 @@ func TestDashboardCursorIsOpaqueAndBoundToQueryAndSelection(t *testing.T) {
 func dashboardRequest(method, target, body string) *http.Request {
 	request := httptest.NewRequest(method, target, strings.NewReader(body))
 	return request.WithContext(api.WithRequestID(request.Context(), "req-dashboard"))
+}
+
+func TestDashboardNamespaceHealthWritesGenerationBoundEnvelope(t *testing.T) {
+	handler, _, _ := testDashboardHandler()
+	recorder := httptest.NewRecorder()
+	handler.NamespaceHealth(recorder, dashboardRequest(http.MethodGet, "/api/v1/dashboard/namespace-health", ""))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
+	if recorder.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("Cache-Control = %q", recorder.Header().Get("Cache-Control"))
+	}
+	var response struct {
+		Data dashboard.DashboardBlockDTO[[]dashboard.NamespaceHealthDTO] `json:"data"`
+		Meta dashboardMeta                                               `json:"meta"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Meta.RequestID != "req-dashboard" || response.Meta.Generation != "gen-7" {
+		t.Fatalf("unexpected meta: %+v", response.Meta)
+	}
+}
+
+func TestDashboardNamespaceHealthRejectsQueryParameters(t *testing.T) {
+	handler, _, _ := testDashboardHandler()
+	recorder := httptest.NewRecorder()
+	handler.NamespaceHealth(recorder, dashboardRequest(http.MethodGet, "/api/v1/dashboard/namespace-health?namespace=payments", ""))
+	if recorder.Code != http.StatusBadRequest || !strings.Contains(recorder.Body.String(), api.CodeValidationFailed) {
+		t.Fatalf("status = %d, body = %s", recorder.Code, recorder.Body.String())
+	}
 }
 
 func TestDashboardSummaryWritesGenerationBoundEnvelope(t *testing.T) {

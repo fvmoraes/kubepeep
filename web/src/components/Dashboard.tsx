@@ -16,6 +16,7 @@ import {
   APIError,
   getDashboardEvents,
   getDashboardMetrics,
+  getDashboardNamespaceHealth,
   getDashboardProblems,
   getDashboardRestarts,
   getDashboardSummary,
@@ -28,6 +29,7 @@ import {
   type DashboardEvent,
   type DashboardLogMatch,
   type DashboardMetrics,
+  type DashboardNamespaceHealth,
   type DashboardProblem,
   type DashboardResponse,
   type DashboardRestart,
@@ -195,6 +197,45 @@ function ResultBody<T>({ pending, error, response, isEmpty, emptyCopy, optional 
   )
 }
 
+function NamespaceHealthTable({ values }: { values: DashboardNamespaceHealth[] }) {
+  const columns = [
+    {
+      key: 'namespace',
+      header: 'Namespace',
+      cell: (row: DashboardNamespaceHealth) => row.namespace,
+    },
+    {
+      key: 'problematic-pods',
+      header: 'Problem pods',
+      cell: (row: DashboardNamespaceHealth) => (
+        <Link className="table-link" to={`/pods?namespace=${encodeURIComponent(row.namespace)}&problematic=true`}>{row.problematicPods}</Link>
+      ),
+    },
+    {
+      key: 'container-restarts',
+      header: 'Restarts',
+      cell: (row: DashboardNamespaceHealth) => (
+        <Link className="table-link" to={`/pods?namespace=${encodeURIComponent(row.namespace)}&restarts=gte3`}>{row.containerRestarts}</Link>
+      ),
+    },
+    {
+      key: 'degraded-workloads',
+      header: 'Degraded workloads',
+      cell: (row: DashboardNamespaceHealth) => (
+        <Link className="table-link" to={`/workloads?namespace=${encodeURIComponent(row.namespace)}&status=Degraded`}>{row.degradedWorkloads}</Link>
+      ),
+    },
+  ]
+  return (
+    <DataTable
+      caption="Per-namespace health; counts link to the filtered bounded list"
+      columns={columns}
+      rows={values}
+      getRowKey={(row) => row.namespace}
+    />
+  )
+}
+
 function DashboardSection({ id, eyebrow, title, action, children }: { id: string; eyebrow: string; title: string; action?: ReactNode; children: ReactNode }) {
   return (
     <Card className="dashboard-section" id={id} aria-labelledby={`${id}-title`}>
@@ -245,11 +286,11 @@ function SummaryCards({ summary, logCounter }: { summary: DashboardSummary; logC
   const cards = [
     ['Namespaces', summary.namespaces, '/namespaces', <Boxes size={16} key="namespaces" />],
     ['Pods', summary.podsTotal, '/pods', <Activity size={16} key="pods" />],
-    ['Healthy pods', summary.podsHealthy, '/pods?status=healthy', <ShieldCheck size={16} key="healthy" />],
-    ['Problem pods', summary.podsProblematic, '/pods?status=problematic', <AlertTriangle size={16} key="problems" />],
+    ['Healthy pods', summary.podsHealthy, '/pods?status=Running', <ShieldCheck size={16} key="healthy" />],
+    ['Problem pods', summary.podsProblematic, '/pods?problematic=true', <AlertTriangle size={16} key="problems" />],
     ['Degraded workloads', summary.workloadsDegraded, '/workloads?status=Degraded', <Boxes size={16} key="workloads" />],
-    ['Restarts', summary.restarts, '/pods?sort=restarts&order=desc', <RotateCcw size={16} key="restarts" />],
-    ['Warning events', summary.warningEvents, '/events?type=Warning', <Clock3 size={16} key="events" />],
+    ['Restarts', summary.restarts, '/pods?restarts=gte3', <RotateCcw size={16} key="restarts" />],
+    ['Warning events', summary.warningEvents, '/events?status=Warning', <Clock3 size={16} key="events" />],
     ['Possible log matches', logCounter, '#log-scan', <ScrollText size={16} key="logs" />],
   ] as const
   return <div className="summary-grid">{cards.map(([label, counter, href, icon]) => <CounterCard key={label} label={label} counter={counter} href={href} icon={icon} />)}</div>
@@ -479,12 +520,38 @@ function latestCollection(responses: Array<DashboardResponse<unknown> | undefine
   return timestamps[0] ? timestamps[0].toLocaleString() : 'waiting for the first completed block'
 }
 
+const staleThresholdSeconds = 60
+
+function BlockAge({ response }: { response?: DashboardResponse<unknown> }) {
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 5_000)
+    return () => window.clearInterval(timer)
+  }, [])
+  const collectedAt = response?.meta?.collectedAt
+  if (!collectedAt) {
+    return null
+  }
+  const collected = new Date(collectedAt).getTime()
+  if (Number.isNaN(collected)) {
+    return null
+  }
+  const ageSeconds = Math.max(0, Math.floor((now - collected) / 1_000))
+  const stale = ageSeconds > staleThresholdSeconds
+  return (
+    <Badge variant={stale ? 'warning' : 'unknown'} aria-label={`Data age ${formatDuration(ageSeconds)}${stale ? ', stale' : ''}`}>
+      {formatDuration(ageSeconds)} old{stale ? ' · stale' : ''}
+    </Badge>
+  )
+}
+
 function DashboardContent({ selection, cluster }: { selection: SelectionSummary; cluster: ComponentState }) {
 	const summary = useQuery({ queryKey: ['dashboard', 'summary', selection.generation], queryFn: ({ signal }) => getDashboardSummary(signal, selection.generation), ...dashboardQueryDefaults })
 	const problems = useQuery({ queryKey: ['dashboard', 'problems', selection.generation], queryFn: ({ signal }) => getDashboardProblems(signal, selection.generation), ...dashboardQueryDefaults })
 	const restarts = useQuery({ queryKey: ['dashboard', 'restarts', selection.generation, 10], queryFn: ({ signal }) => getDashboardRestarts(10, signal, selection.generation), ...dashboardQueryDefaults })
 	const events = useQuery({ queryKey: ['dashboard', 'events', selection.generation], queryFn: ({ signal }) => getDashboardEvents(signal, selection.generation), ...dashboardQueryDefaults })
 	const metrics = useQuery({ queryKey: ['dashboard', 'metrics', selection.generation], queryFn: ({ signal }) => getDashboardMetrics(signal, selection.generation), ...dashboardQueryDefaults })
+	const namespaceHealth = useQuery({ queryKey: ['dashboard', 'namespace-health', selection.generation], queryFn: ({ signal }) => getDashboardNamespaceHealth(signal, selection.generation), ...dashboardQueryDefaults })
   const session = useQuery({ queryKey: ['session', selection.generation], queryFn: ({ signal }) => getSession(signal), staleTime: 5 * 60_000, retry: false })
   const [scanWindow, setScanWindow] = useState<LogScanRequest['window']>('15m')
   const [logScan, setLogScan] = useState<LogScanState>({ kind: 'idle' })
@@ -522,10 +589,11 @@ function DashboardContent({ selection, cluster }: { selection: SelectionSummary;
       restarts.refetch({ cancelRefetch: true }),
       events.refetch({ cancelRefetch: true }),
       metrics.refetch({ cancelRefetch: true }),
+      namespaceHealth.refetch({ cancelRefetch: true }),
     ])
   }
 
-  const isRefreshing = [summary, problems, restarts, events, metrics].some((query) => query.isFetching)
+  const isRefreshing = [summary, problems, restarts, events, metrics, namespaceHealth].some((query) => query.isFetching)
   const logCounter: DashboardCounter = logScan.kind === 'pending'
     ? { state: 'collecting', value: null }
     : logScan.kind === 'success'
@@ -567,7 +635,7 @@ function DashboardContent({ selection, cluster }: { selection: SelectionSummary;
         <div className="dashboard-shortcuts"><Link to="/namespaces">Edit scope</Link><Link to="/permissions">View RBAC</Link></div>
       </div>
 
-      <DashboardSection id="summary" eyebrow="at a glance" title="Summary">
+      <DashboardSection id="summary" eyebrow="at a glance" title="Summary" action={<BlockAge response={summary.data as DashboardResponse<unknown> | undefined} />}>
         <ResultBody
           pending={summary.isPending}
           error={summary.error}
@@ -580,26 +648,32 @@ function DashboardContent({ selection, cluster }: { selection: SelectionSummary;
       </DashboardSection>
 
       <div className="dashboard-columns">
-        <DashboardSection id="problems" eyebrow="prioritized" title="Problem pods">
+        <DashboardSection id="problems" eyebrow="prioritized" title="Problem pods" action={<BlockAge response={problems.data as DashboardResponse<unknown> | undefined} />}>
           <ResultBody pending={problems.isPending} error={problems.error} response={problems.data} isEmpty={(value) => value.length === 0} emptyCopy="No problematic pod was found in the completed coverage.">
             {(value) => <ProblemsTable values={value} />}
           </ResultBody>
         </DashboardSection>
 
-        <DashboardSection id="restarts" eyebrow="top 10" title="Container restarts">
+        <DashboardSection id="restarts" eyebrow="top 10" title="Container restarts" action={<BlockAge response={restarts.data as DashboardResponse<unknown> | undefined} />}>
           <ResultBody pending={restarts.isPending} error={restarts.error} response={restarts.data} isEmpty={(value) => value.length === 0} emptyCopy="No container restart was found in the completed coverage.">
             {(value) => <RestartsTable values={value} />}
           </ResultBody>
         </DashboardSection>
       </div>
 
-      <DashboardSection id="warning-events" eyebrow="recent signals" title="Warning events">
+      <DashboardSection id="warning-events" eyebrow="recent signals" title="Warning events" action={<BlockAge response={events.data as DashboardResponse<unknown> | undefined} />}>
         <ResultBody pending={events.isPending} error={events.error} response={events.data} isEmpty={(value) => value.length === 0} emptyCopy="No Warning event was found in the completed coverage.">
           {(value) => <EventsTable values={value} />}
         </ResultBody>
       </DashboardSection>
 
-      <DashboardSection id="metrics" eyebrow="optional API" title="Pod metrics">
+      <DashboardSection id="namespace-health" eyebrow="by namespace" title="Namespace health" action={<BlockAge response={namespaceHealth.data as DashboardResponse<unknown> | undefined} />}>
+        <ResultBody pending={namespaceHealth.isPending} error={namespaceHealth.error} response={namespaceHealth.data} isEmpty={(value) => value.length === 0} emptyCopy="No namespace health was collected for the active scope.">
+          {(value) => <NamespaceHealthTable values={value} />}
+        </ResultBody>
+      </DashboardSection>
+
+      <DashboardSection id="metrics" eyebrow="optional API" title="Pod metrics" action={<BlockAge response={metrics.data as DashboardResponse<unknown> | undefined} />}>
         <ResultBody pending={metrics.isPending} error={metrics.error} response={metrics.data} isEmpty={(value) => value.pods.length === 0} emptyCopy="The Metrics API returned no pod metrics for the completed coverage." optional>
           {(value) => <MetricsView value={value} />}
         </ResultBody>

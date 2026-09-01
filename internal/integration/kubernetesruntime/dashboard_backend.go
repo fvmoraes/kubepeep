@@ -72,6 +72,11 @@ func (backend *DashboardBackend) Summary(ctx context.Context, binding namespaces
 	})
 }
 
+func (backend *DashboardBackend) NamespaceHealth(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution) dashboard.DashboardBlockDTO[[]dashboard.NamespaceHealthDTO] {
+	service, _ := backend.service(binding)
+	return service.NamespaceHealth(ctx, dashboardSelection(binding, resolution))
+}
+
 func (backend *DashboardBackend) Problems(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution) dashboard.DashboardBlockDTO[[]dashboard.ProblemPodDTO] {
 	service, _ := backend.service(binding)
 	return service.Problems(ctx, dashboardSelection(binding, resolution))

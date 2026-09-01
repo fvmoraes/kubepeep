@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { Link, useNavigate, useParams } from 'react-router'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 
 import {
   APIError,
@@ -339,6 +339,44 @@ const defaultWorkloadList: WorkloadListState = { search: '', namespace: '', kind
 const defaultPodList: PodListState = { search: '', namespace: '', podStatus: '', workload: '', node: '', restarts: 'any', problematic: '', sort: 'identity', order: 'asc' }
 const defaultEventList: EventListState = { search: '', namespace: '', eventType: '', objectKind: '', reason: '', sort: 'timestamp', order: 'desc' }
 
+function paramValue(params: URLSearchParams, key: string): string {
+  return params.get(key) ?? ''
+}
+
+function listedValue(value: string, allowed: readonly string[]): string {
+  return (allowed as readonly string[]).includes(value) ? value : ''
+}
+
+function workloadsStateFromParams(params: URLSearchParams): WorkloadListState {
+  return {
+    ...defaultWorkloadList,
+    search: paramValue(params, 'search'),
+    namespace: paramValue(params, 'namespace'),
+    workloadStatus: listedValue(paramValue(params, 'status'), workloadStatuses),
+  }
+}
+
+function podsStateFromParams(params: URLSearchParams): PodListState {
+  return {
+    ...defaultPodList,
+    search: paramValue(params, 'search'),
+    namespace: paramValue(params, 'namespace'),
+    podStatus: listedValue(paramValue(params, 'status'), podStatuses),
+    restarts: listedValue(paramValue(params, 'restarts'), restartFilters) || 'any',
+    problematic: ['true', 'false'].includes(paramValue(params, 'problematic')) ? paramValue(params, 'problematic') : '',
+  }
+}
+
+function eventsStateFromParams(params: URLSearchParams): EventListState {
+  const type = listedValue(paramValue(params, 'status'), eventTypes) || listedValue(paramValue(params, 'type'), eventTypes)
+  return {
+    ...defaultEventList,
+    search: paramValue(params, 'search'),
+    namespace: paramValue(params, 'namespace'),
+    eventType: type,
+  }
+}
+
 function sameListState<T extends object>(left: T, right: T): boolean {
   return (Object.keys(left) as Array<keyof T>).every((key) => left[key] === right[key])
 }
@@ -351,8 +389,9 @@ export function WorkloadsPage() {
     if (!kind || !namespace || !name) return null
     return workloadFromParams(kind, namespace, name)
   }, [kind, namespace, name])
-  const [draft, setDraft] = useState<WorkloadListState>({ ...defaultWorkloadList })
-  const [applied, setApplied] = useState<WorkloadListState>({ ...defaultWorkloadList })
+  const [params] = useSearchParams()
+  const [draft, setDraft] = useState<WorkloadListState>(() => workloadsStateFromParams(params))
+  const [applied, setApplied] = useState<WorkloadListState>(() => workloadsStateFromParams(params))
   const [cursor, setCursor] = useGenerationCursor(selection?.generation)
   const [selected, setSelected] = useState<GenerationSelection<Workload> | null>(null)
   const queryClient = useQueryClient()
@@ -450,8 +489,9 @@ export function PodsPage() {
     if (!namespace || !name) return null
     return podFromParams(namespace, name)
   }, [namespace, name])
-  const [draft, setDraft] = useState<PodListState>({ ...defaultPodList })
-  const [applied, setApplied] = useState<PodListState>({ ...defaultPodList })
+  const [params] = useSearchParams()
+  const [draft, setDraft] = useState<PodListState>(() => podsStateFromParams(params))
+  const [applied, setApplied] = useState<PodListState>(() => podsStateFromParams(params))
   const [cursor, setCursor] = useGenerationCursor(selection?.generation)
   const [selected, setSelected] = useState<GenerationSelection<Pod> | null>(null)
   const queryClient = useQueryClient()
@@ -541,8 +581,9 @@ export function PodsPage() {
 
 export function EventsPage() {
   const { status, selection } = useActiveSelection()
-  const [draft, setDraft] = useState<EventListState>({ ...defaultEventList })
-  const [applied, setApplied] = useState<EventListState>({ ...defaultEventList })
+  const [params] = useSearchParams()
+  const [draft, setDraft] = useState<EventListState>(() => eventsStateFromParams(params))
+  const [applied, setApplied] = useState<EventListState>(() => eventsStateFromParams(params))
   const [cursor, setCursor] = useGenerationCursor(selection?.generation)
   const queryClient = useQueryClient()
   const list = useQuery({ queryKey: ['resources', 'events', selection?.generation, applied, cursor], queryFn: ({ signal }) => getEvents({ limit: 100, search: applied.search || undefined, namespaces: namespaceValues(applied.namespace), statuses: applied.eventType ? [applied.eventType] : undefined, objectKind: applied.objectKind || undefined, reason: applied.reason || undefined, continueToken: cursor || undefined, ...optionalSort(applied.sort, applied.order, 'timestamp', 'desc') }, signal, selection?.generation), enabled: Boolean(selection) })

@@ -9,6 +9,7 @@ import type {
   DashboardEvent,
   DashboardLogMatch,
   DashboardMetrics,
+  DashboardNamespaceHealth,
   DashboardProblem,
   DashboardResponse,
   DashboardRestart,
@@ -376,6 +377,10 @@ export function getDashboardEvents(signal?: AbortSignal, expectedGeneration?: st
 
 export function getDashboardMetrics(signal?: AbortSignal, expectedGeneration?: string): Promise<DashboardResponse<DashboardMetrics>> {
 	return dashboardRequest<DashboardMetrics>('/api/v1/metrics', { method: 'GET', signal }, expectedGeneration)
+}
+
+export function getDashboardNamespaceHealth(signal?: AbortSignal, expectedGeneration?: string): Promise<DashboardResponse<DashboardNamespaceHealth[]>> {
+	return dashboardRequest<DashboardNamespaceHealth[]>('/api/v1/dashboard/namespace-health', { method: 'GET', signal }, expectedGeneration)
 }
 
 export function scanDashboardLogs(body: LogScanRequest, csrfToken: string, signal?: AbortSignal, expectedGeneration?: string): Promise<DashboardResponse<DashboardLogMatch[]>> {

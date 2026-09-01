@@ -9,10 +9,12 @@ type DashboardPodService interface {
 	Overview(context.Context, Selection) DashboardBlockDTO[PodOverview]
 	Problems(context.Context, Selection) DashboardBlockDTO[[]ProblemPodDTO]
 	Restarts(context.Context, Selection, int) DashboardBlockDTO[[]RestartDTO]
+	NamespaceHealth(context.Context, Selection) DashboardBlockDTO[map[string]PodNamespaceHealth]
 }
 
 type DashboardWorkloadService interface {
 	Degraded(context.Context, Selection) DashboardBlockDTO[[]WorkloadDTO]
+	DegradedByNamespace(context.Context, Selection) DashboardBlockDTO[map[string]int64]
 }
 
 type DashboardEventService interface {
@@ -90,6 +92,54 @@ func (s *DashboardService) Summary(ctx context.Context, selection Selection, opt
 	block.Errors = append(block.Errors, pods.Errors...)
 	block.Errors = append(block.Errors, workloads.Errors...)
 	block.Errors = append(block.Errors, events.Errors...)
+	return block
+}
+
+func (s *DashboardService) NamespaceHealth(ctx context.Context, selection Selection) DashboardBlockDTO[[]NamespaceHealthDTO] {
+	type podResult struct {
+		value DashboardBlockDTO[map[string]PodNamespaceHealth]
+	}
+	type workloadResult struct {
+		value DashboardBlockDTO[map[string]int64]
+	}
+	podsChannel := make(chan podResult, 1)
+	workloadsChannel := make(chan workloadResult, 1)
+	if s != nil && s.Pods != nil {
+		go func() { podsChannel <- podResult{s.Pods.NamespaceHealth(ctx, selection)} }()
+	} else {
+		podsChannel <- podResult{unavailablePodNamespaceHealth()}
+	}
+	if s != nil && s.Workloads != nil {
+		go func() { workloadsChannel <- workloadResult{s.Workloads.DegradedByNamespace(ctx, selection)} }()
+	} else {
+		workloadsChannel <- workloadResult{unavailableWorkloadNamespaceHealth()}
+	}
+	pods := (<-podsChannel).value
+	workloads := (<-workloadsChannel).value
+
+	namespaces := canonicalNamespaces(selection.Namespaces)
+	values := make([]NamespaceHealthDTO, 0, len(namespaces))
+	for _, namespace := range namespaces {
+		entry := pods.Value[namespace]
+		values = append(values, NamespaceHealthDTO{
+			Namespace:         namespace,
+			ProblematicPods:   entry.ProblematicPods,
+			ContainerRestarts: entry.ContainerRestarts,
+			DegradedWorkloads: workloads.Value[namespace],
+		})
+	}
+	block := blockWithValue(values, nil)
+	copyBlockState(&block, pods)
+	if pods.Coverage != nil {
+		coverage := *pods.Coverage
+		block.Coverage = &coverage
+	}
+	if workloads.Coverage != nil && block.Coverage != nil {
+		mergeCoverage(block.Coverage, workloads.Coverage)
+	}
+	block.Complete = pods.Complete && workloads.Complete
+	block.Truncated = pods.Truncated || workloads.Truncated
+	block.Errors = append(block.Errors, workloads.Errors...)
 	return block
 }
 
@@ -215,6 +265,12 @@ func unavailableEvents() DashboardBlockDTO[[]EventDTO] {
 
 func unavailableProblems() DashboardBlockDTO[[]ProblemPodDTO] {
 	result := blockWithValue([]ProblemPodDTO{}, nil)
+	addBlockError(&result, "", NewFeatureUnavailableError())
+	return result
+}
+
+func unavailableWorkloadNamespaceHealth() DashboardBlockDTO[map[string]int64] {
+	result := blockWithValue(map[string]int64{}, nil)
 	addBlockError(&result, "", NewFeatureUnavailableError())
 	return result
 }

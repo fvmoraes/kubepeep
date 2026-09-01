@@ -21,6 +21,7 @@ const maximumDashboardBodyBytes = 1 << 20
 
 type DashboardService interface {
 	Summary(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution) dashboard.DashboardBlockDTO[dashboard.SummaryDTO]
+	NamespaceHealth(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution) dashboard.DashboardBlockDTO[[]dashboard.NamespaceHealthDTO]
 	Problems(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution) dashboard.DashboardBlockDTO[[]dashboard.ProblemPodDTO]
 	Restarts(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, int) dashboard.DashboardBlockDTO[[]dashboard.RestartDTO]
 	Events(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution) dashboard.DashboardBlockDTO[[]dashboard.EventDTO]
@@ -54,6 +55,20 @@ func (handler *Dashboard) Summary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result := handler.service.Summary(r.Context(), binding, resolution)
+	handler.writeResult(w, r, binding, resolution, result, nil)
+}
+
+func (handler *Dashboard) NamespaceHealth(w http.ResponseWriter, r *http.Request) {
+	if err := rejectDashboardQuery(r); err != nil {
+		api.WriteError(w, r, err)
+		return
+	}
+	binding, resolution, err := handler.activeSelection()
+	if err != nil {
+		api.WriteError(w, r, err)
+		return
+	}
+	result := handler.service.NamespaceHealth(r.Context(), binding, resolution)
 	handler.writeResult(w, r, binding, resolution, result, nil)
 }
 
@@ -288,6 +303,8 @@ func totalDashboardFailure(value any) error {
 	case dashboard.DashboardBlockDTO[dashboard.SummaryDTO]:
 		errorsList, coverage = block.Errors, block.Coverage
 		hasValue = summaryHasValue(block.Value)
+	case dashboard.DashboardBlockDTO[[]dashboard.NamespaceHealthDTO]:
+		errorsList, coverage, hasValue = block.Errors, block.Coverage, len(block.Value) > 0
 	case dashboard.DashboardBlockDTO[[]dashboard.ProblemPodDTO]:
 		errorsList, coverage, hasValue = block.Errors, block.Coverage, len(block.Value) > 0
 	case dashboard.DashboardBlockDTO[[]dashboard.RestartDTO]:

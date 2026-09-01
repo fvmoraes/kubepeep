@@ -68,6 +68,7 @@ function defaultResponse(path: string): Response {
   if (path === '/api/v1/dashboard/problems') return json(block([]))
   if (path === '/api/v1/dashboard/restarts?limit=10') return json(block([]))
   if (path === '/api/v1/dashboard/events') return json(block([]))
+  if (path === '/api/v1/dashboard/namespace-health') return json(block([]))
   if (path === '/api/v1/metrics') return json(block({ collectedAt: '2026-08-10T12:00:00Z', windowSeconds: 60, pods: [], topCPU: [], topMemory: [] }))
   throw new Error(`Unexpected request: ${path}`)
 }

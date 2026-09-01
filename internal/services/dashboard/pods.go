@@ -30,6 +30,11 @@ type PodService struct {
 	budget QueryBudget
 }
 
+type PodNamespaceHealth struct {
+	ProblematicPods   int64
+	ContainerRestarts int64
+}
+
 func NewPodService(pods PodPort, events EventPort, owners OwnerResolver, clock Clock, budget QueryBudget) *PodService {
 	if clock == nil {
 		clock = realClock{}
@@ -523,6 +528,42 @@ func (s *PodService) Overview(ctx context.Context, selection Selection) Dashboar
 	return result
 }
 
+func (s *PodService) NamespaceHealth(ctx context.Context, selection Selection) DashboardBlockDTO[map[string]PodNamespaceHealth] {
+	if s == nil {
+		return unavailablePodNamespaceHealth()
+	}
+	requestContext, cancel := context.WithTimeout(ctx, s.budget.Timeout)
+	defer cancel()
+	pods := s.loadPods(requestContext, selection)
+	result := blockWithValue(make(map[string]PodNamespaceHealth), pods.Coverage)
+	copyBlockState(&result, pods)
+	events := s.loadEvents(requestContext, selection)
+	mergeBlockState(&result, events.Complete, events.Truncated, events.Errors)
+	if result.Coverage != nil && events.Coverage != nil {
+		mergeCoverage(result.Coverage, events.Coverage)
+	}
+	now := s.clock.Now()
+	for index := range pods.Value {
+		pod := &pods.Value[index]
+		owner := s.resolveOwner(requestContext, pod)
+		entry := result.Value[pod.Namespace]
+		for _, status := range pod.Status.ContainerStatuses {
+			entry.ContainerRestarts += int64(maxInt32(status.RestartCount, 0))
+		}
+		for _, status := range pod.Status.InitContainerStatuses {
+			entry.ContainerRestarts += int64(maxInt32(status.RestartCount, 0))
+		}
+		for _, status := range pod.Status.EphemeralContainerStatuses {
+			entry.ContainerRestarts += int64(maxInt32(status.RestartCount, 0))
+		}
+		if _, problematic := ClassifyProblemPod(pod, events.Value, owner, now); problematic {
+			entry.ProblematicPods++
+		}
+		result.Value[pod.Namespace] = entry
+	}
+	return result
+}
+
 // podIsPositivelyHealthy is intentionally conservative. Absence of a known
 // problem is not health evidence: Kubernetes must report a Running Pod, a
 // positive Ready condition, and at least one positively running/ready regular
@@ -556,6 +597,12 @@ func maxInt32(left, right int32) int32 {
 		return left
 	}
 	return right
+}
+
+func unavailablePodNamespaceHealth() DashboardBlockDTO[map[string]PodNamespaceHealth] {
+	result := blockWithValue(map[string]PodNamespaceHealth{}, nil)
+	addBlockError(&result, "", NewFeatureUnavailableError())
+	return result
 }
 
 func (s *PodService) resolveOwner(ctx context.Context, pod *corev1.Pod) *ResourceRef {

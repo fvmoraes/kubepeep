@@ -193,6 +193,13 @@ export interface DashboardSummary {
   possibleLogMatches: DashboardCounter
 }
 
+export interface DashboardNamespaceHealth {
+  namespace: string
+  problematicPods: number
+  containerRestarts: number
+  degradedWorkloads: number
+}
+
 export interface DashboardPartialError {
   namespace?: string
   code: string

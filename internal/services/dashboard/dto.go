@@ -126,6 +126,13 @@ type SummaryDTO struct {
 	PossibleLogMatches CounterDTO `json:"possibleLogMatches"`
 }
 
+type NamespaceHealthDTO struct {
+	Namespace         string `json:"namespace"`
+	ProblematicPods   int64  `json:"problematicPods"`
+	ContainerRestarts int64  `json:"containerRestarts"`
+	DegradedWorkloads int64  `json:"degradedWorkloads"`
+}
+
 type ContainerType string
 
 const (

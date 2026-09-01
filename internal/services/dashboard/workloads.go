@@ -409,6 +409,26 @@ func (s *WorkloadService) Degraded(ctx context.Context, selection Selection) Das
 	return result
 }
 
+func (s *WorkloadService) DegradedByNamespace(ctx context.Context, selection Selection) DashboardBlockDTO[map[string]int64] {
+	if s == nil {
+		result := blockWithValue(make(map[string]int64), nil)
+		addBlockError(&result, "", NewFeatureUnavailableError())
+		return result
+	}
+	all := s.List(ctx, selection)
+	result := blockWithValue(make(map[string]int64), all.Coverage)
+	copyBlockState(&result, all)
+	for _, workload := range all.Value {
+		switch workload.Status {
+		case WorkloadDegraded, WorkloadFailed:
+			result.Value[workload.Namespace]++
+		case WorkloadUnknown:
+			result.Complete = false
+		}
+	}
+	return result
+}
+
 func (s *WorkloadService) loadNamespace(ctx context.Context, namespace string, maximumItems int) ([]WorkloadPage, bool, bool, error) {
 	result := make([]WorkloadPage, 0)
 	continuation := ""

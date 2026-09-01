@@ -146,6 +146,93 @@ func TestCounterTruncationRetainsLowerBoundButUnavailableDoesNot(t *testing.T) {
 	}
 }
 
+func TestNamespaceHealthAggregatesPodsAndWorkloadsPerNamespace(t *testing.T) {
+	t.Parallel()
+	pods := &stubDashboardPods{
+		overview: blockWithValue(PodOverview{}, nil),
+		namespaceHealth: blockWithValue(map[string]PodNamespaceHealth{
+			"payments": {ProblematicPods: 1, ContainerRestarts: 7},
+			"other":    {ProblematicPods: 0, ContainerRestarts: 2},
+		}, nil),
+	}
+	workloads := &stubDashboardWorkloads{
+		degradedByNamespace: blockWithValue(map[string]int64{
+			"payments": 1,
+			"other":    0,
+		}, nil),
+	}
+	service := &DashboardService{Pods: pods, Workloads: workloads, Events: &stubDashboardEvents{}}
+	block := service.NamespaceHealth(context.Background(), Selection{Namespaces: []string{"other", "payments"}})
+	if !block.Complete || len(block.Errors) != 0 {
+		t.Fatalf("unexpected block state: %+v", block)
+	}
+	if len(block.Value) != 2 {
+		t.Fatalf("expected 2 namespaces, got %d: %+v", len(block.Value), block.Value)
+	}
+	var payments, other NamespaceHealthDTO
+	for _, row := range block.Value {
+		if row.Namespace == "payments" {
+			payments = row
+		}
+		if row.Namespace == "other" {
+			other = row
+		}
+	}
+	if payments.Namespace != "payments" || payments.ProblematicPods != 1 || payments.ContainerRestarts != 7 || payments.DegradedWorkloads != 1 {
+		t.Fatalf("unexpected payments row: %+v", payments)
+	}
+	if other.Namespace != "other" || other.ProblematicPods != 0 || other.ContainerRestarts != 2 || other.DegradedWorkloads != 0 {
+		t.Fatalf("unexpected other row: %+v", other)
+	}
+}
+
+func TestNamespaceHealthMergesPartialStateFromBothSources(t *testing.T) {
+	t.Parallel()
+	pods := &stubDashboardPods{
+		overview: blockWithValue(PodOverview{}, nil),
+		namespaceHealth: func() DashboardBlockDTO[map[string]PodNamespaceHealth] {
+			block := blockWithValue(map[string]PodNamespaceHealth{"a": {}}, nil)
+			block.Truncated = true
+			block.Complete = false
+			addBlockError(&block, "a", NewDeniedError())
+			return block
+		}(),
+	}
+	workloads := &stubDashboardWorkloads{
+		degradedByNamespace: func() DashboardBlockDTO[map[string]int64] {
+			block := blockWithValue(map[string]int64{"a": 0}, nil)
+			addBlockError(&block, "b", NewAuthenticationUnavailableError())
+			return block
+		}(),
+	}
+	service := &DashboardService{Pods: pods, Workloads: workloads, Events: &stubDashboardEvents{}}
+	block := service.NamespaceHealth(context.Background(), Selection{Namespaces: []string{"a", "b"}})
+	if block.Complete || !block.Truncated {
+		t.Fatalf("merged state lost: complete=%v truncated=%v", block.Complete, block.Truncated)
+	}
+	if len(block.Errors) != 2 {
+		t.Fatalf("expected 2 errors, got %d: %+v", len(block.Errors), block.Errors)
+	}
+}
+
+func TestNamespaceHealthOmitsUnscopedNamespaces(t *testing.T) {
+	t.Parallel()
+	pods := &stubDashboardPods{
+		namespaceHealth: blockWithValue(map[string]PodNamespaceHealth{
+			"scoped":   {ProblematicPods: 1},
+			"unscoped": {ProblematicPods: 9},
+		}, nil),
+	}
+	workloads := &stubDashboardWorkloads{
+		degradedByNamespace: blockWithValue(map[string]int64{"scoped": 0}, nil),
+	}
+	service := &DashboardService{Pods: pods, Workloads: workloads, Events: &stubDashboardEvents{}}
+	block := service.NamespaceHealth(context.Background(), Selection{Namespaces: []string{"scoped"}})
+	if len(block.Value) != 1 || block.Value[0].Namespace != "scoped" || block.Value[0].ProblematicPods != 1 {
+		t.Fatalf("selection was not respected: %+v", block.Value)
+	}
+}
+
 type fakePodPort struct {
 	responses map[string][]PodPage
 	failures  map[string]error
@@ -189,7 +276,8 @@ func (port *fakeEventPort) ListEvents(_ context.Context, namespace string, _ Pag
 }
 
 type stubDashboardPods struct {
-	overview DashboardBlockDTO[PodOverview]
+	overview        DashboardBlockDTO[PodOverview]
+	namespaceHealth DashboardBlockDTO[map[string]PodNamespaceHealth]
 }
 
 func (stub *stubDashboardPods) Overview(context.Context, Selection) DashboardBlockDTO[PodOverview] {
@@ -201,13 +289,20 @@ func (*stubDashboardPods) Problems(context.Context, Selection) DashboardBlockDTO
 func (*stubDashboardPods) Restarts(context.Context, Selection, int) DashboardBlockDTO[[]RestartDTO] {
 	return blockWithValue([]RestartDTO{}, nil)
 }
+func (stub *stubDashboardPods) NamespaceHealth(context.Context, Selection) DashboardBlockDTO[map[string]PodNamespaceHealth] {
+	return stub.namespaceHealth
+}
 
 type stubDashboardWorkloads struct {
-	value DashboardBlockDTO[[]WorkloadDTO]
+	value               DashboardBlockDTO[[]WorkloadDTO]
+	degradedByNamespace DashboardBlockDTO[map[string]int64]
 }
 
 func (stub *stubDashboardWorkloads) Degraded(context.Context, Selection) DashboardBlockDTO[[]WorkloadDTO] {
 	return stub.value
+}
+func (stub *stubDashboardWorkloads) DegradedByNamespace(context.Context, Selection) DashboardBlockDTO[map[string]int64] {
+	return stub.degradedByNamespace
 }
 
 type stubDashboardEvents struct{ value DashboardBlockDTO[[]EventDTO] }

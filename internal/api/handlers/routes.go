@@ -75,6 +75,7 @@ func Register(applicationRouter *router.Router, dependencies Dependencies) {
 	if dependencies.Dashboard != nil && dependencies.Selection != nil {
 		dashboard := NewDashboard(dependencies.Dashboard, dependencies.Selection, dependencies.Cursors)
 		apiRouter.GET("/dashboard/summary", dashboard.Summary)
+		apiRouter.GET("/dashboard/namespace-health", dashboard.NamespaceHealth)
 		apiRouter.GET("/dashboard/problems", dashboard.Problems)
 		apiRouter.GET("/dashboard/restarts", dashboard.Restarts)
 		apiRouter.GET("/dashboard/events", dashboard.Events)
@@ -159,7 +160,8 @@ func allowedMethods(path string) (string, bool) {
 	switch path {
 	case statusPath, sessionPath, profilesPath, profilePath,
 		apiPrefix + "/contexts", apiPrefix + "/namespaces", apiPrefix + "/permissions",
-		apiPrefix + "/dashboard/summary", apiPrefix + "/dashboard/problems",
+		apiPrefix + "/dashboard/summary", apiPrefix + "/dashboard/namespace-health",
+		apiPrefix + "/dashboard/problems",
 		apiPrefix + "/dashboard/restarts", apiPrefix + "/dashboard/events", apiPrefix + "/metrics",
 		apiPrefix + "/port-forwards", apiPrefix + "/workloads", apiPrefix + "/pods",
 		apiPrefix + "/events", apiPrefix + "/services", apiPrefix + "/ingresses",
