@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { Link } from 'react-router'
+import { Link, useNavigate, useParams } from 'react-router'
 
 import {
   APIError,
@@ -46,7 +46,7 @@ import type {
   ServiceResource,
   Workload,
 } from '../api/types'
-import { Badge, Button, Card, CardContent, CardHeader, CardTitle, DataTable, Input, Select } from '../components/ui'
+import { Badge, Button, DataTable, Drawer, Input, Select } from '../components/ui'
 import type { BadgeVariant } from '../components/ui'
 import { PodActions, WorkloadActions } from './ResourceActions'
 import { ResourceListControls } from './ResourceListControls'
@@ -54,6 +54,7 @@ import type { ActiveListFilter, ListSortOrder, ListSortOption } from './Resource
 import { ResourceLiveUpdates } from './ResourceLiveUpdates'
 import { SavedFilterControls } from './SavedFilterControls'
 import { StatePanel } from './StatePanel'
+import { YamlViewer } from './YamlViewer'
 
 function errorMessage(error: unknown): string {
   if (error instanceof APIError) return `${error.code}: ${error.message}`
@@ -115,28 +116,8 @@ function QueryState({ pending, error, empty, children }: { pending: boolean; err
   return children
 }
 
-function DetailCard({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
-  return (
-    <aside className="resource-detail" aria-label={`${title} details`}>
-      <Card>
-        <CardHeader>
-          <CardTitle>{title}</CardTitle>
-          <Button variant="secondary" size="compact" onClick={onClose}>Close</Button>
-        </CardHeader>
-        <CardContent>{children}</CardContent>
-      </Card>
-    </aside>
-  )
-}
-
-function YAMLViewer({ value, pending, error, onLoad }: { value?: string; pending: boolean; error: unknown; onLoad: () => void }) {
-  return (
-    <section className="yaml-viewer" aria-label="Authorized YAML">
-      <Button variant="secondary" size="compact" disabled={pending} onClick={onLoad}>{pending ? 'Loading YAML…' : 'Load authorized YAML'}</Button>
-      {error ? <p className="field-error">{errorMessage(error)}</p> : null}
-      {value !== undefined ? <pre aria-label="YAML document">{value}</pre> : <p>YAML is fetched only after this explicit action and remains in memory.</p>}
-    </section>
-  )
+function detailTitle(title: string) {
+  return <h2 className="text-xl text-kp-text">{title}</h2>
 }
 
 function useActiveSelection() {
@@ -178,6 +159,23 @@ function useGenerationCursorMap<K extends string>(generation: string | undefined
 
 function workloadKindPath(kind: Workload['kind']): string {
   return ({ Deployment: 'deployments', StatefulSet: 'statefulsets', DaemonSet: 'daemonsets', Job: 'jobs', CronJob: 'cronjobs' } as const)[kind]
+}
+
+function workloadFromParams(kind: string, namespace: string, name: string): Workload | null {
+  const kindMap: Record<string, Workload['kind']> = {
+    deployments: 'Deployment',
+    statefulsets: 'StatefulSet',
+    daemonsets: 'DaemonSet',
+    jobs: 'Job',
+    cronjobs: 'CronJob',
+  }
+  const mapped = kindMap[kind]
+  if (!mapped) return null
+  return { namespace, kind: mapped, name, ready: null, desired: null, available: null, updated: null, status: 'Unknown', ageSeconds: 0 }
+}
+
+function podFromParams(namespace: string, name: string): Pod {
+  return { namespace, name, status: 'Unknown', ready: { current: 0, desired: 0 }, restarts: 0, node: null, ip: null, owner: null, ageSeconds: 0, problematic: false }
 }
 
 interface GenerationSelection<T> {
@@ -347,13 +345,23 @@ function sameListState<T extends object>(left: T, right: T): boolean {
 
 export function WorkloadsPage() {
   const { status, selection } = useActiveSelection()
+  const { kind, namespace, name } = useParams<{ kind: string; namespace: string; name: string }>()
+  const navigate = useNavigate()
+  const paramItem = useMemo(() => {
+    if (!kind || !namespace || !name) return null
+    return workloadFromParams(kind, namespace, name)
+  }, [kind, namespace, name])
   const [draft, setDraft] = useState<WorkloadListState>({ ...defaultWorkloadList })
   const [applied, setApplied] = useState<WorkloadListState>({ ...defaultWorkloadList })
   const [cursor, setCursor] = useGenerationCursor(selection?.generation)
   const [selected, setSelected] = useState<GenerationSelection<Workload> | null>(null)
   const queryClient = useQueryClient()
   const requests = useGenerationRequests(selection?.generation)
-  const activeSelected = selected && selected.generation === selection?.generation ? selected.item : null
+  const activeSelected = useMemo(() => {
+    if (paramItem) return paramItem
+    if (selected && selected.generation === selection?.generation) return selected.item
+    return null
+  }, [paramItem, selected, selection?.generation])
   const list = useQuery({
     queryKey: ['resources', 'workloads', selection?.generation, applied, cursor],
     queryFn: ({ signal }) => getWorkloads({ limit: 100, search: applied.search || undefined, namespaces: namespaceValues(applied.namespace), kinds: applied.kind ? [applied.kind] : undefined, statuses: applied.workloadStatus ? [applied.workloadStatus] : undefined, ...optionalSort(applied.sort, applied.order, 'identity', 'asc'), continueToken: cursor || undefined }, signal, selection?.generation),
@@ -370,6 +378,7 @@ export function WorkloadsPage() {
     requests.abortAll()
     yaml.reset()
     setSelected(null)
+    navigate('/workloads')
   }
 
   return (
@@ -408,7 +417,8 @@ export function WorkloadsPage() {
                 getRowKey={(item) => `${item.kind}/${item.namespace}/${item.name}`}
                 columns={[
                   { key: 'namespace', header: 'Namespace', cell: (item) => item.namespace },
-                  { key: 'name', header: 'Kind / name', cell: (item) => <TableLink aria-label={`Open ${item.kind} ${item.name} in ${item.namespace}`} onClick={() => { requests.abortAll(); setSelected({ generation: selection!.generation, item }); yaml.reset() }} primary={item.name} secondary={item.kind} /> },
+                    { key: 'name', header: 'Kind / name', cell: (item) => <TableLink aria-label={`Open ${item.kind} ${item.name} in ${item.namespace}`} onClick={() => { requests.abortAll(); setSelected({ generation: selection!.generation, item }); yaml.reset(); navigate(`/workloads/${workloadKindPath(item.kind)}/${encodeURIComponent(item.namespace)}/${encodeURIComponent(item.name)}`) }} primary={item.name} secondary={item.kind} /> },
+
                   { key: 'ready', header: 'Ready', cell: (item) => `${item.ready ?? '—'} / ${item.desired ?? '—'}` },
                   { key: 'status', header: 'Status', cell: (item) => <Badge variant={statusBadgeVariant(item.status)}>{item.status}</Badge> },
                   { key: 'age', header: 'Age', cell: (item) => age(item.ageSeconds) },
@@ -416,13 +426,15 @@ export function WorkloadsPage() {
               />
               {list.data ? <CollectionFooter result={list.data} onNext={(next) => { setCursor(next); closeDetail() }} onRestart={() => { setCursor(''); closeDetail() }} /> : null}
             </div>
-            {activeSelected ? <DetailCard title={`${activeSelected.kind} ${activeSelected.namespace}/${activeSelected.name}`} onClose={closeDetail}>
-              {detail.isPending ? <p>Loading detail…</p> : detail.isError ? <p className="field-error">{errorMessage(detail.error)}</p> : detail.data ? <>
-                <dl className="resource-facts"><div><dt>Status</dt><dd>{detail.data.status}</dd></div><div><dt>Resource version</dt><dd>{detail.data.metadata.resourceVersion}</dd></div><div><dt>Containers</dt><dd>{detail.data.containers.map((value) => value.name).join(', ') || 'none'}</dd></div><div><dt>Labels</dt><dd>{Object.entries(detail.data.metadata.labels ?? {}).map(([label, value]) => `${label}=${value}`).join(', ') || 'none'}</dd></div></dl>
-                <WorkloadActions key={`${selection!.generation}/${detail.data.metadata.uid}`} detail={detail.data} selection={selection as SelectionSummary} />
+            <Drawer open={Boolean(activeSelected)} onClose={closeDetail} title={detailTitle(activeSelected ? `${activeSelected.kind} ${activeSelected.namespace}/${activeSelected.name}` : 'Resource detail')}>
+              {activeSelected ? <>
+                {detail.isPending ? <p>Loading detail…</p> : detail.isError ? <p className="field-error">{errorMessage(detail.error)}</p> : detail.data ? <>
+                  <dl className="resource-facts"><div><dt>Status</dt><dd>{detail.data.status}</dd></div><div><dt>Resource version</dt><dd>{detail.data.metadata.resourceVersion}</dd></div><div><dt>Containers</dt><dd>{detail.data.containers.map((value) => value.name).join(', ') || 'none'}</dd></div><div><dt>Labels</dt><dd>{Object.entries(detail.data.metadata.labels ?? {}).map(([label, value]) => `${label}=${value}`).join(', ') || 'none'}</dd></div></dl>
+                  <WorkloadActions key={`${selection!.generation}/${detail.data.metadata.uid}`} detail={detail.data} selection={selection as SelectionSummary} />
+                </> : null}
+                <YamlViewer value={yaml.data} pending={yaml.isPending} error={yaml.error} onLoad={() => yaml.mutate(activeSelected)} />
               </> : null}
-              <YAMLViewer value={yaml.data} pending={yaml.isPending} error={yaml.error} onLoad={() => yaml.mutate(activeSelected)} />
-            </DetailCard> : null}
+            </Drawer>
           </div>
         </QueryState>
       </SelectionGate>
@@ -432,13 +444,23 @@ export function WorkloadsPage() {
 
 export function PodsPage() {
   const { status, selection } = useActiveSelection()
+  const { namespace, name } = useParams<{ namespace: string; name: string }>()
+  const navigate = useNavigate()
+  const paramItem = useMemo(() => {
+    if (!namespace || !name) return null
+    return podFromParams(namespace, name)
+  }, [namespace, name])
   const [draft, setDraft] = useState<PodListState>({ ...defaultPodList })
   const [applied, setApplied] = useState<PodListState>({ ...defaultPodList })
   const [cursor, setCursor] = useGenerationCursor(selection?.generation)
   const [selected, setSelected] = useState<GenerationSelection<Pod> | null>(null)
   const queryClient = useQueryClient()
   const requests = useGenerationRequests(selection?.generation)
-  const activeSelected = selected && selected.generation === selection?.generation ? selected.item : null
+  const activeSelected = useMemo(() => {
+    if (paramItem) return paramItem
+    if (selected && selected.generation === selection?.generation) return selected.item
+    return null
+  }, [paramItem, selected, selection?.generation])
   const list = useQuery({
     queryKey: ['resources', 'pods', selection?.generation, applied, cursor],
     queryFn: ({ signal }) => getPods({ limit: 100, search: applied.search || undefined, namespaces: namespaceValues(applied.namespace), statuses: applied.podStatus ? [applied.podStatus] : undefined, workload: applied.workload || undefined, node: applied.node || undefined, restarts: applied.restarts as 'any' | 'gt0' | 'gte3' | 'gte10', problematic: applied.problematic === '' ? undefined : applied.problematic === 'true', ...optionalSort(applied.sort, applied.order, 'identity', 'asc'), continueToken: cursor || undefined }, signal, selection?.generation),
@@ -451,6 +473,7 @@ export function PodsPage() {
     requests.abortAll()
     yaml.reset()
     setSelected(null)
+    navigate('/pods')
   }
 
   return (
@@ -494,7 +517,7 @@ export function PodsPage() {
               rows={list.data?.items ?? []}
               getRowKey={(item) => `${item.namespace}/${item.name}`}
               columns={[
-                { key: 'namespace', header: 'Namespace / Pod', cell: (item) => <TableLink aria-label={`Open Pod ${item.name} in ${item.namespace}`} onClick={() => { requests.abortAll(); setSelected({ generation: selection!.generation, item }); yaml.reset() }} primary={<>{item.name}{item.problematic ? <Badge variant="danger" className="ml-2">problem</Badge> : null}</>} secondary={item.namespace} /> },
+                { key: 'namespace', header: 'Namespace / Pod', cell: (item) => <TableLink aria-label={`Open Pod ${item.name} in ${item.namespace}`} onClick={() => { requests.abortAll(); setSelected({ generation: selection!.generation, item }); yaml.reset(); navigate(`/pods/${encodeURIComponent(item.namespace)}/${encodeURIComponent(item.name)}`) }} primary={<>{item.name}{item.problematic ? <Badge variant="danger" className="ml-2">problem</Badge> : null}</>} secondary={item.namespace} /> },
                 { key: 'status', header: 'Status', cell: (item) => <Badge variant={statusBadgeVariant(item.status)}>{item.status}</Badge> },
                 { key: 'ready', header: 'Ready', cell: (item) => `${item.ready.current}/${item.ready.desired}` },
                 { key: 'restarts', header: 'Restarts', cell: (item) => item.restarts },
@@ -503,7 +526,12 @@ export function PodsPage() {
               ]}
             />
             {list.data ? <CollectionFooter result={list.data} onNext={(next) => { setCursor(next); closeDetail() }} onRestart={() => { setCursor(''); closeDetail() }} /> : null}</div>
-            {activeSelected ? <DetailCard title={`Pod ${activeSelected.namespace}/${activeSelected.name}`} onClose={closeDetail}>{detail.isPending ? <p>Loading detail…</p> : detail.isError ? <p className="field-error">{errorMessage(detail.error)}</p> : detail.data ? <><dl className="resource-facts"><div><dt>UID</dt><dd>{detail.data.metadata.uid}</dd></div><div><dt>Owner</dt><dd>{detail.data.summary.owner ? `${detail.data.summary.owner.kind}/${detail.data.summary.owner.name}` : 'standalone'}</dd></div><div><dt>Containers</dt><dd>{detail.data.containers.map((value) => `${value.spec.name} (${value.state})`).join(', ') || 'none'}</dd></div><div><dt>IP</dt><dd>{detail.data.summary.ip ?? '—'}</dd></div></dl><Link className="button button--secondary button--compact" to={`/logs?namespace=${encodeURIComponent(activeSelected.namespace)}&pod=${encodeURIComponent(activeSelected.name)}&container=${encodeURIComponent(detail.data.containers[0]?.spec.name ?? '')}`}>View logs</Link><PodActions key={`${selection!.generation}/${detail.data.metadata.uid}`} detail={detail.data} selection={selection as SelectionSummary} /></> : null}<YAMLViewer value={yaml.data} pending={yaml.isPending} error={yaml.error} onLoad={() => yaml.mutate(activeSelected)} /></DetailCard> : null}
+            <Drawer open={Boolean(activeSelected)} onClose={closeDetail} title={detailTitle(activeSelected ? `Pod ${activeSelected.namespace}/${activeSelected.name}` : 'Resource detail')}>
+              {activeSelected ? <>
+                {detail.isPending ? <p>Loading detail…</p> : detail.isError ? <p className="field-error">{errorMessage(detail.error)}</p> : detail.data ? <><dl className="resource-facts"><div><dt>UID</dt><dd>{detail.data.metadata.uid}</dd></div><div><dt>Owner</dt><dd>{detail.data.summary.owner ? `${detail.data.summary.owner.kind}/${detail.data.summary.owner.name}` : 'standalone'}</dd></div><div><dt>Containers</dt><dd>{detail.data.containers.map((value) => `${value.spec.name} (${value.state})`).join(', ') || 'none'}</dd></div><div><dt>IP</dt><dd>{detail.data.summary.ip ?? '—'}</dd></div></dl><Link className="button button--secondary button--compact" to={`/logs?namespace=${encodeURIComponent(activeSelected.namespace)}&pod=${encodeURIComponent(activeSelected.name)}&container=${encodeURIComponent(detail.data.containers[0]?.spec.name ?? '')}`}>View logs</Link><PodActions key={`${selection!.generation}/${detail.data.metadata.uid}`} detail={detail.data} selection={selection as SelectionSummary} /></> : null}
+                <YamlViewer value={yaml.data} pending={yaml.isPending} error={yaml.error} onLoad={() => yaml.mutate(activeSelected)} />
+              </> : null}
+            </Drawer>
           </div>
         </QueryState>
       </SelectionGate>
@@ -607,19 +635,31 @@ function NetworkDetailView({ tab, service, ingress, slice }: { tab: NetworkSelec
   return null
 }
 
+function networkTabFromParams(tab: string): NetworkResourceTab | null {
+  return tab === 'services' || tab === 'ingresses' || tab === 'endpoint-slices' ? tab : null
+}
+
 export function NetworkPage() {
   const { status, selection } = useActiveSelection()
-  const [tab, setTab] = useState<NetworkTab>('services')
+  const { tab: tabParam, namespace, name } = useParams<{ tab: string; namespace: string; name: string }>()
+  const navigate = useNavigate()
+  const [tabState, setTab] = useState<NetworkTab>('services')
+  const tab = useMemo(() => networkTabFromParams(tabParam ?? '') || tabState, [tabParam, tabState])
   const [cursors, setCursorValue] = useGenerationCursorMap(selection?.generation, defaultNetworkCursors)
   const [drafts, setDrafts] = useState<Record<NetworkResourceTab, SimpleListState>>(() => structuredClone(defaultNetworkLists))
   const [appliedLists, setAppliedLists] = useState<Record<NetworkResourceTab, SimpleListState>>(() => structuredClone(defaultNetworkLists))
   const [selected, setSelected] = useState<NetworkSelection | null>(null)
   const queryClient = useQueryClient()
   const requests = useGenerationRequests(selection?.generation)
+  const paramSelection = useMemo(() => {
+    const parsedTab = networkTabFromParams(tabParam ?? '')
+    if (!parsedTab || !namespace || !name || !selection) return null
+    return { generation: selection.generation, tab: parsedTab, namespace, name }
+  }, [tabParam, namespace, name, selection])
   const resourceTab: NetworkResourceTab = tab === 'port-forwards' ? 'services' : tab
   const draft = drafts[resourceTab]
   const applied = appliedLists[resourceTab]
-  const activeSelected = selected?.generation === selection?.generation ? selected : null
+  const activeSelected = paramSelection || (selected?.generation === selection?.generation ? selected : null)
   const networkOptions = (value: NetworkResourceTab) => ({ limit: 100, search: appliedLists[value].search || undefined, continueToken: cursors[value] || undefined, ...optionalSort(appliedLists[value].sort, appliedLists[value].order, 'identity', 'asc') })
   const services = useQuery({ queryKey: ['resources', 'services', selection?.generation, appliedLists.services, cursors.services], queryFn: ({ signal }) => getServices(networkOptions('services'), signal, selection?.generation), enabled: Boolean(selection && tab === 'services') })
   const ingresses = useQuery({ queryKey: ['resources', 'ingresses', selection?.generation, appliedLists.ingresses, cursors.ingresses], queryFn: ({ signal }) => getIngresses(networkOptions('ingresses'), signal, selection?.generation), enabled: Boolean(selection && tab === 'ingresses') })
@@ -638,6 +678,7 @@ export function NetworkPage() {
     requests.abortAll()
     yaml.reset()
     setSelected(null)
+    navigate('/network')
   }
 
   function setCursor(value: string) {
@@ -659,11 +700,16 @@ export function NetworkPage() {
                   rows={active?.items ?? []}
                   getRowKey={(item) => `${item.namespace}/${item.name}`}
                   columns={[
-                    { key: 'namespace', header: 'Namespace / name', cell: (item) => <TableLink aria-label={`Open ${tab} ${item.name} in ${item.namespace}`} onClick={() => { closeDetail(); setSelected({ generation: selection!.generation, tab: tab as NetworkSelection['tab'], namespace: item.namespace, name: item.name }) }} primary={item.name} secondary={item.namespace} /> },
+                    { key: 'namespace', header: 'Namespace / name', cell: (item) => <TableLink aria-label={`Open ${tab} ${item.name} in ${item.namespace}`} onClick={() => { closeDetail(); setSelected({ generation: selection!.generation, tab: tab as NetworkSelection['tab'], namespace: item.namespace, name: item.name }); navigate(`/network/${tab}/${encodeURIComponent(item.namespace)}/${encodeURIComponent(item.name)}`) }} primary={item.name} secondary={item.namespace} /> },
                     { key: 'type', header: 'Type', cell: (item) => ('type' in item ? item.type : 'className' in item ? (item.className ?? 'Ingress') : item.addressType) },
                     { key: 'summary', header: 'Summary', cell: (item) => ('clusterIPs' in item ? item.clusterIPs.join(', ') : 'hosts' in item ? item.hosts.join(', ') : `${item.endpoints.length} endpoints`) },
                   ]}
-                />{active ? <CollectionFooter result={active} onNext={setCursor} onRestart={() => setCursor('')} /> : null}</div>{activeSelected ? <DetailCard title={`${activeSelected.namespace}/${activeSelected.name}`} onClose={closeDetail}>{currentDetail.isPending ? <p>Loading detail…</p> : currentDetail.isError ? <p className="field-error">{errorMessage(currentDetail.error)}</p> : <NetworkDetailView tab={activeSelected.tab} service={serviceDetail.data} ingress={ingressDetail.data} slice={sliceDetail.data} />}<YAMLViewer value={yaml.data} pending={yaml.isPending} error={yaml.error} onLoad={() => yaml.mutate(activeSelected)} /></DetailCard> : null}</div></QueryState>}
+                />{active ? <CollectionFooter result={active} onNext={setCursor} onRestart={() => setCursor('')} /> : null}</div><Drawer open={Boolean(activeSelected)} onClose={closeDetail} title={detailTitle(activeSelected ? `${activeSelected.namespace}/${activeSelected.name}` : 'Resource detail')}>
+                  {activeSelected ? <>
+                    {currentDetail.isPending ? <p>Loading detail…</p> : currentDetail.isError ? <p className="field-error">{errorMessage(currentDetail.error)}</p> : <NetworkDetailView tab={activeSelected.tab} service={serviceDetail.data} ingress={ingressDetail.data} slice={sliceDetail.data} />}
+                    <YamlViewer value={yaml.data} pending={yaml.isPending} error={yaml.error} onLoad={() => yaml.mutate(activeSelected)} />
+                  </> : null}
+                </Drawer></div></QueryState>}
         </SelectionGate>
       </div>
     </div>
@@ -673,6 +719,10 @@ export function NetworkPage() {
 type ConfigTab = 'configmaps' | 'secrets'
 type ConfigItem = ConfigMapResource | SecretMetadata
 type ConfigSelection = { generation: string; namespace: string; name: string }
+
+function configTabFromParams(tab: string): ConfigTab | null {
+  return tab === 'configmaps' || tab === 'secrets' ? tab : null
+}
 
 const configSortOptions: readonly ListSortOption[] = [
   { value: 'identity', label: 'Namespace and name' },
@@ -695,14 +745,21 @@ function SecretMetadataView({ secret }: { secret: SecretMetadata }) {
 
 export function ConfigPage() {
   const { status, selection } = useActiveSelection()
-  const [tab, setTab] = useState<ConfigTab>('configmaps')
+  const { tab: tabParam, namespace, name } = useParams<{ tab: string; namespace: string; name: string }>()
+  const navigate = useNavigate()
+  const [tabState, setTab] = useState<ConfigTab>('configmaps')
+  const tab = useMemo(() => configTabFromParams(tabParam ?? '') || tabState, [tabParam, tabState])
   const [cursors, setCursorValue] = useGenerationCursorMap(selection?.generation, defaultConfigCursors)
   const [drafts, setDrafts] = useState<Record<ConfigTab, SimpleListState>>(() => structuredClone(defaultConfigLists))
   const [appliedLists, setAppliedLists] = useState<Record<ConfigTab, SimpleListState>>(() => structuredClone(defaultConfigLists))
   const [selected, setSelected] = useState<ConfigSelection | null>(null)
   const queryClient = useQueryClient()
   const requests = useGenerationRequests(selection?.generation)
-  const activeSelected = selected?.generation === selection?.generation ? selected : null
+  const paramSelection = useMemo(() => {
+    if (!namespace || !name || !selection) return null
+    return { generation: selection.generation, namespace, name }
+  }, [namespace, name, selection])
+  const activeSelected = paramSelection || (selected?.generation === selection?.generation ? selected : null)
   const draft = drafts[tab]
   const applied = appliedLists[tab]
   const configOptions = (value: ConfigTab) => ({ limit: 100, search: appliedLists[value].search || undefined, continueToken: cursors[value] || undefined, ...optionalSort(appliedLists[value].sort, appliedLists[value].order, 'identity', 'asc') })
@@ -711,6 +768,7 @@ export function ConfigPage() {
   const configDetail = useQuery({ queryKey: ['resources', 'configmap-detail', selection?.generation, activeSelected?.namespace, activeSelected?.name], queryFn: ({ signal }) => getConfigMap(activeSelected!.namespace, activeSelected!.name, signal, selection!.generation), enabled: Boolean(activeSelected && tab === 'configmaps') })
   const secretDetail = useQuery({ queryKey: ['resources', 'secret-detail', selection?.generation, activeSelected?.namespace, activeSelected?.name], queryFn: ({ signal }) => getSecret(activeSelected!.namespace, activeSelected!.name, signal, selection!.generation), enabled: Boolean(activeSelected && tab === 'secrets') })
   const yaml = useMutation({ mutationFn: (value: ConfigSelection) => requests.run((signal) => getConfigMapYAML(value.namespace, value.name, signal)) })
+
   const active: CollectionResult<ConfigItem> | undefined = tab === 'configmaps' && configMaps.data ? { ...configMaps.data, items: configMaps.data.items } : tab === 'secrets' && secrets.data ? { ...secrets.data, items: secrets.data.items } : undefined
   const activeQuery = tab === 'configmaps' ? configMaps : secrets
 
@@ -718,6 +776,7 @@ export function ConfigPage() {
     requests.abortAll()
     yaml.reset()
     setSelected(null)
+    navigate('/config')
   }
 
   function setCursor(value: string) {
@@ -736,11 +795,16 @@ export function ConfigPage() {
                   rows={active?.items ?? []}
                   getRowKey={(item) => { const value = 'metadata' in item ? item.metadata : item; return `${value.namespace}/${value.name}` }}
                   columns={[
-                    { key: 'namespace', header: 'Namespace / name', cell: (item) => { const value = 'metadata' in item ? item.metadata : item; return <TableLink aria-label={`Open ${tab === 'secrets' ? 'Secret' : 'ConfigMap'} ${value.name} in ${value.namespace}`} onClick={() => { closeDetail(); setSelected({ generation: selection!.generation, namespace: value.namespace, name: value.name }) }} primary={value.name} secondary={value.namespace} /> } },
+                    { key: 'namespace', header: 'Namespace / name', cell: (item) => { const value = 'metadata' in item ? item.metadata : item; return <TableLink aria-label={`Open ${tab === 'secrets' ? 'Secret' : 'ConfigMap'} ${value.name} in ${value.namespace}`} onClick={() => { closeDetail(); setSelected({ generation: selection!.generation, namespace: value.namespace, name: value.name }); navigate(`/config/${tab}/${encodeURIComponent(value.namespace)}/${encodeURIComponent(value.name)}`) }} primary={value.name} secondary={value.namespace} /> } },
                     { key: 'uid', header: 'UID', cell: (item) => { const value = 'metadata' in item ? item.metadata : item; return value.uid } },
                     { key: 'created', header: 'Created', cell: (item) => { const value = 'metadata' in item ? item.metadata : item; return dateTime(value.creationTimestamp) } },
                   ]}
-                />{active ? <CollectionFooter result={active} onNext={setCursor} onRestart={() => setCursor('')} /> : null}</div>{activeSelected ? <DetailCard title={`${tab === 'secrets' ? 'Secret metadata' : 'ConfigMap'} ${activeSelected.namespace}/${activeSelected.name}`} onClose={closeDetail}>{tab === 'configmaps' ? configDetail.isPending ? <p>Loading authorized entries…</p> : configDetail.isError ? <p className="field-error">{errorMessage(configDetail.error)}</p> : configDetail.data ? <ConfigMapDetailView detail={configDetail.data} /> : null : secretDetail.isPending ? <p>Loading metadata…</p> : secretDetail.isError ? <p className="field-error">{errorMessage(secretDetail.error)}</p> : secretDetail.data ? <SecretMetadataView secret={secretDetail.data} /> : null}{tab === 'configmaps' ? <YAMLViewer value={yaml.data} pending={yaml.isPending} error={yaml.error} onLoad={() => yaml.mutate(activeSelected)} /> : null}</DetailCard> : null}</div></QueryState></SelectionGate></div>
+                />{active ? <CollectionFooter result={active} onNext={setCursor} onRestart={() => setCursor('')} /> : null}</div><Drawer open={Boolean(activeSelected)} onClose={closeDetail} title={detailTitle(activeSelected ? `${tab === 'secrets' ? 'Secret metadata' : 'ConfigMap'} ${activeSelected.namespace}/${activeSelected.name}` : 'Resource detail')}>
+                  {activeSelected ? <>
+                    {tab === 'configmaps' ? configDetail.isPending ? <p>Loading authorized entries…</p> : configDetail.isError ? <p className="field-error">{errorMessage(configDetail.error)}</p> : configDetail.data ? <ConfigMapDetailView detail={configDetail.data} /> : null : secretDetail.isPending ? <p>Loading metadata…</p> : secretDetail.isError ? <p className="field-error">{errorMessage(secretDetail.error)}</p> : secretDetail.data ? <SecretMetadataView secret={secretDetail.data} /> : null}
+                    {tab === 'configmaps' ? <YamlViewer value={yaml.data} pending={yaml.isPending} error={yaml.error} onLoad={() => yaml.mutate(activeSelected)} /> : null}
+                  </> : null}
+                </Drawer></div></QueryState></SelectionGate></div>
     </div>
   )
 }

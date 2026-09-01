@@ -316,7 +316,7 @@ func filterSortWorkloads(items []resources.WorkloadDTO, options resources.ListOp
 		if len(statuses) > 0 && !statuses[string(item.Status)] {
 			continue
 		}
-		if options.Search != "" && !matches(options.Search, item.Namespace, item.Name, item.Kind) {
+		if options.Search != "" && !matchesSearch(options, item.Namespace, item.Name, item.Kind) {
 			continue
 		}
 		result = append(result, item)
@@ -361,7 +361,7 @@ func filterSortPods(items []resources.PodDTO, options resources.ListOptions) []r
 		if item.Owner != nil {
 			owner = item.Owner.Name
 		}
-		if options.Search != "" && !matches(options.Search, item.Namespace, item.Name, pointerString(item.Node), owner) {
+		if options.Search != "" && !matchesSearch(options, item.Namespace, item.Name, pointerString(item.Node), owner) {
 			continue
 		}
 		result = append(result, item)
@@ -398,7 +398,7 @@ func filterSortEvents(items []resources.EventDTO, options resources.ListOptions)
 		if options.Reason != "" && item.Reason != options.Reason {
 			continue
 		}
-		if options.Search != "" && !matches(options.Search, item.Namespace, item.ObjectKind, item.ObjectName, item.Reason, item.Message) {
+		if options.Search != "" && !matchesSearch(options, item.Namespace, item.ObjectKind, item.ObjectName, item.Reason, item.Message) {
 			continue
 		}
 		result = append(result, item)
@@ -422,7 +422,7 @@ func filterSortServices(items []resources.ServiceDTO, options resources.ListOpti
 	result := items[:0]
 	for _, item := range items {
 		ips := strings.Join(item.ClusterIPs, " ")
-		if options.Search == "" || matches(options.Search, item.Namespace, item.Name, item.Type, ips) {
+		if options.Search == "" || matchesSearch(options, item.Namespace, item.Name, item.Type, ips) {
 			result = append(result, item)
 		}
 	}
@@ -443,7 +443,7 @@ func filterSortServices(items []resources.ServiceDTO, options resources.ListOpti
 func filterSortIngresses(items []resources.IngressDTO, options resources.ListOptions) []resources.IngressDTO {
 	result := items[:0]
 	for _, item := range items {
-		if options.Search == "" || matches(options.Search, item.Namespace, item.Name, pointerString(item.ClassName), strings.Join(item.Hosts, " ")) {
+		if options.Search == "" || matchesSearch(options, item.Namespace, item.Name, pointerString(item.ClassName), strings.Join(item.Hosts, " ")) {
 			result = append(result, item)
 		}
 	}
@@ -468,7 +468,7 @@ func filterSortEndpointSlices(items []resources.EndpointSliceDTO, options resour
 		for _, endpoint := range item.Endpoints {
 			addresses = append(addresses, endpoint.Addresses...)
 		}
-		if options.Search == "" || matches(options.Search, item.Namespace, item.Name, strings.Join(addresses, " ")) {
+		if options.Search == "" || matchesSearch(options, item.Namespace, item.Name, strings.Join(addresses, " ")) {
 			result = append(result, item)
 		}
 	}
@@ -489,7 +489,7 @@ func filterSortEndpointSlices(items []resources.EndpointSliceDTO, options resour
 func filterSortConfigMaps(items []resources.ConfigMapListDTO, options resources.ListOptions) []resources.ConfigMapListDTO {
 	result := items[:0]
 	for _, item := range items {
-		if options.Search == "" || matches(options.Search, item.Namespace, item.Name) {
+		if options.Search == "" || matchesSearch(options, item.Namespace, item.Name) {
 			result = append(result, item)
 		}
 	}
@@ -510,7 +510,7 @@ func filterSortConfigMaps(items []resources.ConfigMapListDTO, options resources.
 func filterSortSecrets(items []resources.SecretMetadataDTO, options resources.ListOptions) []resources.SecretMetadataDTO {
 	result := items[:0]
 	for _, item := range items {
-		if options.Search == "" || matches(options.Search, item.Metadata.Namespace, item.Metadata.Name) {
+		if options.Search == "" || matchesSearch(options, item.Metadata.Namespace, item.Metadata.Name) {
 			result = append(result, item)
 		}
 	}
@@ -529,13 +529,12 @@ func filterSortSecrets(items []resources.SecretMetadataDTO, options resources.Li
 	return result
 }
 
-func matches(search string, values ...string) bool {
-	for _, value := range values {
-		if resources.ContainsFolded(value, search) {
-			return true
-		}
+func matchesSearch(options resources.ListOptions, values ...string) bool {
+	query := options.SearchQuery
+	if query.IsEmpty() && options.Search != "" {
+		query = resources.ParseSearch(options.Search)
 	}
-	return false
+	return query.Matches(values...)
 }
 func pointerString(value *string) string {
 	if value == nil {

@@ -148,6 +148,10 @@ export function App() {
         {applicationDestinations.map(({ path, page: Page }) => path === '/'
           ? <Route key={path} index element={<Page />} />
           : <Route key={path} path={path.slice(1)} element={<Page />} />)}
+        <Route path="workloads/:kind/:namespace/:name" element={<WorkloadsPage />} />
+        <Route path="pods/:namespace/:name" element={<PodsPage />} />
+        <Route path="network/:tab/:namespace/:name" element={<NetworkPage />} />
+        <Route path="config/:tab/:namespace/:name" element={<ConfigPage />} />
         <Route path="*" element={<StatePanel kind="error" title="Page not found">Return to Overview using the navigation.</StatePanel>} />
       </Route>
     </Routes>

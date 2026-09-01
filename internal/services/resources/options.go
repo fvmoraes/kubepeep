@@ -20,21 +20,22 @@ const (
 // ListOptions is the normalized domain representation of the common query.
 // Continue is the externally authenticated token and is never persisted.
 type ListOptions struct {
-	Limit       int
-	Continue    string
-	Search      string
-	Namespaces  []string
-	Statuses    []string
-	Kinds       []WorkloadKind
-	Sort        string
-	Order       SortOrder
-	Workload    string
-	Node        string
-	Restarts    RestartFilter
-	Problematic *bool
-	ObjectKind  string
-	Reason      string
-	AddressType string
+	Limit        int
+	Continue     string
+	Search       string
+	SearchQuery  SearchQuery
+	Namespaces   []string
+	Statuses     []string
+	Kinds        []WorkloadKind
+	Sort         string
+	Order        SortOrder
+	Workload     string
+	Node         string
+	Restarts     RestartFilter
+	Problematic  *bool
+	ObjectKind   string
+	Reason       string
+	AddressType  string
 }
 
 type collectionRules struct {
@@ -75,6 +76,7 @@ func NormalizeListOptions(collection Collection, options ListOptions) (ListOptio
 	if len(options.Search) > MaximumSearchBytes || !utf8.ValidString(options.Search) {
 		return ListOptions{}, validationError("search must be valid UTF-8 up to 256 bytes")
 	}
+	options.SearchQuery = ParseSearch(options.Search)
 	var err error
 	options.Namespaces, err = canonicalStrings(options.Namespaces, MaximumNamespaces, nil, "namespace")
 	if err != nil {

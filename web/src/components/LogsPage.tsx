@@ -5,7 +5,7 @@ import { useSearchParams } from 'react-router'
 import { APIError, getPermissions, getPod, getPodLogs, getPods, getPreferences, getSession, getStatus } from '../api/client'
 import { streamURL } from '../api/desktop'
 import type { APIErrorPayload, CollectionResult, LogLine, Pod, Preferences, SelectionSummary } from '../api/types'
-import { Button, Input, Select } from '../components/ui'
+import { Badge, Button, Input, Select, type BadgeVariant } from '../components/ui'
 import { SavedFilterControls } from './SavedFilterControls'
 import { StatePanel } from './StatePanel'
 
@@ -55,6 +55,90 @@ function validSince(value: string): boolean {
   const amount = Number(match[1])
   const seconds = amount * (match[2] === 'h' ? 3_600 : match[2] === 'm' ? 60 : 1)
   return Number.isSafeInteger(seconds) && seconds <= 4 * 3_600
+}
+
+type LogLevel = 'error' | 'warn' | 'info' | 'debug'
+
+function isJSONObjectLike(text: string): unknown {
+  const trimmed = text.trim()
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return null
+  try {
+    const value = JSON.parse(trimmed)
+    if (value !== null && typeof value === 'object') return value
+  } catch {
+    // Not valid JSON; render as plain text.
+  }
+  return null
+}
+
+function HighlightedJSON({ value }: { value: unknown }) {
+  if (value === null) return <span className="text-kp-red">null</span>
+  if (typeof value === 'boolean') return <span className="text-kp-sky">{String(value)}</span>
+  if (typeof value === 'number') return <span className="text-kp-peach">{String(value)}</span>
+  if (typeof value === 'string') {
+    return (
+      <>
+        <span className="text-kp-overlay-text">"</span>
+        <span className="text-kp-green">{value}</span>
+        <span className="text-kp-overlay-text">"</span>
+      </>
+    )
+  }
+  if (Array.isArray(value)) {
+    if (value.length === 0) return <span className="text-kp-overlay-text">[]</span>
+    return (
+      <span className="text-kp-overlay-text">
+        [{value.map((item, index) => (
+          <span key={index}>
+            <HighlightedJSON value={item} />
+            {index < value.length - 1 ? ', ' : ''}
+          </span>
+        ))}]
+      </span>
+    )
+  }
+  const entries = Object.entries(value as Record<string, unknown>)
+  if (entries.length === 0) return <span className="text-kp-overlay-text">{'{}'}</span>
+  return (
+    <span className="text-kp-overlay-text">
+      {'{ '}
+      {entries.map(([key, item], index) => (
+        <span key={key}>
+          <span className="text-kp-overlay-text">"</span>
+          <span className="text-kp-mauve">{key}</span>
+          <span className="text-kp-overlay-text">"</span>
+          : <HighlightedJSON value={item} />
+          {index < entries.length - 1 ? ', ' : ''}
+        </span>
+      ))}
+      {' }'}
+    </span>
+  )
+}
+
+function detectLogLevel(text: string): LogLevel | null {
+  const match = /\b(err(?:or)?|warn(?:ing)?|info|debug)\b/i.exec(text)
+  if (!match) return null
+  const raw = match[1].toLowerCase()
+  if (raw.startsWith('err')) return 'error'
+  if (raw.startsWith('warn')) return 'warn'
+  if (raw === 'info') return 'info'
+  return 'debug'
+}
+
+function levelBadgeVariant(level: LogLevel | 'all'): BadgeVariant {
+  switch (level) {
+    case 'error':
+      return 'danger'
+    case 'warn':
+      return 'warning'
+    case 'info':
+      return 'info'
+    case 'debug':
+      return 'default'
+    default:
+      return 'default'
+  }
 }
 
 const defaultLogPreferences: Preferences['logs'] = { wrap: false, timestamps: true, tailLines: 200 }
@@ -163,14 +247,16 @@ function LogsWorkspace({ selection, params, defaults, preferencesUnavailable }: 
   const [search, setSearch] = useState('')
   const [wrap, setWrap] = useState(defaults.wrap)
   const [paused, setPaused] = useState(false)
-  const [pausedAt, setPausedAt] = useState(0)
   const [followLines, setFollowLines] = useState<LogLine[]>([])
+  const [followBuffer, setFollowBuffer] = useState<LogLine[]>([])
   const [follow, setFollow] = useState<FollowState>({ status: 'idle', message: 'Follow is stopped.' })
   const [isFollowing, setIsFollowing] = useState(false)
   const [clipboardMessage, setClipboardMessage] = useState('')
+  const [levelFilter, setLevelFilter] = useState<LogLevel | 'all'>('all')
   const followAbortRef = useRef<AbortController | null>(null)
   const readAbortRef = useRef<AbortController | null>(null)
   const mountedRef = useRef(true)
+  const followBufferRef = useRef<LogLine[]>([])
 
   const catalog = useQuery({
     queryKey: ['resources', 'log-target-catalog', selection.generation],
@@ -211,9 +297,24 @@ function LogsWorkspace({ selection, params, defaults, preferencesUnavailable }: 
     }
   }, [])
 
+  function clearBuffer() {
+    followBufferRef.current = []
+    setFollowBuffer([])
+  }
+
+  function flushBuffer() {
+    const buffer = followBufferRef.current
+    if (buffer.length === 0) return
+    setFollowLines((lines) => buffer.reduce((acc, line) => appendBounded(acc, line), lines))
+    followBufferRef.current = []
+    setFollowBuffer([])
+  }
+
   function stopFollow(reason = 'Follow stopped by the user.') {
     followAbortRef.current?.abort()
     followAbortRef.current = null
+    flushBuffer()
+    setPaused(false)
     setIsFollowing(false)
     setFollow({ status: 'ended', message: reason })
   }
@@ -223,6 +324,7 @@ function LogsWorkspace({ selection, params, defaults, preferencesUnavailable }: 
     readAbortRef.current?.abort()
     read.reset()
     setFollowLines([])
+    clearBuffer()
     setPaused(false)
     update()
   }
@@ -230,6 +332,7 @@ function LogsWorkspace({ selection, params, defaults, preferencesUnavailable }: 
   async function startFollow() {
     followAbortRef.current?.abort()
     setFollowLines([])
+    clearBuffer()
     setPaused(false)
     const controller = new AbortController()
     followAbortRef.current = controller
@@ -279,11 +382,21 @@ function LogsWorkspace({ selection, params, defaults, preferencesUnavailable }: 
           } else if (event.event === 'line') {
             if (!metaSeen) throw new APIError(502, { code: 'INVALID_RESPONSE', message: 'The log stream sent data before metadata.' })
             const line: LogLine = { timestamp: typeof payload.timestamp === 'string' ? payload.timestamp : null, text: typeof payload.text === 'string' ? payload.text : '', truncated: payload.truncated === true }
-            setFollowLines((lines) => appendBounded(lines, line))
+            if (paused) {
+              const next = appendBounded(followBufferRef.current, line)
+              followBufferRef.current = next
+              setFollowBuffer(next)
+            } else {
+              setFollowLines((lines) => appendBounded(lines, line))
+            }
           } else if (event.event === 'end') {
+            flushBuffer()
+            setPaused(false)
             setFollow({ status: 'ended', message: `Stream ended: ${String(payload.reason ?? 'upstream_eof')}.` })
             return
           } else if (event.event === 'error') {
+            flushBuffer()
+            setPaused(false)
             setFollow({ status: 'error', message: `${String(payload.code ?? 'STREAM_ERROR')}: ${String(payload.message ?? 'The stream ended.')}` })
             return
           }
@@ -291,7 +404,11 @@ function LogsWorkspace({ selection, params, defaults, preferencesUnavailable }: 
       }
       setFollow({ status: 'ended', message: 'The upstream stream closed.' })
     } catch (error) {
-      if (!controller.signal.aborted && mountedRef.current) setFollow({ status: 'error', message: message(error) })
+      if (!controller.signal.aborted && mountedRef.current) {
+        flushBuffer()
+        setPaused(false)
+        setFollow({ status: 'error', message: message(error) })
+      }
     } finally {
       if (followAbortRef.current === controller) followAbortRef.current = null
       if (mountedRef.current) setIsFollowing(false)
@@ -299,9 +416,10 @@ function LogsWorkspace({ selection, params, defaults, preferencesUnavailable }: 
   }
 
   const lines = follow.status === 'following' || followLines.length > 0 ? followLines : (read.data?.lines ?? [])
-  const pausedLines = paused ? lines.slice(0, pausedAt) : lines
+  const keptLines = lines
   const normalizedSearch = search.toLocaleLowerCase()
-  const visibleLines = normalizedSearch === '' ? pausedLines : pausedLines.filter((line) => line.text.toLocaleLowerCase().includes(normalizedSearch))
+  const searchMatchedLines = normalizedSearch === '' ? keptLines : keptLines.filter((line) => line.text.toLocaleLowerCase().includes(normalizedSearch))
+  const visibleLines = levelFilter === 'all' ? searchMatchedLines : searchMatchedLines.filter((line) => detectLogLevel(line.text) === levelFilter)
   const ready = Boolean(selectedPod && containers.includes(container)) && Number.isInteger(tailLines) && tailLines >= 1 && tailLines <= 2_000 && validSince(since)
 
   function textValue(): string {
@@ -359,9 +477,12 @@ function LogsWorkspace({ selection, params, defaults, preferencesUnavailable }: 
     {read.isError ? <StatePanel kind="error" title="Log request failed">{message(read.error)}</StatePanel> : null}
     {read.data?.truncated ? <p className="permission-notice">The bounded log response was truncated by the server.</p> : null}
     <section className="log-viewer">
-      <header><div><strong className={`follow-state follow-state--${follow.status}`} aria-live="polite">{follow.message}</strong><small>{visibleLines.length} visible of {pausedLines.length} line{pausedLines.length === 1 ? '' : 's'} kept in the bounded in-memory viewer.</small></div><div><Button size="compact" variant="secondary" onClick={() => { if (!paused) setPausedAt(lines.length); setPaused(!paused) }}>{paused ? 'Resume view' : 'Pause view'}</Button><Button size="compact" variant="secondary" onClick={() => setWrap(!wrap)}>{wrap ? 'Disable wrap' : 'Wrap lines'}</Button><Button size="compact" variant="secondary" disabled={visibleLines.length === 0} onClick={() => void copyLogs()}>Copy</Button><Button size="compact" variant="secondary" disabled={visibleLines.length === 0} onClick={downloadLogs}>Download</Button><Button size="compact" variant="secondary" disabled={lines.length === 0} onClick={() => { setFollowLines([]); read.reset(); setPaused(false) }}>Clear</Button></div></header>
+      <header><div><strong className={`follow-state follow-state--${follow.status}`} aria-live="polite">{paused ? `${follow.message} (paused)` : follow.message}</strong><small>{visibleLines.length} visible of {keptLines.length} line{keptLines.length === 1 ? '' : 's'} kept in the bounded in-memory viewer{paused && followBuffer.length > 0 ? ` · ${followBuffer.length} buffered` : ''}.</small></div><div><Button size="compact" variant="secondary" disabled={!isFollowing && !paused} aria-label={paused ? 'Continue following logs' : 'Pause following logs'} onClick={() => { if (paused) { flushBuffer(); setPaused(false) } else { setPaused(true) } }}>{paused ? 'Continue' : 'Pause'}</Button><Button size="compact" variant="secondary" onClick={() => setWrap(!wrap)}>{wrap ? 'Disable wrap' : 'Wrap lines'}</Button><Button size="compact" variant="secondary" disabled={visibleLines.length === 0} onClick={() => void copyLogs()}>Copy</Button><Button size="compact" variant="secondary" disabled={visibleLines.length === 0} onClick={downloadLogs}>Download</Button><Button size="compact" variant="secondary" disabled={lines.length === 0} onClick={() => { setFollowLines([]); clearBuffer(); read.reset(); setPaused(false) }}>Clear</Button><label className="log-level-filter">Level<Select value={levelFilter} aria-label="Filter by log level" onChange={(event) => setLevelFilter(event.target.value as LogLevel | 'all')}><option value="all">all</option><option value="error">error</option><option value="warn">warn</option><option value="info">info</option><option value="debug">debug</option></Select></label>{levelFilter !== 'all' ? <Badge variant={levelBadgeVariant(levelFilter)} className={levelFilter === 'debug' ? 'text-kp-mauve border-kp-mauve-muted' : ''}>{levelFilter}</Badge> : null}</div></header>
       <label className="log-search">Search visible logs<Input type="search" data-app-shortcut="search" aria-keyshortcuts="Control+F Meta+F" value={search} maxLength={256} onChange={(event) => setSearch(event.target.value)} /></label>
-      <pre className={`${wrap ? 'whitespace-pre-wrap break-words' : 'whitespace-pre'} min-h-[280px] max-h-[62vh] overflow-auto bg-kp-crust border border-kp-overlay-0 rounded-md p-3.5 text-kp-text text-xs leading-relaxed`} aria-label="Log output">{visibleLines.map((line, index) => <span key={`${index}-${line.timestamp ?? ''}`}>{timestamps && line.timestamp ? <time className="text-kp-overlay-text">{line.timestamp} </time> : null}{line.text}{line.truncated ? ' [truncated]' : ''}{'\n'}</span>)}</pre>
+      <pre className={`${wrap ? 'whitespace-pre-wrap break-words' : 'whitespace-pre'} min-h-[280px] max-h-[62vh] overflow-auto bg-kp-crust border border-kp-overlay-0 rounded-md p-3.5 text-kp-text text-xs leading-relaxed`} aria-label="Log output">{visibleLines.map((line, index) => {
+        const jsonValue = isJSONObjectLike(line.text)
+        return <span key={`${index}-${line.timestamp ?? ''}`}>{timestamps && line.timestamp ? <time className="text-kp-overlay-text">{line.timestamp} </time> : null}{jsonValue ? <HighlightedJSON value={jsonValue} /> : line.text}{line.truncated ? ' [truncated]' : ''}{'\n'}</span>
+      })}</pre>
       {clipboardMessage ? <p className="field-help" role="status">{clipboardMessage}</p> : null}
     </section>
   </>
