@@ -170,3 +170,15 @@
 | G-08 | ✅ `test/kind/harness.sh validate` verde — todas as fases 4-7 de cenários Kubernetes/RBAC. Obs.: exigiu contorno ambiental (TLS interceptado no mirror do registry — `skip_verify` no containerd do nó de teste; imagem importada via host). | — |
 | G-09 | ✅ Playwright E2E 3/3, agora servindo o bundle de produção (`vite preview` em vez de dev server, que flakava por transform on-demand); asserção da marca atualizada para o SVG da Fase 1. | `968ff1e` |
 | G-10 | ◐ Parcial: `go vet -tags desktop ./...` limpo; build nativo segue bloqueado sem permissão para instalar `libgtk-3-dev`/`libwebkit2gtk-4.1-dev` (policy server rejeita sudo). | — |
+
+## 12. Fase 7 — evoluções futuras (2026-09-01, terceira rodada)
+
+| Item | Resultado | Commit |
+| --- | --- | --- |
+| F7-05 Terminal exec xterm.js | ✅ ExecTerminal com tema dos tokens, screen-reader mode, scrollback 1000, fit + resize automático, degradação graciosa; stdout/stderr no terminal, status em HTML acessível; xterm em chunk separado (84 kB gzip). | `e77258b` |
+| F7-04 Busca global | ✅ Command Center indexa recursos já carregados na sessão (identificadores apenas, sem conteúdo), navegando aos deep links; getter resolvido na abertura da paleta (sem loops reativos); limitado a 200 entradas. | `07de7e7` |
+| F7-01 Favoritos | ✅ Seção `favorites` no schema de preferências (50 itens, kinds allowlisted, backward-compatible), botão de estrela em todos os drawers de detalhe (Secrets permitidos — metadata-only), grupo de favoritos em primeiro lugar na paleta. | `3b10615` |
+| F7-02 Diff de YAML | ⏸ Adiado: requer endpoint de last-applied + viewer de diff; planejado como próximo item isolado. | — |
+| F7-03 Multi-contexto | ⏸ Backlog permanente (XL; grande superfície de segurança). | — |
+
+Contadores no fechamento: 984 testes Go, 84 Vitest, 3 E2E Playwright.
