@@ -13,6 +13,10 @@ import {
   scaleWorkload,
 } from '../api/client'
 import { streamURL } from '../api/desktop'
+import { lazy, Suspense } from 'react'
+import type { ExecTerminalHandle } from './ExecTerminal'
+
+const ExecTerminal = lazy(() => import('./ExecTerminal'))
 import type {
   CapabilityDecision,
   CapabilityMatrix,
@@ -242,12 +246,10 @@ export function PodActions({ detail, selection }: { detail: PodDetail; selection
   const [localPort, setLocalPort] = useState('')
   const [container, setContainer] = useState(detail.containers[0]?.spec.name ?? '')
   const [command, setCommand] = useState('/bin/sh')
-  const [stdin, setStdin] = useState('')
-  const [columns, setColumns] = useState(120)
-  const [rows, setRows] = useState(40)
   const [terminal, setTerminal] = useState<TerminalLine[]>([])
   const [socketState, setSocketState] = useState<ExecSocketState>('closed')
   const socketRef = useRef<WebSocket | null>(null)
+  const execTerminalRef = useRef<ExecTerminalHandle | null>(null)
   const actionTarget = target(selection, detail.metadata.namespace, 'Pod', detail.metadata.name)
   const permissions = useQuery({
     queryKey: ['action-permissions', selection.generation, detail.metadata.namespace, detail.metadata.name, 'pod-actions'],
@@ -276,6 +278,11 @@ export function PodActions({ detail, selection }: { detail: PodDetail; selection
 
   function appendTerminal(line: TerminalLine) {
     setTerminal((lines) => appendTerminalBounded(lines, line))
+  }
+
+  function appendOutput(stream: 'stdout' | 'stderr', text: string) {
+    if (stream === 'stderr') execTerminalRef.current?.writeStderr(text)
+    else execTerminalRef.current?.writeStdout(text)
   }
 
   async function openExecSocket(ticket: ExecTicket) {
@@ -322,7 +329,7 @@ export function PodActions({ detail, selection }: { detail: PodDetail; selection
         appendTerminal({ stream: 'status', text: 'The exec server sent an unsupported data stream.' })
         return
       }
-      appendTerminal({ stream: bytes[0] === 2 ? 'stderr' : 'stdout', text: new TextDecoder().decode(bytes.subarray(1)) })
+      appendOutput(bytes[0] === 2 ? 'stderr' : 'stdout', new TextDecoder().decode(bytes.subarray(1)))
     }
     socket.onerror = () => {
       if (socketRef.current === socket) appendTerminal({ stream: 'status', text: 'The exec stream failed.' })
@@ -409,21 +416,20 @@ export function PodActions({ detail, selection }: { detail: PodDetail; selection
   const parsedLocalPort = localPort === '' ? null : Number(localPort)
   const localPortValid = parsedLocalPort === null || (Number.isInteger(parsedLocalPort) && parsedLocalPort >= 1_024 && parsedLocalPort <= 65_535)
 
-  function sendStdin() {
+  function sendRawStdin(text: string) {
     const socket = socketRef.current
-    if (!socket || socketState !== 'ready' || socket.readyState !== WebSocket.OPEN || stdin === '') return
-    const payload = new TextEncoder().encode(`${stdin}\n`)
+    if (!socket || socketState !== 'ready' || socket.readyState !== WebSocket.OPEN || text === '') return
+    const payload = new TextEncoder().encode(text)
     const frame = new Uint8Array(payload.length + 1)
     frame[0] = 0
     frame.set(payload, 1)
     socket.send(frame)
-    setStdin('')
   }
 
-  function resizeTerminal() {
+  function handleTerminalResize(nextColumns: number, nextRows: number) {
     const socket = socketRef.current
     if (!socket || socketState !== 'ready' || socket.readyState !== WebSocket.OPEN) return
-    socket.send(JSON.stringify({ type: 'resize', columns, rows }))
+    socket.send(JSON.stringify({ type: 'resize', columns: nextColumns, rows: nextRows }))
   }
 
   function closeExec() {
@@ -465,14 +471,20 @@ export function PodActions({ detail, selection }: { detail: PodDetail; selection
         <div className="terminal-panel">
           <div className="terminal-toolbar">
             <span aria-live="polite">Exec: {socketState}</span>
-            <label>Columns<Input type="number" min="1" max="4096" value={columns} onChange={(event) => setColumns(Number(event.target.value))} /></label>
-            <label>Rows<Input type="number" min="1" max="4096" value={rows} onChange={(event) => setRows(Number(event.target.value))} /></label>
-            <Button size="compact" variant="secondary" disabled={socketState !== 'ready' || columns < 1 || columns > 4096 || rows < 1 || rows > 4096} onClick={resizeTerminal}>Resize</Button>
-            <Button size="compact" variant="secondary" onClick={() => setTerminal([])}>Clear output</Button>
-            <Button size="compact" variant="danger" disabled={socketState !== 'ready'} onClick={closeExec}>Close session</Button>
+            <Button size="compact" variant="secondary" disabled={socketState !== 'ready'} onClick={closeExec}>Close session</Button>
+            <Button size="compact" variant="secondary" onClick={() => { execTerminalRef.current?.clear(); setTerminal([]) }}>Clear output</Button>
           </div>
-          <pre aria-label="Exec terminal output">{terminal.map((line, index) => <span className={`terminal-${line.stream}`} key={`${index}-${line.stream}`}>{line.text}{'\n'}</span>)}</pre>
-          <div className="terminal-input"><Input value={stdin} onChange={(event) => setStdin(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') sendStdin() }} aria-label="Terminal input" /><Button size="compact" disabled={socketState !== 'ready' || stdin === ''} onClick={sendStdin}>Send</Button></div>
+          <ul className="capability-list" aria-label="Exec session status">
+            {terminal.map((line, index) => <li key={`${index}-${line.stream}`} className="terminal-status">{line.text}</li>)}
+          </ul>
+          <Suspense fallback={<pre aria-label="Exec terminal output" className="min-h-32" />}>
+            <ExecTerminal
+              ref={execTerminalRef}
+              label="Exec terminal output"
+              onStdin={sendRawStdin}
+              onResize={handleTerminalResize}
+            />
+          </Suspense>
         </div>
       ) : null}
       {[remove, portForward, exec].map((operation, index) => operation.isError ? <p className="field-error" key={index}>{mutationError(operation.error)}</p> : null)}
