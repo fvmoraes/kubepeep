@@ -178,7 +178,7 @@
 | F7-05 Terminal exec xterm.js | ✅ ExecTerminal com tema dos tokens, screen-reader mode, scrollback 1000, fit + resize automático, degradação graciosa; stdout/stderr no terminal, status em HTML acessível; xterm em chunk separado (84 kB gzip). | `e77258b` |
 | F7-04 Busca global | ✅ Command Center indexa recursos já carregados na sessão (identificadores apenas, sem conteúdo), navegando aos deep links; getter resolvido na abertura da paleta (sem loops reativos); limitado a 200 entradas. | `07de7e7` |
 | F7-01 Favoritos | ✅ Seção `favorites` no schema de preferências (50 itens, kinds allowlisted, backward-compatible), botão de estrela em todos os drawers de detalhe (Secrets permitidos — metadata-only), grupo de favoritos em primeiro lugar na paleta. | `3b10615` |
-| F7-02 Diff de YAML | ⏸ Adiado: requer endpoint de last-applied + viewer de diff; planejado como próximo item isolado. | — |
+| F7-02 Diff de YAML | ✅ Diff server-side contra a anotação last-applied (Myers bounded, redação herdada do nível de confiança da rota YAML, Secrets recusados antes de qualquer fetch); endpoint generation-fenced e UI no YamlViewer de todos os drawers. | `df3be10` |
 | F7-03 Multi-contexto | ⏸ Backlog permanente (XL; grande superfície de segurança). | — |
 
-Contadores no fechamento: 984 testes Go, 84 Vitest, 3 E2E Playwright.
+Contadores no fechamento: 991 testes Go, 84 Vitest, 3 E2E Playwright.
