@@ -472,7 +472,7 @@ export function WorkloadsPage() {
                   <dl className="resource-facts"><div><dt>Status</dt><dd>{detail.data.status}</dd></div><div><dt>Resource version</dt><dd>{detail.data.metadata.resourceVersion}</dd></div><div><dt>Containers</dt><dd>{detail.data.containers.map((value) => value.name).join(', ') || 'none'}</dd></div><div><dt>Labels</dt><dd>{Object.entries(detail.data.metadata.labels ?? {}).map(([label, value]) => `${label}=${value}`).join(', ') || 'none'}</dd></div></dl>
                   <WorkloadActions key={`${selection!.generation}/${detail.data.metadata.uid}`} detail={detail.data} selection={selection as SelectionSummary} />
                 </> : null}
-                <YamlViewer value={yaml.data} pending={yaml.isPending} error={yaml.error} onLoad={() => yaml.mutate(activeSelected)} />
+                <YamlViewer value={yaml.data} pending={yaml.isPending} error={yaml.error} onLoad={() => yaml.mutate(activeSelected)} diffTarget={activeSelected ? { collection: workloadKindPath(activeSelected.kind), namespace: activeSelected.namespace, name: activeSelected.name, generation: selection?.generation } : undefined} />
               </> : null}
             </Drawer>
           </div>
@@ -570,7 +570,7 @@ export function PodsPage() {
             <Drawer open={Boolean(activeSelected)} onClose={closeDetail} title={<span className="flex items-center gap-2">{detailTitle(activeSelected ? `Pod ${activeSelected.namespace}/${activeSelected.name}` : 'Resource detail')}{activeSelected ? <FavoriteButton kind="pod" namespace={activeSelected.namespace} name={activeSelected.name} generation={selection?.generation} label="Pod" /> : null}</span>}>
               {activeSelected ? <>
                 {detail.isPending ? <p>Loading detail…</p> : detail.isError ? <p className="field-error">{errorMessage(detail.error)}</p> : detail.data ? <><dl className="resource-facts"><div><dt>UID</dt><dd>{detail.data.metadata.uid}</dd></div><div><dt>Owner</dt><dd>{detail.data.summary.owner ? `${detail.data.summary.owner.kind}/${detail.data.summary.owner.name}` : 'standalone'}</dd></div><div><dt>Containers</dt><dd>{detail.data.containers.map((value) => `${value.spec.name} (${value.state})`).join(', ') || 'none'}</dd></div><div><dt>IP</dt><dd>{detail.data.summary.ip ?? '—'}</dd></div></dl><Link className="button button--secondary button--compact" to={`/logs?namespace=${encodeURIComponent(activeSelected.namespace)}&pod=${encodeURIComponent(activeSelected.name)}&container=${encodeURIComponent(detail.data.containers[0]?.spec.name ?? '')}`}>View logs</Link><PodActions key={`${selection!.generation}/${detail.data.metadata.uid}`} detail={detail.data} selection={selection as SelectionSummary} /></> : null}
-                <YamlViewer value={yaml.data} pending={yaml.isPending} error={yaml.error} onLoad={() => yaml.mutate(activeSelected)} />
+                <YamlViewer value={yaml.data} pending={yaml.isPending} error={yaml.error} onLoad={() => yaml.mutate(activeSelected)} diffTarget={activeSelected ? { collection: 'pods', namespace: activeSelected.namespace, name: activeSelected.name, generation: selection?.generation } : undefined} />
               </> : null}
             </Drawer>
           </div>
@@ -749,7 +749,7 @@ export function NetworkPage() {
                 />{active ? <CollectionFooter result={active} onNext={setCursor} onRestart={() => setCursor('')} /> : null}</div><Drawer open={Boolean(activeSelected)} onClose={closeDetail} title={<span className="flex items-center gap-2">{detailTitle(activeSelected ? `${activeSelected.namespace}/${activeSelected.name}` : 'Resource detail')}{activeSelected ? <FavoriteButton kind={({ services: 'service', ingresses: 'ingress', 'endpoint-slices': 'endpointslice' } as const)[activeSelected.tab]} namespace={activeSelected.namespace} name={activeSelected.name} generation={selection?.generation} label={activeSelected.tab} /> : null}</span>}>
                   {activeSelected ? <>
                     {currentDetail.isPending ? <p>Loading detail…</p> : currentDetail.isError ? <p className="field-error">{errorMessage(currentDetail.error)}</p> : <NetworkDetailView tab={activeSelected.tab} service={serviceDetail.data} ingress={ingressDetail.data} slice={sliceDetail.data} />}
-                    <YamlViewer value={yaml.data} pending={yaml.isPending} error={yaml.error} onLoad={() => yaml.mutate(activeSelected)} />
+                    <YamlViewer value={yaml.data} pending={yaml.isPending} error={yaml.error} onLoad={() => yaml.mutate(activeSelected)} diffTarget={activeSelected ? { collection: activeSelected.tab, namespace: activeSelected.namespace, name: activeSelected.name, generation: selection?.generation } : undefined} />
                   </> : null}
                 </Drawer></div></QueryState>}
         </SelectionGate>
@@ -844,7 +844,7 @@ export function ConfigPage() {
                 />{active ? <CollectionFooter result={active} onNext={setCursor} onRestart={() => setCursor('')} /> : null}</div><Drawer open={Boolean(activeSelected)} onClose={closeDetail} title={<span className="flex items-center gap-2">{detailTitle(activeSelected ? `${tab === 'secrets' ? 'Secret metadata' : 'ConfigMap'} ${activeSelected.namespace}/${activeSelected.name}` : 'Resource detail')}{activeSelected ? <FavoriteButton kind={tab === 'secrets' ? 'secret' : 'configmap'} namespace={activeSelected.namespace} name={activeSelected.name} generation={selection?.generation} label={tab === 'secrets' ? 'Secret' : 'ConfigMap'} /> : null}</span>}>
                   {activeSelected ? <>
                     {tab === 'configmaps' ? configDetail.isPending ? <p>Loading authorized entries…</p> : configDetail.isError ? <p className="field-error">{errorMessage(configDetail.error)}</p> : configDetail.data ? <ConfigMapDetailView detail={configDetail.data} /> : null : secretDetail.isPending ? <p>Loading metadata…</p> : secretDetail.isError ? <p className="field-error">{errorMessage(secretDetail.error)}</p> : secretDetail.data ? <SecretMetadataView secret={secretDetail.data} /> : null}
-                    {tab === 'configmaps' ? <YamlViewer value={yaml.data} pending={yaml.isPending} error={yaml.error} onLoad={() => yaml.mutate(activeSelected)} /> : null}
+                    {tab === 'configmaps' ? <YamlViewer value={yaml.data} pending={yaml.isPending} error={yaml.error} onLoad={() => yaml.mutate(activeSelected)} diffTarget={activeSelected ? { collection: 'configmaps', namespace: activeSelected.namespace, name: activeSelected.name, generation: selection?.generation } : undefined} /> : null}
                   </> : null}
                 </Drawer></div></QueryState></SelectionGate></div>
     </div>

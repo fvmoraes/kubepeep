@@ -1,8 +1,9 @@
-import { APIError } from '../api/client'
-import { Button } from '../components/ui'
+import { APIError, getYAMLDiff, type YAMLDiff } from '../api/client'
+import { Badge, Button } from '../components/ui'
 import { PrismLight as SyntaxHighlighter } from 'react-syntax-highlighter'
 import yaml from 'react-syntax-highlighter/dist/esm/languages/prism/yaml'
 import vscDarkPlus from 'react-syntax-highlighter/dist/esm/styles/prism/vsc-dark-plus'
+import { useState } from 'react'
 
 SyntaxHighlighter.registerLanguage('yaml', yaml)
 
@@ -11,14 +12,41 @@ function formatError(error: unknown): string {
   return error instanceof Error ? error.message : 'The local API could not load this resource.'
 }
 
+export interface YamlDiffTarget {
+  collection: string
+  namespace: string
+  name: string
+  generation?: string
+}
+
 interface YamlViewerProps {
   value?: string
   pending: boolean
   error: unknown
   onLoad: () => void
+  diffTarget?: YamlDiffTarget
 }
 
-export function YamlViewer({ value, pending, error, onLoad }: YamlViewerProps) {
+type DiffState =
+  | { kind: 'idle' }
+  | { kind: 'pending' }
+  | { kind: 'ready'; diff: YAMLDiff }
+  | { kind: 'error'; message: string }
+
+export function YamlViewer({ value, pending, error, onLoad, diffTarget }: YamlViewerProps) {
+  const [diffState, setDiffState] = useState<DiffState>({ kind: 'idle' })
+
+  async function loadDiff() {
+    if (!diffTarget) return
+    setDiffState({ kind: 'pending' })
+    try {
+      const diff = await getYAMLDiff(diffTarget.collection, diffTarget.namespace, diffTarget.name, undefined, diffTarget.generation)
+      setDiffState({ kind: 'ready', diff })
+    } catch (cause) {
+      setDiffState({ kind: 'error', message: formatError(cause) })
+    }
+  }
+
   return (
     <section className="yaml-viewer" aria-label="Authorized YAML">
       <Button variant="secondary" size="compact" disabled={pending} onClick={onLoad}>
@@ -43,6 +71,47 @@ export function YamlViewer({ value, pending, error, onLoad }: YamlViewerProps) {
       ) : (
         <p>YAML is fetched only after this explicit action and remains in memory.</p>
       )}
+      {diffTarget ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="secondary"
+            size="compact"
+            disabled={value === undefined || diffState.kind === 'pending'}
+            onClick={() => void loadDiff()}
+          >
+            {diffState.kind === 'pending' ? 'Computing diff…' : 'Diff vs last-applied'}
+          </Button>
+          {diffState.kind === 'ready' && diffState.diff.truncated ? <Badge variant="warning">truncated</Badge> : null}
+        </div>
+      ) : null}
+      {diffState.kind === 'error' ? <p className="field-error">{diffState.message}</p> : null}
+      {diffState.kind === 'ready' ? (
+        diffState.diff.absent ? (
+          <p role="status">No last-applied baseline was found; the resource was not applied through kubectl.</p>
+        ) : (
+          <div
+            aria-label="YAML diff against last-applied"
+            role="region"
+            className="overflow-auto rounded-md border border-kp-overlay-0 bg-kp-crust p-3 font-mono text-xs leading-relaxed"
+          >
+            {diffState.diff.lines.map((line, index) => (
+              <div
+                key={`${index}-${line.kind}`}
+                className={
+                  line.kind === 'added'
+                    ? 'text-kp-green'
+                    : line.kind === 'removed'
+                      ? 'text-kp-red'
+                      : 'text-kp-overlay-text'
+                }
+              >
+                {line.kind === 'added' ? '+ ' : line.kind === 'removed' ? '- ' : '  '}
+                {line.text}
+              </div>
+            ))}
+          </div>
+        )
+      ) : null}
     </section>
   )
 }

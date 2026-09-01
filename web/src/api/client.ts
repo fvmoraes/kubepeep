@@ -22,6 +22,7 @@ import type {
   IngressDetail,
   IngressResource,
   KubernetesContext,
+  YAMLDiff,
   LogScanRequest,
   LogQuery,
   LogRead,
@@ -387,6 +388,15 @@ export function getDashboardMetrics(signal?: AbortSignal, expectedGeneration?: s
 
 export function getDashboardNamespaceHealth(signal?: AbortSignal, expectedGeneration?: string): Promise<DashboardResponse<DashboardNamespaceHealth[]>> {
 	return dashboardRequest<DashboardNamespaceHealth[]>('/api/v1/dashboard/namespace-health', { method: 'GET', signal }, expectedGeneration)
+}
+
+export function getYAMLDiff(collection: string, namespace: string, name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<YAMLDiff> {
+	return requestEnvelope<YAMLDiff>(`/api/v1/resources/${encodeURIComponent(collection)}/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}/yaml-diff`, { method: 'GET', signal }).then((response) => {
+		if (expectedGeneration && response.meta?.generation && response.meta.generation !== expectedGeneration) {
+			throw new APIError(409, { code: 'GENERATION_CHANGED', message: 'The YAML diff belongs to another selection generation.' })
+		}
+		return response.data
+	})
 }
 
 export function scanDashboardLogs(body: LogScanRequest, csrfToken: string, signal?: AbortSignal, expectedGeneration?: string): Promise<DashboardResponse<DashboardLogMatch[]>> {

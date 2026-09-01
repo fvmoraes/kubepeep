@@ -38,6 +38,7 @@ type ResourceService interface {
 	GetConfigMap(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, string, string) (resourcecore.ConfigMapDetailDTO, error)
 	GetSecret(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, string, string) (resourcecore.SecretMetadataDTO, error)
 	ResourceYAML(context.Context, namespaces.SelectionBinding, string, string, string) ([]byte, error)
+	ResourceLastAppliedDiff(context.Context, namespaces.SelectionBinding, string, string, string) (resourcecore.LastAppliedDiffDTO, error)
 	ReadLogs(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, string, string, resourcecore.LogQuery) (resourcecore.LogReadDTO, error)
 }
 
@@ -244,6 +245,52 @@ func (handler *Resources) collectionYAML(w http.ResponseWriter, r *http.Request,
 	handler.yaml(w, r, func(ctx context.Context, b namespaces.SelectionBinding) ([]byte, error) {
 		return handler.service.ResourceYAML(ctx, b, collection, r.PathValue("namespace"), r.PathValue("name"))
 	})
+}
+
+// yamlDiffCollections are the metadata-bearing collections eligible for the
+// last-applied diff. Secrets are deliberately absent.
+var yamlDiffCollections = map[string]string{
+	"pods":            "pods",
+	"deployments":     "deployments",
+	"statefulsets":    "statefulsets",
+	"daemonsets":      "daemonsets",
+	"jobs":            "jobs",
+	"cronjobs":        "cronjobs",
+	"services":        "services",
+	"ingresses":       "ingresses",
+	"endpoint-slices": "endpointslices",
+	"configmaps":      "configmaps",
+}
+
+func (handler *Resources) ResourceYAMLDiff(w http.ResponseWriter, r *http.Request) {
+	collection, ok := yamlDiffCollections[r.PathValue("collection")]
+	if !ok {
+		api.WriteError(w, r, api.NewHTTPError(http.StatusNotFound, api.CodeNotFound, "The YAML diff resource type is invalid.", nil, nil))
+		return
+	}
+	if err := validateDetailRequest(r); err != nil {
+		api.WriteError(w, r, err)
+		return
+	}
+	binding, resolution, err := handler.activeSelection()
+	if err != nil {
+		api.WriteError(w, r, err)
+		return
+	}
+	if err = validateResourcePath(r, resolution); err != nil {
+		api.WriteError(w, r, err)
+		return
+	}
+	diff, err := handler.service.ResourceLastAppliedDiff(r.Context(), binding, collection, r.PathValue("namespace"), r.PathValue("name"))
+	if err != nil {
+		httpErr := resourceHTTPError(err)
+		if resourcecore.ErrorCodeOf(err) == resourcecore.CodeLimitExceeded {
+			httpErr = api.NewHTTPError(http.StatusRequestEntityTooLarge, api.CodeBodyTooLarge, "The YAML diff exceeds the response limit.", nil, err)
+		}
+		api.WriteError(w, r, httpErr)
+		return
+	}
+	handler.writeJSONIfCurrent(w, r, binding, map[string]any{"data": diff})
 }
 
 type yamlCall func(context.Context, namespaces.SelectionBinding) ([]byte, error)

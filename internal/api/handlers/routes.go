@@ -104,6 +104,7 @@ func Register(applicationRouter *router.Router, dependencies Dependencies) {
 		apiRouter.GET("/configmaps", resourceHandler.ConfigMaps)
 		apiRouter.GET("/configmaps/{namespace}/{name}", resourceHandler.ConfigMapDetail)
 		apiRouter.GET("/configmaps/{namespace}/{name}/yaml", resourceHandler.ConfigMapYAML)
+		apiRouter.GET("/resources/{collection}/{namespace}/{name}/yaml-diff", resourceHandler.ResourceYAMLDiff)
 		apiRouter.GET("/secrets", resourceHandler.Secrets)
 		apiRouter.GET("/secrets/{namespace}/{name}", resourceHandler.SecretDetail)
 	}

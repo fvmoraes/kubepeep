@@ -466,38 +466,99 @@ func (backend *ResourceBackend) GetSecret(ctx context.Context, binding namespace
 }
 
 func (backend *ResourceBackend) ResourceYAML(ctx context.Context, binding namespaces.SelectionBinding, collection, namespace, name string) ([]byte, error) {
-	origin := resources.Origin{Namespace: namespace, Version: "v1", Resource: collection}
-	switch collection {
-	case "ingresses":
-		origin.APIGroup = "networking.k8s.io"
-	case "endpointslices":
-		origin.APIGroup = "discovery.k8s.io"
-	}
-	if err := backend.authorizeGet(ctx, binding, origin, name); err != nil {
-		return nil, err
-	}
-	requestContext, cancel, clients, err := backend.unary(ctx, binding)
+	value, err := backend.fetchYAMLObject(ctx, binding, collection, namespace, name)
 	if err != nil {
 		return nil, err
 	}
-	defer cancel()
-	var value any
+	return resources.MarshalReadOnlyYAML(value)
+}
+
+// fetchYAMLObject loads the live typed object behind every YAML-capable
+// collection after an exact get authorization.
+func (backend *ResourceBackend) fetchYAMLObject(ctx context.Context, binding namespaces.SelectionBinding, collection, namespace, name string) (any, error) {
 	switch collection {
-	case "services":
-		value, err = clients.kubernetes.CoreV1().Services(namespace).Get(requestContext, name, metav1.GetOptions{})
-	case "ingresses":
-		value, err = clients.kubernetes.NetworkingV1().Ingresses(namespace).Get(requestContext, name, metav1.GetOptions{})
-	case "endpointslices":
-		value, err = clients.kubernetes.DiscoveryV1().EndpointSlices(namespace).Get(requestContext, name, metav1.GetOptions{})
-	case "configmaps":
-		value, err = clients.kubernetes.CoreV1().ConfigMaps(namespace).Get(requestContext, name, metav1.GetOptions{})
+	case "pods":
+		origin := resources.Origin{Namespace: namespace, Version: "v1", Resource: "pods"}
+		if err := backend.authorizeGet(ctx, binding, origin, name); err != nil {
+			return nil, err
+		}
+		requestContext, cancel, clients, err := backend.unary(ctx, binding)
+		if err != nil {
+			return nil, err
+		}
+		defer cancel()
+		value, err := clients.kubernetes.CoreV1().Pods(namespace).Get(requestContext, name, metav1.GetOptions{})
+		return value, mapResourceError(err)
+	case "deployments", "statefulsets", "daemonsets", "jobs", "cronjobs":
+		origin, err := workloadOrigin(collection, namespace)
+		if err != nil {
+			return nil, err
+		}
+		if err := backend.authorizeGet(ctx, binding, origin, name); err != nil {
+			return nil, err
+		}
+		return backend.getWorkloadObject(ctx, binding, collection, namespace, name)
+	case "services", "ingresses", "endpointslices", "configmaps":
+		var origin resources.Origin
+		switch collection {
+		case "ingresses":
+			origin = resources.Origin{Namespace: namespace, APIGroup: "networking.k8s.io", Version: "v1", Resource: collection}
+		case "endpointslices":
+			origin = resources.Origin{Namespace: namespace, APIGroup: "discovery.k8s.io", Version: "v1", Resource: collection}
+		default:
+			origin = resources.Origin{Namespace: namespace, Version: "v1", Resource: collection}
+		}
+		if err := backend.authorizeGet(ctx, binding, origin, name); err != nil {
+			return nil, err
+		}
+		requestContext, cancel, clients, err := backend.unary(ctx, binding)
+		if err != nil {
+			return nil, err
+		}
+		defer cancel()
+		switch collection {
+		case "services":
+			value, getErr := clients.kubernetes.CoreV1().Services(namespace).Get(requestContext, name, metav1.GetOptions{})
+			return value, mapResourceError(getErr)
+		case "ingresses":
+			value, getErr := clients.kubernetes.NetworkingV1().Ingresses(namespace).Get(requestContext, name, metav1.GetOptions{})
+			return value, mapResourceError(getErr)
+		case "endpointslices":
+			value, getErr := clients.kubernetes.DiscoveryV1().EndpointSlices(namespace).Get(requestContext, name, metav1.GetOptions{})
+			return value, mapResourceError(getErr)
+		default:
+			value, getErr := clients.kubernetes.CoreV1().ConfigMaps(namespace).Get(requestContext, name, metav1.GetOptions{})
+			return value, mapResourceError(getErr)
+		}
 	default:
 		return nil, resourceDomain(resources.CodeValidationFailed, "The YAML resource type is invalid.", nil)
 	}
-	if err != nil {
-		return nil, mapResourceError(err)
+}
+
+// ResourceLastAppliedDiff (F7-02) compares the live document against the
+// kubectl last-applied baseline. Only identity-checked metadata-bearing kinds
+// are eligible; Secrets never enter this path.
+func (backend *ResourceBackend) ResourceLastAppliedDiff(ctx context.Context, binding namespaces.SelectionBinding, collection, namespace, name string) (resources.LastAppliedDiffDTO, error) {
+	if collection == "secrets" {
+		return resources.LastAppliedDiffDTO{}, resourceDomain(resources.CodeForbidden, "Secret YAML is not available.", resources.ErrSecretYAML)
 	}
-	return resources.MarshalReadOnlyYAML(value)
+	value, err := backend.fetchYAMLObject(ctx, binding, collection, namespace, name)
+	if err != nil {
+		return resources.LastAppliedDiffDTO{}, err
+	}
+	previous, found, err := resources.ExtractLastApplied(value)
+	if err != nil {
+		return resources.LastAppliedDiffDTO{}, err
+	}
+	if !found {
+		return resources.LastAppliedDiffDTO{Absent: true, Lines: []resources.DiffLineDTO{}}, nil
+	}
+	current := resources.StripLastAppliedAnnotation(value)
+	currentYAML, err := resources.MarshalReadOnlyYAML(current)
+	if err != nil {
+		return resources.LastAppliedDiffDTO{}, err
+	}
+	return resources.DiffYAML(currentYAML, previous), nil
 }
 
 func workloadOrigin(kind, namespace string) (resources.Origin, error) {

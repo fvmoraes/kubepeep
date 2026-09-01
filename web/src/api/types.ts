@@ -674,6 +674,17 @@ export interface FavoriteSet {
   items: FavoriteItem[]
 }
 
+export interface YAMLDiffLine {
+  kind: 'same' | 'added' | 'removed'
+  text: string
+}
+
+export interface YAMLDiff {
+  absent: boolean
+  truncated: boolean
+  lines: YAMLDiffLine[]
+}
+
 export interface ActionTarget {
   clusterProfileId: number
   context: string
