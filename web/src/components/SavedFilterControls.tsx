@@ -32,7 +32,7 @@ export function SavedFilterControls({
   const [selectedID, setSelectedID] = useState('')
   const [message, setMessage] = useState('')
   const activeRequest = useRef<AbortController | null>(null)
-  const filters = preferences.data?.filters[collection].items ?? []
+  const filters = preferences.data?.filters?.[collection]?.items ?? []
   const trimmedName = name.trim()
   const canSave = Boolean(preferences.data) && validName(name) && Object.keys(currentQuery).length > 0 && filters.length < 50
 
@@ -54,13 +54,14 @@ export function SavedFilterControls({
           throw new APIError(409, { code: 'GENERATION_CHANGED', message: 'The active selection changed before the filter was saved.' })
         }
         const id = createIdempotencyKey()
+        const currentItems = current.filters?.[collection]?.items ?? []
         const next: Preferences = {
           ...current,
           filters: {
             ...current.filters,
             [collection]: {
               version: 1,
-              items: [...current.filters[collection].items, { id, name: trimmedName, query: structuredClone(currentQuery) }],
+              items: [...currentItems, { id, name: trimmedName, query: structuredClone(currentQuery) }],
             },
           },
         }

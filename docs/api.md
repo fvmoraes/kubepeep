@@ -320,6 +320,13 @@ Não há rota de Secret YAML, edição YAML, impersonation ou credenciais.
 | `GET /health` | MVP/probe | vazio | `HealthDTO` | proteção Host; sem RBAC | 503 somente por falha local crítica; 500 se a própria resposta não puder ser construída |
 | `GET /api/v1/status` | MVP | vazio | `StatusDTO` | Host allowlisted; Origin, se presente, deve ser same-origin; sem RBAC | — |
 | `GET /api/v1/session` | Interna | vazio | `SessionDTO` | Host allowlisted; Origin, se presente, deve ser same-origin; CORS desabilitado; `no-store` | `CSRF_REJECTED` |
+| `GET /metrics` | Opt-in (Fase 5) | vazio | texto Prometheus | loopback exclusivo; sem RBAC (rede local confiável) | rota não registrada (404) quando `observability.metrics.enabled != true` |
+
+`GET /metrics` expõe apenas o contador allowlisted
+`kubepeep_requests_total{method,route,status}` — o label `route` usa o padrão
+de rota do `http.ServeMux`, nunca caminhos do usuário. Detalhes do contrato de
+observabilidade (schema de logs com `duration_ms`, opt-in do OTel, sanidade)
+estão em [observability.md](observability.md).
 
 `SessionDTO`:
 
@@ -850,6 +857,12 @@ Exemplo:
     "pods": {"version": 1, "items": []},
     "events": {"version": 1, "items": []},
     "logs": {"version": 1, "items": []}
+  },
+  "favorites": {
+    "version": 1,
+    "items": [
+      {"id": "fav_1a2b3c4d5e6f7a8b", "kind": "pod", "namespace": "payments", "name": "api-abc"}
+    ]
   }
 }
 ```
@@ -861,6 +874,14 @@ sempre materializa defaults. Enums, limites e o schema fechado de cada
 camelCase e são mapeados para as chaves internas snake_case de forma fixa. O
 endpoint não aceita merge patch, key/value arbitrário nem null.
 
+A seção `favorites` (F7-01) fixa até 50 recursos apenas pela identidade
+(`kind`, `namespace`, `name`): kinds permitidos são `pod`, `deployment`,
+`statefulset`, `daemonset`, `job`, `cronjob`, `service`, `ingress`,
+`endpointslice`, `configmap` e `secret` (Secret favoritável porque o detalhe
+é metadata-only); namespace/name seguem o padrão de identificadores DNS e
+alvos duplicados são rejeitados. Clientes anteriores podem omitir a seção:
+um conjunto zero é tratado como vazio e regravado na forma canônica.
+
 ## 13. Dashboard
 
 | Método/rota | Classe | Request | Response | Autorização | Erros/completude |
@@ -869,6 +890,7 @@ endpoint não aceita merge patch, key/value arbitrário nem null.
 | `GET /api/v1/dashboard/problems` | MVP | query comum | `DashboardBlockDTO<ProblemPodDTO[]>`, 200 | `list/get pods`, events se usados | parcial/cursor; 409/503/504 |
 | `GET /api/v1/dashboard/restarts` | MVP | `limit` default 10, máximo 50 | `DashboardBlockDTO<RestartDTO[]>`, 200 | `list pods` | parcial; 409/503/504 |
 | `GET /api/v1/dashboard/events` | MVP | query comum | `DashboardBlockDTO<EventDTO[]>`, 200 | `list events` | parcial/cursor; 409/503/504 |
+| `GET /api/v1/dashboard/namespace-health` | MVP | vazio (sem query) | `DashboardBlockDTO<NamespaceHealthDTO[]>`, 200 | herda pods/workloads | parcial; 409/503/504 |
 | `POST /api/v1/dashboard/log-scan` | MVP | `LogScanRequest` | `DashboardBlockDTO<LogMatchDTO[]>`, 200 | CSRF + `get pods/log` por namespace | 400/403/409/429/503/504 |
 | `GET /api/v1/metrics` | MVP opcional em runtime | query comum | `DashboardBlockDTO<MetricsDTO>`, 200 | discovery + `list pods.metrics.k8s.io` | 403/409/503 `FEATURE_UNAVAILABLE`/504 |
 
@@ -1342,6 +1364,17 @@ omitidos, não reduzidos a objetos genéricos.
 | `GET /api/v1/configmaps` | query comum | `ConfigMapListDTO[]`, 200 | `list configmaps` metadata-first | cursor/parcial; 403/409/410/503/504 |
 | `GET /api/v1/configmaps/{namespace}/{name}` | vazio | `ConfigMapDetailDTO`, 200 | `get configmaps` com resourceName | 403/404/409/413/503/504 |
 | `GET /api/v1/configmaps/{namespace}/{name}/yaml` | vazio | YAML, 200 | `get configmaps` com resourceName | 403/404/409/413/503/504 |
+| `GET /api/v1/resources/{collection}/{namespace}/{name}/yaml-diff` | vazio | `LastAppliedDiffDTO`, 200 JSON | `get` do recurso (mesma autorização da rota YAML) | 404 coleção inválida; 403/404/409/413/503/504 |
+
+`yaml-diff` (F7-02) compara o documento vivo contra o baseline
+`kubectl.kubernetes.io/last-applied-configuration`. Coleções elegíveis:
+`pods`, `deployments`, `statefulsets`, `daemonsets`, `jobs`, `cronjobs`,
+`services`, `ingresses`, `endpoint-slices`, `configmaps` — **Secrets são
+recusados** (404 de coleção) antes de qualquer fetch. O DTO contém
+`absent` (sem baseline; nenhum valor zero é implícito), `truncated` e
+`lines[{kind: same|added|removed, text}]`; o diff é limitado a 6.000 linhas
+por lado e 4.000 linhas renderizadas, e a anotação last-applied é removida
+do documento corrente para não poluir o resultado.
 | `GET /api/v1/secrets` | query comum | `SecretMetadataDTO[]`, 200 | `list secrets`; PartialObjectMetadata | cursor/parcial; 403/409/410/503/504 |
 | `GET /api/v1/secrets/{namespace}/{name}` | vazio | `SecretMetadataDTO`, 200 | `get secrets` com resourceName; PartialObjectMetadata | 403/404/409/503/504 |
 

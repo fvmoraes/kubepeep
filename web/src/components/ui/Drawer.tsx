@@ -19,7 +19,10 @@ export function Drawer({ open, onClose, title, children, className = '' }: Drawe
     }
   }, [open])
 
-  function handleBackdropClick(event: MouseEvent<HTMLDivElement>) {
+  function handleBackdropMouseDown(event: MouseEvent<HTMLDivElement>) {
+    // mousedown instead of click: the interaction that opens the drawer
+    // dispatches its native click AFTER the backdrop mounts, which would
+    // immediately close it (click-through).
     if (event.target === event.currentTarget) {
       onClose()
     }
@@ -37,7 +40,7 @@ export function Drawer({ open, onClose, title, children, className = '' }: Drawe
     <div
       role="presentation"
       className="fixed inset-0 z-50"
-      onClick={handleBackdropClick}
+      onMouseDown={handleBackdropMouseDown}
       onKeyDown={handleKeyDown}
     >
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" aria-hidden="true" />
