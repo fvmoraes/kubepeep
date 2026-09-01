@@ -17,7 +17,7 @@ test('serves the application shell and preserves History API navigation', async 
   await page.goto('/')
 
   await expect(page.getByLabel('Primary navigation')).toBeVisible()
-  await expect(page.getByText('kubePeep', { exact: true })).toBeVisible()
+  await expect(page.getByRole('img', { name: 'KubePeep' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'The local API returned an error' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Open command center' })).toBeVisible()
   const renderedDestinations = await page.getByRole('navigation', { name: 'Primary navigation' }).getByRole('link').evaluateAll((links) => links.map((link) => [new URL((link as HTMLAnchorElement).href).pathname, link.textContent?.trim() ?? '']))
