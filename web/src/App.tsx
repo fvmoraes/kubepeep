@@ -15,6 +15,9 @@ import {
 import { NavLink, Outlet, Route, Routes } from 'react-router'
 
 import { getStatus } from './api/client'
+import { BrandLogo } from './components/BrandLogo'
+import { BrandWordmark } from './components/BrandWordmark'
+import { Badge } from './components/ui/Badge'
 import { CommandCenter } from './components/CommandCenter'
 import { ContextSelector } from './components/ContextSelector'
 import { DashboardPage } from './components/Dashboard'
@@ -66,13 +69,14 @@ function StatusBadge() {
   })
 
   if (status.isPending) {
-    return <span className="status-badge status-badge--unknown">checking local service</span>
+    return <Badge variant="unknown">checking local service</Badge>
   }
   if (status.isError) {
-    return <span className="status-badge status-badge--unhealthy">local API unavailable</span>
+    return <Badge variant="danger">local API unavailable</Badge>
   }
   const local = status.data.components.application.status
-  return <span className={`status-badge status-badge--${local}`}>{local}</span>
+  const variant = local === 'healthy' ? 'healthy' : local === 'degraded' ? 'warning' : local === 'unhealthy' ? 'danger' : 'unknown'
+  return <Badge variant={variant}>{local}</Badge>
 }
 
 function Shell() {
@@ -103,8 +107,11 @@ function Shell() {
       <a className="skip-link" href="#main-content">Skip to main content</a>
       <aside className="sidebar">
         <div className="brand" aria-label="kubePeep home">
-          <span className="brand-mark" aria-hidden="true">kp</span>
-          <div><strong>kubePeep</strong><small>local cluster view</small></div>
+          <BrandLogo size={34} />
+          <div>
+            <BrandWordmark height={18} />
+            <small>local cluster view</small>
+          </div>
         </div>
         <nav aria-label="Primary navigation">
           {applicationDestinations.map(({ path, label, icon: Icon }) => (

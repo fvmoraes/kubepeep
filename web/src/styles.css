@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "./tokens.css";
 
 :root {
   --ctp-mauve: #cba6f7;
@@ -34,9 +35,10 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 .app-shell { min-height: 100vh; display: grid; grid-template-columns: 220px minmax(0, 1fr); }
 .sidebar { background: var(--ctp-mantle); border-right: 1px solid var(--ctp-surface0); padding: 18px 12px; }
 .brand { min-height: 52px; display: flex; align-items: center; gap: 10px; padding: 0 8px 16px; }
-.brand-mark { width: 34px; height: 34px; display: grid; place-items: center; border: 1px solid #6c568a; border-radius: 10px; color: var(--ctp-mauve); background: #2a2238; font-weight: 700; }
-.brand strong, .brand small { display: block; }
-.brand small { color: var(--ctp-overlay1); font-size: 11px; margin-top: 2px; }
+.brand > img:first-child { flex: 0 0 auto; }
+.brand > div { min-width: 0; }
+.brand > div > img { display: block; max-width: 100%; height: auto; }
+.brand small { display: block; color: var(--ctp-overlay1); font-size: 11px; margin-top: 2px; }
 nav { display: grid; gap: 3px; }
 nav a { min-height: 40px; display: flex; align-items: center; gap: 10px; padding: 9px 10px; border: 1px solid transparent; border-radius: 8px; color: var(--ctp-subtext); text-decoration: none; font-size: 13px; }
 nav a:hover { background: #201a30; color: var(--ctp-text); }

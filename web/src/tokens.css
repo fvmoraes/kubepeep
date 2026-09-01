@@ -1,0 +1,113 @@
+@theme {
+  /* Base palette (Catppuccin Mocha inspired) */
+  --color-kp-crust: #0e0a16;
+  --color-kp-mantle: #120e1a;
+  --color-kp-base: #16121f;
+  --color-kp-surface-0: #1c1730;
+  --color-kp-surface-1: #191427;
+  --color-kp-surface-2: #201a30;
+  --color-kp-surface-3: #251d35;
+  --color-kp-surface-4: #261e3a;
+  --color-kp-overlay-0: #33294a;
+  --color-kp-overlay-1: #382e50;
+  --color-kp-overlay-2: #413556;
+  --color-kp-overlay-3: #483d64;
+  --color-kp-overlay-4: #514363;
+  --color-kp-overlay-5: #6c568a;
+
+  --color-kp-text: #cdd6f4;
+  --color-kp-subtext: #bac2de;
+  --color-kp-overlay-text: #7f849c;
+
+  --color-kp-mauve: #cba6f7;
+  --color-kp-mauve-hover: #d9b8ff;
+  --color-kp-mauve-muted: #6c568a;
+
+  --color-kp-red: #f38ba8;
+  --color-kp-red-bg: #342231;
+  --color-kp-red-border: #65404c;
+
+  --color-kp-peach: #fab387;
+  --color-kp-peach-bg: #2b2537;
+  --color-kp-peach-border: #5c573e;
+
+  --color-kp-yellow: #f9e2af;
+  --color-kp-yellow-bg: #2b2537;
+  --color-kp-yellow-border: #5c573e;
+
+  --color-kp-green: #a6e3a1;
+  --color-kp-green-bg: #405b43;
+  --color-kp-green-border: #405b43;
+
+  --color-kp-sky: #89dceb;
+  --color-kp-sky-bg: #242c38;
+  --color-kp-sky-border: #405566;
+
+  /* Brand gradients */
+  --color-kp-brand-violet: #7c3aed;
+  --color-kp-brand-indigo: #4f46e5;
+  --color-kp-brand-blue: #2563eb;
+  --color-kp-brand-fuchsia: #c026d3;
+
+  /* Spacing scale */
+  --spacing-px: 1px;
+  --spacing-0: 0px;
+  --spacing-0\.5: 2px;
+  --spacing-1: 4px;
+  --spacing-1\.5: 6px;
+  --spacing-2: 8px;
+  --spacing-2\.5: 10px;
+  --spacing-3: 12px;
+  --spacing-3\.5: 14px;
+  --spacing-4: 16px;
+  --spacing-5: 20px;
+  --spacing-6: 24px;
+  --spacing-7: 28px;
+  --spacing-8: 32px;
+  --spacing-9: 36px;
+  --spacing-10: 40px;
+  --spacing-11: 44px;
+  --spacing-12: 48px;
+  --spacing-14: 56px;
+  --spacing-16: 64px;
+  --spacing-20: 80px;
+  --spacing-24: 96px;
+
+  /* Radius scale */
+  --radius-none: 0px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 10px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+  --radius-full: 9999px;
+
+  /* Typography */
+  --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+
+  --text-2xs: 9px;
+  --text-xs: 10px;
+  --text-sm: 11px;
+  --text-base: 12px;
+  --text-md: 13px;
+  --text-lg: 14px;
+  --text-xl: 16px;
+  --text-2xl: 18px;
+  --text-3xl: 22px;
+  --text-4xl: clamp(22px, 4vw, 32px);
+
+  /* Shadows */
+  --shadow-card: 0 14px 40px rgba(0, 0, 0, 0.16);
+  --shadow-dialog: 0 28px 80px rgba(0, 0, 0, 0.52);
+  --shadow-focus: 0 0 0 2px rgba(203, 166, 247, 0.12);
+
+  /* Z-index */
+  --z-skip-link: 100;
+  --z-sidebar-mobile: 10;
+  --z-command-backdrop: 120;
+
+  /* Layout */
+  --sidebar-width: 220px;
+  --topbar-height: 82px;
+}
