@@ -42,6 +42,67 @@ const applicationDestinations = [
 ] as const
 
 const commandRoutes = applicationDestinations.map(({ path, label, description, keywords }) => ({ path, label, description, keywords }))
+
+// Global resource index (F7-04): names and namespaces already loaded in this
+// session's bounded pages become searchable palette entries. Only identifiers
+// are indexed — never resource content, specs, or Secret data.
+const maximumCommandResources = 200
+
+function resourceEntryPath(collection: unknown, item: { name?: string; namespace?: string; kind?: string }): string | null {
+  if (typeof collection !== 'string' || !item.name || !item.namespace) return null
+  const namespace = encodeURIComponent(item.namespace)
+  const name = encodeURIComponent(item.name)
+  switch (collection) {
+    case 'pods':
+      return `/pods/${namespace}/${name}`
+    case 'workloads': {
+      const kind = ({ Deployment: 'deployments', StatefulSet: 'statefulsets', DaemonSet: 'daemonsets', Job: 'jobs', CronJob: 'cronjobs' } as Record<string, string>)[item.kind ?? '']
+      return kind ? `/workloads/${kind}/${namespace}/${name}` : null
+    }
+    case 'services':
+      return `/network/services/${namespace}/${name}`
+    case 'ingresses':
+      return `/network/ingresses/${namespace}/${name}`
+    case 'endpoint-slices':
+      return `/network/endpoint-slices/${namespace}/${name}`
+    case 'configmaps':
+      return `/config/configmaps/${namespace}/${name}`
+    case 'secrets':
+      return `/config/secrets/${namespace}/${name}`
+    default:
+      return null
+  }
+}
+
+function resourceEntryKeywords(collection: string, item: { kind?: string; namespace?: string }): string[] {
+  return [item.kind ?? '', item.namespace ?? '', collection]
+}
+
+function commandResourceEntries(queryClient: ReturnType<typeof useQueryClient>, generation: string | undefined) {
+  if (!generation) return []
+  const seen = new Set<string>()
+  const entries: Array<{ path: string; label: string; description: string; keywords: string[] }> = []
+  for (const query of queryClient.getQueryCache().getAll()) {
+    const key = query.queryKey
+    if (key[0] !== 'resources' || key[2] !== generation) continue
+    const collection = typeof key[1] === 'string' ? key[1] : ''
+    const data = query.state.data as { items?: Array<{ name?: string; namespace?: string; kind?: string }> } | undefined
+    if (!Array.isArray(data?.items)) continue
+    for (const item of data.items) {
+      const path = resourceEntryPath(collection, item)
+      if (!path || seen.has(path)) continue
+      seen.add(path)
+      entries.push({
+        path,
+        label: item.name ?? '',
+        description: `${item.kind ?? collection} · ${item.namespace ?? ''}`,
+        keywords: resourceEntryKeywords(collection, item),
+      })
+      if (entries.length >= maximumCommandResources) return entries
+    }
+  }
+  return entries
+}
 const safeGlobalRefreshRoots = new Set([
   'action-permissions',
   'cluster-profiles',
@@ -91,6 +152,7 @@ function Shell() {
   const previousGeneration = useRef<string | null>(null)
   const refreshActiveReads = useCallback(() => queryClient.refetchQueries({ type: 'active', predicate: isSafeGlobalRefreshQuery }), [queryClient])
 
+
   useEffect(() => {
     const current = selection?.generation ?? null
     const previous = previousGeneration.current
@@ -130,7 +192,7 @@ function Shell() {
             {selection ? <small>{selection.cluster} · {selection.namespaceCount} namespace{selection.namespaceCount === 1 ? '' : 's'}</small> : null}
           </div>
           <div className="topbar-controls">
-            <CommandCenter routes={commandRoutes} onRefresh={refreshActiveReads} />
+            <CommandCenter routes={commandRoutes} getResources={() => commandResourceEntries(queryClient, selection?.generation)} onRefresh={refreshActiveReads} />
             <ContextSelector selection={selection} />
             <StatusBadge />
           </div>

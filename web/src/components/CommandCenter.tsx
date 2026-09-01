@@ -13,6 +13,11 @@ export interface CommandRoute {
 
 interface CommandCenterProps {
   routes: readonly CommandRoute[]
+  // Visible-resource entries (F7-04): identifiers only, gathered from
+  // bounded pages already loaded in this session. Resolved when the palette
+  // opens so the index always reflects the freshest cache without reactive
+  // subscriptions.
+  getResources?: () => readonly CommandRoute[]
   onRefresh?: () => void | Promise<unknown>
 }
 
@@ -65,7 +70,8 @@ function matchesQuery(route: CommandRoute, query: string) {
   return terms.every((term) => searchable.includes(term))
 }
 
-export function CommandCenter({ routes, onRefresh }: CommandCenterProps) {
+export function CommandCenter({ routes, getResources, onRefresh }: CommandCenterProps) {
+  const [sessionResources, setSessionResources] = useState<readonly CommandRoute[]>([])
   const navigate = useNavigate()
   const [view, setView] = useState<CommandCenterView>(null)
   const [query, setQuery] = useState('')
@@ -78,13 +84,19 @@ export function CommandCenter({ routes, onRefresh }: CommandCenterProps) {
   const descriptionId = useId()
   const listboxId = useId()
   const filteredRoutes = useMemo(() => routes.filter((route) => matchesQuery(route, query)), [query, routes])
+  const filteredResources = useMemo(
+    () => (sessionResources.length > 0 ? sessionResources.filter((entry) => matchesQuery(entry, query)) : []),
+    [query, sessionResources],
+  )
+  const combinedResults = useMemo(() => (filteredResources.length > 0 ? [...filteredRoutes, ...filteredResources] : filteredRoutes), [filteredResources, filteredRoutes])
 
   const open = useCallback((nextView: Exclude<CommandCenterView, null>) => {
     if (view === null && document.activeElement instanceof HTMLElement) {
       returnFocusRef.current = document.activeElement
     }
+    if (nextView === 'commands') setSessionResources(getResources?.() ?? [])
     setView(nextView)
-  }, [view])
+  }, [getResources, view])
 
   const close = useCallback(() => {
     setView(null)
@@ -176,16 +188,16 @@ export function CommandCenter({ routes, onRefresh }: CommandCenterProps) {
       return
     }
 
-    if (view !== 'commands' || filteredRoutes.length === 0) return
+    if (view !== 'commands' || combinedResults.length === 0) return
     if (event.key === 'ArrowDown') {
       event.preventDefault()
-      setActiveIndex((current) => (current + 1) % filteredRoutes.length)
+      setActiveIndex((current) => (current + 1) % combinedResults.length)
     } else if (event.key === 'ArrowUp') {
       event.preventDefault()
-      setActiveIndex((current) => (current - 1 + filteredRoutes.length) % filteredRoutes.length)
+      setActiveIndex((current) => (current - 1 + combinedResults.length) % combinedResults.length)
     } else if (event.key === 'Enter' && event.target === inputRef.current) {
       event.preventDefault()
-      chooseRoute(filteredRoutes[Math.min(activeIndex, filteredRoutes.length - 1)])
+      chooseRoute(combinedResults[Math.min(activeIndex, combinedResults.length - 1)])
     }
   }
 
@@ -238,7 +250,7 @@ export function CommandCenter({ routes, onRefresh }: CommandCenterProps) {
 
             {view === 'commands' ? (
               <>
-                <p id={descriptionId} className="command-center-description">Search the pages built into this local application. No cluster data is queried.</p>
+                <p id={descriptionId} className="command-center-description">{sessionResources.length > 0 ? 'Search pages and resources already loaded in this session. Only names and namespaces are searched; no resource content is read.' : 'Search the pages built into this local application. No cluster data is queried.'}</p>
                 <div className="command-center-search">
                   <Search size={17} aria-hidden="true" />
                   <Input
@@ -249,7 +261,7 @@ export function CommandCenter({ routes, onRefresh }: CommandCenterProps) {
                     aria-autocomplete="list"
                     aria-controls={listboxId}
                     aria-expanded="true"
-                    aria-activedescendant={filteredRoutes.length > 0 ? `${listboxId}-option-${activeIndex}` : undefined}
+                    aria-activedescendant={combinedResults.length > 0 ? `${listboxId}-option-${activeIndex}` : undefined}
                     autoComplete="off"
                     spellCheck="false"
                     value={query}
@@ -262,8 +274,8 @@ export function CommandCenter({ routes, onRefresh }: CommandCenterProps) {
                   />
                 </div>
 
-                {filteredRoutes.length > 0 ? (
-                  <div id={listboxId} className="command-center-results" role="listbox" aria-label="Application pages">
+                {combinedResults.length > 0 ? (
+                  <div id={listboxId} className="command-center-results" role="listbox" aria-label={sessionResources.length > 0 ? 'Application pages and visible resources' : 'Application pages'}>
                     {filteredRoutes.map((route, index) => (
                       <button
                         key={route.path}
@@ -281,9 +293,29 @@ export function CommandCenter({ routes, onRefresh }: CommandCenterProps) {
                         <code>{route.path}</code>
                       </button>
                     ))}
+                    {filteredResources.map((entry, offset) => {
+                      const index = filteredRoutes.length + offset
+                      return (
+                        <button
+                          key={entry.path}
+                          id={`${listboxId}-option-${index}`}
+                          type="button"
+                          role="option"
+                          tabIndex={-1}
+                          aria-selected={index === activeIndex}
+                          className={index === activeIndex ? 'command-center-result command-center-result--active' : 'command-center-result'}
+                          onMouseEnter={() => setActiveIndex(index)}
+                          onFocus={() => setActiveIndex(index)}
+                          onClick={() => chooseRoute(entry)}
+                        >
+                          <span><strong>{entry.label}</strong><small>{entry.description}</small></span>
+                          <code>{entry.path}</code>
+                        </button>
+                      )
+                    })}
                   </div>
                 ) : (
-                  <p className="command-center-empty" role="status">No application page matches this search.</p>
+                  <p className="command-center-empty" role="status">{sessionResources.length > 0 ? 'No page or loaded resource matches this search.' : 'No application page matches this search.'}</p>
                 )}
 
                 <footer className="command-center-footer">
