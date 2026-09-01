@@ -93,3 +93,65 @@
 - [ ] Release candidate criada e instaladores testados.
 - [ ] Matriz MVP 27/27.
 - [ ] Matriz UX avançada conforme escopo da Fase 9.
+
+---
+
+## 10. Resultado da execução (2026-09-01)
+
+### Fase 0 — ✅ concluída (`deb4d02`)
+
+- F0-01 ✅ `TestGenerationUsesActivityIdleDeadlineAndCancelsPreviousWork` estabilizado (timer parado antes do reset + margens); port-forward cleanup com retry no probe.
+- F0-02/F0-03 ✅ `context.Background()` removido dos serviços de ação; root context propagado; cancelamento por request/geração/shutdown.
+- F0-05 ✅ mutação de `os.Stderr` localizada em helper com restauração via `defer`.
+- F0-06 ✅ race latente adicional em `Generation.Stream` corrigida (timer sob mutex) na F4.
+
+### Fase 1 — ✅ concluída (`41a2adf`, `6681f70`)
+
+- F1-01 ✅ tokens em `web/src/tokens.css` (`@theme` Tailwind 4).
+- F1-02 ✅ componentes atômicos em `web/src/components/ui/` (Button, Input, Select, Badge, Card, Tabs, EmptyState, Skeleton, DataTable, Drawer) e migração dos componentes de tela.
+- F1-03 ✅ SVGs da marca integrados (BrandLogo/BrandWordmark na sidebar).
+- F1-04 ✅ `DataTable` em uso nas listas de recursos, dashboard e permissões.
+
+### Fase 2 — ✅ concluída (`17e53fe`)
+
+- F2-01 ✅ parser composto (`termo -excluido "frase exata"`) no backend com testes; filtros de lista inicializam pela URL.
+- F2-02 ✅ `Drawer` lateral para detalhes, preservando lista e deep links.
+- F2-03 ✅ YAML com highlight (`react-syntax-highlighter`, PrismLight + vscDarkPlus); Secret continua sem YAML.
+- F2-04 ✅ logs: pause/continue com buffer, highlight JSON, filtro local por nível.
+
+### Fase 3 — ✅ concluída (`6e142bd`)
+
+- F3-01 ✅ cards navegam para `/pods?problematic=true`, `/pods?restarts=gte3`, `/events?status=Warning` etc.
+- F3-02 ✅ seção "Namespace health" no dashboard (backend já existia; frontend consumido com links por namespace).
+- F3-03 ✅ idade dos dados por bloco com badge "stale" após 60s.
+
+### Fase 4 — ✅ concluída com ressalva (`e010dcb`)
+
+- F4-01 ✅ (forma pragmática) teste arquitetural em `internal/ports` impede handlers de importarem adapters/integração; pacote `ports` sem dependências.
+- F4-02 ⏸ **adiado**: consolidação dashboard/resources é refactor de alto risco; documentada como follow-up.
+- F4-03 ✅ cobertura: adapters/kubernetes 53%→91,6%; kubernetesruntime 41,4%→75,3% (alvo ≥70%).
+
+### Fase 5 — ✅ essencial concluída (`f8dd8a6`)
+
+- O-01 ✅ `duration_ms` numérico no schema de logs.
+- Métricas ✅ registro próprio allowlisted + middleware de requests + `/metrics` opt-in (default off, loopback), com testes de ausência/Presença.
+- `docs/observability.md` ✅.
+- ⏸ adiados: O-02..O-05 parciais, spans OTel (O-06..O-09), checks de observabilidade no `doctor` (F5-04).
+
+### Fase 6 — ✅ concluída (`02d008e`)
+
+- F6-01 ✅ testes de `internal/application.Compose` (validações, /health, cleanups, resiliência sem kubeconfig).
+- F6-02..F6-04 ✅ `docs/design-system.md`, `docs/rbac-requirements.md`, `docs/observability.md`, `docs/architecture.md` atualizado.
+
+### Gates transversais no fechamento
+
+| Gate | Resultado |
+| --- | --- |
+| G-01 `go test -count=1 ./...` | ✅ 956 testes, 37 pacotes |
+| G-02 `go test -race` (pacotes internos rodados durante as fases) | ✅ |
+| G-03 `go vet` | ✅ limpo |
+| G-04 frontend lint/typecheck/test/build | ✅ (79 Vitest) |
+| G-07 `scripts/security_check.sh HEAD` | ✅ em todos os pushes |
+| E2E smoke manual | ✅ app + Kind `kubepeep-f4`, screenshots atualizados |
+
+⏸ G-08/G-09/G-10 (harness Kind completo, Playwright E2E dedicado, build desktop) permanecem para o pipeline de release.

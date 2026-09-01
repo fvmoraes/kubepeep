@@ -3,6 +3,10 @@
 > **Status:** revisão técnica, funcional e visual concluída em 2026-08-31.
 > **Base:** HEAD `c7e291d` (`feat: desktop support and security hardening`).
 > **Objetivo:** transformar os achados da revisão em um plano executável de melhorias, preservando a identidade minimalista do KubePeep e aproximando a experiência de referência do Aptakube sem copiá-la.
+>
+> **Execução (2026-09-01):** Fases 0–6 concluídas e publicadas no `main`.
+> Commits: F0 `deb4d02` · F1 `41a2adf`+`6681f70` · F2 `17e53fe` · F3 `6e142bd` · F4 `e010dcb` · F5 `f8dd8a6` · F6 `02d008e`.
+> Itens deliberadamente adiados: F4-02 (consolidação dashboard/resources — refactor de alto risco, feito como follow-up separado), O-02..O-08 parciais (OTel spans e correlação request_id) e toda a Fase 7 (evoluções futuras P3).
 
 ## 1. Propósito deste plano
 
