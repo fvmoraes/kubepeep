@@ -101,9 +101,11 @@ Regras verificáveis:
 
 Um teste arquitetural futuro deve falhar se `internal/api/handlers` importar `k8s.io/client-go/kubernetes` ou o adapter SQLite concreto.
 
+> **Implementado:** `internal/ports/architecture_test.go` falha se qualquer arquivo de `internal/api/handlers` importar `internal/adapters/...` ou `internal/integration/...`, e garante que o pacote `internal/ports` permaneça livre de dependências internas. Handlers dependem exclusivamente de interfaces de serviço e DTOs; a fiação concreta pertence a `internal/application.Compose` e aos runtimes (CLI/desktop).
+
 ## 5. Ports
 
-As assinaturas Go serão fechadas após o scaffold, mas a semântica é definida aqui.
+As interfaces Go vivem junto aos serviços que as consomem (idioma Go de "consumer-defined interfaces"); o pacote `internal/ports` é a fronteira documentada, mantido livre de dependências internas e vigiado pelo teste arquitetural acima. A semântica é definida aqui.
 
 | Port | Responsabilidade | Entradas mínimas | Saídas/garantias |
 | --- | --- | --- | --- |
