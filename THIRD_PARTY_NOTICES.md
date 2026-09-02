@@ -1,6 +1,6 @@
 # Third-party notices
 
-Kube Peep is distributed under the MIT license in `LICENSE`. Its executable
+Kube Peep is distributed under the Apache License, Version 2.0 in `LICENSE`. Its executable
 also contains open-source dependencies. Versions are fixed by `go.mod`,
 `go.sum`, and `web/package-lock.json`; the linked upstream license files remain
 the authoritative terms.

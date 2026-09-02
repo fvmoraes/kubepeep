@@ -61,6 +61,12 @@ archives:
           group: root
           mode: 0644
           mtime: "{{ .CommitDate }}"
+      - src: NOTICE
+        info:
+          owner: root
+          group: root
+          mode: 0644
+          mtime: "{{ .CommitDate }}"
       - src: THIRD_PARTY_NOTICES.md
         info:
           owner: root

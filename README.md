@@ -227,4 +227,5 @@ migrations are embedded. See [the executable plan](plan/README.md),
 
 ## License
 
-MIT. See [LICENSE](LICENSE) and [third-party notices](THIRD_PARTY_NOTICES.md).
+Apache License, Version 2.0. See [LICENSE](LICENSE), [NOTICE](NOTICE) and
+[third-party notices](THIRD_PARTY_NOTICES.md).
