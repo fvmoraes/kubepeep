@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versions follow [Semantic Versioning](https://semver.org/) **without the `v`
 prefix** (official tags: `1.4.2`, `1.4.3`, …), and entries are generated
 automatically from Conventional Commits by `.github/workflows/release.yml`.
+## [0.1.1] - 2026-09-03
+
+## Changed
+- chore(verify): drop retired goreleaser snapshot harness
+
+## Download
+
+Permanently-updated links: https://github.com/fvmoraes/kubepeep/blob/main/docs/download.md
+
+## Full Changelog
+**Full Changelog**: https://github.com/fvmoraes/kubepeep/compare/0.1.0...0.1.1
+
 ## [0.1.0] - 2026-09-03
 
 ## Added
@@ -82,3 +94,4 @@ Permanently-updated links: https://github.com/fvmoraes/kubepeep/blob/main/docs/d
 **Full Changelog**: https://github.com/fvmoraes/kubepeep/releases/tag/0.1.0
 
 [0.1.0]: https://github.com/fvmoraes/kubepeep/releases/tag/0.1.0
+[0.1.1]: https://github.com/fvmoraes/kubepeep/releases/tag/0.1.1
