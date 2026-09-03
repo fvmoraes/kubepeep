@@ -321,9 +321,23 @@ jobs:
           mkdir -p dist
           go install github.com/goreleaser/nfpm/v2/cmd/nfpm@${{ env.NFPM_VERSION }}
           export PKG_VERSION="${{ env.VERSION }}" PKG_ARCH="${{ matrix.nfpm_arch }}"
-          mkdir -p dist
-          "$(go env GOPATH)/bin/nfpm" package -p deb -f build/linux/nfpm.yaml -t "dist/kubepeep-linux-${{ matrix.arch }}.deb"
-          "$(go env GOPATH)/bin/nfpm" package -p rpm -f build/linux/nfpm.yaml -t "dist/kubepeep-linux-${{ matrix.arch }}.rpm"
+          export NFPM_LOG=debug
+          set +e
+          "$(go env GOPATH)/bin/nfpm" package -p deb -f build/linux/nfpm.yaml -t "dist/kubepeep-linux-${{ matrix.arch }}.deb" 2>&1 | tee nfpm-deb.log
+          deb_rc=${PIPESTATUS[0]}
+          if [ "$deb_rc" -ne 0 ]; then
+            tail -c 3500 nfpm-deb.log | while IFS= read -r line; do echo "::error title=nfpm-deb::$line"; done
+            exit "$deb_rc"
+          fi
+          "$(go env GOPATH)/bin/nfpm" package -p rpm -f build/linux/nfpm.yaml -t "dist/kubepeep-linux-${{ matrix.arch }}.rpm" 2>&1 | tee nfpm-rpm.log
+          rpm_rc=${PIPESTATUS[0]}
+          if [ "$rpm_rc" -ne 0 ]; then
+            tail -c 3500 nfpm-rpm.log | while IFS= read -r line; do echo "::error title=nfpm-rpm::$line"; done
+            exit "$rpm_rc"
+          fi
+          set -e
+          test -f "dist/kubepeep-linux-${{ matrix.arch }}.deb"
+          test -f "dist/kubepeep-linux-${{ matrix.arch }}.rpm"
 
       - name: Package the CLI archive (install.sh)
         run: |
