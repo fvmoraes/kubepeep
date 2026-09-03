@@ -4,23 +4,25 @@
 #
 # Fluxo (uma única run por push em main ou dispatch manual):
 #
-#   prepare       — analisa Conventional Commits desde a última tag oficial,
-#                   calcula SemVer SEM prefixo "v", espera o verify.yml do
-#                   commit, atualiza wails.json/CHANGELOG, versiona (commit do
-#                   bot) e cria a tag imutável <X.Y.Z>
-#         ↓
+#   prepare       — analisa Conventional Commits desde a última tag oficial e
+#                   calcula SemVer SEM prefixo "v"; commita metadados de
+#                   versão (wails.json + CHANGELOG). Rápido: NÃO espera o
+#                   verify e NÃO cria tag.
+#         ↓                    (builds rodam em PARALELO com o verify.yml)
 #   build-linux   — Wails nativo (ubuntu-24.04 / ubuntu-24.04-arm) →
 #                   deb + rpm (nfpm) + tar.gz (CLI para install.sh)
 #   build-windows — Wails nativo (windows-2025) → NSIS setup.exe + zip
 #   build-macos   — Wails nativo (macos-15-intel / macos-15) → dmg + zip + tar.gz
 #         ↓ (todos precisam passar; nada é publicado parcialmente)
-#   publish       — checksums.txt + SBOM SPDX + GitHub Release marcada como
-#                   Latest (criada na tag real, nunca em "latest")
+#   publish       — espera o verify.yml do commit de origem; só então cria a
+#                   tag imutável <X.Y.Z>, checksums.txt, SBOM SPDX e a GitHub
+#                   Release marcada como Latest
 #         ↓
 #   update-latest — move a git tag móvel `latest` para o commit da release
 #
 # Regras:
-#   - Tags oficiais: 1.0.0, 1.1.0, 1.1.1 — SEM prefixo "v" (imutáveis).
+#   - Tags oficiais: 1.0.0, 1.1.0, 1.1.1 — SEM prefixo "v" (imutáveis) e criadas
+#     APENAS quando todos os builds e o verify passam (falha não queima versão).
 #   - Apenas a git tag móvel `latest` é atualizada (force push só nela).
 #   - Assets com nome CONSTANTE (kubepeep-linux-amd64.deb, …): cada Release tem
 #     seu próprio namespace, e /releases/latest/download/<asset> é permanente.
@@ -58,23 +60,24 @@ env:
 
 jobs:
   # ------------------------------------------------------------------ #
-  # prepare — versionamento, CHANGELOG, tag imutável                    #
+  # prepare — versionamento e metadados (rápido, sem tag)               #
   # ------------------------------------------------------------------ #
   prepare:
-    name: prepare (SemVer + tag)
+    name: prepare (SemVer + metadados)
     if: github.repository == 'fvmoraes/kubepeep' && github.actor != 'github-actions[bot]' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 15
     permissions:
       contents: write
     outputs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
+      sha: ${{ steps.metadata.outputs.sha }}
       should_release: ${{ steps.bump.outputs.should_release }}
     steps:
       - name: Check out source (full history for commit analysis)
         # persist-credentials permanece no default (true) APENAS aqui: este job
-        # empurra o commit de versionamento e a tag com o GITHUB_TOKEN delimitado.
+        # empurra o commit de metadados com o GITHUB_TOKEN delimitado.
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           fetch-depth: 0
@@ -83,38 +86,6 @@ jobs:
         env:
           SECURITY_REF: ${{ github.sha }}
         run: ./scripts/security_check.sh "$SECURITY_REF"
-
-      - name: Require successful verification for this exact commit
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          # A release só sai de um commit validado pelo verify.yml em main.
-          # O push dispara ambos os workflows em paralelo; aqui aguardamos o
-          # resultado (success) do verify.yml para ESTE sha antes de versionar.
-          deadline=$(( $(date +%s) + 45 * 60 ))
-          while :; do
-            state=$(gh api \
-              "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/check-runs" \
-              --jq '[.check_runs[] | select(.name == "build-and-test") | .conclusion] | join(",")' 2>/dev/null || echo "")
-            case "$state" in
-              *success*)
-                echo "verify.yml concluded successfully for ${GITHUB_SHA}."
-                exit 0
-                ;;
-              # *failure* também cobre startup_failure (substring).
-              *failure*|*cancelled*|*timed_out*|*action_required*)
-                echo "::error::verify.yml did not succeed for ${GITHUB_SHA} (state: ${state}). Release aborted."
-                exit 1
-                ;;
-            esac
-            if [ "$(date +%s)" -ge "$deadline" ]; then
-              echo "::error::Timed out waiting for verify.yml on ${GITHUB_SHA} (last state: ${state:-none}). Release aborted."
-              exit 1
-            fi
-            echo "Waiting for verify.yml on ${GITHUB_SHA} (state: ${state:-none})..."
-            sleep 60
-          done
 
       - name: Determine bump type
         id: bump
@@ -219,6 +190,7 @@ jobs:
           grep productVersion wails.json
 
       - name: Commit version files and push (bot)
+        id: metadata
         if: steps.bump.outputs.should_release == 'true'
         run: |
           set -euo pipefail
@@ -231,16 +203,7 @@ jobs:
             git commit -m "release: ${{ steps.version.outputs.version }} [skip ci]"
             git push origin "HEAD:main"
           fi
-
-      - name: Create the immutable release tag
-        if: steps.bump.outputs.should_release == 'true'
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          set -euo pipefail
-          git tag -a "$VERSION" -m "KubePeep $VERSION"
-          git push origin "$VERSION"
-          echo "Tag ${VERSION} → $(git rev-parse --short HEAD)"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Keep release notes for the publish job
         if: steps.bump.outputs.should_release == 'true'
@@ -273,10 +236,10 @@ jobs:
     env:
       VERSION: ${{ needs.prepare.outputs.version }}
     steps:
-      - name: Check out the immutable release tag
+      - name: Check out the release metadata commit
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: refs/tags/${{ needs.prepare.outputs.tag }}
+          ref: ${{ needs.prepare.outputs.sha }}
           persist-credentials: false
 
       - name: Set up Go
@@ -384,10 +347,10 @@ jobs:
     env:
       VERSION: ${{ needs.prepare.outputs.version }}
     steps:
-      - name: Check out the immutable release tag
+      - name: Check out the release metadata commit
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: refs/tags/${{ needs.prepare.outputs.tag }}
+          ref: ${{ needs.prepare.outputs.sha }}
           persist-credentials: false
 
       - name: Set up Go
@@ -431,6 +394,9 @@ jobs:
               throw 'makensis is still unavailable after NSIS installation'
             }
           }
+
+      # O Wails executa o frontend (npm ci + npm run build) conforme wails.json.
+      # `-nsis` gera o instalador oficial; `-webview2 embed` embute o bootstrapper.
       - name: Build the Wails desktop app and NSIS installer
         shell: pwsh
         run: >
@@ -481,8 +447,12 @@ jobs:
         run: |
           New-Item -ItemType Directory -Path dist -Force | Out-Null
           Copy-Item .\build\bin\kubePeep.exe .\dist\kubePeep.exe
-          $installer = Get-ChildItem .\build\bin -Filter '*installer*.exe' | Select-Object -First 1
-          if ($null -eq $installer) { throw 'NSIS installer was not produced' }
+          $installer = Get-ChildItem .\build\bin -Filter '*installer*.exe' -Recurse | Select-Object -First 1
+          if ($null -eq $installer) {
+            Write-Output "build/bin contents:"
+            Get-ChildItem .\build\bin -Recurse | Select-Object FullName | Format-Table -AutoSize | Out-String | Write-Output
+            throw 'NSIS installer was not produced'
+          }
           Copy-Item $installer.FullName .\dist\kubepeep-windows-amd64-setup.exe
           $staging = Join-Path $env:RUNNER_TEMP 'kubepeep-windows-zip'
           New-Item -ItemType Directory -Path $staging -Force | Out-Null
@@ -521,10 +491,10 @@ jobs:
     env:
       VERSION: ${{ needs.prepare.outputs.version }}
     steps:
-      - name: Check out the immutable release tag
+      - name: Check out the release metadata commit
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: refs/tags/${{ needs.prepare.outputs.tag }}
+          ref: ${{ needs.prepare.outputs.sha }}
           persist-credentials: false
 
       - name: Set up Go
@@ -585,24 +555,71 @@ jobs:
           retention-days: 3
 
   # ------------------------------------------------------------------ #
-  # publish — checksums, SBOM, GitHub Release (Latest)                   #
+  # publish — gate de verify + tag + checksums + SBOM + Release (Latest) #
   # ------------------------------------------------------------------ #
   publish:
-    name: publish (GitHub Release · Latest)
+    name: publish (tag · checksums · SBOM · Release Latest)
     needs: [prepare, build-linux, build-windows, build-macos]
     if: needs.prepare.outputs.should_release == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 75
     permissions:
       contents: write
     env:
       VERSION: ${{ needs.prepare.outputs.version }}
+      TAG: ${{ needs.prepare.outputs.tag }}
+      METADATA_SHA: ${{ needs.prepare.outputs.sha }}
     steps:
-      - name: Check out the immutable release tag
+      - name: Require successful verification of the originating commit
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Os builds rodam em paralelo com o verify.yml; só publicamos quando
+          # o verify do commit de ORIGEM termina com sucesso. O commit de
+          # metadados usa [skip ci] por design — altera apenas wails.json e
+          # CHANGELOG, nenhum código.
+          deadline=$(( $(date +%s) + 45 * 60 ))
+          while :; do
+            state=$(gh api \
+              "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/check-runs" \
+              --jq '[.check_runs[] | select(.name == "build-and-test") | .conclusion] | join(",")' 2>/dev/null || echo "")
+            case "$state" in
+              *success*)
+                echo "verify.yml concluded successfully for ${GITHUB_SHA}."
+                break
+                ;;
+              *failure*|*cancelled*|*timed_out*|*action_required*)
+                echo "::error::verify.yml did not succeed for ${GITHUB_SHA} (state: ${state}). Release aborted — no tag was created."
+                exit 1
+                ;;
+            esac
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::error::Timed out waiting for verify.yml on ${GITHUB_SHA} (last state: ${state:-none})."
+              exit 1
+            fi
+            echo "Waiting for verify.yml on ${GITHUB_SHA} (state: ${state:-none})..."
+            sleep 60
+          done
+
+      - name: Check out the release metadata commit
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: refs/tags/${{ needs.prepare.outputs.tag }}
+          ref: ${{ needs.prepare.outputs.sha }}
           persist-credentials: false
+
+      - name: Create the immutable release tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if git ls-remote --tags origin "refs/tags/${TAG}" | grep -q "refs/tags/${TAG}"; then
+            echo "::error::Tag ${TAG} already exists on origin — refusing to overwrite."
+            exit 1
+          fi
+          gh api -X POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+            -f ref="refs/tags/${TAG}" -f sha="${METADATA_SHA}" > /dev/null
+          echo "Tag ${TAG} → ${METADATA_SHA:0:7}"
 
       - name: Download all validated build artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -667,7 +684,6 @@ jobs:
       - name: Create the GitHub Release (Latest) from the immutable tag
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ needs.prepare.outputs.tag }}
         run: |
           set -euo pipefail
           if gh release view "$TAG" >/dev/null 2>&1; then
@@ -703,10 +719,10 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Check out the immutable release tag
+      - name: Check out the release metadata commit
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: refs/tags/${{ needs.prepare.outputs.tag }}
+          ref: ${{ needs.prepare.outputs.sha }}
           persist-credentials: false
 
       - name: Move the mobile latest tag to the release commit
