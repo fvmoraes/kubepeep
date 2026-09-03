@@ -302,16 +302,19 @@ jobs:
             bash -c "apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq build-essential libgtk-3-dev libwebkit2gtk-4.1-dev pkg-config >/dev/null && \
             wails build -tags 'desktop,webkit2_41' -clean -s -skipbindings -nopackage -platform linux/${{ matrix.arch }} \
               -ldflags \"-s -w -X github.com/fvmoraes/kubepeep/internal/buildinfo.Version=\$RELEASE_VERSION -X github.com/fvmoraes/kubepeep/internal/buildinfo.Commit=\$RELEASE_COMMIT -X github.com/fvmoraes/kubepeep/internal/buildinfo.BuildDate=\$BUILD_DATE\" \
-              -o kubePeep"
+              -o kubePeep && \
+            ./build/bin/kubePeep version > /src/.version-out && cat /src/.version-out"
 
       - name: Verify the binary reports the release version
         run: |
-          reported=$(./build/bin/kubePeep version 2>&1) || reported="$reported (binary exited non-zero)"
-          echo "$reported"
-          case "$reported" in
-            *"version=${{ env.VERSION }}"*) : ;;
-            *) echo "::error::binary reported '$reported' but expected version=${{ env.VERSION }} (ldflags did not reach the build?)" ; exit 1 ;;
-          esac
+          # The desktop binary is dynamically linked against GTK/WebKit, which
+          # only exist inside the build container — so the version check ran
+          # there and wrote .version-out for this step to assert.
+          cat .version-out
+          grep -F "version=${{ env.VERSION }}" .version-out || {
+            echo "::error::binary did not report version=${{ env.VERSION }}"
+            exit 1
+          }
 
       - name: Package deb and rpm (nfpm)
         run: |
@@ -326,8 +329,8 @@ jobs:
           CGO_ENABLED=0 go build -trimpath \
             -ldflags "-s -w -X github.com/fvmoraes/kubepeep/internal/buildinfo.Version=${{ env.VERSION }} -X github.com/fvmoraes/kubepeep/internal/buildinfo.Commit=${GITHUB_SHA::7} -X github.com/fvmoraes/kubepeep/internal/buildinfo.BuildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             -o dist/staging/kubePeep ./cmd/kubePeep
-          cp README.md LICENSE THIRD_PARTY_NOTICES.md dist/staging/
-          tar -czf "dist/kubepeep-linux-${{ matrix.arch }}.tar.gz" -C dist/staging kubePeep README.md LICENSE THIRD_PARTY_NOTICES.md
+          cp README.md LICENSE NOTICE THIRD_PARTY_NOTICES.md dist/staging/
+          tar -czf "dist/kubepeep-linux-${{ matrix.arch }}.tar.gz" -C dist/staging kubePeep README.md LICENSE NOTICE THIRD_PARTY_NOTICES.md
           rm -rf dist/staging
 
       - name: Upload build artifacts
@@ -542,11 +545,21 @@ jobs:
         run: |
           mkdir -p dist
           ditto -c -k --sequesterRsrc --keepParent build/bin/kubePeep.app dist/kubepeep-darwin-${{ matrix.arch }}.zip
-          hdiutil create -volname "KubePeep" -srcfolder build/bin/kubePeep.app -ov -format UDZO "dist/kubepeep-darwin-${{ matrix.arch }}.dmg"
+          # hdiutil is flaky on hosted runners; retry a couple of times.
+          attempts=0
+          until [ "$attempts" -ge 3 ]; do
+            if hdiutil create -volname "KubePeep" -srcfolder build/bin/kubePeep.app -ov -format UDZO "dist/kubepeep-darwin-${{ matrix.arch }}.dmg"; then
+              break
+            fi
+            attempts=$((attempts + 1))
+            echo "hdiutil attempt $attempts failed; retrying..."
+            sleep 5
+          done
+          [ "$attempts" -lt 3 ] || exit 1
           staging=$(mktemp -d)
           cp build/bin/kubePeep.app/Contents/MacOS/kubePeep "$staging/kubePeep"
-          cp README.md LICENSE THIRD_PARTY_NOTICES.md "$staging/"
-          tar -czf "dist/kubepeep-darwin-${{ matrix.arch }}.tar.gz" -C "$staging" kubePeep README.md LICENSE THIRD_PARTY_NOTICES.md
+          cp README.md LICENSE NOTICE THIRD_PARTY_NOTICES.md "$staging/"
+          tar -czf "dist/kubepeep-darwin-${{ matrix.arch }}.tar.gz" -C "$staging" kubePeep README.md LICENSE NOTICE THIRD_PARTY_NOTICES.md
           ls -la dist
 
       - name: Upload build artifacts
