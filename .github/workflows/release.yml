@@ -318,6 +318,7 @@ jobs:
 
       - name: Package deb and rpm (nfpm)
         run: |
+          mkdir -p dist
           go install github.com/goreleaser/nfpm/v2/cmd/nfpm@${{ env.NFPM_VERSION }}
           export PKG_VERSION="${{ env.VERSION }}" PKG_ARCH="${{ matrix.nfpm_arch }}"
           mkdir -p dist
@@ -326,6 +327,7 @@ jobs:
 
       - name: Package the CLI archive (install.sh)
         run: |
+          mkdir -p dist/staging
           CGO_ENABLED=0 go build -trimpath \
             -ldflags "-s -w -X github.com/fvmoraes/kubepeep/internal/buildinfo.Version=${{ env.VERSION }} -X github.com/fvmoraes/kubepeep/internal/buildinfo.Commit=${GITHUB_SHA::7} -X github.com/fvmoraes/kubepeep/internal/buildinfo.BuildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             -o dist/staging/kubePeep ./cmd/kubePeep
