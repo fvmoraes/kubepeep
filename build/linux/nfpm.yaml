@@ -1,0 +1,84 @@
+# KubePeep Linux packaging (DEB + RPM) — used by .github/workflows/release.yml.
+# The workflow injects PKG_VERSION and PKG_ARCH (nfpm environment expansion)
+# and stages the desktop binary at build/bin/kubePeep before packaging.
+name: kubepeep
+
+arch: ${PKG_ARCH}
+platform: linux
+version: ${PKG_VERSION}
+release: 1
+section: utils
+priority: optional
+
+maintainer: Franklin Moraes <fvmoraes@users.noreply.github.com>
+description: |-
+  Local Kubernetes observability desktop application.
+  KubePeep runs entirely on loopback and talks to your cluster with the
+  identity of the selected kubeconfig context.
+vendor: KubePeep Project
+homepage: https://kubepeep.online
+license: Apache-2.0
+
+# Runtime libraries of the Wails/WebKit/GTK stack. The desktop binary is
+# built with the webkit2_41 tag (libwebkit2gtk-4.1, Ubuntu 22.04+/Debian 12+).
+depends:
+  - libgtk-3-0
+  - libwebkit2gtk-4.1-0
+
+# RPM distributions name the same stack differently (Fedora 39+, RHEL 9 EPEL).
+overrides:
+  rpm:
+    depends:
+      - gtk3
+      - webkit2gtk4.1
+
+contents:
+  - src: build/bin/kubePeep
+    dst: /usr/bin/kubepeep
+    type: file
+    file_info:
+      mode: 0755
+      owner: root
+      group: root
+  - src: packaging/linux/kubepeep.desktop
+    dst: /usr/share/applications/kubepeep.desktop
+    type: file
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+  - src: build/appicon.png
+    dst: /usr/share/icons/hicolor/256x256/apps/kubepeep.png
+    type: file
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+  - src: LICENSE
+    dst: /usr/share/doc/kubepeep/LICENSE
+    type: file
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+  - src: NOTICE
+    dst: /usr/share/doc/kubepeep/NOTICE
+    type: file
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+  - src: THIRD_PARTY_NOTICES.md
+    dst: /usr/share/doc/kubepeep/THIRD_PARTY_NOTICES.md
+    type: file
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+  - src: README.md
+    dst: /usr/share/doc/kubepeep/README.md
+    type: file
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
