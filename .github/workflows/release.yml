@@ -102,7 +102,8 @@ jobs:
                 echo "verify.yml concluded successfully for ${GITHUB_SHA}."
                 exit 0
                 ;;
-              *failure*|*cancelled*|*timed_out*|*startup_failure*|*action_required*)
+              # *failure* também cobre startup_failure (substring).
+              *failure*|*cancelled*|*timed_out*|*action_required*)
                 echo "::error::verify.yml did not succeed for ${GITHUB_SHA} (state: ${state}). Release aborted."
                 exit 1
                 ;;
@@ -163,9 +164,11 @@ jobs:
             exit 0
           fi
 
-          echo "should_release=true" >> "$GITHUB_OUTPUT"
-          echo "bump_type=$type" >> "$GITHUB_OUTPUT"
-          echo "previous_tag=${previous_tag}" >> "$GITHUB_OUTPUT"
+          {
+            echo "should_release=true"
+            echo "bump_type=$type"
+            echo "previous_tag=${previous_tag}"
+          } >> "$GITHUB_OUTPUT"
           echo "Bump: ${type} · ${count} commit(s) since ${previous_tag:-beginning}"
 
       - name: Compute version
@@ -186,8 +189,10 @@ jobs:
             echo "::error::Tag ${version} already exists on origin — aborting."
             exit 1
           fi
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
-          echo "tag=${version}" >> "$GITHUB_OUTPUT"
+          {
+            echo "version=${version}"
+            echo "tag=${version}"
+          } >> "$GITHUB_OUTPUT"
           echo "Release version: ${version} (previous: ${previous})"
 
       - name: Generate release notes and update CHANGELOG
