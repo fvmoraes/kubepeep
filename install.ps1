@@ -392,8 +392,8 @@ switch ($architecture.ToUpperInvariant()) {
 }
 
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-$archiveName = "kubePeep_${Version}_windows_${targetArch}.zip"
-$releaseUrl = "https://github.com/fvmoraes/kubepeep/releases/download/v$Version"
+$archiveName = "kubepeep-windows-$targetArch.zip"
+$releaseUrl = "https://github.com/fvmoraes/kubepeep/releases/download/$Version"
 $temporaryRoot = Join-Path ([IO.Path]::GetTempPath()) ("kubepeep-install-" + [Guid]::NewGuid().ToString('N'))
 $staged = $null
 $backup = $null

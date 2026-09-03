@@ -1,5 +1,8 @@
 # Kube Peep
 
+[![Latest Release](https://img.shields.io/github/v/release/fvmoraes/kubepeep?sort=semver&label=release&logo=github)](https://github.com/fvmoraes/kubepeep/releases/latest)
+[![Release pipeline](https://github.com/fvmoraes/kubepeep/actions/workflows/release.yml/badge.svg)](https://github.com/fvmoraes/kubepeep/actions/workflows/release.yml)
+
 Kube Peep is a local, self-contained Kubernetes dashboard. It uses the current
 user's kubeconfig and Kubernetes RBAC identity, and embeds its React interface
 in the Go binary. It runs as a native desktop application (Wails) or as a
@@ -17,6 +20,25 @@ credentials, does not impersonate users, and never displays Secret values.
 - No Node.js, database server, or other Kube Peep runtime dependency.
 
 The Metrics API is optional. Its absence affects only the metrics block.
+
+## Download
+
+Official desktop packages and CLI archives are published on GitHub Releases.
+The links below are permanent: they always deliver the latest stable release.
+
+| Platform | Architecture | Download |
+|----------|--------------|----------|
+| Windows 10/11 | x86_64 | [kubepeep-windows-amd64-setup.exe](https://github.com/fvmoraes/kubepeep/releases/latest/download/kubepeep-windows-amd64-setup.exe) |
+| Linux DEB (Debian/Ubuntu) | x86_64 | [kubepeep-linux-amd64.deb](https://github.com/fvmoraes/kubepeep/releases/latest/download/kubepeep-linux-amd64.deb) |
+| Linux RPM (Fedora/RHEL) | x86_64 | [kubepeep-linux-amd64.rpm](https://github.com/fvmoraes/kubepeep/releases/latest/download/kubepeep-linux-amd64.rpm) |
+| Linux DEB (Debian/Ubuntu) | ARM64 | [kubepeep-linux-arm64.deb](https://github.com/fvmoraes/kubepeep/releases/latest/download/kubepeep-linux-arm64.deb) |
+| Linux RPM (Fedora/RHEL) | ARM64 | [kubepeep-linux-arm64.rpm](https://github.com/fvmoraes/kubepeep/releases/latest/download/kubepeep-linux-arm64.rpm) |
+| macOS (Intel) | x86_64 | [kubepeep-darwin-amd64.dmg](https://github.com/fvmoraes/kubepeep/releases/latest/download/kubepeep-darwin-amd64.dmg) |
+| macOS (Apple Silicon) | ARM64 | [kubepeep-darwin-arm64.dmg](https://github.com/fvmoraes/kubepeep/releases/latest/download/kubepeep-darwin-arm64.dmg) |
+
+Latest release page: <https://github.com/fvmoraes/kubepeep/releases/latest> ·
+Per-platform details and verification notes:
+[docs/download.md](docs/download.md).
 
 ## Install a release
 

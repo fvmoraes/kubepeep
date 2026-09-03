@@ -23,7 +23,7 @@ case "${1:-}" in
 esac
 EOF
 chmod 755 "$payload_dir/kubePeep"
-archive=kubePeep_0.1.0_linux_amd64.tar.gz
+archive=kubepeep-linux-amd64.tar.gz
 publish_payload() {
 	tar -czf "$release_dir/$archive" -C "$payload_dir" kubePeep
 	checksum=$(sha256sum "$release_dir/$archive" | awk '{print $1}')

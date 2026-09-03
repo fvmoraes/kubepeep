@@ -307,8 +307,8 @@ case "$(uname -m)" in
 	*) fail "unsupported architecture" ;;
 esac
 
-archive_name=kubePeep_${version}_${target_os}_${target_arch}.tar.gz
-release_url=$repository_url/releases/download/v$version
+archive_name=kubepeep-${target_os}-${target_arch}.tar.gz
+release_url=$repository_url/releases/download/$version
 prepare_install_directory
 validate_existing_binary
 validate_managed_path
