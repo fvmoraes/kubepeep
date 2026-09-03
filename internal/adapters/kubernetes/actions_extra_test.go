@@ -110,10 +110,12 @@ func newFakeSPDYConnection() *fakeSPDYConnection {
 
 func (connection *fakeSPDYConnection) CreateStream(headers http.Header) (httpstream.Stream, error) {
 	connection.mu.Lock()
-	defer connection.mu.Unlock()
 	streamType := headers.Get(corev1.StreamType)
 	connection.created = append(connection.created, streamType)
 	factory := connection.factories[streamType]
+	// Libera o mutex antes de invocar a factory: factories de teste podem
+	// bloquear (ex.: cancelamento) e não podem travar Close/closeCountValue.
+	connection.mu.Unlock()
 	if factory == nil {
 		return nil, errors.New("synthetic stream refused")
 	}
