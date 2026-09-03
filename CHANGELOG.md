@@ -9,6 +9,24 @@ automatically from Conventional Commits by `.github/workflows/release.yml`.
 ## [0.1.2] - 2026-09-03
 
 ## Changed
+- release: 0.1.2 [skip ci]
+- refactor(release): build in parallel with verify; tag only after all gates
+
+## Fixed
+- fix(release): version-env injection in container build, nfpm config, icon, dependabot
+- fix(verify): prune go.sum entries added by 'go mod download all'
+- fix(release): unblock container tidy offline and ensure NSIS on Windows
+
+## Download
+
+Permanently-updated links: https://github.com/fvmoraes/kubepeep/blob/main/docs/download.md
+
+## Full Changelog
+**Full Changelog**: https://github.com/fvmoraes/kubepeep/compare/0.1.1...0.1.2
+
+## [0.1.2] - 2026-09-03
+
+## Changed
 - refactor(release): build in parallel with verify; tag only after all gates
 
 ## Fixed
