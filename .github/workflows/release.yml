@@ -308,7 +308,12 @@ jobs:
         run: echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
       - name: Warm the Go module cache for the build container
-        run: go mod download
+        # `wails build` roda `go mod tidy` antes de compilar; o tidy resolve
+        # TAMBÉM dependências de teste (ex.: gomega). Baixamos o grafo inteiro
+        # para que o tidy do container funcione com GOPROXY=off.
+        run: |
+          go mod tidy
+          go mod download all
 
       # O binário desktop é compilado dentro de um container Ubuntu 22.04 para
       # compatibilidade de glibc (2.35) com Ubuntu 22.04+/Debian 12+, usando a
@@ -406,8 +411,26 @@ jobs:
       - name: Install Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
 
-      # O Wails executa o frontend (npm ci + npm run build) conforme wails.json.
-      # `-nsis` gera o instalador oficial; `-webview2 embed` embute o bootstrapper.
+      # O Wails não baixa o NSIS: sem makensis no PATH ele apenas avisa e pula
+      # o instalador. Garantimos o NSIS antes do build.
+      - name: Ensure NSIS is available
+        shell: pwsh
+        run: |
+          if (-not (Get-Command makensis -ErrorAction SilentlyContinue)) {
+            choco install nsis -y --no-progress
+          }
+          $makensis = Get-Command makensis -ErrorAction SilentlyContinue
+          if ($makensis) {
+            Write-Output "makensis: $($makensis.Source)"
+          } else {
+            $nsisPath = 'C:\Program Files (x86)\NSIS'
+            if (Test-Path (Join-Path $nsisPath 'makensis.exe')) {
+              Add-Content $env:GITHUB_PATH $nsisPath
+              Write-Output "makensis added to PATH for subsequent steps: $nsisPath"
+            } else {
+              throw 'makensis is still unavailable after NSIS installation'
+            }
+          }
       - name: Build the Wails desktop app and NSIS installer
         shell: pwsh
         run: >
