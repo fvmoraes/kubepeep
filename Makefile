@@ -19,7 +19,7 @@ LDFLAGS := -s -w \
 
 .PHONY: format format-check lint typecheck test-unit test-integration test-race \
 	test-e2e test web-install web-build build smoke cross-build verify-ginger \
-	verify release-snapshot clean dev-desktop build-desktop build-desktop-linux \
+	verify clean dev-desktop build-desktop build-desktop-linux \
 	build-desktop-windows build-desktop-darwin
 
 WAILS ?= $(shell $(GO) env GOPATH)/bin/wails
@@ -103,9 +103,6 @@ build-desktop-darwin:
 	$(WAILS) build -tags "$(DESKTOP_TAGS)" -clean -platform darwin/amd64 -o "$(DESKTOP_OUT)/darwin-amd64/kubePeep"
 
 verify: format-check lint typecheck test test-e2e build smoke verify-ginger
-
-release-snapshot:
-	goreleaser release --snapshot --clean
 
 clean:
 	rm -f $(BINARY)

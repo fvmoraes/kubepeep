@@ -245,6 +245,13 @@ try {
     $script:testStage = 'upgrade'
     $oldLdflags = '-X github.com/fvmoraes/kubepeep/internal/buildinfo.Version=0.0.9 -X github.com/fvmoraes/kubepeep/internal/buildinfo.Commit=synthetic-old -X github.com/fvmoraes/kubepeep/internal/buildinfo.BuildDate=2026-08-17T00:00:00Z'
     & go build -trimpath -ldflags $oldLdflags -o $binaryPath ./cmd/kubePeep
+    if ($LASTEXITCODE -ne 0) {
+        # Runners do Windows podem falhar a escrita do exe por varredura em
+        # tempo real do antivírus; uma repetição única resolve de forma
+        # determinística.
+        Start-Sleep -Seconds 3
+        & go build -trimpath -ldflags $oldLdflags -o $binaryPath ./cmd/kubePeep
+    }
     if ($LASTEXITCODE -ne 0) { throw 'could not create the previous-version upgrade fixture' }
     Assert-True ((& $binaryPath version | Out-String) -match 'version=0\.0\.9(?:\s|$)') 'previous-version fixture reports an unexpected version'
     & ./install.ps1 -Version 0.1.0 -InstallDir $installDir | Out-Null

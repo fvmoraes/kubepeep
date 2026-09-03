@@ -422,6 +422,37 @@ jobs:
           $out = & .\build\bin\kubePeep.exe version | Out-String
           if ($out -notmatch [Regex]::Escape("version=${{ env.VERSION }}")) { throw 'version mismatch' }
 
+      # Cobertura migrada do antigo native-archive-smoke (verify.yml):
+      # valida o modo serve do binário Windows publicável de ponta a ponta.
+      - name: Smoke the serve mode (loopback health)
+        shell: pwsh
+        run: |
+          $env:LOCALAPPDATA = Join-Path $env:RUNNER_TEMP 'kubepeep-serve-localappdata'
+          New-Item -ItemType Directory -Path $env:LOCALAPPDATA -Force | Out-Null
+          $binary = Join-Path (Get-Location) 'build\bin\kubePeep.exe'
+          $process = Start-Process -FilePath $binary -ArgumentList @('serve', '--no-browser') -PassThru -WindowStyle Hidden
+          try {
+            $healthy = $false
+            foreach ($attempt in 1..100) {
+              if ($process.HasExited) { throw "serve process exited before readiness (code $($process.ExitCode))" }
+              try {
+                $status = & $binary status 2>$null | Out-String
+                if ($LASTEXITCODE -eq 0 -and $status -match 'port=([0-9]+)') {
+                  $port = [int]$Matches[1]
+                  Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$port/health" | Out-Null
+                  Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$port/api/v1/status" | Out-Null
+                  $healthy = $true
+                  break
+                }
+              } catch { }
+              Start-Sleep -Milliseconds 100
+            }
+            if (-not $healthy) { throw 'serve smoke did not reach a healthy loopback state' }
+          } finally {
+            & $binary stop *> $null
+            if (-not $process.WaitForExit(10000)) { Stop-Process -Id $process.Id -Force }
+          }
+
       - name: Assemble release assets
         shell: pwsh
         run: |
