@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=KubePeep
+GenericName=Kubernetes Observability
+Comment=Local Kubernetes observability desktop application
+Exec=/usr/bin/kubepeep
+Icon=kubepeep
+Terminal=false
+Categories=Development;System;Network;
+Keywords=kubernetes;k8s;cluster;pods;logs;
+StartupNotify=true
+StartupWMClass=kubepeep
