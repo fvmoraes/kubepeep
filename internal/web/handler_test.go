@@ -94,3 +94,17 @@ func testHandler(t *testing.T) *Handler {
 	}
 	return handler
 }
+
+func TestRootServesIndexRegardlessOfAccept(t *testing.T) {
+	handler := testHandler(t)
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.Header.Set("Accept", "application/json")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("root status=%d — plain HTTP health probes must read the SPA index, not a 404", w.Code)
+	}
+	if got := w.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("root cache=%q", got)
+	}
+}

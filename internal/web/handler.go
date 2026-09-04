@@ -55,7 +55,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	requestPath := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
-	if requestPath == "index.html" {
+	// The root path is the canonical SPA entry: plain HTTP health probes
+	// (systemd, curl, container checks) request it without an Accept header
+	// and must not read a 404 as "service dead".
+	if requestPath == "" || requestPath == "index.html" {
 		h.serveIndex(w, r)
 		return
 	}
