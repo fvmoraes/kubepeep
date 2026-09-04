@@ -620,6 +620,7 @@ jobs:
           # metadados usa [skip ci] por design — altera apenas wails.json e
           # CHANGELOG, nenhum código.
           deadline=$(( $(date +%s) + 45 * 60 ))
+          failure_streak=0
           while :; do
             state=$(gh api \
               "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/check-runs" \
@@ -630,10 +631,20 @@ jobs:
                 break
                 ;;
               *failure*|*cancelled*|*timed_out*|*action_required*)
-                echo "::error::verify.yml did not succeed for ${GITHUB_SHA} (state: ${state}). Release aborted — no tag was created."
-                exit 1
+                # A failed reading can come from a flaky job that is being
+                # re-run (a manual re-run flips this check to success later).
+                # Only abort after consecutive failures with no recovery.
+                failure_streak=$((failure_streak + 1))
+                if [ "$failure_streak" -ge 3 ]; then
+                  echo "::error::verify.yml did not succeed for ${GITHUB_SHA} (state: ${state}, $failure_streak consecutive readings). Release aborted — no tag was created."
+                  exit 1
+                fi
+                echo "verify.yml state ${state} (reading ${failure_streak}); re-checking..."
+                sleep 45
+                continue
                 ;;
             esac
+            failure_streak=0
             if [ "$(date +%s)" -ge "$deadline" ]; then
               echo "::error::Timed out waiting for verify.yml on ${GITHUB_SHA} (last state: ${state:-none})."
               exit 1
