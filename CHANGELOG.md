@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versions follow [Semantic Versioning](https://semver.org/) **without the `v`
 prefix** (official tags: `1.4.2`, `1.4.3`, …), and entries are generated
 automatically from Conventional Commits by `.github/workflows/release.yml`.
+## [0.1.5] - 2026-09-04
+
+## Fixed
+- fix(release): require consecutive failed readings before aborting publish
+
+## Download
+
+Permanently-updated links: https://github.com/fvmoraes/kubepeep/blob/main/docs/download.md
+
+## Full Changelog
+**Full Changelog**: https://github.com/fvmoraes/kubepeep/compare/0.1.4...0.1.5
+
 ## [0.1.4] - 2026-09-04
 
 ## Fixed
@@ -306,3 +318,4 @@ Permanently-updated links: https://github.com/fvmoraes/kubepeep/blob/main/docs/d
 [0.1.2]: https://github.com/fvmoraes/kubepeep/releases/tag/0.1.2
 [0.1.3]: https://github.com/fvmoraes/kubepeep/releases/tag/0.1.3
 [0.1.4]: https://github.com/fvmoraes/kubepeep/releases/tag/0.1.4
+[0.1.5]: https://github.com/fvmoraes/kubepeep/releases/tag/0.1.5
