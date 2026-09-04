@@ -711,16 +711,16 @@ jobs:
             kubepeep-darwin-arm64.zip
             kubepeep-darwin-amd64.tar.gz
             kubepeep-darwin-arm64.tar.gz
-            kubepeep-${VERSION}-linux-amd64.deb
-            kubepeep-${VERSION}-linux-arm64.deb
-            kubepeep-${VERSION}-linux-amd64.rpm
-            kubepeep-${VERSION}-linux-arm64.rpm
-            kubepeep-${VERSION}-windows-amd64-setup.exe
-            kubepeep-${VERSION}-windows-amd64.zip
-            kubepeep-${VERSION}-darwin-amd64.dmg
-            kubepeep-${VERSION}-darwin-arm64.dmg
-            kubepeep-${VERSION}-darwin-amd64.zip
-            kubepeep-${VERSION}-darwin-arm64.zip
+            "kubepeep-${VERSION}-linux-amd64.deb"
+            "kubepeep-${VERSION}-linux-arm64.deb"
+            "kubepeep-${VERSION}-linux-amd64.rpm"
+            "kubepeep-${VERSION}-linux-arm64.rpm"
+            "kubepeep-${VERSION}-windows-amd64-setup.exe"
+            "kubepeep-${VERSION}-windows-amd64.zip"
+            "kubepeep-${VERSION}-darwin-amd64.dmg"
+            "kubepeep-${VERSION}-darwin-arm64.dmg"
+            "kubepeep-${VERSION}-darwin-amd64.zip"
+            "kubepeep-${VERSION}-darwin-arm64.zip"
             release-notes.md
           )
           for asset in "${expected[@]}"; do
@@ -765,6 +765,8 @@ jobs:
             echo "::error::Release $TAG already exists — refusing to overwrite immutable assets."
             exit 1
           fi
+          # The darwin globs are intentional wildcards.
+          # shellcheck disable=SC2086
           gh release create "$TAG" \
             dist/kubepeep-linux-*.deb \
             dist/kubepeep-linux-*.rpm \
