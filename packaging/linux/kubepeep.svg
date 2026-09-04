@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc" shape-rendering="geometricPrecision">
+  <title id="title">KubePeep</title>
+  <desc id="desc">Logo vetorial KubePeep com o hexágono interno uniformemente afastado da moldura externa.</desc>
+
+  <defs>
+    <linearGradient id="frame" x1="82" y1="414" x2="432" y2="94" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2563EB"/>
+      <stop offset="0.42" stop-color="#4F46E5"/>
+      <stop offset="0.72" stop-color="#7C3AED"/>
+      <stop offset="1" stop-color="#C026D3"/>
+    </linearGradient>
+
+    <linearGradient id="topFace" x1="154" y1="112" x2="358" y2="290" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#6D28D9"/>
+      <stop offset="0.56" stop-color="#9333EA"/>
+      <stop offset="1" stop-color="#C026D3"/>
+    </linearGradient>
+
+    <linearGradient id="leftFace" x1="152" y1="230" x2="256" y2="351" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4F46E5"/>
+      <stop offset="1" stop-color="#312E81"/>
+    </linearGradient>
+
+    <linearGradient id="rightFace" x1="360" y1="230" x2="256" y2="351" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#7E22CE"/>
+      <stop offset="1" stop-color="#4338CA"/>
+    </linearGradient>
+
+    <radialGradient id="iris" cx="36%" cy="30%" r="74%">
+      <stop offset="0" stop-color="#C084FC"/>
+      <stop offset="0.5" stop-color="#8B5CF6"/>
+      <stop offset="1" stop-color="#4F46E5"/>
+    </radialGradient>
+
+    <clipPath id="eyeClip">
+      <path d="M152 230 C181 195 217 178 256 178 C295 178 331 195 360 230 C331 265 295 282 256 282 C217 282 181 265 152 230 Z"/>
+    </clipPath>
+  </defs>
+
+  <!-- Moldura externa -->
+  <g fill="none" stroke="url(#frame)" stroke-width="17" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M256 58 L404 144"/>
+    <path d="M404 144 L404 316"/>
+    <path d="M404 316 L256 402"/>
+    <path d="M256 402 L108 316"/>
+    <path d="M108 316 L108 144"/>
+    <path d="M108 144 L256 58"/>
+  </g>
+
+  <g fill="url(#frame)">
+    <circle cx="256" cy="58" r="22"/>
+    <circle cx="404" cy="144" r="22"/>
+    <circle cx="404" cy="316" r="22"/>
+    <circle cx="256" cy="402" r="22"/>
+    <circle cx="108" cy="316" r="22"/>
+    <circle cx="108" cy="144" r="22"/>
+  </g>
+
+  <!-- Hexágono interno: offset uniforme de 44 unidades em relação à linha central externa -->
+  <path fill="url(#topFace)" d="M256 108.889 L360 169.322 L360 290.678 L256 351.111 L152 290.678 L152 169.322 Z"/>
+
+  <!-- Faces inferiores do cubo -->
+  <path fill="url(#leftFace)" d="M152 230 L256 230 L256 351.111 L152 290.678 Z"/>
+  <path fill="url(#rightFace)" d="M256 230 L360 230 L360 290.678 L256 351.111 Z"/>
+
+  <!-- Olho centralizado no mesmo centro geométrico da moldura -->
+  <path fill="#FFFFFF" d="M152 230 C181 195 217 178 256 178 C295 178 331 195 360 230 C331 265 295 282 256 282 C217 282 181 265 152 230 Z"/>
+
+  <g clip-path="url(#eyeClip)">
+    <circle cx="256" cy="230" r="43" fill="url(#iris)"/>
+    <circle cx="256" cy="230" r="24" fill="#21103F"/>
+    <circle cx="271" cy="214" r="9" fill="#FFFFFF"/>
+  </g>
+</svg>

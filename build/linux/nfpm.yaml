@@ -47,8 +47,15 @@ contents:
       mode: 0644
       owner: root
       group: root
-  - src: build/appicon.png
-    dst: /usr/share/icons/hicolor/256x256/apps/kubepeep.png
+  - src: packaging/linux/kubepeep.png
+    dst: /usr/share/icons/hicolor/512x512/apps/kubepeep.png
+    type: file
+    file_info:
+      mode: 0644
+      owner: root
+      group: root
+  - src: packaging/linux/kubepeep.svg
+    dst: /usr/share/icons/hicolor/scalable/apps/kubepeep.svg
     type: file
     file_info:
       mode: 0644
