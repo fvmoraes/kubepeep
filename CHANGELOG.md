@@ -8,6 +8,22 @@ prefix** (official tags: `1.4.2`, `1.4.3`, …), and entries are generated
 automatically from Conventional Commits by `.github/workflows/release.yml`.
 ## [0.1.5] - 2026-09-04
 
+## Changed
+- release: 0.1.5 [skip ci]
+
+## Fixed
+- fix(release): declare TAG in the step env of the permanent-URL smoke
+- fix(release): require consecutive failed readings before aborting publish
+
+## Download
+
+Permanently-updated links: https://github.com/fvmoraes/kubepeep/blob/main/docs/download.md
+
+## Full Changelog
+**Full Changelog**: https://github.com/fvmoraes/kubepeep/compare/0.1.4...0.1.5
+
+## [0.1.5] - 2026-09-04
+
 ## Fixed
 - fix(release): require consecutive failed readings before aborting publish
 
