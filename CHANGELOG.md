@@ -6,6 +6,34 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versions follow [Semantic Versioning](https://semver.org/) **without the `v`
 prefix** (official tags: `1.4.2`, `1.4.3`, …), and entries are generated
 automatically from Conventional Commits by `.github/workflows/release.yml`.
+## [0.1.2] - 2026-09-04
+
+## Changed
+- release: 0.1.2 [skip ci]
+- release: 0.1.2 [skip ci]
+- release: 0.1.2 [skip ci]
+- release: 0.1.2 [skip ci]
+- release: 0.1.2 [skip ci]
+- release: 0.1.2 [skip ci]
+- refactor(release): build in parallel with verify; tag only after all gates
+
+## Fixed
+- fix(release): container stages binary into dist/staging with universal permissions
+- fix(release): nfpm diagnostics via error annotations (runner-only failure, invisible without auth)
+- fix(release): create dist/ before nfpm and CLI archive steps (no output dir on clean runner)
+- fix(release): run Linux version check inside the build container; hdiutil retry; NOTICE in CLI archives
+- fix(release): track build/linux/nfpm.yaml and build/windows/icon.ico (ignored by build/ pattern)
+- fix(release): version-env injection in container build, nfpm config, icon, dependabot
+- fix(verify): prune go.sum entries added by 'go mod download all'
+- fix(release): unblock container tidy offline and ensure NSIS on Windows
+
+## Download
+
+Permanently-updated links: https://github.com/fvmoraes/kubepeep/blob/main/docs/download.md
+
+## Full Changelog
+**Full Changelog**: https://github.com/fvmoraes/kubepeep/compare/0.1.1...0.1.2
+
 ## [0.1.2] - 2026-09-03
 
 ## Changed
