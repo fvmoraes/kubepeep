@@ -303,7 +303,8 @@ jobs:
             wails build -tags 'desktop,webkit2_41' -clean -s -skipbindings -nopackage -platform linux/${{ matrix.arch }} \
               -ldflags \"-s -w -X github.com/fvmoraes/kubepeep/internal/buildinfo.Version=\$RELEASE_VERSION -X github.com/fvmoraes/kubepeep/internal/buildinfo.Commit=\$RELEASE_COMMIT -X github.com/fvmoraes/kubepeep/internal/buildinfo.BuildDate=\$BUILD_DATE\" \
               -o kubePeep && \
-            ./build/bin/kubePeep version > /src/.version-out && cat /src/.version-out"
+            install -m 0755 build/bin/kubePeep /src/dist/staging/kubepeep && \
+            chmod -R a+rX /src/build"
 
       - name: Verify the binary reports the release version
         run: |
@@ -315,6 +316,8 @@ jobs:
             echo "::error::binary did not report version=${{ env.VERSION }}"
             exit 1
           }
+          # The container ran as root; normalize ownership for the host steps.
+          sudo chown -R "$(id -u):$(id -g)" build dist 2>/dev/null || true
 
       - name: Package deb and rpm (nfpm)
         run: |

@@ -33,7 +33,7 @@ overrides:
       - webkit2gtk4.1
 
 contents:
-  - src: build/bin/kubePeep
+  - src: dist/staging/kubepeep
     dst: /usr/bin/kubepeep
     type: file
     file_info:
