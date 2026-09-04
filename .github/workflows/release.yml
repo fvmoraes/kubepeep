@@ -810,13 +810,13 @@ jobs:
             location=$(curl -s -o /dev/null -w '%{redirect_url}' \
               "https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/checksums.txt")
             case "$location" in
-              *"/tag/${TAG}/checksums.txt"*) break ;;
+              *"/download/${TAG}/checksums.txt"*|*"/tag/${TAG}/checksums.txt"*) break ;;
             esac
             echo "attempt $attempt: redirect=$location; waiting for propagation..."
             sleep 10
           done
           echo "Permanent URL redirects to: $location"
           case "$location" in
-            *"/tag/${TAG}/checksums.txt"*) echo "Permanent download URL OK." ;;
+            *"/download/${TAG}/checksums.txt"*|*"/tag/${TAG}/checksums.txt"*) echo "Permanent download URL OK." ;;
             *) echo "::error::Permanent URL did not resolve to tag ${TAG}"; exit 1 ;;
           esac
