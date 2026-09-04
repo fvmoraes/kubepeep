@@ -25,11 +25,14 @@ type PlatformInfoDTO struct {
 }
 
 // InvokeResult mirrors the minimal HTTP response contract consumed by the
-// frontend client without involving any network listener.
+// frontend client without involving any network listener. The json tags are
+// load-bearing: the Wails bridge serializes this struct with encoding/json,
+// and without lowercase tags the frontend would receive Go field names
+// ("Status"/"Headers"/"Body") instead of the contract keys.
 type InvokeResult struct {
-	Status  int
-	Headers map[string][]string
-	Body    string
+	Status  int                 `json:"status"`
+	Headers map[string][]string `json:"headers"`
+	Body    string              `json:"body"`
 }
 
 // Bridge is the Wails binding layer. Invoke forwards allowlisted API calls to
@@ -98,9 +101,15 @@ func (bridge *Bridge) Invoke(method string, path string, headers map[string]stri
 	}
 	recorder := httptest.NewRecorder()
 	bridge.handler.ServeHTTP(recorder, request)
+	// The desktop client looks headers up by lowercase name; Go canonicalizes
+	// them (Content-Type), so normalize here to keep the contract consistent.
+	normalized := make(map[string][]string, len(recorder.Header()))
+	for name, values := range recorder.Header() {
+		normalized[strings.ToLower(name)] = values
+	}
 	return InvokeResult{
 		Status:  recorder.Code,
-		Headers: recorder.Header(),
+		Headers: normalized,
 		Body:    recorder.Body.String(),
 	}, nil
 }

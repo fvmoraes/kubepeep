@@ -53,18 +53,24 @@ export class DesktopResponse {
   readonly status: number
   readonly ok: boolean
   private readonly result: InvokeResult
+  private readonly headerIndex: Record<string, string[]>
 
   constructor(result: InvokeResult) {
     this.result = result
     this.status = result.status
     this.ok = result.status >= 200 && result.status < 300
+    // Bridge headers may arrive in any key case (Go canonicalizes them);
+    // index by lowercase so lookups mirror the native Headers behavior.
+    this.headerIndex = {}
+    for (const [name, values] of Object.entries(result.headers ?? {})) {
+      this.headerIndex[name.toLowerCase()] = values
+    }
   }
 
   get headers(): { get(name: string): string | null } {
-    const lookup = this.result.headers ?? {}
     return {
       get: (name: string) => {
-        const values = lookup[name.toLowerCase()] ?? []
+        const values = this.headerIndex[name.toLowerCase()] ?? []
         return values.length > 0 ? values[0] : null
       },
     }

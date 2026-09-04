@@ -2,6 +2,7 @@ package desktop
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -133,6 +134,53 @@ func TestLoopbackStreamCorsAndPreflight(t *testing.T) {
 	}
 	if got := response.Header.Get("Access-Control-Allow-Headers"); !strings.Contains(got, "X-KubePeep-CSRF") {
 		t.Fatalf("preflight headers=%q", got)
+	}
+}
+
+func TestInvokeResultJSONContractUsesLowercaseKeys(t *testing.T) {
+	payload, err := json.Marshal(InvokeResult{
+		Status:  http.StatusOK,
+		Headers: map[string][]string{"content-type": {"application/json"}},
+		Body:    `{"data":{"ok":true}}`,
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	for _, key := range []string{"status", "headers", "body"} {
+		if _, ok := decoded[key]; !ok {
+			t.Fatalf("InvokeResult JSON is missing key %q; the Wails bridge serializes this struct and the desktop client expects lowercase contract keys (got keys: %v)", key, decoded)
+		}
+	}
+	if len(decoded) != 3 {
+		t.Fatalf("unexpected extra keys in InvokeResult JSON: %v", decoded)
+	}
+}
+
+func TestInvokeResultHeadersAreLowercase(t *testing.T) {
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("X-Request-ID", "req_header_case")
+		_, _ = w.Write([]byte(`{"data":{"ok":true}}`))
+	})
+	bridge := NewBridge(handler, "http://127.0.0.1:2748", "http://127.0.0.1:2748")
+	result, err := bridge.Invoke("GET", "/api/v1/status", nil, "")
+	if err != nil {
+		t.Fatalf("invoke: %v", err)
+	}
+	for name := range result.Headers {
+		if name != strings.ToLower(name) {
+			t.Fatalf("header key %q is not lowercase", name)
+		}
+	}
+	if got := result.Headers["content-type"]; len(got) == 0 || !strings.Contains(got[0], "application/json") {
+		t.Fatalf("content-type=%v", got)
+	}
+	if got := result.Headers["x-request-id"]; len(got) != 1 || got[0] != "req_header_case" {
+		t.Fatalf("x-request-id=%v", got)
 	}
 }
 
