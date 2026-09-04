@@ -343,6 +343,9 @@ jobs:
           set -e
           test -f "dist/kubepeep-linux-${{ matrix.arch }}.deb"
           test -f "dist/kubepeep-linux-${{ matrix.arch }}.rpm"
+          # Versioned aliases: installers carry the release version in the name.
+          cp "dist/kubepeep-linux-${{ matrix.arch }}.deb" "dist/kubepeep-${VERSION}-linux-${{ matrix.arch }}.deb"
+          cp "dist/kubepeep-linux-${{ matrix.arch }}.rpm" "dist/kubepeep-${VERSION}-linux-${{ matrix.arch }}.rpm"
 
       - name: Package the CLI archive (install.sh)
         run: |
@@ -362,6 +365,8 @@ jobs:
             dist/kubepeep-linux-${{ matrix.arch }}.deb
             dist/kubepeep-linux-${{ matrix.arch }}.rpm
             dist/kubepeep-linux-${{ matrix.arch }}.tar.gz
+            dist/kubepeep-${{ env.VERSION }}-linux-${{ matrix.arch }}.deb
+            dist/kubepeep-${{ env.VERSION }}-linux-${{ matrix.arch }}.rpm
           if-no-files-found: error
           retention-days: 3
 
@@ -484,11 +489,13 @@ jobs:
             throw 'NSIS installer was not produced'
           }
           Copy-Item $installer.FullName .\dist\kubepeep-windows-amd64-setup.exe
+          Copy-Item $installer.FullName .\dist\kubepeep-$env:VERSION-windows-amd64-setup.exe
           $staging = Join-Path $env:RUNNER_TEMP 'kubepeep-windows-zip'
           New-Item -ItemType Directory -Path $staging -Force | Out-Null
           Copy-Item .\build\bin\kubePeep.exe (Join-Path $staging 'kubePeep.exe')
           Copy-Item .\README.md, .\LICENSE, .\THIRD_PARTY_NOTICES.md $staging
           Compress-Archive -Path (Join-Path $staging '*') -DestinationPath .\dist\kubepeep-windows-amd64.zip
+          Compress-Archive -Path (Join-Path $staging '*') -DestinationPath .\dist\kubepeep-$env:VERSION-windows-amd64.zip
           Get-ChildItem .\dist
 
       - name: Upload build artifacts
@@ -498,6 +505,8 @@ jobs:
           path: |
             dist/kubepeep-windows-amd64-setup.exe
             dist/kubepeep-windows-amd64.zip
+            dist/kubepeep-${{ env.VERSION }}-windows-amd64-setup.exe
+            dist/kubepeep-${{ env.VERSION }}-windows-amd64.zip
           if-no-files-found: error
           retention-days: 3
 
@@ -581,6 +590,9 @@ jobs:
           cp build/bin/kubePeep.app/Contents/MacOS/kubePeep "$staging/kubePeep"
           cp README.md LICENSE NOTICE THIRD_PARTY_NOTICES.md "$staging/"
           tar -czf "dist/kubepeep-darwin-${{ matrix.arch }}.tar.gz" -C "$staging" kubePeep README.md LICENSE NOTICE THIRD_PARTY_NOTICES.md
+          # Versioned aliases: installers carry the release version in the name.
+          cp dist/kubepeep-darwin-${{ matrix.arch }}.zip "dist/kubepeep-${VERSION}-darwin-${{ matrix.arch }}.zip"
+          cp dist/kubepeep-darwin-${{ matrix.arch }}.dmg "dist/kubepeep-${VERSION}-darwin-${{ matrix.arch }}.dmg"
           ls -la dist
 
       - name: Upload build artifacts
@@ -591,6 +603,8 @@ jobs:
             dist/kubepeep-darwin-${{ matrix.arch }}.dmg
             dist/kubepeep-darwin-${{ matrix.arch }}.zip
             dist/kubepeep-darwin-${{ matrix.arch }}.tar.gz
+            dist/kubepeep-${{ env.VERSION }}-darwin-${{ matrix.arch }}.dmg
+            dist/kubepeep-${{ env.VERSION }}-darwin-${{ matrix.arch }}.zip
           if-no-files-found: error
           retention-days: 3
 
@@ -697,6 +711,16 @@ jobs:
             kubepeep-darwin-arm64.zip
             kubepeep-darwin-amd64.tar.gz
             kubepeep-darwin-arm64.tar.gz
+            kubepeep-${VERSION}-linux-amd64.deb
+            kubepeep-${VERSION}-linux-arm64.deb
+            kubepeep-${VERSION}-linux-amd64.rpm
+            kubepeep-${VERSION}-linux-arm64.rpm
+            kubepeep-${VERSION}-windows-amd64-setup.exe
+            kubepeep-${VERSION}-windows-amd64.zip
+            kubepeep-${VERSION}-darwin-amd64.dmg
+            kubepeep-${VERSION}-darwin-arm64.dmg
+            kubepeep-${VERSION}-darwin-amd64.zip
+            kubepeep-${VERSION}-darwin-arm64.zip
             release-notes.md
           )
           for asset in "${expected[@]}"; do
@@ -745,11 +769,17 @@ jobs:
             dist/kubepeep-linux-*.deb \
             dist/kubepeep-linux-*.rpm \
             dist/kubepeep-linux-*.tar.gz \
+            dist/kubepeep-*-linux-*.deb \
+            dist/kubepeep-*-linux-*.rpm \
             dist/kubepeep-windows-amd64-setup.exe \
             dist/kubepeep-windows-amd64.zip \
+            dist/kubepeep-${VERSION}-windows-amd64-setup.exe \
+            dist/kubepeep-${VERSION}-windows-amd64.zip \
             dist/kubepeep-darwin-*.dmg \
             dist/kubepeep-darwin-*.zip \
             dist/kubepeep-darwin-*.tar.gz \
+            dist/kubepeep-*-darwin-*.dmg \
+            dist/kubepeep-*-darwin-*.zip \
             dist/checksums.txt \
             "dist/kubepeep-${{ env.VERSION }}.spdx.json" \
             --latest \

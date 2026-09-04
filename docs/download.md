@@ -123,6 +123,27 @@ sha256sum --ignore-missing -c checksums.txt
 Every release also publishes an SPDX SBOM
 (`kubepeep-<version>.spdx.json`) generated from the release source tree.
 
+## Versioned asset names
+
+Alongside the fixed-name files above, every release publishes the same
+installers with the release version in the name (for archiving and
+version-pinned automation):
+
+```text
+kubepeep-<version>-windows-amd64-setup.exe
+kubepeep-<version>-linux-amd64.deb
+kubepeep-<version>-linux-arm64.deb
+kubepeep-<version>-linux-amd64.rpm
+kubepeep-<version>-linux-arm64.rpm
+kubepeep-<version>-darwin-amd64.dmg
+kubepeep-<version>-darwin-arm64.dmg
+kubepeep-<version>-darwin-amd64.zip
+kubepeep-<version>-darwin-arm64.zip
+```
+
+Download a versioned asset at
+`https://github.com/fvmoraes/kubepeep/releases/download/<version>/kubepeep-<version>-...`.
+
 ## Integration notes (kubepeep.online)
 
 The official website consumes the same permanent endpoints:
