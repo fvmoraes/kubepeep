@@ -11,6 +11,24 @@ automatically from Conventional Commits by `.github/workflows/release.yml`.
 ## Added
 - feat(release): publish installers with the version in the filename
 
+## Changed
+- release: 0.2.0 [skip ci]
+
+## Fixed
+- fix(release): quote versioned allowlist entries and silence SC2086 on intentional globs
+
+## Download
+
+Permanently-updated links: https://github.com/fvmoraes/kubepeep/blob/main/docs/download.md
+
+## Full Changelog
+**Full Changelog**: https://github.com/fvmoraes/kubepeep/compare/0.1.6...0.2.0
+
+## [0.2.0] - 2026-09-04
+
+## Added
+- feat(release): publish installers with the version in the filename
+
 ## Download
 
 Permanently-updated links: https://github.com/fvmoraes/kubepeep/blob/main/docs/download.md
