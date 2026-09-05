@@ -110,6 +110,25 @@ func Register(applicationRouter *router.Router, dependencies Dependencies) {
 		apiRouter.GET("/nodes", resourceHandler.Nodes)
 		apiRouter.GET("/nodes/{name}", resourceHandler.NodeDetail)
 		apiRouter.GET("/nodes/{name}/yaml", resourceHandler.NodeYAML)
+		apiRouter.GET("/leases", resourceHandler.Leases)
+		apiRouter.GET("/leases/{namespace}/{name}", resourceHandler.LeaseDetail)
+		apiRouter.GET("/leases/{namespace}/{name}/yaml", resourceHandler.LeaseYAML)
+		apiRouter.GET("/persistent-volumes", resourceHandler.PersistentVolumes)
+		apiRouter.GET("/persistent-volumes/{name}", resourceHandler.PersistentVolumeDetail)
+		apiRouter.GET("/persistent-volumes/{name}/yaml", resourceHandler.PersistentVolumeYAML)
+		apiRouter.GET("/persistent-volume-claims", resourceHandler.PersistentVolumeClaims)
+		apiRouter.GET("/persistent-volume-claims/{namespace}/{name}", resourceHandler.PersistentVolumeClaimDetail)
+		apiRouter.GET("/persistent-volume-claims/{namespace}/{name}/yaml", resourceHandler.PersistentVolumeClaimYAML)
+		apiRouter.GET("/storage-classes", resourceHandler.StorageClasses)
+		apiRouter.GET("/storage-classes/{name}", resourceHandler.StorageClassDetail)
+		apiRouter.GET("/storage-classes/{name}/yaml", resourceHandler.StorageClassYAML)
+		apiRouter.GET("/csi-drivers", resourceHandler.CSIDrivers)
+		apiRouter.GET("/csi-drivers/{name}", resourceHandler.CSIDriverDetail)
+		apiRouter.GET("/csi-nodes", resourceHandler.CSINodes)
+		apiRouter.GET("/csi-nodes/{name}", resourceHandler.CSINodeDetail)
+		apiRouter.GET("/volume-attachments", resourceHandler.VolumeAttachments)
+		apiRouter.GET("/volume-attachments/{name}", resourceHandler.VolumeAttachmentDetail)
+		apiRouter.GET("/namespaces/{name}", resourceHandler.NamespaceDetail)
 	}
 	if dependencies.Preferences != nil {
 		preferenceHandler := NewResources(nil, dependencies.Preferences, dependencies.Selection, dependencies.Cursors)
@@ -170,7 +189,10 @@ func allowedMethods(path string) (string, bool) {
 		apiPrefix + "/port-forwards", apiPrefix + "/workloads", apiPrefix + "/pods",
 		apiPrefix + "/events", apiPrefix + "/services", apiPrefix + "/ingresses",
 		apiPrefix + "/endpoint-slices", apiPrefix + "/configmaps", apiPrefix + "/secrets",
-		apiPrefix + "/nodes":
+		apiPrefix + "/nodes", apiPrefix + "/leases",
+		apiPrefix + "/persistent-volumes", apiPrefix + "/persistent-volume-claims",
+		apiPrefix + "/storage-classes", apiPrefix + "/csi-drivers", apiPrefix + "/csi-nodes",
+		apiPrefix + "/volume-attachments":
 		return "GET, HEAD", true
 	case apiPrefix + "/preferences":
 		return "GET, HEAD, PUT", true
@@ -226,7 +248,7 @@ func resourceAllowedMethods(path string) (string, bool) {
 		return "GET, HEAD", true
 	case len(parts) == 5 && parts[0] == "pods" && parts[3] == "logs" && parts[4] == "stream":
 		return "GET", true
-	case len(parts) == 3 && (parts[0] == "services" || parts[0] == "ingresses" || parts[0] == "endpoint-slices" || parts[0] == "configmaps" || parts[0] == "secrets"):
+	case len(parts) == 3 && (parts[0] == "services" || parts[0] == "ingresses" || parts[0] == "endpoint-slices" || parts[0] == "configmaps" || parts[0] == "secrets" || parts[0] == "leases" || parts[0] == "persistent-volume-claims"):
 		return "GET, HEAD", true
 	case len(parts) == 4 && parts[3] == "yaml" && (parts[0] == "services" || parts[0] == "ingresses" || parts[0] == "endpoint-slices" || parts[0] == "configmaps"):
 		return "GET, HEAD", true
@@ -234,9 +256,27 @@ func resourceAllowedMethods(path string) (string, bool) {
 		return "GET, HEAD", true
 	case len(parts) == 3 && parts[0] == "nodes" && parts[2] == "yaml":
 		return "GET, HEAD", true
+	case len(parts) == 2 && clusterNameRoutes[parts[0]]:
+		return "GET, HEAD", true
+	case len(parts) == 3 && parts[2] == "yaml" && clusterYAMLRoutes[parts[0]]:
+		return "GET, HEAD", true
+	case len(parts) == 4 && parts[3] == "yaml" && (parts[0] == "leases" || parts[0] == "persistent-volume-claims"):
+		return "GET, HEAD", true
 	default:
 		return "", false
 	}
+}
+
+// clusterNameRoutes are cluster-scoped detail collections ({collection}/{name}).
+var clusterNameRoutes = map[string]bool{
+	"nodes": true, "persistent-volumes": true, "storage-classes": true,
+	"csi-drivers": true, "csi-nodes": true, "volume-attachments": true,
+	"namespaces": true,
+}
+
+// clusterYAMLRoutes are the cluster-scoped collections with a YAML action.
+var clusterYAMLRoutes = map[string]bool{
+	"nodes": true, "persistent-volumes": true, "storage-classes": true,
 }
 
 func mergeAllowMethods(left, right string) string {

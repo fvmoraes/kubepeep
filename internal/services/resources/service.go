@@ -11,6 +11,8 @@ var collectionGVR = map[Collection]Origin{
 	CollectionPods: {Version: "v1", Resource: "pods"}, CollectionEvents: {Version: "v1", Resource: "events"}, CollectionServices: {Version: "v1", Resource: "services"},
 	CollectionIngresses: {APIGroup: "networking.k8s.io", Version: "v1", Resource: "ingresses"}, CollectionEndpointSlices: {APIGroup: "discovery.k8s.io", Version: "v1", Resource: "endpointslices"},
 	CollectionConfigMaps: {Version: "v1", Resource: "configmaps"}, CollectionSecrets: {Version: "v1", Resource: "secrets"},
+	CollectionLeases: {APIGroup: "coordination.k8s.io", Version: "v1", Resource: "leases"},
+	CollectionPersistentVolumeClaims: {Version: "v1", Resource: "persistentvolumeclaims"},
 }
 var workloadGVR = map[WorkloadKind]Origin{WorkloadDeployments: {APIGroup: "apps", Version: "v1", Resource: "deployments"}, WorkloadStatefulSets: {APIGroup: "apps", Version: "v1", Resource: "statefulsets"}, WorkloadDaemonSets: {APIGroup: "apps", Version: "v1", Resource: "daemonsets"}, WorkloadJobs: {APIGroup: "batch", Version: "v1", Resource: "jobs"}, WorkloadCronJobs: {APIGroup: "batch", Version: "v1", Resource: "cronjobs"}}
 

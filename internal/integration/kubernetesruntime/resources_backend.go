@@ -310,10 +310,248 @@ func (backend *ResourceBackend) ListNodes(ctx context.Context, binding namespace
 	}, filterSortNodes)
 }
 
+func (backend *ResourceBackend) ListLeases(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, options resources.ListOptions, cursor *resources.CompositeCursor[resources.LeaseDTO]) (resources.ListResult[resources.LeaseDTO], error) {
+	return collectFilteredResource(ctx, backend, binding, resolution, resources.CollectionLeases, options, cursor, leaseIdentityLess, func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[resources.LeaseDTO], error) {
+		return backend.listLeasePage(ctx, binding, page)
+	}, filterSortLeases)
+}
+
+func (backend *ResourceBackend) ListPersistentVolumeClaims(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, options resources.ListOptions, cursor *resources.CompositeCursor[resources.PersistentVolumeClaimDTO]) (resources.ListResult[resources.PersistentVolumeClaimDTO], error) {
+	return collectFilteredResource(ctx, backend, binding, resolution, resources.CollectionPersistentVolumeClaims, options, cursor, persistentVolumeClaimIdentityLess, func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[resources.PersistentVolumeClaimDTO], error) {
+		return backend.listPersistentVolumeClaimPage(ctx, binding, page)
+	}, filterSortPersistentVolumeClaims)
+}
+
+func (backend *ResourceBackend) ListPersistentVolumes(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, options resources.ListOptions, cursor *resources.CompositeCursor[resources.PersistentVolumeDTO]) (resources.ListResult[resources.PersistentVolumeDTO], error) {
+	return clusterCollect(ctx, backend, binding, resolution, resources.CollectionPersistentVolumes, options, cursor, persistentVolumeIdentityLess, func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[resources.PersistentVolumeDTO], error) {
+		return backend.listPersistentVolumePage(ctx, binding, page)
+	}, filterSortPersistentVolumes)
+}
+
+func (backend *ResourceBackend) ListStorageClasses(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, options resources.ListOptions, cursor *resources.CompositeCursor[resources.StorageClassDTO]) (resources.ListResult[resources.StorageClassDTO], error) {
+	return clusterCollect(ctx, backend, binding, resolution, resources.CollectionStorageClasses, options, cursor, storageClassIdentityLess, func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[resources.StorageClassDTO], error) {
+		return backend.listStorageClassPage(ctx, binding, page)
+	}, filterSortStorageClasses)
+}
+
+func (backend *ResourceBackend) ListCSIDrivers(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, options resources.ListOptions, cursor *resources.CompositeCursor[resources.CSIDriverDTO]) (resources.ListResult[resources.CSIDriverDTO], error) {
+	return clusterCollect(ctx, backend, binding, resolution, resources.CollectionCSIDrivers, options, cursor, csiDriverIdentityLess, func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[resources.CSIDriverDTO], error) {
+		return backend.listCSIDriverPage(ctx, binding, page)
+	}, filterSortCSIDrivers)
+}
+
+func (backend *ResourceBackend) ListCSINodes(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, options resources.ListOptions, cursor *resources.CompositeCursor[resources.CSINodeDTO]) (resources.ListResult[resources.CSINodeDTO], error) {
+	return clusterCollect(ctx, backend, binding, resolution, resources.CollectionCSINodes, options, cursor, csiNodeIdentityLess, func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[resources.CSINodeDTO], error) {
+		return backend.listCSINodePage(ctx, binding, page)
+	}, filterSortCSINodes)
+}
+
+func (backend *ResourceBackend) ListVolumeAttachments(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, options resources.ListOptions, cursor *resources.CompositeCursor[resources.VolumeAttachmentDTO]) (resources.ListResult[resources.VolumeAttachmentDTO], error) {
+	return clusterCollect(ctx, backend, binding, resolution, resources.CollectionVolumeAttachments, options, cursor, volumeAttachmentIdentityLess, func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[resources.VolumeAttachmentDTO], error) {
+		return backend.listVolumeAttachmentPage(ctx, binding, page)
+	}, filterSortVolumeAttachments)
+}
+
 func nodeIdentityLess(left, right resources.NodeDTO) bool {
 	return left.Name < right.Name
 }
 
+func leaseIdentityLess(left, right resources.LeaseDTO) bool {
+	if left.Namespace != right.Namespace {
+		return left.Namespace < right.Namespace
+	}
+	return left.Name < right.Name
+}
+func persistentVolumeClaimIdentityLess(left, right resources.PersistentVolumeClaimDTO) bool {
+	if left.Namespace != right.Namespace {
+		return left.Namespace < right.Namespace
+	}
+	return left.Name < right.Name
+}
+func persistentVolumeIdentityLess(left, right resources.PersistentVolumeDTO) bool {
+	return left.Name < right.Name
+}
+func storageClassIdentityLess(left, right resources.StorageClassDTO) bool {
+	return left.Name < right.Name
+}
+func csiDriverIdentityLess(left, right resources.CSIDriverDTO) bool {
+	return left.Name < right.Name
+}
+func csiNodeIdentityLess(left, right resources.CSINodeDTO) bool {
+	return left.Name < right.Name
+}
+func volumeAttachmentIdentityLess(left, right resources.VolumeAttachmentDTO) bool {
+	return left.Name < right.Name
+}
+
+func filterSortLeases(items []resources.LeaseDTO, options resources.ListOptions) []resources.LeaseDTO {
+	result := items[:0]
+	for _, item := range items {
+		if options.Search == "" || matchesSearch(options, item.Namespace, item.Name, item.HolderName) {
+			result = append(result, item)
+		}
+	}
+	sort.SliceStable(result, func(i, j int) bool {
+		l, r := result[i], result[j]
+		identity := strings.Compare(l.Namespace, r.Namespace)
+		if identity == 0 {
+			identity = strings.Compare(l.Name, r.Name)
+		}
+		primary := identity
+		switch options.Sort {
+		case "name":
+			primary = naturalTextCompare(l.Name, r.Name)
+		case "age":
+			primary = int64Compare(l.AgeSeconds, r.AgeSeconds)
+		}
+		return pageSortLess(primary, identity, options.Order == resources.OrderDescending)
+	})
+	return result
+}
+func filterSortPersistentVolumeClaims(items []resources.PersistentVolumeClaimDTO, options resources.ListOptions) []resources.PersistentVolumeClaimDTO {
+	result := items[:0]
+	statuses := stringSet(options.Statuses)
+	for _, item := range items {
+		if len(statuses) > 0 && !statuses[item.Status] {
+			continue
+		}
+		if options.Search != "" && !matchesSearch(options, item.Namespace, item.Name, item.VolumeName) {
+			continue
+		}
+		result = append(result, item)
+	}
+	sort.SliceStable(result, func(i, j int) bool {
+		l, r := result[i], result[j]
+		identity := strings.Compare(l.Namespace, r.Namespace)
+		if identity == 0 {
+			identity = strings.Compare(l.Name, r.Name)
+		}
+		primary := identity
+		switch options.Sort {
+		case "name":
+			primary = naturalTextCompare(l.Name, r.Name)
+		case "age":
+			primary = int64Compare(l.AgeSeconds, r.AgeSeconds)
+		case "status":
+			primary = naturalTextCompare(l.Status, r.Status)
+		}
+		return pageSortLess(primary, identity, options.Order == resources.OrderDescending)
+	})
+	return result
+}
+func filterSortPersistentVolumes(items []resources.PersistentVolumeDTO, options resources.ListOptions) []resources.PersistentVolumeDTO {
+	result := items[:0]
+	statuses := stringSet(options.Statuses)
+	for _, item := range items {
+		if len(statuses) > 0 && !statuses[item.Status] {
+			continue
+		}
+		if options.Search != "" && !matchesSearch(options, item.Name, item.StorageClass) {
+			continue
+		}
+		result = append(result, item)
+	}
+	sort.SliceStable(result, func(i, j int) bool {
+		l, r := result[i], result[j]
+		identity := strings.Compare(l.Name, r.Name)
+		primary := identity
+		switch options.Sort {
+		case "name":
+			primary = naturalTextCompare(l.Name, r.Name)
+		case "age":
+			primary = int64Compare(l.AgeSeconds, r.AgeSeconds)
+		case "status":
+			primary = naturalTextCompare(l.Status, r.Status)
+		}
+		return pageSortLess(primary, identity, options.Order == resources.OrderDescending)
+	})
+	return result
+}
+func filterSortStorageClasses(items []resources.StorageClassDTO, options resources.ListOptions) []resources.StorageClassDTO {
+	result := items[:0]
+	for _, item := range items {
+		if options.Search == "" || matchesSearch(options, item.Name, item.Provisioner) {
+			result = append(result, item)
+		}
+	}
+	sort.SliceStable(result, func(i, j int) bool {
+		l, r := result[i], result[j]
+		identity := strings.Compare(l.Name, r.Name)
+		primary := identity
+		switch options.Sort {
+		case "name":
+			primary = naturalTextCompare(l.Name, r.Name)
+		case "age":
+			primary = int64Compare(l.AgeSeconds, r.AgeSeconds)
+		}
+		return pageSortLess(primary, identity, options.Order == resources.OrderDescending)
+	})
+	return result
+}
+func filterSortCSIDrivers(items []resources.CSIDriverDTO, options resources.ListOptions) []resources.CSIDriverDTO {
+	result := items[:0]
+	for _, item := range items {
+		if options.Search == "" || matchesSearch(options, item.Name) {
+			result = append(result, item)
+		}
+	}
+	sort.SliceStable(result, func(i, j int) bool {
+		l, r := result[i], result[j]
+		identity := strings.Compare(l.Name, r.Name)
+		primary := identity
+		switch options.Sort {
+		case "name":
+			primary = naturalTextCompare(l.Name, r.Name)
+		case "age":
+			primary = int64Compare(l.AgeSeconds, r.AgeSeconds)
+		}
+		return pageSortLess(primary, identity, options.Order == resources.OrderDescending)
+	})
+	return result
+}
+func filterSortCSINodes(items []resources.CSINodeDTO, options resources.ListOptions) []resources.CSINodeDTO {
+	result := items[:0]
+	for _, item := range items {
+		if options.Search == "" || matchesSearch(options, item.Name) {
+			result = append(result, item)
+		}
+	}
+	sort.SliceStable(result, func(i, j int) bool {
+		l, r := result[i], result[j]
+		identity := strings.Compare(l.Name, r.Name)
+		primary := identity
+		switch options.Sort {
+		case "name":
+			primary = naturalTextCompare(l.Name, r.Name)
+		case "age":
+			primary = int64Compare(l.AgeSeconds, r.AgeSeconds)
+		}
+		return pageSortLess(primary, identity, options.Order == resources.OrderDescending)
+	})
+	return result
+}
+func filterSortVolumeAttachments(items []resources.VolumeAttachmentDTO, options resources.ListOptions) []resources.VolumeAttachmentDTO {
+	result := items[:0]
+	for _, item := range items {
+		if options.Search != "" && !matchesSearch(options, item.Name, item.NodeName, item.Attacher, item.VolumeName) {
+			continue
+		}
+		result = append(result, item)
+	}
+	sort.SliceStable(result, func(i, j int) bool {
+		l, r := result[i], result[j]
+		identity := strings.Compare(l.Name, r.Name)
+		primary := identity
+		switch options.Sort {
+		case "name":
+			primary = naturalTextCompare(l.Name, r.Name)
+		case "age":
+			primary = int64Compare(l.AgeSeconds, r.AgeSeconds)
+		}
+		return pageSortLess(primary, identity, options.Order == resources.OrderDescending)
+	})
+	return result
+}
 func filterSortNodes(items []resources.NodeDTO, options resources.ListOptions) []resources.NodeDTO {
 	result := items[:0]
 	statuses := stringSet(options.Statuses)

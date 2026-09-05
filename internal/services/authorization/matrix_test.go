@@ -24,6 +24,14 @@ func TestAllowlistExactlyMatchesDocumentedMVPIDs(t *testing.T) {
 		"configmaps.list", "configmaps.get", "configmaps.watch",
 		"secrets.list", "secrets.get",
 		"nodes.list", "nodes.get",
+		"persistentvolumes.list", "persistentvolumes.get",
+		"persistentvolumeclaims.list", "persistentvolumeclaims.get",
+		"storageclasses.list", "storageclasses.get",
+		"volumeattachments.list", "volumeattachments.get",
+		"csinodes.list", "csinodes.get",
+		"csidrivers.list", "csidrivers.get",
+		"leases.list", "leases.get",
+		"namespaces.get",
 		"metrics.pods.list",
 	}
 	allowlist := Allowlist()
@@ -39,7 +47,7 @@ func TestAllowlistExactlyMatchesDocumentedMVPIDs(t *testing.T) {
 			t.Fatalf("duplicate capability ID %q", specification.ID)
 		}
 		seen[specification.ID] = struct{}{}
-		if specification.ResourceNamePolicy == ResourceNameEmpty && specification.Scope == ScopeCluster && specification.ID != "namespaces.list" && specification.ID != "nodes.list" {
+		if specification.ResourceNamePolicy == ResourceNameEmpty && specification.Scope == ScopeCluster && specification.ID != "namespaces.list" && specification.ID != "nodes.list" && !isClusterListCapability(specification.ID) {
 			t.Fatalf("unexpected cluster capability: %+v", specification)
 		}
 	}
@@ -49,6 +57,17 @@ func TestAllowlistExactlyMatchesDocumentedMVPIDs(t *testing.T) {
 	if got := Allowlist()[0].ID; got != "namespaces.list" {
 		t.Fatalf("allowlist mutated through caller: %q", got)
 	}
+}
+
+// isClusterListCapability enumerates the approved cluster-scoped empty-name
+// list capabilities beyond namespaces.list.
+func isClusterListCapability(id string) bool {
+	switch id {
+	case "nodes.list", "persistentvolumes.list", "storageclasses.list",
+		"volumeattachments.list", "csinodes.list", "csidrivers.list":
+		return true
+	}
+	return false
 }
 
 func TestKeyForCapabilitySeparatesResourceAndSubresource(t *testing.T) {

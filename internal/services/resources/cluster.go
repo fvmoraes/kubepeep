@@ -9,7 +9,12 @@ import (
 // ClusterCollections are read without any namespace scope: the origin carries
 // an empty namespace and authorization keys use cluster-scoped capabilities.
 var clusterGVR = map[Collection]Origin{
-	CollectionNodes: {Version: "v1", Resource: "nodes"},
+	CollectionNodes:             {Version: "v1", Resource: "nodes"},
+	CollectionPersistentVolumes: {Version: "v1", Resource: "persistentvolumes"},
+	CollectionVolumeAttachments: {APIGroup: "storage.k8s.io", Version: "v1", Resource: "volumeattachments"},
+	CollectionStorageClasses:    {APIGroup: "storage.k8s.io", Version: "v1", Resource: "storageclasses"},
+	CollectionCSINodes:          {APIGroup: "storage.k8s.io", Version: "v1", Resource: "csinodes"},
+	CollectionCSIDrivers:        {APIGroup: "storage.k8s.io", Version: "v1", Resource: "csidrivers"},
 }
 
 // ClusterOriginFor returns the single cluster-scoped origin of a collection.
@@ -215,5 +220,33 @@ func sortStrings(values []string) {
 		for j := i; j > 0 && values[j] < values[j-1]; j-- {
 			values[j], values[j-1] = values[j-1], values[j]
 		}
+	}
+}
+
+// NamespaceObjectDetailDTO is the V2-01 Namespace object inspection. It is
+// distinct from local scope management: phases and conditions of the cluster
+// object, never the saved scope contents.
+type NamespaceObjectDetailDTO struct {
+	Metadata   ResourceMetadataDTO `json:"metadata"`
+	Status     string              `json:"status"`
+	Conditions []ConditionDTO      `json:"conditions"`
+}
+
+func (NamespaceObjectDetailDTO) resourceDetailItem() {}
+
+// ConvertNamespaceObjectDetail projects one Namespace object onto the bounded
+// inspection DTO.
+func ConvertNamespaceObjectDetail(value *corev1.Namespace) NamespaceObjectDetailDTO {
+	conditions := make([]ConditionDTO, 0, min(len(value.Status.Conditions), maximumNodeConditions))
+	for _, condition := range value.Status.Conditions {
+		if len(conditions) == maximumNodeConditions {
+			break
+		}
+		conditions = append(conditions, conditionDTO(string(condition.Type), string(condition.Status), condition.Reason, condition.Message, condition.LastTransitionTime))
+	}
+	metadata := ConvertMetadata(value)
+	metadata.Namespace = ""
+	return NamespaceObjectDetailDTO{
+		Metadata: metadata, Status: string(value.Status.Phase), Conditions: conditions,
 	}
 }

@@ -12,6 +12,7 @@ import { NamespaceScopeEditor } from './components/NamespaceScopeEditor'
 import { PermissionsMatrixPage } from './components/PermissionsMatrix'
 import { LogsPage } from './components/LogsPage'
 import { ConfigPage, EventsPage, NetworkPage, NodesPage, PodsPage, WorkloadsPage } from './components/ResourcePages'
+import { LeasesPage, NamespaceObjectPage, StoragePage } from './components/FamilyPages'
 import { SettingsPage } from './components/SettingsPage'
 import { Sidebar } from './components/Sidebar'
 import { StatePanel } from './components/StatePanel'
@@ -47,7 +48,15 @@ const maximumCommandResources = 200
 function resourceEntryPath(collection: unknown, item: { name?: string; namespace?: string; kind?: string }): string | null {
   if (typeof collection !== 'string' || !item.name) return null
   // Cluster-scoped entries (ADR 0006) resolve by name only; no fake namespace.
-  if (collection === 'nodes') return `/nodes/${encodeURIComponent(item.name)}`
+  const clusterRoots: Record<string, string> = {
+    nodes: '/nodes',
+    'persistent-volumes': '/storage/persistent-volumes',
+    'storage-classes': '/storage/storage-classes',
+    'csi-nodes': '/storage/csi-nodes',
+    'csi-drivers': '/storage/csi-drivers',
+    'volume-attachments': '/storage/volume-attachments',
+  }
+  if (collection in clusterRoots) return `${clusterRoots[collection]}/${encodeURIComponent(item.name)}`
   if (!item.namespace) return null
   const namespace = encodeURIComponent(item.namespace)
   const name = encodeURIComponent(item.name)
@@ -68,6 +77,10 @@ function resourceEntryPath(collection: unknown, item: { name?: string; namespace
       return `/config/configmaps/${namespace}/${name}`
     case 'secrets':
       return `/config/secrets/${namespace}/${name}`
+    case 'leases':
+      return `/leases/${namespace}/${name}`
+    case 'persistent-volume-claims':
+      return `/storage/persistent-volume-claims/${namespace}/${name}`
     default:
       return null
   }
@@ -267,7 +280,13 @@ export function App() {
         <Route path="events" element={<EventsPage />} />
         <Route path="nodes" element={<NodesPage />} />
         <Route path="nodes/:name" element={<NodesPage />} />
+        <Route path="leases" element={<LeasesPage />} />
+        <Route path="leases/:namespace/:name" element={<LeasesPage />} />
         <Route path="namespaces" element={<NamespaceScopeEditor />} />
+        <Route path="namespaces/:name" element={<NamespaceObjectPage />} />
+        <Route path="storage" element={<StoragePage />} />
+        <Route path="storage/:tab" element={<StoragePage />} />
+        <Route path="storage/:tab/:namespace/:name" element={<StoragePage />} />
         <Route path="permissions" element={<PermissionsMatrixPage />} />
         <Route path="logs" element={<LogsPage />} />
         <Route path="pods" element={<PodsPage />} />

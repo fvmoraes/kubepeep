@@ -7,6 +7,7 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
+	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
 	networkingv1 "k8s.io/api/networking/v1"
@@ -78,6 +79,18 @@ func MarshalReadOnlyYAML(value any) ([]byte, error) {
 		copy.ManagedFields = nil
 		sanitized = copy
 	case *discoveryv1.EndpointSlice:
+		copy := object.DeepCopy()
+		copy.ManagedFields = nil
+		sanitized = copy
+	case *coordinationv1.Lease:
+		copy := object.DeepCopy()
+		copy.ManagedFields = nil
+		sanitized = copy
+	case *corev1.PersistentVolumeClaim:
+		copy := object.DeepCopy()
+		copy.ManagedFields = nil
+		sanitized = copy
+	case *corev1.Namespace:
 		copy := object.DeepCopy()
 		copy.ManagedFields = nil
 		sanitized = copy

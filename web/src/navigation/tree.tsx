@@ -64,7 +64,7 @@ export const navGroups: NavGroup[] = [
       { id: 'nodes', label: 'Nodes', path: '/nodes', icon: Server, tip: 'Nodes' },
       { id: 'events', label: 'Events', path: '/events', icon: FileText, tip: 'Events', keywords: ['warning', 'reason'] },
       { id: 'namespaces', label: 'Namespaces', path: '/namespaces', icon: Boxes, tip: 'Namespaces', keywords: ['scope'] },
-      { id: 'leases', label: 'Leases', icon: Timer, tip: 'Leases' },
+      { id: 'leases', label: 'Leases', path: '/leases', icon: Timer, tip: 'Leases' },
     ],
   },
   {
@@ -118,12 +118,12 @@ export const navGroups: NavGroup[] = [
     id: 'storage',
     label: 'Storage',
     items: [
-      { id: 'pv', label: 'PersistentVolumes', path: undefined, icon: HardDrive, tip: 'Persistent Volumes' },
-      { id: 'pvc', label: 'PersistentVolumeClaims', icon: HardDrive, tip: 'Persistent Volume Claims' },
-      { id: 'volume-attachments', label: 'VolumeAttachments', icon: HardDrive, tip: 'Volume Attachments' },
-      { id: 'storage-classes', label: 'StorageClasses', icon: HardDrive, tip: 'Storage Classes' },
-      { id: 'csi-nodes', label: 'CSINodes', icon: HardDrive, tip: 'CSI Nodes' },
-      { id: 'csi-drivers', label: 'CSIDrivers', icon: HardDrive, tip: 'CSI Drivers' },
+      { id: 'pv', label: 'PersistentVolumes', path: '/storage/persistent-volumes', icon: HardDrive, tip: 'Persistent Volumes' },
+      { id: 'pvc', label: 'PersistentVolumeClaims', path: '/storage/persistent-volume-claims', icon: HardDrive, tip: 'Persistent Volume Claims' },
+      { id: 'volume-attachments', label: 'VolumeAttachments', path: '/storage/volume-attachments', icon: HardDrive, tip: 'Volume Attachments' },
+      { id: 'storage-classes', label: 'StorageClasses', path: '/storage/storage-classes', icon: HardDrive, tip: 'Storage Classes' },
+      { id: 'csi-nodes', label: 'CSINodes', path: '/storage/csi-nodes', icon: HardDrive, tip: 'CSI Nodes' },
+      { id: 'csi-drivers', label: 'CSIDrivers', path: '/storage/csi-drivers', icon: HardDrive, tip: 'CSI Drivers' },
     ],
   },
   {

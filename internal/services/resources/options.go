@@ -55,6 +55,13 @@ var rulesByCollection = map[Collection]collectionRules{
 	CollectionConfigMaps:     {sorts: []string{"identity", "name", "createdAt"}, defaultSort: "identity", defaultOrder: OrderAscending},
 	CollectionSecrets:        {sorts: []string{"identity", "name", "createdAt"}, defaultSort: "identity", defaultOrder: OrderAscending},
 	CollectionNodes:          {sorts: []string{"identity", "name", "age", "status"}, defaultSort: "identity", defaultOrder: OrderAscending},
+	CollectionLeases:         {sorts: []string{"identity", "name", "age"}, defaultSort: "identity", defaultOrder: OrderAscending},
+	CollectionPersistentVolumes:      {sorts: []string{"identity", "name", "age", "status"}, defaultSort: "identity", defaultOrder: OrderAscending},
+	CollectionPersistentVolumeClaims: {sorts: []string{"identity", "name", "age", "status"}, defaultSort: "identity", defaultOrder: OrderAscending},
+	CollectionVolumeAttachments:      {sorts: []string{"identity", "name", "age"}, defaultSort: "identity", defaultOrder: OrderAscending},
+	CollectionStorageClasses:         {sorts: []string{"identity", "name", "age"}, defaultSort: "identity", defaultOrder: OrderAscending},
+	CollectionCSINodes:               {sorts: []string{"identity", "name", "age"}, defaultSort: "identity", defaultOrder: OrderAscending},
+	CollectionCSIDrivers:             {sorts: []string{"identity", "name", "age"}, defaultSort: "identity", defaultOrder: OrderAscending},
 }
 
 // NormalizeListOptions applies all bounded, endpoint-specific defaults and

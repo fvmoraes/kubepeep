@@ -29,6 +29,13 @@ type ResourceService interface {
 	ListConfigMaps(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, resourcecore.ListOptions, *resourcecore.CompositeCursor[resourcecore.ConfigMapListDTO]) (resourcecore.ListResult[resourcecore.ConfigMapListDTO], error)
 	ListSecrets(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, resourcecore.ListOptions, *resourcecore.CompositeCursor[resourcecore.SecretMetadataDTO]) (resourcecore.ListResult[resourcecore.SecretMetadataDTO], error)
 	ListNodes(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, resourcecore.ListOptions, *resourcecore.CompositeCursor[resourcecore.NodeDTO]) (resourcecore.ListResult[resourcecore.NodeDTO], error)
+	ListLeases(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, resourcecore.ListOptions, *resourcecore.CompositeCursor[resourcecore.LeaseDTO]) (resourcecore.ListResult[resourcecore.LeaseDTO], error)
+	ListPersistentVolumeClaims(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, resourcecore.ListOptions, *resourcecore.CompositeCursor[resourcecore.PersistentVolumeClaimDTO]) (resourcecore.ListResult[resourcecore.PersistentVolumeClaimDTO], error)
+	ListPersistentVolumes(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, resourcecore.ListOptions, *resourcecore.CompositeCursor[resourcecore.PersistentVolumeDTO]) (resourcecore.ListResult[resourcecore.PersistentVolumeDTO], error)
+	ListStorageClasses(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, resourcecore.ListOptions, *resourcecore.CompositeCursor[resourcecore.StorageClassDTO]) (resourcecore.ListResult[resourcecore.StorageClassDTO], error)
+	ListCSIDrivers(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, resourcecore.ListOptions, *resourcecore.CompositeCursor[resourcecore.CSIDriverDTO]) (resourcecore.ListResult[resourcecore.CSIDriverDTO], error)
+	ListCSINodes(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, resourcecore.ListOptions, *resourcecore.CompositeCursor[resourcecore.CSINodeDTO]) (resourcecore.ListResult[resourcecore.CSINodeDTO], error)
+	ListVolumeAttachments(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, resourcecore.ListOptions, *resourcecore.CompositeCursor[resourcecore.VolumeAttachmentDTO]) (resourcecore.ListResult[resourcecore.VolumeAttachmentDTO], error)
 	GetWorkload(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, string, string, string) (resourcecore.WorkloadDetailDTO, error)
 	WorkloadYAMLDocument(context.Context, namespaces.SelectionBinding, string, string, string) ([]byte, error)
 	GetPod(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, string, string) (resourcecore.PodDetailDTO, error)
@@ -40,6 +47,16 @@ type ResourceService interface {
 	GetSecret(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, string, string) (resourcecore.SecretMetadataDTO, error)
 	GetNode(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, string) (resourcecore.NodeDetailDTO, error)
 	NodeYAMLDocument(context.Context, namespaces.SelectionBinding, string) ([]byte, error)
+	GetLease(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, string, string) (resourcecore.LeaseDetailDTO, error)
+	GetPersistentVolumeClaim(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, string, string) (resourcecore.PersistentVolumeClaimDetailDTO, error)
+	GetPersistentVolume(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, string) (resourcecore.PersistentVolumeDetailDTO, error)
+	PersistentVolumeYAMLDocument(context.Context, namespaces.SelectionBinding, string) ([]byte, error)
+	GetStorageClass(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, string) (resourcecore.StorageClassDetailDTO, error)
+	StorageClassYAMLDocument(context.Context, namespaces.SelectionBinding, string) ([]byte, error)
+	GetCSIDriver(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, string) (resourcecore.CSIDriverDetailDTO, error)
+	GetCSINode(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, string) (resourcecore.CSINodeDetailDTO, error)
+	GetVolumeAttachment(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, string) (resourcecore.VolumeAttachmentDetailDTO, error)
+	GetNamespace(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, string) (resourcecore.NamespaceObjectDetailDTO, error)
 	ResourceYAML(context.Context, namespaces.SelectionBinding, string, string, string) ([]byte, error)
 	ResourceLastAppliedDiff(context.Context, namespaces.SelectionBinding, string, string, string) (resourcecore.LastAppliedDiffDTO, error)
 	ReadLogs(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, string, string, resourcecore.LogQuery) (resourcecore.LogReadDTO, error)
@@ -106,6 +123,42 @@ func (handler *Resources) Secrets(w http.ResponseWriter, r *http.Request) {
 func (handler *Resources) Nodes(w http.ResponseWriter, r *http.Request) {
 	handleClusterList(handler, w, r, resourcecore.CollectionNodes, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution, o resourcecore.ListOptions, c *resourcecore.CompositeCursor[resourcecore.NodeDTO]) (resourcecore.ListResult[resourcecore.NodeDTO], error) {
 		return handler.service.ListNodes(ctx, b, s, o, c)
+	})
+}
+
+func (handler *Resources) Leases(w http.ResponseWriter, r *http.Request) {
+	handleList(handler, w, r, resourcecore.CollectionLeases, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution, o resourcecore.ListOptions, c *resourcecore.CompositeCursor[resourcecore.LeaseDTO]) (resourcecore.ListResult[resourcecore.LeaseDTO], error) {
+		return handler.service.ListLeases(ctx, b, s, o, c)
+	})
+}
+func (handler *Resources) PersistentVolumeClaims(w http.ResponseWriter, r *http.Request) {
+	handleList(handler, w, r, resourcecore.CollectionPersistentVolumeClaims, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution, o resourcecore.ListOptions, c *resourcecore.CompositeCursor[resourcecore.PersistentVolumeClaimDTO]) (resourcecore.ListResult[resourcecore.PersistentVolumeClaimDTO], error) {
+		return handler.service.ListPersistentVolumeClaims(ctx, b, s, o, c)
+	})
+}
+func (handler *Resources) PersistentVolumes(w http.ResponseWriter, r *http.Request) {
+	handleClusterList(handler, w, r, resourcecore.CollectionPersistentVolumes, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution, o resourcecore.ListOptions, c *resourcecore.CompositeCursor[resourcecore.PersistentVolumeDTO]) (resourcecore.ListResult[resourcecore.PersistentVolumeDTO], error) {
+		return handler.service.ListPersistentVolumes(ctx, b, s, o, c)
+	})
+}
+func (handler *Resources) StorageClasses(w http.ResponseWriter, r *http.Request) {
+	handleClusterList(handler, w, r, resourcecore.CollectionStorageClasses, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution, o resourcecore.ListOptions, c *resourcecore.CompositeCursor[resourcecore.StorageClassDTO]) (resourcecore.ListResult[resourcecore.StorageClassDTO], error) {
+		return handler.service.ListStorageClasses(ctx, b, s, o, c)
+	})
+}
+func (handler *Resources) CSIDrivers(w http.ResponseWriter, r *http.Request) {
+	handleClusterList(handler, w, r, resourcecore.CollectionCSIDrivers, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution, o resourcecore.ListOptions, c *resourcecore.CompositeCursor[resourcecore.CSIDriverDTO]) (resourcecore.ListResult[resourcecore.CSIDriverDTO], error) {
+		return handler.service.ListCSIDrivers(ctx, b, s, o, c)
+	})
+}
+func (handler *Resources) CSINodes(w http.ResponseWriter, r *http.Request) {
+	handleClusterList(handler, w, r, resourcecore.CollectionCSINodes, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution, o resourcecore.ListOptions, c *resourcecore.CompositeCursor[resourcecore.CSINodeDTO]) (resourcecore.ListResult[resourcecore.CSINodeDTO], error) {
+		return handler.service.ListCSINodes(ctx, b, s, o, c)
+	})
+}
+func (handler *Resources) VolumeAttachments(w http.ResponseWriter, r *http.Request) {
+	handleClusterList(handler, w, r, resourcecore.CollectionVolumeAttachments, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution, o resourcecore.ListOptions, c *resourcecore.CompositeCursor[resourcecore.VolumeAttachmentDTO]) (resourcecore.ListResult[resourcecore.VolumeAttachmentDTO], error) {
+		return handler.service.ListVolumeAttachments(ctx, b, s, o, c)
 	})
 }
 
@@ -235,6 +288,47 @@ func (handler *Resources) NodeDetail(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (handler *Resources) LeaseDetail(w http.ResponseWriter, r *http.Request) {
+	handler.detail(w, r, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution) (any, error) {
+		return handler.service.GetLease(ctx, b, s, r.PathValue("namespace"), r.PathValue("name"))
+	})
+}
+func (handler *Resources) PersistentVolumeClaimDetail(w http.ResponseWriter, r *http.Request) {
+	handler.detail(w, r, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution) (any, error) {
+		return handler.service.GetPersistentVolumeClaim(ctx, b, s, r.PathValue("namespace"), r.PathValue("name"))
+	})
+}
+func (handler *Resources) PersistentVolumeDetail(w http.ResponseWriter, r *http.Request) {
+	handler.clusterDetail(w, r, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution) (any, error) {
+		return handler.service.GetPersistentVolume(ctx, b, s, r.PathValue("name"))
+	})
+}
+func (handler *Resources) StorageClassDetail(w http.ResponseWriter, r *http.Request) {
+	handler.clusterDetail(w, r, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution) (any, error) {
+		return handler.service.GetStorageClass(ctx, b, s, r.PathValue("name"))
+	})
+}
+func (handler *Resources) CSIDriverDetail(w http.ResponseWriter, r *http.Request) {
+	handler.clusterDetail(w, r, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution) (any, error) {
+		return handler.service.GetCSIDriver(ctx, b, s, r.PathValue("name"))
+	})
+}
+func (handler *Resources) CSINodeDetail(w http.ResponseWriter, r *http.Request) {
+	handler.clusterDetail(w, r, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution) (any, error) {
+		return handler.service.GetCSINode(ctx, b, s, r.PathValue("name"))
+	})
+}
+func (handler *Resources) VolumeAttachmentDetail(w http.ResponseWriter, r *http.Request) {
+	handler.clusterDetail(w, r, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution) (any, error) {
+		return handler.service.GetVolumeAttachment(ctx, b, s, r.PathValue("name"))
+	})
+}
+func (handler *Resources) NamespaceDetail(w http.ResponseWriter, r *http.Request) {
+	handler.clusterDetail(w, r, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution) (any, error) {
+		return handler.service.GetNamespace(ctx, b, s, r.PathValue("name"))
+	})
+}
+
 // clusterDetail serves one cluster-scoped detail: no namespace in the path,
 // name-only validation, no scope membership check.
 func (handler *Resources) clusterDetail(w http.ResponseWriter, r *http.Request, call detailCall) {
@@ -310,6 +404,22 @@ func (handler *Resources) NodeYAML(w http.ResponseWriter, r *http.Request) {
 	handler.clusterYAML(w, r, func(ctx context.Context, b namespaces.SelectionBinding) ([]byte, error) {
 		return handler.service.NodeYAMLDocument(ctx, b, r.PathValue("name"))
 	})
+}
+func (handler *Resources) PersistentVolumeYAML(w http.ResponseWriter, r *http.Request) {
+	handler.clusterYAML(w, r, func(ctx context.Context, b namespaces.SelectionBinding) ([]byte, error) {
+		return handler.service.PersistentVolumeYAMLDocument(ctx, b, r.PathValue("name"))
+	})
+}
+func (handler *Resources) StorageClassYAML(w http.ResponseWriter, r *http.Request) {
+	handler.clusterYAML(w, r, func(ctx context.Context, b namespaces.SelectionBinding) ([]byte, error) {
+		return handler.service.StorageClassYAMLDocument(ctx, b, r.PathValue("name"))
+	})
+}
+func (handler *Resources) LeaseYAML(w http.ResponseWriter, r *http.Request) {
+	handler.collectionYAML(w, r, "leases")
+}
+func (handler *Resources) PersistentVolumeClaimYAML(w http.ResponseWriter, r *http.Request) {
+	handler.collectionYAML(w, r, "persistent-volume-claims")
 }
 
 // clusterYAML serves one cluster-scoped YAML action with the same fencing and

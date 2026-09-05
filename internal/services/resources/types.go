@@ -23,6 +23,13 @@ const (
 	CollectionConfigMaps     Collection = "configmaps"
 	CollectionSecrets        Collection = "secrets"
 	CollectionNodes          Collection = "nodes"
+	CollectionLeases         Collection = "leases"
+	CollectionPersistentVolumes       Collection = "persistent-volumes"
+	CollectionPersistentVolumeClaims  Collection = "persistent-volume-claims"
+	CollectionVolumeAttachments       Collection = "volume-attachments"
+	CollectionStorageClasses          Collection = "storage-classes"
+	CollectionCSINodes                Collection = "csi-nodes"
+	CollectionCSIDrivers              Collection = "csi-drivers"
 )
 
 type WorkloadKind string

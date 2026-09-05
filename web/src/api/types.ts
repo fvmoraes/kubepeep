@@ -636,6 +636,156 @@ export interface NodeDetail {
   truncated: boolean
 }
 
+export interface Lease {
+  namespace: string
+  name: string
+  holderName: string
+  durationSeconds: number
+  renewTime: string | null
+  ageSeconds: number
+}
+
+export interface LeaseDetail {
+  metadata: ResourceMetadata
+  holderName: string
+  durationSeconds: number
+  renewTime: string | null
+  acquireTime: string | null
+}
+
+export interface VolumeClaimRef {
+  namespace: string
+  name: string
+}
+
+export interface PersistentVolume {
+  name: string
+  status: string
+  capacity: string
+  accessModes: string[]
+  reclaimPolicy: string
+  storageClass: string
+  claim: VolumeClaimRef | null
+  ageSeconds: number
+}
+
+export interface PersistentVolumeDetail {
+  metadata: ResourceMetadata
+  status: string
+  capacity: Record<string, string> | null
+  accessModes: string[]
+  reclaimPolicy: string
+  storageClass: string
+  volumeMode: string
+  claim: VolumeClaimRef | null
+  reason: string | null
+  message: string | null
+  omitted: string[]
+}
+
+export interface PersistentVolumeClaim {
+  namespace: string
+  name: string
+  status: string
+  volumeName: string
+  capacity: string | null
+  accessModes: string[]
+  storageClass: string | null
+  ageSeconds: number
+}
+
+export interface PersistentVolumeClaimDetail {
+  metadata: ResourceMetadata
+  status: string
+  volumeName: string
+  capacity: Record<string, string> | null
+  accessModes: string[]
+  storageClass: string | null
+  volumeMode: string
+  conditions: Condition[]
+  truncated: boolean
+}
+
+export interface StorageClass {
+  name: string
+  provisioner: string
+  default: boolean
+  reclaimPolicy: string
+  volumeBindingMode: string
+  allowVolumeExpansion: boolean
+  ageSeconds: number
+}
+
+export interface StorageClassDetail {
+  metadata: ResourceMetadata
+  provisioner: string
+  default: boolean
+  reclaimPolicy: string
+  volumeBindingMode: string
+  allowVolumeExpansion: boolean
+  omitted: string[]
+}
+
+export interface CSIDriver {
+  name: string
+  attachRequired: boolean
+  podInfoOnMount: boolean
+  storageCapacity: boolean
+  ageSeconds: number
+}
+
+export interface CSIDriverDetail {
+  metadata: ResourceMetadata
+  attachRequired: boolean
+  podInfoOnMount: boolean
+  storageCapacity: boolean
+  fsGroupPolicy: string
+}
+
+export interface CSINode {
+  name: string
+  driverCount: number
+  ageSeconds: number
+}
+
+export interface CSINodeDriver {
+  name: string
+  nodeID: string
+  topologyKeys: string[]
+}
+
+export interface CSINodeDetail {
+  metadata: ResourceMetadata
+  driverCount: number
+  drivers: CSINodeDriver[]
+  truncated: boolean
+}
+
+export interface VolumeAttachment {
+  name: string
+  nodeName: string
+  attacher: string
+  volumeName: string
+  attached: boolean
+  ageSeconds: number
+}
+
+export interface VolumeAttachmentDetail {
+  metadata: ResourceMetadata
+  nodeName: string
+  attacher: string
+  volumeName: string
+  persistentVolumeName: string
+  attached: boolean
+  omitted: string[]
+}
+
+export interface NamespaceObjectDetail {
+  metadata: ResourceMetadata
+  status: string
+  conditions: Condition[]
+}
+
 export interface LogLine {
   timestamp: string | null
   text: string

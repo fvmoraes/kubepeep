@@ -22,8 +22,23 @@ import type {
   IngressDetail,
   IngressResource,
   KubernetesContext,
+  CSIDriver,
+  CSIDriverDetail,
+  CSINode,
+  CSINodeDetail,
+  Lease,
+  LeaseDetail,
+  NamespaceObjectDetail,
   NodeDetail,
   NodeSummary,
+  PersistentVolume,
+  PersistentVolumeClaim,
+  PersistentVolumeClaimDetail,
+  PersistentVolumeDetail,
+  StorageClass,
+  StorageClassDetail,
+  VolumeAttachment,
+  VolumeAttachmentDetail,
   YAMLDiff,
   LogScanRequest,
   LogQuery,
@@ -518,6 +533,82 @@ export function getNode(name: string, signal?: AbortSignal, expectedGeneration?:
 
 export function getNodeYAML(name: string, signal?: AbortSignal): Promise<string> {
   return requestYAML(`/api/v1/nodes/${resourcePath(name)}/yaml`, signal)
+}
+
+export function getLeases(options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<Lease>> {
+  return collectionRequest<Lease>('/api/v1/leases', options, signal, expectedGeneration)
+}
+
+export function getLease(namespace: string, name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<LeaseDetail> {
+  return resourceRequest<LeaseDetail>(`/api/v1/leases/${resourcePath(namespace)}/${resourcePath(name)}`, signal, expectedGeneration)
+}
+
+export function getLeaseYAML(namespace: string, name: string, signal?: AbortSignal): Promise<string> {
+  return requestYAML(`/api/v1/leases/${resourcePath(namespace)}/${resourcePath(name)}/yaml`, signal)
+}
+
+export function getPersistentVolumes(options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<PersistentVolume>> {
+  return collectionRequest<PersistentVolume>('/api/v1/persistent-volumes', options, signal, expectedGeneration)
+}
+
+export function getPersistentVolume(name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<PersistentVolumeDetail> {
+  return resourceRequest<PersistentVolumeDetail>(`/api/v1/persistent-volumes/${resourcePath(name)}`, signal, expectedGeneration)
+}
+
+export function getPersistentVolumeYAML(name: string, signal?: AbortSignal): Promise<string> {
+  return requestYAML(`/api/v1/persistent-volumes/${resourcePath(name)}/yaml`, signal)
+}
+
+export function getPersistentVolumeClaims(options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<PersistentVolumeClaim>> {
+  return collectionRequest<PersistentVolumeClaim>('/api/v1/persistent-volume-claims', options, signal, expectedGeneration)
+}
+
+export function getPersistentVolumeClaim(namespace: string, name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<PersistentVolumeClaimDetail> {
+  return resourceRequest<PersistentVolumeClaimDetail>(`/api/v1/persistent-volume-claims/${resourcePath(namespace)}/${resourcePath(name)}`, signal, expectedGeneration)
+}
+
+export function getPersistentVolumeClaimYAML(namespace: string, name: string, signal?: AbortSignal): Promise<string> {
+  return requestYAML(`/api/v1/persistent-volume-claims/${resourcePath(namespace)}/${resourcePath(name)}/yaml`, signal)
+}
+
+export function getStorageClasses(options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<StorageClass>> {
+  return collectionRequest<StorageClass>('/api/v1/storage-classes', options, signal, expectedGeneration)
+}
+
+export function getStorageClass(name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<StorageClassDetail> {
+  return resourceRequest<StorageClassDetail>(`/api/v1/storage-classes/${resourcePath(name)}`, signal, expectedGeneration)
+}
+
+export function getStorageClassYAML(name: string, signal?: AbortSignal): Promise<string> {
+  return requestYAML(`/api/v1/storage-classes/${resourcePath(name)}/yaml`, signal)
+}
+
+export function getCSIDrivers(options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<CSIDriver>> {
+  return collectionRequest<CSIDriver>('/api/v1/csi-drivers', options, signal, expectedGeneration)
+}
+
+export function getCSIDriver(name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<CSIDriverDetail> {
+  return resourceRequest<CSIDriverDetail>(`/api/v1/csi-drivers/${resourcePath(name)}`, signal, expectedGeneration)
+}
+
+export function getCSINodes(options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<CSINode>> {
+  return collectionRequest<CSINode>('/api/v1/csi-nodes', options, signal, expectedGeneration)
+}
+
+export function getCSINode(name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<CSINodeDetail> {
+  return resourceRequest<CSINodeDetail>(`/api/v1/csi-nodes/${resourcePath(name)}`, signal, expectedGeneration)
+}
+
+export function getVolumeAttachments(options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<VolumeAttachment>> {
+  return collectionRequest<VolumeAttachment>('/api/v1/volume-attachments', options, signal, expectedGeneration)
+}
+
+export function getVolumeAttachment(name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<VolumeAttachmentDetail> {
+  return resourceRequest<VolumeAttachmentDetail>(`/api/v1/volume-attachments/${resourcePath(name)}`, signal, expectedGeneration)
+}
+
+export function getNamespaceObject(name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<NamespaceObjectDetail> {
+  return resourceRequest<NamespaceObjectDetail>(`/api/v1/namespaces/${resourcePath(name)}`, signal, expectedGeneration)
 }
 
 export function getPreferences(signal?: AbortSignal): Promise<Preferences> {

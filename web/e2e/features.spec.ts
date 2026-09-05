@@ -234,3 +234,38 @@ test('nodes route is reachable from the sidebar navigation tree (V1-08)', async 
   await expect(page).toHaveURL(/\/nodes$/)
   await expect(page.getByRole('heading', { name: 'Nodes' })).toBeVisible()
 })
+
+test('storage tabs render honest states and navigate (R23-R27/V2)', async ({ page }) => {
+  const pv = { name: 'pv-data', status: 'Available', capacity: '10Gi', accessModes: ['ReadWriteOnce'], reclaimPolicy: 'Retain', storageClass: 'standard', claim: null, ageSeconds: 3600 }
+  await page.route('**/api/v1/persistent-volumes*', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: [pv], meta: { generation, page: { limit: 100, next: '', complete: true, truncated: false, filterScope: 'page' }, coverage: { requestedNamespaces: 0, completedNamespaces: 0, deniedNamespaces: [], failed: [] } } }) })
+  })
+  await page.route('**/api/v1/persistent-volume-claims*', async (route) => {
+    await route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ code: 'FORBIDDEN', message: 'Access to this resource was denied.' }) })
+  })
+
+  await page.goto('/storage/persistent-volumes')
+  await expect(page.getByRole('heading', { name: 'Storage' })).toBeVisible()
+  await expect(page.getByRole('cell', { name: /pv-data/ })).toBeVisible()
+  // No fictitious namespace fan-out for cluster-scoped lists.
+  await expect(page.getByText('Cluster-scoped result')).toBeVisible()
+
+  await page.getByRole('tab', { name: 'persistent-volume-claims' }).click()
+  await expect(page).toHaveURL(/\/storage\/persistent-volume-claims$/)
+  // Denial is authoritative: never an empty result.
+  await expect(page.getByText('Access to this resource was denied.')).toBeVisible()
+})
+
+test('leases page lists authorized leases in the scoped namespaces (R05/V2)', async ({ page }) => {
+  const lease = { namespace: 'payments', name: 'leader-election', holderName: 'api-abc', durationSeconds: 15, renewTime: '2026-09-05T01:00:00Z', ageSeconds: 120 }
+  await page.route('**/api/v1/leases?*', async (route) => {
+    const url = new URL(route.request().url())
+    const data = url.pathname === '/api/v1/leases' ? [lease] : []
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data, meta: { generation, page: { limit: 100, next: '', complete: true, truncated: false, filterScope: 'page' }, coverage: { requestedNamespaces: 1, completedNamespaces: 1, deniedNamespaces: [], failed: [] } } }) })
+  })
+
+  await page.goto('/leases')
+  await expect(page.getByRole('heading', { name: 'Leases' })).toBeVisible()
+  await expect(page.getByRole('cell', { name: /leader-election/ })).toBeVisible()
+  await expect(page.getByText('api-abc').first()).toBeVisible()
+})

@@ -223,6 +223,139 @@ func (backend *ResourceBackend) listNodePage(ctx context.Context, binding namesp
 	return result, nil
 }
 
+func (backend *ResourceBackend) listLeasePage(ctx context.Context, binding namespaces.SelectionBinding, page resources.PageRequest) (resources.OriginPage[resources.LeaseDTO], error) {
+	result := resources.OriginPage[resources.LeaseDTO]{Origin: page.Origin, Items: []resources.LeaseDTO{}}
+	requestContext, cancel, clients, err := backend.unary(ctx, binding)
+	if err != nil {
+		return result, err
+	}
+	defer cancel()
+	list, err := clients.kubernetes.CoordinationV1().Leases(page.Origin.Namespace).List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	if err != nil {
+		return result, mapResourceError(err)
+	}
+	now := backend.now().UTC()
+	for index := range list.Items {
+		result.Items = append(result.Items, resources.ConvertLease(&list.Items[index], now))
+	}
+	result.Continue, result.ResourceVersion = list.Continue, list.ResourceVersion
+	return result, nil
+}
+
+func (backend *ResourceBackend) listPersistentVolumeClaimPage(ctx context.Context, binding namespaces.SelectionBinding, page resources.PageRequest) (resources.OriginPage[resources.PersistentVolumeClaimDTO], error) {
+	result := resources.OriginPage[resources.PersistentVolumeClaimDTO]{Origin: page.Origin, Items: []resources.PersistentVolumeClaimDTO{}}
+	requestContext, cancel, clients, err := backend.unary(ctx, binding)
+	if err != nil {
+		return result, err
+	}
+	defer cancel()
+	list, err := clients.kubernetes.CoreV1().PersistentVolumeClaims(page.Origin.Namespace).List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	if err != nil {
+		return result, mapResourceError(err)
+	}
+	now := backend.now().UTC()
+	for index := range list.Items {
+		result.Items = append(result.Items, resources.ConvertPersistentVolumeClaim(&list.Items[index], now))
+	}
+	result.Continue, result.ResourceVersion = list.Continue, list.ResourceVersion
+	return result, nil
+}
+
+func (backend *ResourceBackend) listPersistentVolumePage(ctx context.Context, binding namespaces.SelectionBinding, page resources.PageRequest) (resources.OriginPage[resources.PersistentVolumeDTO], error) {
+	result := resources.OriginPage[resources.PersistentVolumeDTO]{Origin: page.Origin, Items: []resources.PersistentVolumeDTO{}}
+	requestContext, cancel, clients, err := backend.unary(ctx, binding)
+	if err != nil {
+		return result, err
+	}
+	defer cancel()
+	list, err := clients.kubernetes.CoreV1().PersistentVolumes().List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	if err != nil {
+		return result, mapResourceError(err)
+	}
+	now := backend.now().UTC()
+	for index := range list.Items {
+		result.Items = append(result.Items, resources.ConvertPersistentVolume(&list.Items[index], now))
+	}
+	result.Continue, result.ResourceVersion = list.Continue, list.ResourceVersion
+	return result, nil
+}
+
+func (backend *ResourceBackend) listStorageClassPage(ctx context.Context, binding namespaces.SelectionBinding, page resources.PageRequest) (resources.OriginPage[resources.StorageClassDTO], error) {
+	result := resources.OriginPage[resources.StorageClassDTO]{Origin: page.Origin, Items: []resources.StorageClassDTO{}}
+	requestContext, cancel, clients, err := backend.unary(ctx, binding)
+	if err != nil {
+		return result, err
+	}
+	defer cancel()
+	list, err := clients.kubernetes.StorageV1().StorageClasses().List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	if err != nil {
+		return result, mapResourceError(err)
+	}
+	now := backend.now().UTC()
+	for index := range list.Items {
+		result.Items = append(result.Items, resources.ConvertStorageClass(&list.Items[index], now))
+	}
+	result.Continue, result.ResourceVersion = list.Continue, list.ResourceVersion
+	return result, nil
+}
+
+func (backend *ResourceBackend) listCSIDriverPage(ctx context.Context, binding namespaces.SelectionBinding, page resources.PageRequest) (resources.OriginPage[resources.CSIDriverDTO], error) {
+	result := resources.OriginPage[resources.CSIDriverDTO]{Origin: page.Origin, Items: []resources.CSIDriverDTO{}}
+	requestContext, cancel, clients, err := backend.unary(ctx, binding)
+	if err != nil {
+		return result, err
+	}
+	defer cancel()
+	list, err := clients.kubernetes.StorageV1().CSIDrivers().List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	if err != nil {
+		return result, mapResourceError(err)
+	}
+	now := backend.now().UTC()
+	for index := range list.Items {
+		result.Items = append(result.Items, resources.ConvertCSIDriver(&list.Items[index], now))
+	}
+	result.Continue, result.ResourceVersion = list.Continue, list.ResourceVersion
+	return result, nil
+}
+
+func (backend *ResourceBackend) listCSINodePage(ctx context.Context, binding namespaces.SelectionBinding, page resources.PageRequest) (resources.OriginPage[resources.CSINodeDTO], error) {
+	result := resources.OriginPage[resources.CSINodeDTO]{Origin: page.Origin, Items: []resources.CSINodeDTO{}}
+	requestContext, cancel, clients, err := backend.unary(ctx, binding)
+	if err != nil {
+		return result, err
+	}
+	defer cancel()
+	list, err := clients.kubernetes.StorageV1().CSINodes().List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	if err != nil {
+		return result, mapResourceError(err)
+	}
+	now := backend.now().UTC()
+	for index := range list.Items {
+		result.Items = append(result.Items, resources.ConvertCSINode(&list.Items[index], now))
+	}
+	result.Continue, result.ResourceVersion = list.Continue, list.ResourceVersion
+	return result, nil
+}
+
+func (backend *ResourceBackend) listVolumeAttachmentPage(ctx context.Context, binding namespaces.SelectionBinding, page resources.PageRequest) (resources.OriginPage[resources.VolumeAttachmentDTO], error) {
+	result := resources.OriginPage[resources.VolumeAttachmentDTO]{Origin: page.Origin, Items: []resources.VolumeAttachmentDTO{}}
+	requestContext, cancel, clients, err := backend.unary(ctx, binding)
+	if err != nil {
+		return result, err
+	}
+	defer cancel()
+	list, err := clients.kubernetes.StorageV1().VolumeAttachments().List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	if err != nil {
+		return result, mapResourceError(err)
+	}
+	now := backend.now().UTC()
+	for index := range list.Items {
+		result.Items = append(result.Items, resources.ConvertVolumeAttachment(&list.Items[index], now))
+	}
+	result.Continue, result.ResourceVersion = list.Continue, list.ResourceVersion
+	return result, nil
+}
+
 func (backend *ResourceBackend) GetNode(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, name string) (resources.NodeDetailDTO, error) {
 	if name == "" {
 		return resources.NodeDetailDTO{}, resourceDomain(resources.CodeValidationFailed, "The resource target is incomplete.", nil)
@@ -246,9 +379,228 @@ func (backend *ResourceBackend) GetNode(ctx context.Context, binding namespaces.
 	return resources.ConvertNodeDetail(value, backend.now().UTC()), nil
 }
 
-// nodeSafeYAML is the reviewed read-only Node document (ADR 0006/V1-06). It
-// is assembled from the sanitized detail DTO only: annotations, managedFields,
-// finalizers, provider IDs, pod CIDRs and arbitrary labels never enter it.
+// clusterGet is the shared cluster-scoped detail path: exact-name
+// authorization, then one typed GET. Origin.Namespace is always empty here.
+func clusterGet[T resources.DetailItem](ctx context.Context, backend *ResourceBackend, binding namespaces.SelectionBinding, origin resources.Origin, name string, get func(context.Context, resourceClientSet) (T, error)) (T, error) {
+	var zero T
+	if name == "" {
+		return zero, resourceDomain(resources.CodeValidationFailed, "The resource target is incomplete.", nil)
+	}
+	capability := backend.authorizer.Check(ctx, authorization.Key{Generation: binding.Generation, Namespace: origin.Namespace, APIGroup: origin.APIGroup, Resource: origin.Resource, Verb: "get", ResourceName: name})
+	switch capability.Decision {
+	case authorization.DecisionDenied:
+		return zero, resourceDomain(resources.CodeForbidden, "Access to this resource was denied.", nil)
+	case authorization.DecisionUnknown:
+		return zero, resourceDomain(resources.CodeAuthorizationUnavailable, "Authorization could not be confirmed.", nil)
+	}
+	requestContext, cancel, clients, err := backend.unary(ctx, binding)
+	if err != nil {
+		return zero, err
+	}
+	defer cancel()
+	return get(requestContext, clients)
+}
+
+func (backend *ResourceBackend) GetLease(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, namespace, name string) (resources.LeaseDetailDTO, error) {
+	origin := resources.Origin{Namespace: namespace, APIGroup: "coordination.k8s.io", Version: "v1", Resource: "leases"}
+	return getAuthorized(ctx, backend, binding, resolution, origin, name, func(ctx context.Context, _ resources.Origin, name string) (resources.LeaseDetailDTO, error) {
+		requestContext, cancel, clients, err := backend.unary(ctx, binding)
+		if err != nil {
+			return resources.LeaseDetailDTO{}, err
+		}
+		defer cancel()
+		value, err := clients.kubernetes.CoordinationV1().Leases(namespace).Get(requestContext, name, metav1.GetOptions{})
+		if err != nil {
+			return resources.LeaseDetailDTO{}, mapResourceError(err)
+		}
+		return resources.ConvertLeaseDetail(value), nil
+	})
+}
+
+func (backend *ResourceBackend) GetPersistentVolumeClaim(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, namespace, name string) (resources.PersistentVolumeClaimDetailDTO, error) {
+	origin := resources.Origin{Namespace: namespace, Version: "v1", Resource: "persistentvolumeclaims"}
+	return getAuthorized(ctx, backend, binding, resolution, origin, name, func(ctx context.Context, _ resources.Origin, name string) (resources.PersistentVolumeClaimDetailDTO, error) {
+		requestContext, cancel, clients, err := backend.unary(ctx, binding)
+		if err != nil {
+			return resources.PersistentVolumeClaimDetailDTO{}, err
+		}
+		defer cancel()
+		value, err := clients.kubernetes.CoreV1().PersistentVolumeClaims(namespace).Get(requestContext, name, metav1.GetOptions{})
+		if err != nil {
+			return resources.PersistentVolumeClaimDetailDTO{}, mapResourceError(err)
+		}
+		return resources.ConvertPersistentVolumeClaimDetail(value), nil
+	})
+}
+
+func (backend *ResourceBackend) GetPersistentVolume(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, name string) (resources.PersistentVolumeDetailDTO, error) {
+	return clusterGet(ctx, backend, binding, resources.Origin{Version: "v1", Resource: "persistentvolumes"}, name, func(ctx context.Context, clients resourceClientSet) (resources.PersistentVolumeDetailDTO, error) {
+		value, err := clients.kubernetes.CoreV1().PersistentVolumes().Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return resources.PersistentVolumeDetailDTO{}, mapResourceError(err)
+		}
+		return resources.ConvertPersistentVolumeDetail(value), nil
+	})
+}
+
+func (backend *ResourceBackend) GetStorageClass(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, name string) (resources.StorageClassDetailDTO, error) {
+	return clusterGet(ctx, backend, binding, resources.Origin{APIGroup: "storage.k8s.io", Version: "v1", Resource: "storageclasses"}, name, func(ctx context.Context, clients resourceClientSet) (resources.StorageClassDetailDTO, error) {
+		value, err := clients.kubernetes.StorageV1().StorageClasses().Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return resources.StorageClassDetailDTO{}, mapResourceError(err)
+		}
+		return resources.ConvertStorageClassDetail(value), nil
+	})
+}
+
+func (backend *ResourceBackend) GetCSIDriver(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, name string) (resources.CSIDriverDetailDTO, error) {
+	return clusterGet(ctx, backend, binding, resources.Origin{APIGroup: "storage.k8s.io", Version: "v1", Resource: "csidrivers"}, name, func(ctx context.Context, clients resourceClientSet) (resources.CSIDriverDetailDTO, error) {
+		value, err := clients.kubernetes.StorageV1().CSIDrivers().Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return resources.CSIDriverDetailDTO{}, mapResourceError(err)
+		}
+		return resources.ConvertCSIDriverDetail(value), nil
+	})
+}
+
+func (backend *ResourceBackend) GetCSINode(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, name string) (resources.CSINodeDetailDTO, error) {
+	return clusterGet(ctx, backend, binding, resources.Origin{APIGroup: "storage.k8s.io", Version: "v1", Resource: "csinodes"}, name, func(ctx context.Context, clients resourceClientSet) (resources.CSINodeDetailDTO, error) {
+		value, err := clients.kubernetes.StorageV1().CSINodes().Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return resources.CSINodeDetailDTO{}, mapResourceError(err)
+		}
+		return resources.ConvertCSINodeDetail(value), nil
+	})
+}
+
+func (backend *ResourceBackend) GetVolumeAttachment(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, name string) (resources.VolumeAttachmentDetailDTO, error) {
+	return clusterGet(ctx, backend, binding, resources.Origin{APIGroup: "storage.k8s.io", Version: "v1", Resource: "volumeattachments"}, name, func(ctx context.Context, clients resourceClientSet) (resources.VolumeAttachmentDetailDTO, error) {
+		value, err := clients.kubernetes.StorageV1().VolumeAttachments().Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return resources.VolumeAttachmentDetailDTO{}, mapResourceError(err)
+		}
+		return resources.ConvertVolumeAttachmentDetail(value), nil
+	})
+}
+
+// GetNamespace serves the V2-01 Namespace object inspection. It is fully
+// separate from the local scope management: selecting scopes never calls it.
+func (backend *ResourceBackend) GetNamespace(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, name string) (resources.NamespaceObjectDetailDTO, error) {
+	return clusterGet(ctx, backend, binding, resources.Origin{Version: "v1", Resource: "namespaces"}, name, func(ctx context.Context, clients resourceClientSet) (resources.NamespaceObjectDetailDTO, error) {
+		value, err := clients.kubernetes.CoreV1().Namespaces().Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return resources.NamespaceObjectDetailDTO{}, mapResourceError(err)
+		}
+		return resources.ConvertNamespaceObjectDetail(value), nil
+	})
+}
+
+// PersistentVolumeYAMLDocument serves a curated PV document: identity,
+// capacity, access modes, reclaim policy, class, claim reference and phase.
+// Source-specific blocks (csi/nfs/hostPath/...), secret references and
+// volume attributes are labeled as omitted (V2-08).
+func (backend *ResourceBackend) PersistentVolumeYAMLDocument(ctx context.Context, binding namespaces.SelectionBinding, name string) ([]byte, error) {
+	return clusterYAMLDocument(ctx, backend, binding, resources.Origin{Version: "v1", Resource: "persistentvolumes"}, name, func(ctx context.Context, clients resourceClientSet) (any, error) {
+		value, err := clients.kubernetes.CoreV1().PersistentVolumes().Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return nil, mapResourceError(err)
+		}
+		detail := resources.ConvertPersistentVolumeDetail(value)
+		return persistentVolumeSafeYAML{
+			APIVersion: "v1",
+			Kind:       "PersistentVolume",
+			Metadata: nodeSafeMetadata{
+				Name:              detail.Metadata.Name,
+				UID:               detail.Metadata.UID,
+				CreationTimestamp: detail.Metadata.CreationTimestamp,
+			},
+			Spec: persistentVolumeSafeSpec{
+				Capacity:      detail.Capacity,
+				AccessModes:   detail.AccessModes,
+				ReclaimPolicy: detail.ReclaimPolicy,
+				StorageClass:  detail.StorageClass,
+				VolumeMode:    detail.VolumeMode,
+				Claim:         detail.Claim,
+			},
+			Status:  persistentVolumeSafeStatus{Phase: detail.Status, Reason: detail.Reason, Message: detail.Message},
+			Omitted: detail.Omitted,
+		}, nil
+	})
+}
+
+type persistentVolumeSafeYAML struct {
+	APIVersion string                     `json:"apiVersion"`
+	Kind       string                     `json:"kind"`
+	Metadata   nodeSafeMetadata           `json:"metadata"`
+	Spec       persistentVolumeSafeSpec   `json:"spec"`
+	Status     persistentVolumeSafeStatus `json:"status"`
+	Omitted    []string                   `json:"x-kubepeep-omitted"`
+}
+
+type persistentVolumeSafeSpec struct {
+	Capacity      map[string]string            `json:"capacity,omitempty"`
+	AccessModes   []string                     `json:"accessModes,omitempty"`
+	ReclaimPolicy string                       `json:"persistentVolumeReclaimPolicy,omitempty"`
+	StorageClass  string                       `json:"storageClassName,omitempty"`
+	VolumeMode    string                       `json:"volumeMode,omitempty"`
+	Claim         *resources.VolumeClaimRefDTO `json:"claimRef,omitempty"`
+}
+
+type persistentVolumeSafeStatus struct {
+	Phase   string  `json:"phase,omitempty"`
+	Reason  *string `json:"reason,omitempty"`
+	Message *string `json:"message,omitempty"`
+}
+
+// StorageClassYAMLDocument serves the curated StorageClass document with
+// parameters and topologies omitted (they may carry provider credentials).
+func (backend *ResourceBackend) StorageClassYAMLDocument(ctx context.Context, binding namespaces.SelectionBinding, name string) ([]byte, error) {
+	return clusterYAMLDocument(ctx, backend, binding, resources.Origin{APIGroup: "storage.k8s.io", Version: "v1", Resource: "storageclasses"}, name, func(ctx context.Context, clients resourceClientSet) (any, error) {
+		value, err := clients.kubernetes.StorageV1().StorageClasses().Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return nil, mapResourceError(err)
+		}
+		detail := resources.ConvertStorageClassDetail(value)
+		return map[string]any{
+			"apiVersion": "storage.k8s.io/v1",
+			"kind":       "StorageClass",
+			"metadata": map[string]any{
+				"name":              detail.Metadata.Name,
+				"uid":               detail.Metadata.UID,
+				"creationTimestamp": detail.Metadata.CreationTimestamp,
+			},
+			"provisioner":          detail.Provisioner,
+			"reclaimPolicy":        detail.ReclaimPolicy,
+			"volumeBindingMode":    detail.VolumeBindingMode,
+			"allowVolumeExpansion": detail.AllowVolumeExpansion,
+			"default":              detail.Default,
+			"x-kubepeep-omitted":   detail.Omitted,
+		}, nil
+	})
+}
+
+// clusterYAMLDocument authorizes a cluster-scoped YAML action, fetches the
+// object, delegates assembly to build and encodes through the shared ceiling.
+func clusterYAMLDocument(ctx context.Context, backend *ResourceBackend, binding namespaces.SelectionBinding, origin resources.Origin, name string, build func(context.Context, resourceClientSet) (any, error)) ([]byte, error) {
+	capability := backend.authorizer.Check(ctx, authorization.Key{Generation: binding.Generation, Namespace: origin.Namespace, APIGroup: origin.APIGroup, Resource: origin.Resource, Verb: "get", ResourceName: name})
+	switch capability.Decision {
+	case authorization.DecisionDenied:
+		return nil, resourceDomain(resources.CodeForbidden, "Access to this resource was denied.", nil)
+	case authorization.DecisionUnknown:
+		return nil, resourceDomain(resources.CodeAuthorizationUnavailable, "Authorization could not be confirmed.", nil)
+	}
+	requestContext, cancel, clients, err := backend.unary(ctx, binding)
+	if err != nil {
+		return nil, err
+	}
+	defer cancel()
+	document, err := build(requestContext, clients)
+	if err != nil {
+		return nil, err
+	}
+	return resources.MarshalYAMLDocument(document)
+}
+
 type nodeSafeYAML struct {
 	APIVersion string           `json:"apiVersion"`
 	Kind       string           `json:"kind"`
@@ -623,13 +975,17 @@ func (backend *ResourceBackend) fetchYAMLObject(ctx context.Context, binding nam
 			return nil, err
 		}
 		return backend.getWorkloadObject(ctx, binding, collection, namespace, name)
-	case "services", "ingresses", "endpointslices", "configmaps":
+	case "services", "ingresses", "endpointslices", "configmaps", "leases", "persistent-volume-claims":
 		var origin resources.Origin
 		switch collection {
 		case "ingresses":
 			origin = resources.Origin{Namespace: namespace, APIGroup: "networking.k8s.io", Version: "v1", Resource: collection}
 		case "endpointslices":
 			origin = resources.Origin{Namespace: namespace, APIGroup: "discovery.k8s.io", Version: "v1", Resource: collection}
+		case "leases":
+			origin = resources.Origin{Namespace: namespace, APIGroup: "coordination.k8s.io", Version: "v1", Resource: "leases"}
+		case "persistent-volume-claims":
+			origin = resources.Origin{Namespace: namespace, Version: "v1", Resource: "persistentvolumeclaims"}
 		default:
 			origin = resources.Origin{Namespace: namespace, Version: "v1", Resource: collection}
 		}
@@ -650,6 +1006,12 @@ func (backend *ResourceBackend) fetchYAMLObject(ctx context.Context, binding nam
 			return value, mapResourceError(getErr)
 		case "endpointslices":
 			value, getErr := clients.kubernetes.DiscoveryV1().EndpointSlices(namespace).Get(requestContext, name, metav1.GetOptions{})
+			return value, mapResourceError(getErr)
+		case "leases":
+			value, getErr := clients.kubernetes.CoordinationV1().Leases(namespace).Get(requestContext, name, metav1.GetOptions{})
+			return value, mapResourceError(getErr)
+		case "persistent-volume-claims":
+			value, getErr := clients.kubernetes.CoreV1().PersistentVolumeClaims(namespace).Get(requestContext, name, metav1.GetOptions{})
 			return value, mapResourceError(getErr)
 		default:
 			value, getErr := clients.kubernetes.CoreV1().ConfigMaps(namespace).Get(requestContext, name, metav1.GetOptions{})
