@@ -46,22 +46,27 @@ type collectionRules struct {
 }
 
 var rulesByCollection = map[Collection]collectionRules{
-	CollectionWorkloads:      {statuses: []string{"Healthy", "Progressing", "Degraded", "Suspended", "Completed", "Failed", "Unknown"}, sorts: []string{"identity", "name", "age", "status"}, defaultSort: "identity", defaultOrder: OrderAscending},
-	CollectionPods:           {statuses: []string{"Running", "Pending", "Succeeded", "Failed", "Unknown"}, sorts: []string{"identity", "name", "age", "restarts", "status"}, defaultSort: "identity", defaultOrder: OrderAscending},
-	CollectionEvents:         {statuses: []string{"Normal", "Warning", "Unknown"}, sorts: []string{"timestamp", "count", "identity"}, defaultSort: "timestamp", defaultOrder: OrderDescending},
-	CollectionServices:       {sorts: []string{"identity", "name", "type"}, defaultSort: "identity", defaultOrder: OrderAscending},
-	CollectionIngresses:      {sorts: []string{"identity", "name"}, defaultSort: "identity", defaultOrder: OrderAscending},
-	CollectionEndpointSlices: {sorts: []string{"identity", "name", "addressType"}, defaultSort: "identity", defaultOrder: OrderAscending},
-	CollectionConfigMaps:     {sorts: []string{"identity", "name", "createdAt"}, defaultSort: "identity", defaultOrder: OrderAscending},
-	CollectionSecrets:        {sorts: []string{"identity", "name", "createdAt"}, defaultSort: "identity", defaultOrder: OrderAscending},
-	CollectionNodes:          {sorts: []string{"identity", "name", "age", "status"}, defaultSort: "identity", defaultOrder: OrderAscending},
-	CollectionLeases:         {sorts: []string{"identity", "name", "age"}, defaultSort: "identity", defaultOrder: OrderAscending},
+	CollectionWorkloads:              {statuses: []string{"Healthy", "Progressing", "Degraded", "Suspended", "Completed", "Failed", "Unknown"}, sorts: []string{"identity", "name", "age", "status"}, defaultSort: "identity", defaultOrder: OrderAscending},
+	CollectionPods:                   {statuses: []string{"Running", "Pending", "Succeeded", "Failed", "Unknown"}, sorts: []string{"identity", "name", "age", "restarts", "status"}, defaultSort: "identity", defaultOrder: OrderAscending},
+	CollectionEvents:                 {statuses: []string{"Normal", "Warning", "Unknown"}, sorts: []string{"timestamp", "count", "identity"}, defaultSort: "timestamp", defaultOrder: OrderDescending},
+	CollectionServices:               {sorts: []string{"identity", "name", "type"}, defaultSort: "identity", defaultOrder: OrderAscending},
+	CollectionIngresses:              {sorts: []string{"identity", "name"}, defaultSort: "identity", defaultOrder: OrderAscending},
+	CollectionEndpointSlices:         {sorts: []string{"identity", "name", "addressType"}, defaultSort: "identity", defaultOrder: OrderAscending},
+	CollectionConfigMaps:             {sorts: []string{"identity", "name", "createdAt"}, defaultSort: "identity", defaultOrder: OrderAscending},
+	CollectionSecrets:                {sorts: []string{"identity", "name", "createdAt"}, defaultSort: "identity", defaultOrder: OrderAscending},
+	CollectionNodes:                  {sorts: []string{"identity", "name", "age", "status"}, defaultSort: "identity", defaultOrder: OrderAscending},
+	CollectionLeases:                 {sorts: []string{"identity", "name", "age"}, defaultSort: "identity", defaultOrder: OrderAscending},
 	CollectionPersistentVolumes:      {sorts: []string{"identity", "name", "age", "status"}, defaultSort: "identity", defaultOrder: OrderAscending},
 	CollectionPersistentVolumeClaims: {sorts: []string{"identity", "name", "age", "status"}, defaultSort: "identity", defaultOrder: OrderAscending},
 	CollectionVolumeAttachments:      {sorts: []string{"identity", "name", "age"}, defaultSort: "identity", defaultOrder: OrderAscending},
 	CollectionStorageClasses:         {sorts: []string{"identity", "name", "age"}, defaultSort: "identity", defaultOrder: OrderAscending},
 	CollectionCSINodes:               {sorts: []string{"identity", "name", "age"}, defaultSort: "identity", defaultOrder: OrderAscending},
 	CollectionCSIDrivers:             {sorts: []string{"identity", "name", "age"}, defaultSort: "identity", defaultOrder: OrderAscending},
+	CollectionServiceAccounts:        {sorts: []string{"identity", "name"}, defaultSort: "identity", defaultOrder: OrderAscending},
+	CollectionResourceQuotas:         {sorts: []string{"identity", "name"}, defaultSort: "identity", defaultOrder: OrderAscending},
+	CollectionLimitRanges:            {sorts: []string{"identity", "name"}, defaultSort: "identity", defaultOrder: OrderAscending},
+	CollectionHPAs:                   {sorts: []string{"identity", "name", "age"}, defaultSort: "identity", defaultOrder: OrderAscending},
+	CollectionPDBs:                   {sorts: []string{"identity", "name"}, defaultSort: "identity", defaultOrder: OrderAscending},
 }
 
 // NormalizeListOptions applies all bounded, endpoint-specific defaults and

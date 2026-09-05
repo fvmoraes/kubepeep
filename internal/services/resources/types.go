@@ -14,6 +14,11 @@ const (
 type Collection string
 
 const (
+	CollectionServiceAccounts Collection = "service-accounts"
+	CollectionResourceQuotas  Collection = "resource-quotas"
+	CollectionLimitRanges     Collection = "limit-ranges"
+	CollectionHPAs            Collection = "horizontalpodautoscalers"
+	CollectionPDBs            Collection = "poddisruptionbudgets"
 	CollectionWorkloads      Collection = "workloads"
 	CollectionPods           Collection = "pods"
 	CollectionEvents         Collection = "events"
@@ -40,6 +45,7 @@ const (
 	WorkloadDaemonSets   WorkloadKind = "daemonsets"
 	WorkloadJobs         WorkloadKind = "jobs"
 	WorkloadCronJobs     WorkloadKind = "cronjobs"
+	WorkloadReplicaSets  WorkloadKind = "replicasets"
 )
 
 var canonicalWorkloadKinds = []WorkloadKind{
@@ -48,6 +54,7 @@ var canonicalWorkloadKinds = []WorkloadKind{
 	WorkloadDaemonSets,
 	WorkloadJobs,
 	WorkloadCronJobs,
+	WorkloadReplicaSets,
 }
 
 type SortOrder string

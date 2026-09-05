@@ -109,7 +109,7 @@ function useGenerationCursorMap<K extends string>(generation: string | undefined
 }
 
 function workloadKindPath(kind: Workload['kind']): string {
-  return ({ Deployment: 'deployments', StatefulSet: 'statefulsets', DaemonSet: 'daemonsets', Job: 'jobs', CronJob: 'cronjobs' } as const)[kind]
+  return ({ Deployment: 'deployments', StatefulSet: 'statefulsets', DaemonSet: 'daemonsets', Job: 'jobs', CronJob: 'cronjobs', ReplicaSet: 'replicasets' } as const)[kind]
 }
 
 function workloadFromParams(kind: string, namespace: string, name: string): Workload | null {
@@ -119,6 +119,7 @@ function workloadFromParams(kind: string, namespace: string, name: string): Work
     daemonsets: 'DaemonSet',
     jobs: 'Job',
     cronjobs: 'CronJob',
+    replicasets: 'ReplicaSet',
   }
   const mapped = kindMap[kind]
   if (!mapped) return null
@@ -200,7 +201,7 @@ function activeFilter(id: string, label: string, value: string | string[]): Acti
   return display === '' ? [] : [{ id, label, value: display }]
 }
 
-const workloadKinds = ['deployments', 'statefulsets', 'daemonsets', 'jobs', 'cronjobs'] as const
+const workloadKinds = ['deployments', 'statefulsets', 'daemonsets', 'jobs', 'cronjobs', 'replicasets'] as const
 const workloadStatuses = ['Healthy', 'Progressing', 'Degraded', 'Suspended', 'Completed', 'Failed', 'Unknown'] as const
 const podStatuses = ['Running', 'Pending', 'Succeeded', 'Failed', 'Unknown'] as const
 const restartFilters = ['any', 'gt0', 'gte3', 'gte10'] as const
@@ -356,7 +357,7 @@ export function WorkloadsPage() {
         ...activeFilter('namespace', 'Namespace', namespaceValues(applied.namespace)), ...activeFilter('kind', 'Kind', applied.kind), ...activeFilter('status', 'Status', applied.workloadStatus),
       ]} sort={draft.sort} order={draft.order} appliedSort={applied.sort} appliedOrder={applied.order} defaultSort="identity" defaultOrder="asc" hasPendingChanges={!sameListState(draft, applied)} sortOptions={workloadSortOptions} onSortChange={(value) => setDraft((current) => ({ ...current, sort: value }))} onOrderChange={(value) => setDraft((current) => ({ ...current, order: value }))}>
         <NamespaceFilterInput value={draft.namespace} onChange={(value) => setDraft((current) => ({ ...current, namespace: value }))} />
-        <label>Kind<Select value={draft.kind} onChange={(event) => setDraft((current) => ({ ...current, kind: event.target.value }))}><option value="">All kinds</option><option value="deployments">Deployments</option><option value="statefulsets">StatefulSets</option><option value="daemonsets">DaemonSets</option><option value="jobs">Jobs</option><option value="cronjobs">CronJobs</option></Select></label>
+        <label>Kind<Select value={draft.kind} onChange={(event) => setDraft((current) => ({ ...current, kind: event.target.value }))}><option value="">All kinds</option><option value="deployments">Deployments</option><option value="replicasets">ReplicaSets</option><option value="statefulsets">StatefulSets</option><option value="daemonsets">DaemonSets</option><option value="jobs">Jobs</option><option value="cronjobs">CronJobs</option></Select></label>
         <label>Status<Select value={draft.workloadStatus} onChange={(event) => setDraft((current) => ({ ...current, workloadStatus: event.target.value }))}><option value="">All statuses</option>{workloadStatuses.map((value) => <option key={value}>{value}</option>)}</Select></label>
       </ResourceListControls>
       {selection ? <SavedFilterControls collection="workloads" generation={selection.generation} currentQuery={compactFilterQuery([
@@ -393,7 +394,7 @@ export function WorkloadsPage() {
               />
               {list.data ? <CollectionFooter result={list.data} onNext={(next) => { setCursor(next); closeDetail() }} onRestart={() => { setCursor(''); closeDetail() }} /> : null}
             </div>
-            <Drawer open={Boolean(activeSelected)} onClose={closeDetail} title={<span className="flex items-center gap-2">{detailTitle(activeSelected ? `${activeSelected.kind} ${activeSelected.namespace}/${activeSelected.name}` : 'Resource detail')}{activeSelected ? <FavoriteButton kind={({ Deployment: 'deployment', StatefulSet: 'statefulset', DaemonSet: 'daemonset', Job: 'job', CronJob: 'cronjob' } as const)[activeSelected.kind]} namespace={activeSelected.namespace} name={activeSelected.name} generation={selection?.generation} label={activeSelected.kind} /> : null}</span>}>
+            <Drawer open={Boolean(activeSelected)} onClose={closeDetail} title={<span className="flex items-center gap-2">{detailTitle(activeSelected ? `${activeSelected.kind} ${activeSelected.namespace}/${activeSelected.name}` : 'Resource detail')}{activeSelected && activeSelected.kind !== 'ReplicaSet' ? <FavoriteButton kind={({ Deployment: 'deployment', StatefulSet: 'statefulset', DaemonSet: 'daemonset', Job: 'job', CronJob: 'cronjob' } as const)[activeSelected.kind]} namespace={activeSelected.namespace} name={activeSelected.name} generation={selection?.generation} label={activeSelected.kind} /> : null}</span>}>
               {activeSelected ? <>
                 {detail.isPending ? <p className="text-sm text-kp-overlay-text" role="status">Loading detail…</p> : detail.isError ? <p className="text-sm text-kp-red" role="alert">{errorMessage(detail.error)}</p> : detail.data ? <>
                   <Facts facts={[

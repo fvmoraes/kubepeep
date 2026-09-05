@@ -141,6 +141,9 @@ func (backend *ResourceBackend) relatedWorkload(ctx context.Context, binding nam
 	case *appsv1.DaemonSet:
 		namespace, podSelector = object.Namespace, labelSelector(object.Spec.Selector)
 		podOwnerUIDs = map[types.UID]struct{}{object.UID: {}}
+	case *appsv1.ReplicaSet:
+		namespace, podSelector = object.Namespace, labelSelector(object.Spec.Selector)
+		podOwnerUIDs = map[types.UID]struct{}{object.UID: {}}
 	case *batchv1.Job:
 		namespace, podSelector = object.Namespace, labelSelector(object.Spec.Selector)
 		podOwnerUIDs = map[types.UID]struct{}{object.UID: {}}

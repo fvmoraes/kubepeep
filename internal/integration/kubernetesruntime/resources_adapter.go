@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"time"
 
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
@@ -110,6 +111,15 @@ func (backend *ResourceBackend) listWorkloadPage(ctx context.Context, binding na
 		}
 		for index := range list.Items {
 			result.Items = append(result.Items, resources.ConvertJob(&list.Items[index], now))
+		}
+		result.Continue, result.ResourceVersion = list.Continue, list.ResourceVersion
+	case "replicasets":
+		list, listErr := clients.kubernetes.AppsV1().ReplicaSets(page.Origin.Namespace).List(requestContext, options)
+		if listErr != nil {
+			return result, mapResourceError(listErr)
+		}
+		for index := range list.Items {
+			result.Items = append(result.Items, resources.ConvertReplicaSet(&list.Items[index], now))
 		}
 		result.Continue, result.ResourceVersion = list.Continue, list.ResourceVersion
 	case "cronjobs":
@@ -240,6 +250,110 @@ func (backend *ResourceBackend) listLeasePage(ctx context.Context, binding names
 	}
 	result.Continue, result.ResourceVersion = list.Continue, list.ResourceVersion
 	return result, nil
+}
+
+func (backend *ResourceBackend) listServiceAccountPage(ctx context.Context, binding namespaces.SelectionBinding, page resources.PageRequest) (resources.OriginPage[resources.ServiceAccountDTO], error) {
+	result := resources.OriginPage[resources.ServiceAccountDTO]{Origin: page.Origin, Items: []resources.ServiceAccountDTO{}}
+	requestContext, cancel, clients, err := backend.unary(ctx, binding)
+	if err != nil {
+		return result, err
+	}
+	defer cancel()
+	gvr := schema.GroupVersionResource{Version: "v1", Resource: "serviceaccounts"}
+	list, err := clients.metadata.Resource(gvr).Namespace(page.Origin.Namespace).List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	if err != nil {
+		return result, mapMetadataError(err, "ServiceAccount metadata is unavailable.")
+	}
+	now := backend.now().UTC()
+	for index := range list.Items {
+		item := &list.Items[index]
+		result.Items = append(result.Items, resources.ServiceAccountDTO{Namespace: item.Namespace, Name: item.Name, UID: string(item.UID), AgeSeconds: int64(now.Sub(item.CreationTimestamp.Time) / time.Second)})
+	}
+	result.Continue, result.ResourceVersion = list.Continue, list.ResourceVersion
+	return result, nil
+}
+
+func (backend *ResourceBackend) listResourceQuotaPage(ctx context.Context, binding namespaces.SelectionBinding, page resources.PageRequest) (resources.OriginPage[resources.ResourceQuotaDTO], error) {
+	result := resources.OriginPage[resources.ResourceQuotaDTO]{Origin: page.Origin, Items: []resources.ResourceQuotaDTO{}}
+	requestContext, cancel, clients, err := backend.unary(ctx, binding)
+	if err != nil {
+		return result, err
+	}
+	defer cancel()
+	list, err := clients.kubernetes.CoreV1().ResourceQuotas(page.Origin.Namespace).List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	if err != nil {
+		return result, mapResourceError(err)
+	}
+	for index := range list.Items {
+		result.Items = append(result.Items, resources.ConvertResourceQuota(&list.Items[index]))
+	}
+	result.Continue, result.ResourceVersion = list.Continue, list.ResourceVersion
+	return result, nil
+}
+
+func (backend *ResourceBackend) listLimitRangePage(ctx context.Context, binding namespaces.SelectionBinding, page resources.PageRequest) (resources.OriginPage[resources.LimitRangeDTO], error) {
+	result := resources.OriginPage[resources.LimitRangeDTO]{Origin: page.Origin, Items: []resources.LimitRangeDTO{}}
+	requestContext, cancel, clients, err := backend.unary(ctx, binding)
+	if err != nil {
+		return result, err
+	}
+	defer cancel()
+	list, err := clients.kubernetes.CoreV1().LimitRanges(page.Origin.Namespace).List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	if err != nil {
+		return result, mapResourceError(err)
+	}
+	for index := range list.Items {
+		result.Items = append(result.Items, resources.ConvertLimitRange(&list.Items[index]))
+	}
+	result.Continue, result.ResourceVersion = list.Continue, list.ResourceVersion
+	return result, nil
+}
+
+func (backend *ResourceBackend) listHPAPage(ctx context.Context, binding namespaces.SelectionBinding, page resources.PageRequest) (resources.OriginPage[resources.HorizontalPodAutoscalerDTO], error) {
+	result := resources.OriginPage[resources.HorizontalPodAutoscalerDTO]{Origin: page.Origin, Items: []resources.HorizontalPodAutoscalerDTO{}}
+	requestContext, cancel, clients, err := backend.unary(ctx, binding)
+	if err != nil {
+		return result, err
+	}
+	defer cancel()
+	list, err := clients.kubernetes.AutoscalingV2().HorizontalPodAutoscalers(page.Origin.Namespace).List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	if err != nil {
+		return result, mapHPAError(err)
+	}
+	now := backend.now().UTC()
+	for index := range list.Items {
+		result.Items = append(result.Items, resources.ConvertHorizontalPodAutoscaler(&list.Items[index], now))
+	}
+	result.Continue, result.ResourceVersion = list.Continue, list.ResourceVersion
+	return result, nil
+}
+
+func (backend *ResourceBackend) listPDBPage(ctx context.Context, binding namespaces.SelectionBinding, page resources.PageRequest) (resources.OriginPage[resources.PodDisruptionBudgetDTO], error) {
+	result := resources.OriginPage[resources.PodDisruptionBudgetDTO]{Origin: page.Origin, Items: []resources.PodDisruptionBudgetDTO{}}
+	requestContext, cancel, clients, err := backend.unary(ctx, binding)
+	if err != nil {
+		return result, err
+	}
+	defer cancel()
+	list, err := clients.kubernetes.PolicyV1().PodDisruptionBudgets(page.Origin.Namespace).List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	if err != nil {
+		return result, mapResourceError(err)
+	}
+	now := backend.now().UTC()
+	for index := range list.Items {
+		result.Items = append(result.Items, resources.ConvertPodDisruptionBudget(&list.Items[index], now))
+	}
+	result.Continue, result.ResourceVersion = list.Continue, list.ResourceVersion
+	return result, nil
+}
+
+// mapHPAError marks a missing autoscaling/v2 API as feature unavailability
+// instead of a generic failure (V4-08 shares this distinction).
+func mapHPAError(err error) error {
+	if apierrors.IsNotFound(err) {
+		return resourceDomain(resources.CodeFeatureUnavailable, "The autoscaling/v2 API is unavailable on this cluster.", err)
+	}
+	return mapResourceError(err)
 }
 
 func (backend *ResourceBackend) listPersistentVolumeClaimPage(ctx context.Context, binding namespaces.SelectionBinding, page resources.PageRequest) (resources.OriginPage[resources.PersistentVolumeClaimDTO], error) {
@@ -492,6 +606,86 @@ func (backend *ResourceBackend) GetNamespace(ctx context.Context, binding namesp
 			return resources.NamespaceObjectDetailDTO{}, mapResourceError(err)
 		}
 		return resources.ConvertNamespaceObjectDetail(value), nil
+	})
+}
+
+func (backend *ResourceBackend) GetServiceAccount(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, namespace, name string) (resources.ServiceAccountDTO, error) {
+	origin := resources.Origin{Namespace: namespace, Version: "v1", Resource: "serviceaccounts"}
+	return getAuthorized(ctx, backend, binding, resolution, origin, name, func(ctx context.Context, _ resources.Origin, name string) (resources.ServiceAccountDTO, error) {
+		requestContext, cancel, clients, err := backend.unary(ctx, binding)
+		if err != nil {
+			return resources.ServiceAccountDTO{}, err
+		}
+		defer cancel()
+		value, err := clients.kubernetes.CoreV1().ServiceAccounts(namespace).Get(requestContext, name, metav1.GetOptions{})
+		if err != nil {
+			return resources.ServiceAccountDTO{}, mapResourceError(err)
+		}
+		return resources.ConvertServiceAccount(value, backend.now().UTC()), nil
+	})
+}
+
+func (backend *ResourceBackend) GetResourceQuota(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, namespace, name string) (resources.ResourceQuotaDTO, error) {
+	origin := resources.Origin{Namespace: namespace, Version: "v1", Resource: "resourcequotas"}
+	return getAuthorized(ctx, backend, binding, resolution, origin, name, func(ctx context.Context, _ resources.Origin, name string) (resources.ResourceQuotaDTO, error) {
+		requestContext, cancel, clients, err := backend.unary(ctx, binding)
+		if err != nil {
+			return resources.ResourceQuotaDTO{}, err
+		}
+		defer cancel()
+		value, err := clients.kubernetes.CoreV1().ResourceQuotas(namespace).Get(requestContext, name, metav1.GetOptions{})
+		if err != nil {
+			return resources.ResourceQuotaDTO{}, mapResourceError(err)
+		}
+		return resources.ConvertResourceQuota(value), nil
+	})
+}
+
+func (backend *ResourceBackend) GetLimitRange(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, namespace, name string) (resources.LimitRangeDTO, error) {
+	origin := resources.Origin{Namespace: namespace, Version: "v1", Resource: "limitranges"}
+	return getAuthorized(ctx, backend, binding, resolution, origin, name, func(ctx context.Context, _ resources.Origin, name string) (resources.LimitRangeDTO, error) {
+		requestContext, cancel, clients, err := backend.unary(ctx, binding)
+		if err != nil {
+			return resources.LimitRangeDTO{}, err
+		}
+		defer cancel()
+		value, err := clients.kubernetes.CoreV1().LimitRanges(namespace).Get(requestContext, name, metav1.GetOptions{})
+		if err != nil {
+			return resources.LimitRangeDTO{}, mapResourceError(err)
+		}
+		return resources.ConvertLimitRange(value), nil
+	})
+}
+
+func (backend *ResourceBackend) GetHPA(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, namespace, name string) (resources.HorizontalPodAutoscalerDTO, error) {
+	origin := resources.Origin{Namespace: namespace, APIGroup: "autoscaling", Version: "v2", Resource: "horizontalpodautoscalers"}
+	return getAuthorized(ctx, backend, binding, resolution, origin, name, func(ctx context.Context, _ resources.Origin, name string) (resources.HorizontalPodAutoscalerDTO, error) {
+		requestContext, cancel, clients, err := backend.unary(ctx, binding)
+		if err != nil {
+			return resources.HorizontalPodAutoscalerDTO{}, err
+		}
+		defer cancel()
+		value, err := clients.kubernetes.AutoscalingV2().HorizontalPodAutoscalers(namespace).Get(requestContext, name, metav1.GetOptions{})
+		if err != nil {
+			return resources.HorizontalPodAutoscalerDTO{}, mapHPAError(err)
+		}
+		return resources.ConvertHorizontalPodAutoscaler(value, backend.now().UTC()), nil
+	})
+}
+
+func (backend *ResourceBackend) GetPDB(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, namespace, name string) (resources.PodDisruptionBudgetDTO, error) {
+	origin := resources.Origin{Namespace: namespace, APIGroup: "policy", Version: "v1", Resource: "poddisruptionbudgets"}
+	return getAuthorized(ctx, backend, binding, resolution, origin, name, func(ctx context.Context, _ resources.Origin, name string) (resources.PodDisruptionBudgetDTO, error) {
+		requestContext, cancel, clients, err := backend.unary(ctx, binding)
+		if err != nil {
+			return resources.PodDisruptionBudgetDTO{}, err
+		}
+		defer cancel()
+		value, err := clients.kubernetes.PolicyV1().PodDisruptionBudgets(namespace).Get(requestContext, name, metav1.GetOptions{})
+		if err != nil {
+			return resources.PodDisruptionBudgetDTO{}, mapResourceError(err)
+		}
+		return resources.ConvertPodDisruptionBudget(value, backend.now().UTC()), nil
 	})
 }
 
@@ -765,6 +959,8 @@ func (backend *ResourceBackend) GetWorkload(ctx context.Context, binding namespa
 			return resources.StatefulSetDetail(object, related, now), nil
 		case *appsv1.DaemonSet:
 			return resources.DaemonSetDetail(object, related, now), nil
+		case *appsv1.ReplicaSet:
+			return resources.ReplicaSetDetail(object, related, now), nil
 		case *batchv1.Job:
 			return resources.JobDetail(object, related, now), nil
 		case *batchv1.CronJob:
@@ -827,6 +1023,9 @@ func (backend *ResourceBackend) getWorkloadObject(ctx context.Context, binding n
 		return value, mapResourceError(getErr)
 	case "cronjobs":
 		value, getErr := clients.kubernetes.BatchV1().CronJobs(namespace).Get(requestContext, name, metav1.GetOptions{})
+		return value, mapResourceError(getErr)
+	case "replicasets":
+		value, getErr := clients.kubernetes.AppsV1().ReplicaSets(namespace).Get(requestContext, name, metav1.GetOptions{})
 		return value, mapResourceError(getErr)
 	default:
 		return nil, resourceDomain(resources.CodeValidationFailed, "The workload kind is invalid.", nil)
@@ -966,7 +1165,7 @@ func (backend *ResourceBackend) fetchYAMLObject(ctx context.Context, binding nam
 		defer cancel()
 		value, err := clients.kubernetes.CoreV1().Pods(namespace).Get(requestContext, name, metav1.GetOptions{})
 		return value, mapResourceError(err)
-	case "deployments", "statefulsets", "daemonsets", "jobs", "cronjobs":
+	case "deployments", "statefulsets", "daemonsets", "jobs", "cronjobs", "replicasets":
 		origin, err := workloadOrigin(collection, namespace)
 		if err != nil {
 			return nil, err
@@ -1050,7 +1249,7 @@ func (backend *ResourceBackend) ResourceLastAppliedDiff(ctx context.Context, bin
 
 func workloadOrigin(kind, namespace string) (resources.Origin, error) {
 	switch kind {
-	case "deployments", "statefulsets", "daemonsets":
+	case "deployments", "statefulsets", "daemonsets", "replicasets":
 		return resources.Origin{Namespace: namespace, APIGroup: "apps", Version: "v1", Resource: kind}, nil
 	case "jobs", "cronjobs":
 		return resources.Origin{Namespace: namespace, APIGroup: "batch", Version: "v1", Resource: kind}, nil

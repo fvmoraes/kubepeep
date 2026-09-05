@@ -420,7 +420,7 @@ export type WorkloadStatus = 'Healthy' | 'Progressing' | 'Degraded' | 'Suspended
 
 export interface Workload {
   namespace: string
-  kind: 'Deployment' | 'StatefulSet' | 'DaemonSet' | 'Job' | 'CronJob'
+  kind: 'Deployment' | 'StatefulSet' | 'DaemonSet' | 'Job' | 'CronJob' | 'ReplicaSet'
   name: string
   ready: number | null
   desired: number | null
@@ -784,6 +784,66 @@ export interface NamespaceObjectDetail {
   metadata: ResourceMetadata
   status: string
   conditions: Condition[]
+}
+
+export interface ServiceAccount {
+  namespace: string
+  name: string
+  uid: string
+  ageSeconds: number
+}
+
+export interface ResourceQuota {
+  namespace: string
+  name: string
+  hard: Record<string, string> | null
+  used: Record<string, string> | null
+  truncated: boolean
+}
+
+export interface LimitRangeItem {
+  type: string
+  max: Record<string, string> | null
+  min: Record<string, string> | null
+  default: Record<string, string> | null
+  defaultRequest: Record<string, string> | null
+  maxLimitRequestRatio: Record<string, string> | null
+}
+
+export interface LimitRange {
+  namespace: string
+  name: string
+  uid: string
+  items: LimitRangeItem[]
+  truncated: boolean
+}
+
+export interface HorizontalPodAutoscaler {
+  namespace: string
+  name: string
+  targetKind: string
+  targetName: string
+  minReplicas: number | null
+  maxReplicas: number
+  currentReplicas: number
+  desiredReplicas: number
+  conditions: Condition[]
+  metricNames: string[]
+  truncated: boolean
+  ageSeconds: number
+}
+
+export interface PodDisruptionBudget {
+  namespace: string
+  name: string
+  minAvailable: { isInt: boolean; int: number; string: string } | null
+  maxUnavailable: { isInt: boolean; int: number; string: string } | null
+  currentHealthy: number
+  desiredHealthy: number
+  disruptionsAllowed: number
+  expectedPods: number
+  selector: Record<string, string> | null
+  ageSeconds: number
 }
 
 export interface LogLine {

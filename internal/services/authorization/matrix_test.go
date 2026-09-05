@@ -32,6 +32,12 @@ func TestAllowlistExactlyMatchesDocumentedMVPIDs(t *testing.T) {
 		"csidrivers.list", "csidrivers.get",
 		"leases.list", "leases.get",
 		"namespaces.get",
+		"replicasets.list", "replicasets.get", "replicasets.watch",
+		"horizontalpodautoscalers.list", "horizontalpodautoscalers.get",
+		"poddisruptionbudgets.list", "poddisruptionbudgets.get",
+		"resourcequotas.list", "resourcequotas.get",
+		"limitranges.list", "limitranges.get",
+		"serviceaccounts.list", "serviceaccounts.get",
 		"metrics.pods.list",
 	}
 	allowlist := Allowlist()

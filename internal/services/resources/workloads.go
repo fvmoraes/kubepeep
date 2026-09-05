@@ -69,6 +69,33 @@ func ConvertJob(value *batchv1.Job, now time.Time) WorkloadDTO {
 	return workloadFromDashboard(dashboard.ClassifyJob(value, now))
 }
 
+// ConvertReplicaSet classifies an apps/v1 ReplicaSet without inventing health:
+// ready==desired reads Healthy, anything else reads Progressing.
+func ConvertReplicaSet(value *appsv1.ReplicaSet, now time.Time) WorkloadDTO {
+	var desired, ready, available int64
+	if value.Spec.Replicas != nil {
+		desired = int64(*value.Spec.Replicas)
+	}
+	ready, available = int64(value.Status.ReadyReplicas), int64(value.Status.AvailableReplicas)
+	status := WorkloadProgressing
+	if ready == desired {
+		status = WorkloadHealthy
+	}
+	return WorkloadDTO{Namespace: value.Namespace, Kind: "ReplicaSet", Name: value.Name, Ready: &ready, Desired: &desired, Available: &available, Updated: nil, Status: status, AgeSeconds: int64(now.Sub(value.CreationTimestamp.Time) / time.Second)}
+}
+
+func ReplicaSetDetail(value *appsv1.ReplicaSet, related []ResourceRef, now time.Time) WorkloadDetailDTO {
+	summary := ConvertReplicaSet(value, now)
+	conditions := make([]ConditionDTO, 0, min(len(value.Status.Conditions), maximumConditions))
+	for _, condition := range value.Status.Conditions {
+		if len(conditions) == maximumConditions {
+			break
+		}
+		conditions = append(conditions, conditionDTO(string(condition.Type), string(condition.Status), condition.Reason, condition.Message, condition.LastTransitionTime))
+	}
+	return workloadDetail(value, summary, selectorMap(value.Spec.Selector), value.Spec.Template.Annotations, conditions, value.Spec.Template.Spec.Containers, related)
+}
+
 func ConvertCronJob(value *batchv1.CronJob, jobs []batchv1.Job, now time.Time) WorkloadDTO {
 	return ConvertCronJobWithHistory(value, jobs, jobs != nil, now)
 }

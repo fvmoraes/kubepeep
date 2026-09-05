@@ -21,6 +21,7 @@ import type {
   ExecTicket,
   IngressDetail,
   IngressResource,
+  HorizontalPodAutoscaler,
   KubernetesContext,
   CSIDriver,
   CSIDriverDetail,
@@ -29,11 +30,15 @@ import type {
   Lease,
   LeaseDetail,
   NamespaceObjectDetail,
+  LimitRange,
   NodeDetail,
   NodeSummary,
+  PodDisruptionBudget,
   PersistentVolume,
   PersistentVolumeClaim,
   PersistentVolumeClaimDetail,
+  ResourceQuota,
+  ServiceAccount,
   PersistentVolumeDetail,
   StorageClass,
   StorageClassDetail,
@@ -609,6 +614,46 @@ export function getVolumeAttachment(name: string, signal?: AbortSignal, expected
 
 export function getNamespaceObject(name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<NamespaceObjectDetail> {
   return resourceRequest<NamespaceObjectDetail>(`/api/v1/namespaces/${resourcePath(name)}`, signal, expectedGeneration)
+}
+
+export function getServiceAccounts(options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<ServiceAccount>> {
+  return collectionRequest<ServiceAccount>('/api/v1/service-accounts', options, signal, expectedGeneration)
+}
+
+export function getServiceAccount(namespace: string, name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<ServiceAccount> {
+  return resourceRequest<ServiceAccount>(`/api/v1/service-accounts/${resourcePath(namespace)}/${resourcePath(name)}`, signal, expectedGeneration)
+}
+
+export function getResourceQuotas(options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<ResourceQuota>> {
+  return collectionRequest<ResourceQuota>('/api/v1/resource-quotas', options, signal, expectedGeneration)
+}
+
+export function getResourceQuota(namespace: string, name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<ResourceQuota> {
+  return resourceRequest<ResourceQuota>(`/api/v1/resource-quotas/${resourcePath(namespace)}/${resourcePath(name)}`, signal, expectedGeneration)
+}
+
+export function getLimitRanges(options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<LimitRange>> {
+  return collectionRequest<LimitRange>('/api/v1/limit-ranges', options, signal, expectedGeneration)
+}
+
+export function getLimitRange(namespace: string, name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<LimitRange> {
+  return resourceRequest<LimitRange>(`/api/v1/limit-ranges/${resourcePath(namespace)}/${resourcePath(name)}`, signal, expectedGeneration)
+}
+
+export function getHPAs(options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<HorizontalPodAutoscaler>> {
+  return collectionRequest<HorizontalPodAutoscaler>('/api/v1/hpas', options, signal, expectedGeneration)
+}
+
+export function getHPA(namespace: string, name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<HorizontalPodAutoscaler> {
+  return resourceRequest<HorizontalPodAutoscaler>(`/api/v1/hpas/${resourcePath(namespace)}/${resourcePath(name)}`, signal, expectedGeneration)
+}
+
+export function getPDBs(options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<PodDisruptionBudget>> {
+  return collectionRequest<PodDisruptionBudget>('/api/v1/pdbs', options, signal, expectedGeneration)
+}
+
+export function getPDB(namespace: string, name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<PodDisruptionBudget> {
+  return resourceRequest<PodDisruptionBudget>(`/api/v1/pdbs/${resourcePath(namespace)}/${resourcePath(name)}`, signal, expectedGeneration)
 }
 
 export function getPreferences(signal?: AbortSignal): Promise<Preferences> {

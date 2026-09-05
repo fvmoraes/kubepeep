@@ -57,6 +57,16 @@ type ResourceService interface {
 	GetCSINode(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, string) (resourcecore.CSINodeDetailDTO, error)
 	GetVolumeAttachment(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, string) (resourcecore.VolumeAttachmentDetailDTO, error)
 	GetNamespace(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, string) (resourcecore.NamespaceObjectDetailDTO, error)
+	GetServiceAccount(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, string, string) (resourcecore.ServiceAccountDTO, error)
+	GetResourceQuota(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, string, string) (resourcecore.ResourceQuotaDTO, error)
+	GetLimitRange(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, string, string) (resourcecore.LimitRangeDTO, error)
+	GetHPA(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, string, string) (resourcecore.HorizontalPodAutoscalerDTO, error)
+	GetPDB(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, string, string) (resourcecore.PodDisruptionBudgetDTO, error)
+	ListServiceAccounts(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, resourcecore.ListOptions, *resourcecore.CompositeCursor[resourcecore.ServiceAccountDTO]) (resourcecore.ListResult[resourcecore.ServiceAccountDTO], error)
+	ListResourceQuotas(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, resourcecore.ListOptions, *resourcecore.CompositeCursor[resourcecore.ResourceQuotaDTO]) (resourcecore.ListResult[resourcecore.ResourceQuotaDTO], error)
+	ListLimitRanges(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, resourcecore.ListOptions, *resourcecore.CompositeCursor[resourcecore.LimitRangeDTO]) (resourcecore.ListResult[resourcecore.LimitRangeDTO], error)
+	ListHPAs(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, resourcecore.ListOptions, *resourcecore.CompositeCursor[resourcecore.HorizontalPodAutoscalerDTO]) (resourcecore.ListResult[resourcecore.HorizontalPodAutoscalerDTO], error)
+	ListPDBs(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, resourcecore.ListOptions, *resourcecore.CompositeCursor[resourcecore.PodDisruptionBudgetDTO]) (resourcecore.ListResult[resourcecore.PodDisruptionBudgetDTO], error)
 	ResourceYAML(context.Context, namespaces.SelectionBinding, string, string, string) ([]byte, error)
 	ResourceLastAppliedDiff(context.Context, namespaces.SelectionBinding, string, string, string) (resourcecore.LastAppliedDiffDTO, error)
 	ReadLogs(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, string, string, resourcecore.LogQuery) (resourcecore.LogReadDTO, error)
@@ -323,6 +333,56 @@ func (handler *Resources) VolumeAttachmentDetail(w http.ResponseWriter, r *http.
 		return handler.service.GetVolumeAttachment(ctx, b, s, r.PathValue("name"))
 	})
 }
+func (handler *Resources) ServiceAccounts(w http.ResponseWriter, r *http.Request) {
+	handleList(handler, w, r, resourcecore.CollectionServiceAccounts, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution, o resourcecore.ListOptions, c *resourcecore.CompositeCursor[resourcecore.ServiceAccountDTO]) (resourcecore.ListResult[resourcecore.ServiceAccountDTO], error) {
+		return handler.service.ListServiceAccounts(ctx, b, s, o, c)
+	})
+}
+func (handler *Resources) ResourceQuotas(w http.ResponseWriter, r *http.Request) {
+	handleList(handler, w, r, resourcecore.CollectionResourceQuotas, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution, o resourcecore.ListOptions, c *resourcecore.CompositeCursor[resourcecore.ResourceQuotaDTO]) (resourcecore.ListResult[resourcecore.ResourceQuotaDTO], error) {
+		return handler.service.ListResourceQuotas(ctx, b, s, o, c)
+	})
+}
+func (handler *Resources) LimitRanges(w http.ResponseWriter, r *http.Request) {
+	handleList(handler, w, r, resourcecore.CollectionLimitRanges, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution, o resourcecore.ListOptions, c *resourcecore.CompositeCursor[resourcecore.LimitRangeDTO]) (resourcecore.ListResult[resourcecore.LimitRangeDTO], error) {
+		return handler.service.ListLimitRanges(ctx, b, s, o, c)
+	})
+}
+func (handler *Resources) HPAs(w http.ResponseWriter, r *http.Request) {
+	handleList(handler, w, r, resourcecore.CollectionHPAs, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution, o resourcecore.ListOptions, c *resourcecore.CompositeCursor[resourcecore.HorizontalPodAutoscalerDTO]) (resourcecore.ListResult[resourcecore.HorizontalPodAutoscalerDTO], error) {
+		return handler.service.ListHPAs(ctx, b, s, o, c)
+	})
+}
+func (handler *Resources) PDBs(w http.ResponseWriter, r *http.Request) {
+	handleList(handler, w, r, resourcecore.CollectionPDBs, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution, o resourcecore.ListOptions, c *resourcecore.CompositeCursor[resourcecore.PodDisruptionBudgetDTO]) (resourcecore.ListResult[resourcecore.PodDisruptionBudgetDTO], error) {
+		return handler.service.ListPDBs(ctx, b, s, o, c)
+	})
+}
+func (handler *Resources) ServiceAccountDetail(w http.ResponseWriter, r *http.Request) {
+	handler.detail(w, r, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution) (any, error) {
+		return handler.service.GetServiceAccount(ctx, b, s, r.PathValue("namespace"), r.PathValue("name"))
+	})
+}
+func (handler *Resources) ResourceQuotaDetail(w http.ResponseWriter, r *http.Request) {
+	handler.detail(w, r, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution) (any, error) {
+		return handler.service.GetResourceQuota(ctx, b, s, r.PathValue("namespace"), r.PathValue("name"))
+	})
+}
+func (handler *Resources) LimitRangeDetail(w http.ResponseWriter, r *http.Request) {
+	handler.detail(w, r, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution) (any, error) {
+		return handler.service.GetLimitRange(ctx, b, s, r.PathValue("namespace"), r.PathValue("name"))
+	})
+}
+func (handler *Resources) HPADetail(w http.ResponseWriter, r *http.Request) {
+	handler.detail(w, r, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution) (any, error) {
+		return handler.service.GetHPA(ctx, b, s, r.PathValue("namespace"), r.PathValue("name"))
+	})
+}
+func (handler *Resources) PDBDetail(w http.ResponseWriter, r *http.Request) {
+	handler.detail(w, r, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution) (any, error) {
+		return handler.service.GetPDB(ctx, b, s, r.PathValue("namespace"), r.PathValue("name"))
+	})
+}
 func (handler *Resources) NamespaceDetail(w http.ResponseWriter, r *http.Request) {
 	handler.clusterDetail(w, r, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution) (any, error) {
 		return handler.service.GetNamespace(ctx, b, s, r.PathValue("name"))
@@ -470,6 +530,7 @@ func (handler *Resources) clusterYAML(w http.ResponseWriter, r *http.Request, ca
 var yamlDiffCollections = map[string]string{
 	"pods":            "pods",
 	"deployments":     "deployments",
+	"replicasets":     "replicasets",
 	"statefulsets":    "statefulsets",
 	"daemonsets":      "daemonsets",
 	"jobs":            "jobs",
@@ -756,7 +817,7 @@ func validateResourcePath(r *http.Request, resolution namespaces.ScopeResolution
 	if !allowed {
 		return validationHTTPError("The namespace is outside the active scope.", nil)
 	}
-	if kind := r.PathValue("kind"); kind != "" && !containsString([]string{"deployments", "statefulsets", "daemonsets", "jobs", "cronjobs"}, kind) {
+	if kind := r.PathValue("kind"); kind != "" && !containsString([]string{"deployments", "statefulsets", "daemonsets", "jobs", "cronjobs", "replicasets"}, kind) {
 		return validationHTTPError("The workload kind is invalid.", nil)
 	}
 	return nil

@@ -230,7 +230,7 @@ test('nodes lists and details without namespace scope and honors authorization (
 
 test('nodes route is reachable from the sidebar navigation tree (V1-08)', async ({ page }) => {
   await page.goto('/')
-  await page.getByRole('link', { name: 'Nodes' }).click()
+  await page.getByRole('navigation', { name: 'Primary navigation' }).getByRole('link', { name: 'Nodes', exact: true }).click()
   await expect(page).toHaveURL(/\/nodes$/)
   await expect(page.getByRole('heading', { name: 'Nodes' })).toBeVisible()
 })

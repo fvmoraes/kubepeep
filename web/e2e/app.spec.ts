@@ -3,11 +3,14 @@ import { expect, test } from '@playwright/test'
 // Enabled destinations of the Kubernetes navigation tree, in sidebar order.
 const navCatalog = [
   ['/', 'Overview', 'The local API returned an error'],
+  ['/nodes', 'Nodes', 'Nodes'],
   ['/events', 'Events', 'Events'],
   ['/namespaces', 'Namespaces', 'Namespace scopes are offline'],
+  ['/leases', 'Leases', 'Leases'],
   ['/workloads', 'Overview', 'Workloads'],
   ['/workloads/kind/deployments', 'Deployments', 'Workloads'],
   ['/pods', 'Pods', 'Pods'],
+  ['/workloads/kind/replicasets', 'ReplicaSets', 'Workloads'],
   ['/workloads/kind/daemonsets', 'DaemonSets', 'Workloads'],
   ['/workloads/kind/statefulsets', 'StatefulSets', 'Workloads'],
   ['/workloads/kind/jobs', 'Jobs', 'Workloads'],
@@ -18,12 +21,24 @@ const navCatalog = [
   ['/network/port-forwards', 'Port Forwarding', 'Network'],
   ['/config/configmaps', 'ConfigMaps', 'Configuration'],
   ['/config/secrets', 'Secrets', 'Configuration'],
+  ['/configuration/resource-quotas', 'ResourceQuotas', 'Configuration'],
+  ['/configuration/limit-ranges', 'LimitRanges', 'Configuration'],
+  ['/configuration/hpas', 'HorizontalPodAutoscalers', 'Configuration'],
+  ['/configuration/pdbs', 'PodDisruptionBudgets', 'Configuration'],
+  ['/storage/persistent-volumes', 'PersistentVolumes', 'Storage'],
+  ['/storage/persistent-volume-claims', 'PersistentVolumeClaims', 'Storage'],
+  ['/storage/volume-attachments', 'VolumeAttachments', 'Storage'],
+  ['/storage/storage-classes', 'StorageClasses', 'Storage'],
+  ['/storage/csi-nodes', 'CSINodes', 'Storage'],
+  ['/storage/csi-drivers', 'CSIDrivers', 'Storage'],
+  ['/service-accounts', 'ServiceAccounts', 'ServiceAccounts'],
   ['/permissions', 'Permissions', 'Permissions are offline'],
   ['/logs', 'Logs', 'Logs'],
   ['/settings', 'Settings', 'Settings'],
 ] as const
 
 test('serves the application shell and preserves History API navigation', async ({ page }) => {
+  test.setTimeout(90_000)
   await page.goto('/')
 
   await expect(page.getByLabel('Primary navigation')).toBeVisible()

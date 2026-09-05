@@ -221,7 +221,7 @@ promessa de snapshot integral.
 | `/dashboard/restarts` | somente `namespace` e `limit` 1–50 | não aceita `search` | fixa por `restarts` desc; não aceita sort/order | restarts desc, namespace, pod, containerType, container |
 | `/dashboard/events` | `status`: `Normal`, `Warning`, `Unknown` | objectKind, objectName, reason, message | `timestamp` (default desc; page), `count` (page), `identity` (page) | timestamp desc, namespace, uid |
 | `/metrics` | nenhum status | pod, container | `cpu` (default desc; page), `memory` (page), `identity` (page) | medida desc, namespace, pod |
-| `/workloads` | `kind`: os cinco plurais de §14, 1–5, default todos; `status`: enum de `WorkloadDTO` | namespace, name, kind | `identity` (default; page), `name` (page), `age` (page), `status` (page) | kind canônico, namespace, name, uid |
+| `/workloads` | `kind`: os seis plurais de §14, 1–6, default todos; `status`: enum de `WorkloadDTO` | namespace, name, kind | `identity` (default; page), `name` (page), `age` (page), `status` (page) | kind canônico, namespace, name, uid |
 | `/pods` | `status`: `Running`, `Pending`, `Succeeded`, `Failed`, `Unknown`; `workload`, `node`; `restarts`: `any`, `gt0`, `gte3`, `gte10`; `problematic`: `true`/`false` | namespace, name, node, owner name | `identity` (default; page), `name` (page), `age` (page), `restarts` (page), `status` (page) | namespace, name, uid |
 | `/events` | `status`: `Normal`, `Warning`, `Unknown`; `objectKind`, `reason` | namespace, objectKind, objectName, reason, message | `timestamp` (default desc; page), `count` (page), `identity` (page) | timestamp desc, namespace, uid |
 | `/services` | nenhum status | namespace, name, type, clusterIPs | `identity` (default; page), `name` (page), `type` (page) | namespace, name, uid |
@@ -230,6 +230,15 @@ promessa de snapshot integral.
 | `/configmaps` | nenhum status | namespace, name | `identity` (default; page), `name` (page), `createdAt` (page) | namespace, name, uid |
 | `/secrets` | nenhum status | namespace, name | `identity` (default; page), `name` (page), `createdAt` (page) | namespace, name, uid |
 | `/nodes` | `status`: `Ready`, `NotReady`, `Unknown`; sem `namespace` (cluster-scoped) | name, roles, kubeletVersion | `identity` (default; page), `name` (page), `age` (page), `status` (page) | name |
+| `/leases` | nenhum status | namespace, name, holder | `identity` (default; page), `name` (page), `age` (page) | namespace, name, uid |
+| `/persistent-volume-claims` | `status`: `Bound`, `Pending`, `Lost` | namespace, name, volumeName | `identity` (default; page), `name` (page), `age` (page), `status` (page) | namespace, name, uid |
+| `/service-accounts` | nenhum status | namespace, name | `identity` (default; page), `name` (page) | namespace, name, uid |
+| `/resource-quotas` | nenhum status | namespace, name | `identity` (default; page), `name` (page) | namespace, name, uid |
+| `/limit-ranges` | nenhum status | namespace, name | `identity` (default; page), `name` (page) | namespace, name, uid |
+| `/hpas` | nenhum status | namespace, name, target | `identity` (default; page), `name` (page), `age` (page) | namespace, name, uid |
+| `/pdbs` | nenhum status | namespace, name | `identity` (default; page), `name` (page) | namespace, name, uid |
+| `/persistent-volumes` | `status`: `Available`, `Bound`, `Released`, `Failed`, `Pending`; sem `namespace` (cluster-scoped) | name, storageClass | `identity` (default; page), `name` (page), `age` (page), `status` (page) | name, uid |
+| `/storage-classes`, `/csi-drivers`, `/csi-nodes`, `/volume-attachments` | sem `namespace` (cluster-scoped) | name (+ provisioner/attacher quando pertinente) | `identity` (default; page), `name` (page), `age` (page) | name, uid |
 
 `order` default é o indicado por `desc`; nos demais casos é `asc`. UID faz
 parte do modelo interno/list metadata mesmo quando um DTO compacto não o
@@ -1116,8 +1125,11 @@ Ausência da Metrics API usa `FEATURE_UNAVAILABLE`, nunca números fabricados.
 ## 14. Workloads
 
 Kinds aceitos para leitura: `deployments`, `statefulsets`, `daemonsets`, `jobs`,
-`cronjobs`. Restart aceita somente `deployments`; scale aceita somente
-`deployments` e `statefulsets`.
+`cronjobs`, `replicasets` (F3). Restart aceita somente `deployments`; scale
+aceita somente `deployments` e `statefulsets`. ReplicaSet classifica
+`Healthy` quando ready == desired e `Progressing` caso contrário; nenhuma
+outra inferência de saúde é feita. Relações Deployment → ReplicaSet → Pods
+usam `ownerReferences` com UID, nunca igualdade de nome.
 
 | Método/rota | Classe | Request/response | Autorização | Erros |
 | --- | --- | --- | --- | --- |
@@ -1465,6 +1477,38 @@ Schemas da família Nodes:
 | `NodeDTO` | `name`, `status` (`Ready`, `NotReady` ou `Unknown`), `ready` boolean, `roles` apenas da família de labels `node-role.kubernetes.io/*` (máx. 8), `kubeletVersion`, `internalIP: string|null`, `ageSeconds` |
 | `NodeDetailDTO` | `metadata` (sem namespace), campos de `NodeDTO`, `conditions` (máx. 20), `capacity`/`allocatable` (máx. 32 entradas cada), `taints` (máx. 32; `key`/`value`/`effect`) e `truncated` boolean |
 | YAML de Node | documento curado: apiVersion/kind/metadata (nome, uid, creationTimestamp, roles)/status (ready, conditions, internalIP, capacity, allocatable, taints, nodeInfo) + `x-kubepeep-omitted` listando annotations, managedFields, finalizers, spec, config, images e volumes. O objeto cru nunca é serializado |
+
+## 16.2 Configuration e ServiceAccounts (F3)
+
+Todas as rotas abaixo são namespaced (escopo ativo), com `list`/`get`
+próprios por família, cursor e coverage por namespace. Sem rota YAML nesta
+fase (política V3-07 para ServiceAccounts: metadados apenas).
+
+| Método/rota | Request | Response | Autorização | Erros |
+| --- | --- | --- | --- | --- |
+| `GET /api/v1/service-accounts` | query comum | `ServiceAccountDTO[]`, 200 | `list serviceaccounts` | cursor/parcial; 403/409/410/503/504 |
+| `GET /api/v1/service-accounts/{namespace}/{name}` | vazio | `ServiceAccountDTO`, 200 | `get serviceaccounts` com resourceName | 403/404/409/503/504 |
+| `GET /api/v1/resource-quotas` | query comum | `ResourceQuotaDTO[]`, 200 | `list resourcequotas` | cursor/parcial; 403/409/410/503/504 |
+| `GET /api/v1/resource-quotas/{namespace}/{name}` | vazio | `ResourceQuotaDTO`, 200 | `get resourcequotas` com resourceName | 403/404/409/503/504 |
+| `GET /api/v1/limit-ranges` | query comum | `LimitRangeDTO[]`, 200 | `list limitranges` | cursor/parcial; 403/409/410/503/504 |
+| `GET /api/v1/limit-ranges/{namespace}/{name}` | vazio | `LimitRangeDTO`, 200 | `get limitranges` com resourceName | 403/404/409/503/504 |
+| `GET /api/v1/hpas` | query comum | `HorizontalPodAutoscalerDTO[]`, 200 | `list autoscaling/horizontalpodautoscalers` | cursor/parcial; 403/404/409/503/504 |
+| `GET /api/v1/hpas/{namespace}/{name}` | vazio | `HorizontalPodAutoscalerDTO`, 200 | `get autoscaling/horizontalpodautoscalers` com resourceName | 403/404/409/503/504 |
+| `GET /api/v1/pdbs` | query comum | `PodDisruptionBudgetDTO[]`, 200 | `list policy/poddisruptionbudgets` | cursor/parcial; 403/409/410/503/504 |
+| `GET /api/v1/pdbs/{namespace}/{name}` | vazio | `PodDisruptionBudgetDTO`, 200 | `get policy/poddisruptionbudgets` com resourceName | 403/404/409/503/504 |
+
+Schemas fechados:
+
+| DTO | Campos e regras |
+| --- | --- |
+| `ServiceAccountDTO` | `namespace`, `name`, `uid`, `ageSeconds`. Sem tokens, referências de Secret, annotations ou YAML |
+| `ResourceQuotaDTO` | `namespace`, `name`, `hard`/`used` (máx. 64 entradas, quantities com unidade), `truncated`. Contagens de objetos são strings, não conteúdo |
+| `LimitRangeDTO` | `namespace`, `name`, `uid`, `items` (máx. 32; `type`, `max`, `min`, `default`, `defaultRequest`, `maxLimitRequestRatio`), `truncated` |
+| `HorizontalPodAutoscalerDTO` | `namespace`, `name`, `targetKind`/`targetName`, `minReplicas: int|null`, `maxReplicas`, `currentReplicas`, `desiredReplicas`, `conditions` (máx. 16), `metricNames` (nomes sanitizados), `truncated`, `ageSeconds`. Ausência de métricas não é zero |
+| `PodDisruptionBudgetDTO` | `namespace`, `name`, `minAvailable`/`maxUnavailable` (`{isInt, int, string}` preservando IntOrString), `currentHealthy`, `desiredHealthy`, `disruptionsAllowed`, `expectedPods`, `selector` (máx. 32 entradas), `ageSeconds` |
+
+HPA usa a API `autoscaling/v2` quando o cluster a serve; API ausente é
+`FEATURE_UNAVAILABLE`, nunca interpretada como ausência de autoscalers.
 
 ## 17. Port-forwards
 

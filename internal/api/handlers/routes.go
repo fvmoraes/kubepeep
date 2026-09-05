@@ -129,6 +129,16 @@ func Register(applicationRouter *router.Router, dependencies Dependencies) {
 		apiRouter.GET("/volume-attachments", resourceHandler.VolumeAttachments)
 		apiRouter.GET("/volume-attachments/{name}", resourceHandler.VolumeAttachmentDetail)
 		apiRouter.GET("/namespaces/{name}", resourceHandler.NamespaceDetail)
+		apiRouter.GET("/service-accounts", resourceHandler.ServiceAccounts)
+		apiRouter.GET("/service-accounts/{namespace}/{name}", resourceHandler.ServiceAccountDetail)
+		apiRouter.GET("/resource-quotas", resourceHandler.ResourceQuotas)
+		apiRouter.GET("/resource-quotas/{namespace}/{name}", resourceHandler.ResourceQuotaDetail)
+		apiRouter.GET("/limit-ranges", resourceHandler.LimitRanges)
+		apiRouter.GET("/limit-ranges/{namespace}/{name}", resourceHandler.LimitRangeDetail)
+		apiRouter.GET("/hpas", resourceHandler.HPAs)
+		apiRouter.GET("/hpas/{namespace}/{name}", resourceHandler.HPADetail)
+		apiRouter.GET("/pdbs", resourceHandler.PDBs)
+		apiRouter.GET("/pdbs/{namespace}/{name}", resourceHandler.PDBDetail)
 	}
 	if dependencies.Preferences != nil {
 		preferenceHandler := NewResources(nil, dependencies.Preferences, dependencies.Selection, dependencies.Cursors)
@@ -192,7 +202,8 @@ func allowedMethods(path string) (string, bool) {
 		apiPrefix + "/nodes", apiPrefix + "/leases",
 		apiPrefix + "/persistent-volumes", apiPrefix + "/persistent-volume-claims",
 		apiPrefix + "/storage-classes", apiPrefix + "/csi-drivers", apiPrefix + "/csi-nodes",
-		apiPrefix + "/volume-attachments":
+		apiPrefix + "/volume-attachments", apiPrefix + "/service-accounts",
+		apiPrefix + "/resource-quotas", apiPrefix + "/limit-ranges", apiPrefix + "/hpas", apiPrefix + "/pdbs":
 		return "GET, HEAD", true
 	case apiPrefix + "/preferences":
 		return "GET, HEAD, PUT", true
@@ -248,7 +259,7 @@ func resourceAllowedMethods(path string) (string, bool) {
 		return "GET, HEAD", true
 	case len(parts) == 5 && parts[0] == "pods" && parts[3] == "logs" && parts[4] == "stream":
 		return "GET", true
-	case len(parts) == 3 && (parts[0] == "services" || parts[0] == "ingresses" || parts[0] == "endpoint-slices" || parts[0] == "configmaps" || parts[0] == "secrets" || parts[0] == "leases" || parts[0] == "persistent-volume-claims"):
+	case len(parts) == 3 && (parts[0] == "services" || parts[0] == "ingresses" || parts[0] == "endpoint-slices" || parts[0] == "configmaps" || parts[0] == "secrets" || parts[0] == "leases" || parts[0] == "persistent-volume-claims" || parts[0] == "service-accounts" || parts[0] == "resource-quotas" || parts[0] == "limit-ranges" || parts[0] == "hpas" || parts[0] == "pdbs"):
 		return "GET, HEAD", true
 	case len(parts) == 4 && parts[3] == "yaml" && (parts[0] == "services" || parts[0] == "ingresses" || parts[0] == "endpoint-slices" || parts[0] == "configmaps"):
 		return "GET, HEAD", true

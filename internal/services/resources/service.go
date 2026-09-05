@@ -14,7 +14,7 @@ var collectionGVR = map[Collection]Origin{
 	CollectionLeases: {APIGroup: "coordination.k8s.io", Version: "v1", Resource: "leases"},
 	CollectionPersistentVolumeClaims: {Version: "v1", Resource: "persistentvolumeclaims"},
 }
-var workloadGVR = map[WorkloadKind]Origin{WorkloadDeployments: {APIGroup: "apps", Version: "v1", Resource: "deployments"}, WorkloadStatefulSets: {APIGroup: "apps", Version: "v1", Resource: "statefulsets"}, WorkloadDaemonSets: {APIGroup: "apps", Version: "v1", Resource: "daemonsets"}, WorkloadJobs: {APIGroup: "batch", Version: "v1", Resource: "jobs"}, WorkloadCronJobs: {APIGroup: "batch", Version: "v1", Resource: "cronjobs"}}
+var workloadGVR = map[WorkloadKind]Origin{WorkloadDeployments: {APIGroup: "apps", Version: "v1", Resource: "deployments"}, WorkloadStatefulSets: {APIGroup: "apps", Version: "v1", Resource: "statefulsets"}, WorkloadDaemonSets: {APIGroup: "apps", Version: "v1", Resource: "daemonsets"}, WorkloadJobs: {APIGroup: "batch", Version: "v1", Resource: "jobs"}, WorkloadCronJobs: {APIGroup: "batch", Version: "v1", Resource: "cronjobs"}, WorkloadReplicaSets: {APIGroup: "apps", Version: "v1", Resource: "replicasets"}}
 
 func OriginsFor(collection Collection, namespaces []string, kinds []WorkloadKind) ([]Origin, error) {
 	namespaces, err := canonicalStrings(namespaces, MaximumNamespaces, nil, "namespace")

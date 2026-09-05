@@ -352,6 +352,165 @@ func (backend *ResourceBackend) ListVolumeAttachments(ctx context.Context, bindi
 	}, filterSortVolumeAttachments)
 }
 
+func (backend *ResourceBackend) ListServiceAccounts(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, options resources.ListOptions, cursor *resources.CompositeCursor[resources.ServiceAccountDTO]) (resources.ListResult[resources.ServiceAccountDTO], error) {
+	return collectFilteredResource(ctx, backend, binding, resolution, resources.CollectionServiceAccounts, options, cursor, serviceAccountIdentityLess, func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[resources.ServiceAccountDTO], error) {
+		return backend.listServiceAccountPage(ctx, binding, page)
+	}, filterSortServiceAccounts)
+}
+
+func (backend *ResourceBackend) ListResourceQuotas(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, options resources.ListOptions, cursor *resources.CompositeCursor[resources.ResourceQuotaDTO]) (resources.ListResult[resources.ResourceQuotaDTO], error) {
+	return collectFilteredResource(ctx, backend, binding, resolution, resources.CollectionResourceQuotas, options, cursor, resourceQuotaIdentityLess, func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[resources.ResourceQuotaDTO], error) {
+		return backend.listResourceQuotaPage(ctx, binding, page)
+	}, filterSortResourceQuotas)
+}
+
+func (backend *ResourceBackend) ListLimitRanges(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, options resources.ListOptions, cursor *resources.CompositeCursor[resources.LimitRangeDTO]) (resources.ListResult[resources.LimitRangeDTO], error) {
+	return collectFilteredResource(ctx, backend, binding, resolution, resources.CollectionLimitRanges, options, cursor, limitRangeIdentityLess, func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[resources.LimitRangeDTO], error) {
+		return backend.listLimitRangePage(ctx, binding, page)
+	}, filterSortLimitRanges)
+}
+
+func (backend *ResourceBackend) ListHPAs(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, options resources.ListOptions, cursor *resources.CompositeCursor[resources.HorizontalPodAutoscalerDTO]) (resources.ListResult[resources.HorizontalPodAutoscalerDTO], error) {
+	return collectFilteredResource(ctx, backend, binding, resolution, resources.CollectionHPAs, options, cursor, hpaIdentityLess, func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[resources.HorizontalPodAutoscalerDTO], error) {
+		return backend.listHPAPage(ctx, binding, page)
+	}, filterSortHPAs)
+}
+
+func (backend *ResourceBackend) ListPDBs(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, options resources.ListOptions, cursor *resources.CompositeCursor[resources.PodDisruptionBudgetDTO]) (resources.ListResult[resources.PodDisruptionBudgetDTO], error) {
+	return collectFilteredResource(ctx, backend, binding, resolution, resources.CollectionPDBs, options, cursor, pdbIdentityLess, func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[resources.PodDisruptionBudgetDTO], error) {
+		return backend.listPDBPage(ctx, binding, page)
+	}, filterSortPDBs)
+}
+
+func serviceAccountIdentityLess(l, r resources.ServiceAccountDTO) bool {
+	if l.Namespace != r.Namespace {
+		return l.Namespace < r.Namespace
+	}
+	return l.Name < r.Name
+}
+func resourceQuotaIdentityLess(l, r resources.ResourceQuotaDTO) bool {
+	if l.Namespace != r.Namespace {
+		return l.Namespace < r.Namespace
+	}
+	return l.Name < r.Name
+}
+func limitRangeIdentityLess(l, r resources.LimitRangeDTO) bool {
+	if l.Namespace != r.Namespace {
+		return l.Namespace < r.Namespace
+	}
+	return l.Name < r.Name
+}
+func hpaIdentityLess(l, r resources.HorizontalPodAutoscalerDTO) bool {
+	if l.Namespace != r.Namespace {
+		return l.Namespace < r.Namespace
+	}
+	return l.Name < r.Name
+}
+func pdbIdentityLess(l, r resources.PodDisruptionBudgetDTO) bool {
+	if l.Namespace != r.Namespace {
+		return l.Namespace < r.Namespace
+	}
+	return l.Name < r.Name
+}
+
+func filterSortServiceAccounts(items []resources.ServiceAccountDTO, options resources.ListOptions) []resources.ServiceAccountDTO {
+	result := items[:0]
+	for _, item := range items {
+		if options.Search == "" || matchesSearch(options, item.Namespace, item.Name) {
+			result = append(result, item)
+		}
+	}
+	sort.SliceStable(result, func(i, j int) bool {
+		l, r := result[i], result[j]
+		identity := strings.Compare(l.Namespace+"/"+l.Name, r.Namespace+"/"+r.Name)
+		primary := identity
+		if options.Sort == "name" {
+			primary = naturalTextCompare(l.Name, r.Name)
+		}
+		return pageSortLess(primary, identity, options.Order == resources.OrderDescending)
+	})
+	return result
+}
+
+func filterSortResourceQuotas(items []resources.ResourceQuotaDTO, options resources.ListOptions) []resources.ResourceQuotaDTO {
+	result := items[:0]
+	for _, item := range items {
+		if options.Search == "" || matchesSearch(options, item.Namespace, item.Name) {
+			result = append(result, item)
+		}
+	}
+	sort.SliceStable(result, func(i, j int) bool {
+		l, r := result[i], result[j]
+		identity := strings.Compare(l.Namespace+"/"+l.Name, r.Namespace+"/"+r.Name)
+		primary := identity
+		if options.Sort == "name" {
+			primary = naturalTextCompare(l.Name, r.Name)
+		}
+		return pageSortLess(primary, identity, options.Order == resources.OrderDescending)
+	})
+	return result
+}
+
+func filterSortLimitRanges(items []resources.LimitRangeDTO, options resources.ListOptions) []resources.LimitRangeDTO {
+	result := items[:0]
+	for _, item := range items {
+		if options.Search == "" || matchesSearch(options, item.Namespace, item.Name) {
+			result = append(result, item)
+		}
+	}
+	sort.SliceStable(result, func(i, j int) bool {
+		l, r := result[i], result[j]
+		identity := strings.Compare(l.Namespace+"/"+l.Name, r.Namespace+"/"+r.Name)
+		primary := identity
+		if options.Sort == "name" {
+			primary = naturalTextCompare(l.Name, r.Name)
+		}
+		return pageSortLess(primary, identity, options.Order == resources.OrderDescending)
+	})
+	return result
+}
+
+func filterSortHPAs(items []resources.HorizontalPodAutoscalerDTO, options resources.ListOptions) []resources.HorizontalPodAutoscalerDTO {
+	result := items[:0]
+	for _, item := range items {
+		if options.Search == "" || matchesSearch(options, item.Namespace, item.Name, item.TargetKind, item.TargetName) {
+			result = append(result, item)
+		}
+	}
+	sort.SliceStable(result, func(i, j int) bool {
+		l, r := result[i], result[j]
+		identity := strings.Compare(l.Namespace+"/"+l.Name, r.Namespace+"/"+r.Name)
+		primary := identity
+		switch options.Sort {
+		case "name":
+			primary = naturalTextCompare(l.Name, r.Name)
+		case "age":
+			primary = int64Compare(l.AgeSeconds, r.AgeSeconds)
+		}
+		return pageSortLess(primary, identity, options.Order == resources.OrderDescending)
+	})
+	return result
+}
+
+func filterSortPDBs(items []resources.PodDisruptionBudgetDTO, options resources.ListOptions) []resources.PodDisruptionBudgetDTO {
+	result := items[:0]
+	for _, item := range items {
+		if options.Search == "" || matchesSearch(options, item.Namespace, item.Name) {
+			result = append(result, item)
+		}
+	}
+	sort.SliceStable(result, func(i, j int) bool {
+		l, r := result[i], result[j]
+		identity := strings.Compare(l.Namespace+"/"+l.Name, r.Namespace+"/"+r.Name)
+		primary := identity
+		if options.Sort == "name" {
+			primary = naturalTextCompare(l.Name, r.Name)
+		}
+		return pageSortLess(primary, identity, options.Order == resources.OrderDescending)
+	})
+	return result
+}
+
 func nodeIdentityLess(left, right resources.NodeDTO) bool {
 	return left.Name < right.Name
 }
@@ -900,8 +1059,10 @@ func workloadKindRank(kind string) int {
 		return 3
 	case "CronJob":
 		return 4
-	default:
+	case "ReplicaSet":
 		return 5
+	default:
+		return 6
 	}
 }
 func restartMatches(value int64, filter resources.RestartFilter) bool {

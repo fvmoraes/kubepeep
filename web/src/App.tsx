@@ -13,6 +13,7 @@ import { PermissionsMatrixPage } from './components/PermissionsMatrix'
 import { LogsPage } from './components/LogsPage'
 import { ConfigPage, EventsPage, NetworkPage, NodesPage, PodsPage, WorkloadsPage } from './components/ResourcePages'
 import { LeasesPage, NamespaceObjectPage, StoragePage } from './components/FamilyPages'
+import { ConfigurationPage, ServiceAccountsPage } from './components/ConfigurationPages'
 import { SettingsPage } from './components/SettingsPage'
 import { Sidebar } from './components/Sidebar'
 import { StatePanel } from './components/StatePanel'
@@ -64,7 +65,7 @@ function resourceEntryPath(collection: unknown, item: { name?: string; namespace
     case 'pods':
       return `/pods/${namespace}/${name}`
     case 'workloads': {
-      const kind = ({ Deployment: 'deployments', StatefulSet: 'statefulsets', DaemonSet: 'daemonsets', Job: 'jobs', CronJob: 'cronjobs' } as Record<string, string>)[item.kind ?? '']
+      const kind = ({ Deployment: 'deployments', StatefulSet: 'statefulsets', DaemonSet: 'daemonsets', Job: 'jobs', CronJob: 'cronjobs', ReplicaSet: 'replicasets' } as Record<string, string>)[item.kind ?? '']
       return kind ? `/workloads/${kind}/${namespace}/${name}` : null
     }
     case 'services':
@@ -287,6 +288,10 @@ export function App() {
         <Route path="storage" element={<StoragePage />} />
         <Route path="storage/:tab" element={<StoragePage />} />
         <Route path="storage/:tab/:namespace/:name" element={<StoragePage />} />
+        <Route path="configuration" element={<ConfigurationPage />} />
+        <Route path="configuration/:tab" element={<ConfigurationPage />} />
+        <Route path="configuration/:tab/:namespace/:name" element={<ConfigurationPage />} />
+        <Route path="service-accounts" element={<ServiceAccountsPage />} />
         <Route path="permissions" element={<PermissionsMatrixPage />} />
         <Route path="logs" element={<LogsPage />} />
         <Route path="pods" element={<PodsPage />} />

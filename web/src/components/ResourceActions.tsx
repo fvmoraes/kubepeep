@@ -53,6 +53,7 @@ function kindPath(kind: WorkloadDetail['kind']): string {
     DaemonSet: 'daemonsets',
     Job: 'jobs',
     CronJob: 'cronjobs',
+    ReplicaSet: 'replicasets',
   }
   return paths[kind]
 }

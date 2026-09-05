@@ -74,7 +74,7 @@ export const navGroups: NavGroup[] = [
       { id: 'workloads-overview', label: 'Overview', path: '/workloads', icon: Gauge, tip: 'Workloads' },
       { id: 'deployments', label: 'Deployments', path: '/workloads/kind/deployments', icon: Rocket, tip: 'Deployments' },
       { id: 'pods', label: 'Pods', path: '/pods', icon: Container, tip: 'Pods' },
-      { id: 'replicasets', label: 'ReplicaSets', icon: Layers, tip: 'ReplicaSets' },
+      { id: 'replicasets', label: 'ReplicaSets', path: '/workloads/kind/replicasets', icon: Layers, tip: 'ReplicaSets' },
       { id: 'daemonsets', label: 'DaemonSets', path: '/workloads/kind/daemonsets', icon: Boxes, tip: 'DaemonSets' },
       { id: 'statefulsets', label: 'StatefulSets', path: '/workloads/kind/statefulsets', icon: Database, tip: 'StatefulSets' },
       { id: 'jobs', label: 'Jobs', path: '/workloads/kind/jobs', icon: Package, tip: 'Jobs' },
@@ -108,10 +108,10 @@ export const navGroups: NavGroup[] = [
     items: [
       { id: 'configmaps', label: 'ConfigMaps', path: '/config/configmaps', icon: Braces, tip: 'ConfigMaps' },
       { id: 'secrets', label: 'Secrets', path: '/config/secrets', icon: Lock, tip: 'Secrets' },
-      { id: 'resource-quotas', label: 'ResourceQuotas', icon: Gauge, tip: 'ResourceQuotas' },
-      { id: 'limit-ranges', label: 'LimitRanges', icon: Ruler, tip: 'LimitRanges' },
-      { id: 'hpa', label: 'HorizontalPodAutoscalers', icon: TrendingUp, tip: 'Horizontal Pod Autoscalers' },
-      { id: 'pdb', label: 'PodDisruptionBudgets', icon: ShieldCheck, tip: 'Pod Disruption Budgets' },
+      { id: 'resource-quotas', label: 'ResourceQuotas', path: '/configuration/resource-quotas', icon: Gauge, tip: 'ResourceQuotas' },
+      { id: 'limit-ranges', label: 'LimitRanges', path: '/configuration/limit-ranges', icon: Ruler, tip: 'LimitRanges' },
+      { id: 'hpa', label: 'HorizontalPodAutoscalers', path: '/configuration/hpas', icon: TrendingUp, tip: 'Horizontal Pod Autoscalers' },
+      { id: 'pdb', label: 'PodDisruptionBudgets', path: '/configuration/pdbs', icon: ShieldCheck, tip: 'Pod Disruption Budgets' },
     ],
   },
   {
@@ -130,7 +130,7 @@ export const navGroups: NavGroup[] = [
     id: 'access-control',
     label: 'Access Control',
     items: [
-      { id: 'service-accounts', label: 'ServiceAccounts', icon: Users, tip: 'Service Accounts' },
+      { id: 'service-accounts', label: 'ServiceAccounts', path: '/service-accounts', icon: Users, tip: 'Service Accounts' },
       { id: 'roles', label: 'Roles', icon: KeyRound, tip: 'Roles' },
       { id: 'role-bindings', label: 'RoleBindings', icon: KeyRound, tip: 'Role Bindings' },
       { id: 'cluster-roles', label: 'ClusterRoles', icon: KeyRound, tip: 'Cluster Roles' },
