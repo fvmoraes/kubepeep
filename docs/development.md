@@ -39,6 +39,12 @@ plataforma definidos em CI; um build local não os substitui.
 
 ## Layout
 
+Na CI, [release.yml](../.github/workflows/release.yml) organiza os jobs em
+`01 Prepare` → `02 Build` (Linux/Windows/macOS em paralelo) → `03 Publish` →
+`04 Latest`. A publicação consulta o check `build-and-test` de `verify.yml`;
+preservar esse nome, os IDs dos jobs e os nomes dos artifacts ao reorganizar.
+A revisão dos gates e das etapas repetidas está na [Fase 7](../plan/v1/phase-07-release-v1.md).
+
 | Caminho | Conteúdo |
 | --- | --- |
 | `cmd/kubePeep/`, `main.go` | Entrypoints CLI e Wails; arquivos da raiz exigidos pelo build desktop |

@@ -1,6 +1,4 @@
-# KubePeep — Release (CI → build → package → publish → latest)
-#
-# Filosofia de referência: .github/workflows/release.yml do Ginger.
+# KubePeep — Release: 01 Prepare → 02 Build (parallel) → 03 Publish → 04 Latest
 #
 # Fluxo (uma única run por push em main ou dispatch manual):
 #
@@ -14,7 +12,7 @@
 #   build-windows — Wails nativo (windows-2025) → NSIS setup.exe + zip
 #   build-macos   — Wails nativo (macos-15-intel / macos-15) → dmg + zip + tar.gz
 #         ↓ (todos precisam passar; nada é publicado parcialmente)
-#   publish       — espera o verify.yml do commit de origem; só então cria a
+#   publish       — espera o check build-and-test do commit de origem; então cria a
 #                   tag imutável <X.Y.Z>, checksums.txt, SBOM SPDX e a GitHub
 #                   Release marcada como Latest
 #         ↓
@@ -22,12 +20,14 @@
 #
 # Regras:
 #   - Tags oficiais: 1.0.0, 1.1.0, 1.1.1 — SEM prefixo "v" (imutáveis) e criadas
-#     APENAS quando todos os builds e o verify passam (falha não queima versão).
+#     APENAS quando os builds e build-and-test passam (falha não queima versão).
 #   - Apenas a git tag móvel `latest` é atualizada (force push só nela).
 #   - Assets com nome CONSTANTE (kubepeep-linux-amd64.deb, …): cada Release tem
 #     seu próprio namespace, e /releases/latest/download/<asset> é permanente.
 #   - Nenhum binário é commitado no Git (dist/ é ignorado).
 #   - PRs nunca publicam releases.
+#   - IDs dos jobs, nomes de artifacts e o check build-and-test são contratos
+#     do pipeline. A numeração dos nomes visíveis indica etapas, não dependências.
 
 name: release
 
@@ -60,10 +60,10 @@ env:
 
 jobs:
   # ------------------------------------------------------------------ #
-  # prepare — versionamento e metadados (rápido, sem tag)               #
+  # 01 Prepare — versionamento e metadados (rápido, sem tag)            #
   # ------------------------------------------------------------------ #
   prepare:
-    name: prepare (SemVer + metadados)
+    name: 01 · Prepare version and metadata
     if: github.repository == 'fvmoraes/kubepeep' && github.actor != 'github-actions[bot]' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -215,10 +215,11 @@ jobs:
           if-no-files-found: error
 
   # ------------------------------------------------------------------ #
-  # build-linux — Wails nativo + deb/rpm (nfpm) + tar.gz (CLI)           #
+  # 02 Build — Linux, Windows e macOS em paralelo                     #
+  # Linux — Wails nativo + deb/rpm (nfpm) + tar.gz (CLI)                #
   # ------------------------------------------------------------------ #
   build-linux:
-    name: build-linux (${{ matrix.arch }})
+    name: 02 · Build Linux (${{ matrix.arch }})
     needs: prepare
     if: needs.prepare.outputs.should_release == 'true'
     runs-on: ${{ matrix.runner }}
@@ -371,10 +372,10 @@ jobs:
           retention-days: 3
 
   # ------------------------------------------------------------------ #
-  # build-windows — Wails nativo + NSIS installer                       #
+  # Windows — Wails nativo + NSIS installer                            #
   # ------------------------------------------------------------------ #
   build-windows:
-    name: build-windows (amd64)
+    name: 02 · Build Windows (amd64)
     needs: prepare
     if: needs.prepare.outputs.should_release == 'true'
     runs-on: windows-2025
@@ -511,10 +512,10 @@ jobs:
           retention-days: 3
 
   # ------------------------------------------------------------------ #
-  # build-macos — Wails nativo + dmg/zip (Intel e Apple Silicon)         #
+  # macOS — Wails nativo + dmg/zip (Intel e Apple Silicon)               #
   # ------------------------------------------------------------------ #
   build-macos:
-    name: build-macos (${{ matrix.arch }})
+    name: 02 · Build macOS (${{ matrix.arch }})
     needs: prepare
     if: needs.prepare.outputs.should_release == 'true'
     runs-on: ${{ matrix.runner }}
@@ -609,10 +610,10 @@ jobs:
           retention-days: 3
 
   # ------------------------------------------------------------------ #
-  # publish — gate de verify + tag + checksums + SBOM + Release (Latest) #
+  # 03 Publish — gate + tag + checksums + SBOM + Release (Latest)       #
   # ------------------------------------------------------------------ #
   publish:
-    name: publish (tag · checksums · SBOM · Release Latest)
+    name: 03 · Publish release
     needs: [prepare, build-linux, build-windows, build-macos]
     if: needs.prepare.outputs.should_release == 'true'
     runs-on: ubuntu-24.04
@@ -791,10 +792,10 @@ jobs:
           echo "Release $TAG published and marked as Latest."
 
   # ------------------------------------------------------------------ #
-  # update-latest — git tag móvel latest → commit da release             #
+  # 04 Latest — git tag móvel latest → commit da release                #
   # ------------------------------------------------------------------ #
   update-latest:
-    name: update-latest (móvel)
+    name: 04 · Update latest channel
     needs: [prepare, publish]
     if: needs.prepare.outputs.should_release == 'true'
     runs-on: ubuntu-24.04

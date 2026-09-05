@@ -31,8 +31,15 @@ Somente após decisão explícita do usuário sobre a candidate concreta. Esses 
 
 O pipeline pode criar commit de metadados distinto do SHA de origem. Verificar esse comportamento e exigir teste do conteúdo final empacotado; CI verde do commit anterior não prova uma alteração posterior. Não mover tag imutável para “consertar” uma release.
 
+## Melhorias do pipeline reservadas para esta fase
+
+A organização imediata mantém a execução existente: apenas nomes visíveis e comentários dos jobs foram padronizados. Mudanças de comportamento abaixo ficam para o fechamento da v1, com validação de candidate isolada prevista em V7-07 antes de alterar o caminho de publicação.
+
+- [ ] **V7-14 — Gate completo de verificação.** Hoje `publish` consulta literalmente o check `build-and-test` do SHA de origem; isso não inclui os checks `native-runtime` e `restricted-kind`. Definir o conjunto bloqueante e a identidade do commit, tratar paginação e tentativas de reexecução, e validar sucesso, falha, cancelamento e timeout antes de habilitar o novo gate. Preservar o disparo em `main`/dispatch, versionamento e publicação dos assets esperados.
+- [ ] **V7-15 — Redução de repetição nos builds.** Medir duração por plataforma e avaliar compartilhamento de setup/frontend por commit antes de extrair actions compostas ou workflows reutilizáveis. Preservar builds nativos, dependências entre jobs, outputs, nomes de artifacts, allowlist, checksums, SBOM e canais de download. Comparar os pacotes e executar smoke nos runners afetados; não alterar matriz, versões ou caches apenas por organização.
+
 ## Critério de saída
 
-**Pronta localmente:** V7-01–09 e F0–F6 concluídas, U12 comprovado, referência visual atendida, artefatos/limitações rastreáveis e nenhum push executado. **Publicada:** V7-10–13 também concluídos após autorização. Gate pendente permanece explicitamente pendente; não marcar a fase publicada por falta de ambiente remoto.
+**Pronta localmente:** V7-01–09, V7-14–15 e F0–F6 concluídas, U12 comprovado, referência visual atendida, artefatos/limitações rastreáveis e nenhum push executado. V7-15 pode concluir pela manutenção dos builds atuais se a medição não justificar extração. **Publicada:** V7-10–13 também concluídos após autorização. Gate pendente permanece explicitamente pendente; não marcar a fase publicada por falta de ambiente remoto.
 
 **Rollback:** antes da publicação, corrigir por novo commit e gerar nova candidate. Depois, seguir procedimento de rollback/update validado preservando dados e tags imutáveis; revogar/republicar assets ou mover canais remotos exige a decisão do usuário.

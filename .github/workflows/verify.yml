@@ -13,6 +13,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Core validation. Keep this check name: release.yml polls build-and-test.
   build-and-test:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -110,6 +111,7 @@ jobs:
           ginger inspect
           ginger doctor
 
+  # Native runtime validation runs in parallel with the core checks.
   native-runtime:
     name: native-runtime (${{ matrix.os }})
     strategy:
@@ -227,6 +229,7 @@ jobs:
           Write-Output "::error title=Windows installer test diagnostic::$diagnostic"
           exit $exitCode
 
+  # Restricted RBAC integration starts after the core checks succeed.
   restricted-kind:
     needs: build-and-test
     runs-on: ubuntu-24.04
