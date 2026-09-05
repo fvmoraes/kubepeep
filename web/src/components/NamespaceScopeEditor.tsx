@@ -124,40 +124,40 @@ export function NamespaceScopeForm({ selection, csrfToken, scope = null, onSaved
   }
 
   return (
-    <Card className="scope-editor" aria-labelledby="scope-editor-title">
-      <CardContent>
+    <Card aria-labelledby="scope-editor-title">
+      <CardContent className="grid gap-4 p-4">
         <CardHeader>
           <div>
-            <span className="eyebrow">namespace scope</span>
-            <h1 id="scope-editor-title" className="text-xl text-kp-text mt-1">{editing ? `Edit ${scope.name}` : 'Create a namespace scope'}</h1>
+            <h1 id="scope-editor-title" className="text-xl text-kp-text">{editing ? `Edit ${scope.name}` : 'Create a namespace scope'}</h1>
+            <p className="mt-0.5 text-sm text-kp-overlay-text">Namespace scopes bound this installation to explicit context namespaces.</p>
           </div>
-          <span className="text-kp-overlay-text text-xs">{selection.generation}</span>
+          <span className="mono text-xs text-kp-overlay-text">{selection.generation}</span>
         </CardHeader>
 
-        <div className="scope-origin" aria-label="Scope origin">
-          <label>Profile<Input aria-label="Scope cluster profile" value={String(selection.clusterProfileId)} readOnly /></label>
-          <label>Context<Input aria-label="Scope context" value={selection.context} readOnly /></label>
-          <label>Name<Input aria-label="Scope name" value={name} maxLength={120} onChange={(event) => setName(event.target.value)} placeholder="Finance workloads" /></label>
+        <div className="grid gap-3 md:grid-cols-[minmax(100px,0.6fr)_minmax(160px,1fr)_minmax(180px,1.4fr)]" aria-label="Scope origin">
+          <label className="grid gap-1"><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Profile</span><Input aria-label="Scope cluster profile" value={String(selection.clusterProfileId)} readOnly /></label>
+          <label className="grid gap-1"><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Context</span><Input aria-label="Scope context" value={selection.context} readOnly /></label>
+          <label className="grid gap-1"><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Name</span><Input aria-label="Scope name" value={name} maxLength={120} onChange={(event) => setName(event.target.value)} placeholder="Finance workloads" /></label>
         </div>
 
-        <fieldset className="mode-picker">
-          <legend>Mode</legend>
+        <fieldset className="m-0 flex flex-wrap items-center gap-2 border-0 p-0">
+          <legend className="mb-1.5 w-full text-2xs uppercase tracking-wider text-kp-overlay-text">Mode</legend>
           {(['single', 'list', 'all'] as const).map((candidate) => (
-            <label key={candidate}>
-              <input type="radio" name="scope-mode" value={candidate} checked={mode === candidate} onChange={() => updateMode(candidate)} />
-              <span>{candidate}</span>
+            <label key={candidate} className="relative">
+              <input type="radio" name="scope-mode" value={candidate} checked={mode === candidate} onChange={() => updateMode(candidate)} className="peer absolute opacity-0 pointer-events-none" />
+              <span className={`block min-w-[86px] rounded-md border px-3 py-1.5 text-center text-sm cursor-pointer transition-colors peer-focus-visible:outline-2 peer-focus-visible:outline-kp-mauve peer-focus-visible:outline-offset-1 ${mode === candidate ? 'border-kp-accent-border bg-kp-accent-bg text-kp-mauve font-medium' : 'border-kp-overlay-1 bg-kp-surface-3 text-kp-subtext hover:border-kp-overlay-3 hover:text-kp-text'}`}>{candidate}</span>
             </label>
           ))}
         </fieldset>
 
         {mode === 'all' ? (
-          <div className="scope-all-note" role="note">
+          <div className="rounded-r-md border-l-2 border-kp-yellow-border bg-kp-yellow-bg px-3 py-2.5 text-sm text-kp-yellow leading-relaxed" role="note">
             All mode stores no wildcard. The backend will activate only namespaces returned by Kubernetes after confirming list permission.
           </div>
         ) : (
           <>
-            <label className="textarea-field">
-              <span>Namespace input</span>
+            <label className="grid gap-1">
+              <span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Namespace input</span>
               <textarea
                 aria-label="Namespace input"
                 value={rawInput}
@@ -165,28 +165,29 @@ export function NamespaceScopeForm({ selection, csrfToken, scope = null, onSaved
                 rows={8}
                 placeholder={'payments, billing\n---\n- invoices'}
                 spellCheck={false}
+                className="min-h-[150px] w-full rounded-md border border-kp-overlay-0 bg-kp-crust px-2.5 py-2 text-sm text-kp-text leading-relaxed focus:border-kp-mauve focus:shadow-focus focus:outline-none resize-y"
               />
             </label>
-            <p className="field-help">Plain delimiters, strict JSON arrays/objects, and simple YAML sequences are accepted.</p>
+            <p className="m-0 text-xs text-kp-overlay-text">Plain delimiters, strict JSON arrays/objects, and simple YAML sequences are accepted.</p>
           </>
         )}
 
-        <div className="validation-counters" aria-label="Namespace validation counters">
-          <div><strong>{shownValidation.validCount}</strong><span>valid</span></div>
-          <div><strong>{shownValidation.duplicateCount}</strong><span>duplicates removed</span></div>
-          <div><strong>{shownValidation.discardedEmptyCount}</strong><span>empty removed</span></div>
-          <div><strong>{shownValidation.invalidCount}</strong><span>invalid</span></div>
+        <div className="grid grid-cols-2 gap-2 md:grid-cols-4" aria-label="Namespace validation counters">
+          <div className="rounded-lg border border-kp-overlay-0 bg-kp-surface-1 px-2.5 py-2"><strong className="block text-2xl text-kp-text">{shownValidation.validCount}</strong><span className="block text-2xs uppercase tracking-wider text-kp-overlay-text">valid</span></div>
+          <div className="rounded-lg border border-kp-overlay-0 bg-kp-surface-1 px-2.5 py-2"><strong className="block text-2xl text-kp-text">{shownValidation.duplicateCount}</strong><span className="block text-2xs uppercase tracking-wider text-kp-overlay-text">duplicates removed</span></div>
+          <div className="rounded-lg border border-kp-overlay-0 bg-kp-surface-1 px-2.5 py-2"><strong className="block text-2xl text-kp-text">{shownValidation.discardedEmptyCount}</strong><span className="block text-2xs uppercase tracking-wider text-kp-overlay-text">empty removed</span></div>
+          <div className="rounded-lg border border-kp-overlay-0 bg-kp-surface-1 px-2.5 py-2"><strong className="block text-2xl text-kp-text">{shownValidation.invalidCount}</strong><span className="block text-2xs uppercase tracking-wider text-kp-overlay-text">invalid</span></div>
         </div>
 
         {mode !== 'all' && (parsed.validation.valid.length > 0 || parsed.validation.invalid.length > 0) ? (
-          <div className="namespace-chips" aria-label="Parsed namespaces">
+          <div className="flex flex-wrap gap-1.5" aria-label="Parsed namespaces">
             {parsed.validation.valid.map((namespace) => (
-              <button key={`valid-${namespace}`} type="button" className="namespace-chip" onClick={() => removeItem(namespace)} aria-label={`Remove namespace ${namespace}`} title="Remove this namespace from the input">
+              <button key={`valid-${namespace}`} type="button" className="inline-flex items-center gap-1.5 rounded-full border border-kp-blue-border bg-kp-blue-bg px-2.5 py-1 text-xs text-kp-sky cursor-pointer hover:border-kp-overlay-3" onClick={() => removeItem(namespace)} aria-label={`Remove namespace ${namespace}`} title="Remove this namespace from the input">
                 {namespace}<span aria-hidden="true">×</span>
               </button>
             ))}
             {parsed.validation.invalid.map(({ input }) => (
-              <button key={`invalid-${input}`} type="button" className="namespace-chip namespace-chip--invalid" onClick={() => removeItem(input)} aria-label={`Remove invalid namespace ${input}`} title="Remove this entry from the input">
+              <button key={`invalid-${input}`} type="button" className="inline-flex items-center gap-1.5 rounded-full border border-kp-red-border bg-kp-red-bg px-2.5 py-1 text-xs text-kp-red cursor-pointer hover:border-kp-overlay-3" onClick={() => removeItem(input)} aria-label={`Remove invalid namespace ${input}`} title="Remove this entry from the input">
                 {input}<span aria-hidden="true">×</span>
               </button>
             ))}
@@ -194,8 +195,8 @@ export function NamespaceScopeForm({ selection, csrfToken, scope = null, onSaved
         ) : null}
 
         {mode !== 'all' ? (
-          <label className="default-namespace">
-            <span>Default namespace</span>
+          <label className="grid max-w-[340px] gap-1">
+            <span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Default namespace</span>
             <Select aria-label="Default namespace" value={effectiveDefaultNamespace} onChange={(event) => setDefaultNamespace(event.target.value)} disabled={parsed.validation.valid.length === 0}>
               <option value="">Choose a valid namespace</option>
               {parsed.validation.valid.map((namespace) => <option key={namespace} value={namespace}>{namespace}</option>)}
@@ -203,22 +204,22 @@ export function NamespaceScopeForm({ selection, csrfToken, scope = null, onSaved
           </label>
         ) : null}
 
-        {modeError ? <p className="field-error" role="alert">{modeError}</p> : null}
+        {modeError ? <p className="m-0 text-xs text-kp-red" role="alert">{modeError}</p> : null}
         {serverValidation?.existence.checked === false && serverValidation.existence.reasonCode !== 'LOCAL_VALIDATION_ONLY' ? (
-          <p className="field-help" role="status">Existence was not checked: {serverValidation.existence.reasonCode ?? 'permission unavailable'}.</p>
+          <p className="m-0 text-xs text-kp-overlay-text" role="status">Existence was not checked: {serverValidation.existence.reasonCode ?? 'permission unavailable'}.</p>
         ) : null}
-        {validation.isError ? <p className="field-error" role="alert">{messageFor(validation.error)}</p> : null}
-        {save.isError ? <p className="field-error" role="alert">{messageFor(save.error)}</p> : null}
-        {save.isSuccess ? <p className="field-success" role="status">Scope “{save.data.name}” was {editing ? 'updated' : 'saved'}.</p> : null}
+        {validation.isError ? <p className="m-0 text-xs text-kp-red" role="alert">{messageFor(validation.error)}</p> : null}
+        {save.isError ? <p className="m-0 text-xs text-kp-red" role="alert">{messageFor(save.error)}</p> : null}
+        {save.isSuccess ? <p className="m-0 text-xs text-kp-green" role="status">Scope “{save.data.name}” was {editing ? 'updated' : 'saved'}.</p> : null}
 
-        <div className="form-actions">
+        <div className="flex flex-wrap justify-end gap-2">
           {editing ? <Button variant="secondary" onClick={onCancel} disabled={save.isPending}>Cancel edit</Button> : null}
           <Button variant="secondary" onClick={() => updateRawInput('')} disabled={mode === 'all' || rawInput === ''}>Clear</Button>
           <Button variant="secondary" onClick={() => validation.mutate()} disabled={!canValidate}>
             {validation.isPending ? 'Validating…' : 'Validate with cluster'}
           </Button>
           <Button onClick={() => save.mutate()} disabled={!canSave}>
-            {save.isPending ? (editing ? 'Updating…' : 'Saving…') : (editing ? 'Update scope' : 'Save scope')}
+            {save.isPending ? (editing ? 'Updating…' : 'Save scope') : (editing ? 'Update scope' : 'Save scope')}
           </Button>
         </div>
       </CardContent>
@@ -290,7 +291,7 @@ export function NamespaceScopeEditor() {
   const deletionReady = deleteTarget !== null && (!deletingActive || replacementScopeId !== null)
 
   return (
-    <div className="feature-stack">
+    <div className="grid max-w-[1040px] gap-4">
       <NamespaceScopeForm
         key={editingScope ? `edit-${editingScope.id}-${editingScope.version}` : 'create'}
         selection={selection}
@@ -300,27 +301,30 @@ export function NamespaceScopeEditor() {
         onSaved={() => void reconcile()}
       />
       <Card aria-labelledby="saved-scopes-title">
-        <CardContent>
+        <CardContent className="grid gap-3 p-4">
           <CardHeader>
-            <div><span className="eyebrow">saved locally</span><h2 id="saved-scopes-title" className="text-xl text-kp-text mt-1">Namespace scopes</h2></div>
+            <div>
+              <h2 id="saved-scopes-title" className="text-xl text-kp-text">Namespace scopes</h2>
+              <p className="mt-0.5 text-sm text-kp-overlay-text">Saved locally; selecting one activates its namespaces for this session.</p>
+            </div>
           </CardHeader>
-          {scopes.isPending ? <p role="status">Loading saved scopes…</p> : null}
-          {scopes.isError ? <p className="field-error" role="status">Saved scopes are temporarily unavailable.</p> : null}
-          {scopeList.length === 0 && scopes.isSuccess ? <p className="muted">No saved scopes for this local installation.</p> : null}
+          {scopes.isPending ? <p className="m-0 text-sm text-kp-overlay-text" role="status">Loading saved scopes…</p> : null}
+          {scopes.isError ? <p className="m-0 text-sm text-kp-red" role="status">Saved scopes are temporarily unavailable.</p> : null}
+          {scopeList.length === 0 && scopes.isSuccess ? <p className="m-0 text-sm text-kp-overlay-text">No saved scopes for this local installation.</p> : null}
           {scopeList.length ? (
-            <ul className="scope-list">
+            <ul className="m-0 grid list-none gap-2 p-0">
               {scopeList.map((scope) => (
-                <li key={scope.id}>
-                  <div><strong>{scope.name}</strong><small>{scope.context} · {scope.mode} · {scope.namespaces.length} namespaces</small></div>
-                  <div className="scope-actions">
+                <li key={scope.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-kp-overlay-0 bg-kp-surface-1 px-3 py-2.5">
+                  <div className="min-w-0"><strong className="block text-sm text-kp-text">{scope.name}</strong><small className="block text-xs text-kp-overlay-text">{scope.context} · {scope.mode} · {scope.namespaces.length} namespaces</small></div>
+                  <div className="flex flex-wrap items-center justify-end gap-2">
                     {selection.scopeId === scope.id ? <Badge variant="healthy">active</Badge> : (
-                      <Button size="compact" disabled={!session.data || selectScope.isPending || deleteScope.isPending} onClick={() => selectScope.mutate(scope)}>Select {scope.name}</Button>
+                      <Button size="sm" disabled={!session.data || selectScope.isPending || deleteScope.isPending} onClick={() => selectScope.mutate(scope)}>Select {scope.name}</Button>
                     )}
-                    <Button variant="secondary" size="compact" disabled={selectScope.isPending || deleteScope.isPending} onClick={() => {
+                    <Button variant="secondary" size="sm" disabled={selectScope.isPending || deleteScope.isPending} onClick={() => {
                       setEditingScopeId(scope.id)
                       setDeleteScopeId(null)
                     }}>Edit {scope.name}</Button>
-                    <Button variant="danger" size="compact" disabled={!session.data || selectScope.isPending || deleteScope.isPending} onClick={() => {
+                    <Button variant="danger" size="sm" disabled={!session.data || selectScope.isPending || deleteScope.isPending} onClick={() => {
                       setDeleteScopeId(scope.id)
                       setReplacementScopeId(null)
                     }}>Delete {scope.name}</Button>
@@ -329,24 +333,25 @@ export function NamespaceScopeEditor() {
               ))}
             </ul>
           ) : null}
-          {selectScope.isError ? <p className="field-error" role="alert">{messageFor(selectScope.error)}</p> : null}
-          {deleteScope.isError ? <p className="field-error" role="alert">{messageFor(deleteScope.error)}</p> : null}
+          {selectScope.isError ? <p className="m-0 text-xs text-kp-red" role="alert">{messageFor(selectScope.error)}</p> : null}
+          {deleteScope.isError ? <p className="m-0 text-xs text-kp-red" role="alert">{messageFor(deleteScope.error)}</p> : null}
           {deleteTarget ? (
-            <div className="scope-delete-confirmation" role="alertdialog" aria-labelledby="scope-delete-title">
+            <div role="alertdialog" aria-labelledby="scope-delete-title" className="grid gap-3 rounded-lg border border-kp-red-border bg-kp-red-bg/50 p-3.5">
               <div>
-                <strong id="scope-delete-title">Delete “{deleteTarget.name}”?</strong>
-                <p>This removes the local scope definition. Kubernetes resources are not modified.</p>
+                <strong id="scope-delete-title" className="block text-sm text-kp-text">Delete “{deleteTarget.name}”?</strong>
+                <p className="m-0 mt-1 text-xs text-kp-subtext">This removes the local scope definition. Kubernetes resources are not modified.</p>
               </div>
               {deletingActive ? (
-                <label>Replacement scope
+                <label className="grid max-w-[360px] gap-1">
+                  <span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Replacement scope</span>
                   <Select aria-label="Replacement scope" value={replacementScopeId ?? ''} onChange={(event) => setReplacementScopeId(event.target.value ? Number(event.target.value) : null)}>
                     <option value="">Choose before deleting the active scope</option>
                     {replacementCandidates.map((scope) => <option key={scope.id} value={scope.id}>{scope.name}</option>)}
                   </Select>
                 </label>
               ) : null}
-              {deletingActive && replacementCandidates.length === 0 ? <p className="field-error">Create another scope before deleting the active scope.</p> : null}
-              <div className="form-actions">
+              {deletingActive && replacementCandidates.length === 0 ? <p className="m-0 text-xs text-kp-red">Create another scope before deleting the active scope.</p> : null}
+              <div className="flex flex-wrap justify-end gap-2">
                 <Button variant="secondary" onClick={() => {
                   setDeleteScopeId(null)
                   setReplacementScopeId(null)

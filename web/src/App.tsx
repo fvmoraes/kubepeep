@@ -1,22 +1,9 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useCallback, useEffect, useRef } from 'react'
-import {
-  Activity,
-  Boxes,
-  Braces,
-  CircleGauge,
-  FileText,
-  KeyRound,
-  Network,
-  ScrollText,
-  Settings,
-  TerminalSquare,
-} from 'lucide-react'
-import { NavLink, Outlet, Route, Routes } from 'react-router'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Waypoints } from 'lucide-react'
+import { Outlet, Route, Routes, useNavigate } from 'react-router'
 
 import { getPreferences, getStatus, type Preferences } from './api/client'
-import { BrandLogo } from './components/BrandLogo'
-import { BrandWordmark } from './components/BrandWordmark'
 import { Badge } from './components/ui/Badge'
 import { CommandCenter, type CommandRoute } from './components/CommandCenter'
 import { ContextSelector } from './components/ContextSelector'
@@ -26,22 +13,31 @@ import { PermissionsMatrixPage } from './components/PermissionsMatrix'
 import { LogsPage } from './components/LogsPage'
 import { ConfigPage, EventsPage, NetworkPage, PodsPage, WorkloadsPage } from './components/ResourcePages'
 import { SettingsPage } from './components/SettingsPage'
+import { Sidebar } from './components/Sidebar'
 import { StatePanel } from './components/StatePanel'
+import { useAppVersion } from './hooks/useAppVersion'
+import { navGroups, settingsNavItem } from './navigation/tree'
 
-const applicationDestinations = [
-  { path: '/', label: 'Overview', description: 'Cluster health and operational summary', keywords: ['dashboard', 'health'], icon: CircleGauge, page: DashboardPage },
-  { path: '/workloads', label: 'Workloads', description: 'Deployments, StatefulSets and DaemonSets', keywords: ['deployment', 'statefulset', 'daemonset'], icon: Boxes, page: WorkloadsPage },
-  { path: '/pods', label: 'Pods', description: 'Pod inventory, status and containers', keywords: ['container', 'restart'], icon: Activity, page: PodsPage },
-  { path: '/logs', label: 'Logs', description: 'Bounded container log viewer', keywords: ['tail', 'stream'], icon: ScrollText, page: LogsPage },
-  { path: '/events', label: 'Events', description: 'Kubernetes event timeline', keywords: ['warning', 'reason'], icon: FileText, page: EventsPage },
-  { path: '/network', label: 'Network', description: 'Services, ingresses and endpoints', keywords: ['service', 'ingress', 'endpointslice'], icon: Network, page: NetworkPage },
-  { path: '/config', label: 'Config', description: 'Safe configuration resource views', keywords: ['configmap', 'yaml'], icon: Braces, page: ConfigPage },
-  { path: '/namespaces', label: 'Namespaces', description: 'Namespace scopes and selection', keywords: ['scope'], icon: TerminalSquare, page: NamespaceScopeEditor },
-  { path: '/permissions', label: 'Permissions', description: 'Effective Kubernetes capabilities', keywords: ['rbac', 'authorization'], icon: KeyRound, page: PermissionsMatrixPage },
-  { path: '/settings', label: 'Settings', description: 'Allowlisted local preferences', keywords: ['preferences'], icon: Settings, page: SettingsPage },
-] as const
-
-const commandRoutes = applicationDestinations.map(({ path, label, description, keywords }) => ({ path, label, description, keywords }))
+// Command palette catalog: every enabled navigation destination. Group labels
+// disambiguate repeated item names (e.g. the Workloads "Overview").
+const commandRoutes: CommandRoute[] = [
+  ...navGroups.flatMap((group) =>
+    group.items
+      .filter((item) => Boolean(item.path))
+      .map((item) => ({
+        path: item.path!,
+        label: item.label === 'Overview' && group.id !== 'cluster' ? group.label : item.label,
+        description: group.label,
+        keywords: [group.label.toLowerCase(), item.label.toLowerCase(), ...(item.keywords ?? [])],
+      })),
+  ),
+  {
+    path: settingsNavItem.path!,
+    label: settingsNavItem.label,
+    description: 'Application',
+    keywords: ['application', ...(settingsNavItem.keywords ?? [])],
+  },
+]
 
 // Global resource index (F7-04): names and namespaces already loaded in this
 // session's bounded pages become searchable palette entries. Only identifiers
@@ -165,6 +161,18 @@ function isSafeGlobalRefreshQuery(query: { queryKey: readonly unknown[] }) {
   return typeof root === 'string' && safeGlobalRefreshRoots.has(root)
 }
 
+function scopeLabel(selection: {
+  context: string
+  cluster: string
+  scopeName: string | null
+  scopeMode: string | null
+} | null): string {
+  if (!selection) return 'No Kubernetes context selected'
+  if (selection.scopeName) return `${selection.context} / ${selection.scopeName}`
+  if (selection.scopeMode === 'all') return `${selection.context} / All namespaces`
+  return `${selection.context} / No namespace scope selected`
+}
+
 function StatusBadge() {
   const status = useQuery({
     queryKey: ['local-status'],
@@ -186,6 +194,9 @@ function StatusBadge() {
 
 function Shell() {
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
+  const version = useAppVersion()
+  const [compact, setCompact] = useState<boolean>(false)
   const status = useQuery({
     queryKey: ['local-status'],
     queryFn: ({ signal }) => getStatus(signal),
@@ -201,6 +212,9 @@ function Shell() {
     staleTime: 60_000,
   })
 
+  const toggleCompact = useCallback(() => {
+    setCompact((current) => !current)
+  }, [])
 
   useEffect(() => {
     const current = selection?.generation ?? null
@@ -214,36 +228,26 @@ function Shell() {
   }, [queryClient, selection?.generation])
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${compact ? 'app-shell--compact' : ''}`}>
       <a className="skip-link" href="#main-content">Skip to main content</a>
-      <aside className="sidebar">
-        <div className="brand" aria-label="kubePeep home">
-          <BrandLogo size={34} />
-          <div>
-            <BrandWordmark height={18} />
-            <small>local cluster view</small>
-          </div>
-        </div>
-        <nav aria-label="Primary navigation">
-          {applicationDestinations.map(({ path, label, icon: Icon }) => (
-            <NavLink key={path} to={path} end={path === '/'}>
-              <Icon size={17} strokeWidth={1.8} aria-hidden="true" />
-              <span>{label}</span>
-            </NavLink>
-          ))}
-        </nav>
-      </aside>
+      <Sidebar version={version} compact={compact} onToggleCompact={toggleCompact} />
       <div className="workspace">
         <header className="topbar">
-          <div className="active-context">
-            <span className="eyebrow">context</span>
-            <strong>{selection ? `${selection.context} · ${selection.scopeName ?? 'no namespace scope'}` : 'No Kubernetes context selected'}</strong>
-            {selection ? <small>{selection.cluster} · {selection.namespaceCount} namespace{selection.namespaceCount === 1 ? '' : 's'}</small> : null}
+          <div className="topbar-controls">
+            <ContextSelector selection={selection} />
+            <button
+              type="button"
+              onClick={() => navigate('/namespaces')}
+              data-tip={selection ? `${selection.cluster} · ${selection.namespaceCount} namespace${selection.namespaceCount === 1 ? '' : 's'} in scope` : 'Select a namespace scope to browse resources'}
+              className="flex h-8 min-w-0 max-w-[15rem] items-center gap-2 rounded-full border border-kp-overlay-0 bg-kp-surface-0 px-3 text-sm text-kp-subtext hover:border-kp-accent-border hover:text-kp-text"
+            >
+              <Waypoints size={14} strokeWidth={1.8} className="shrink-0 text-kp-mauve" aria-hidden="true" />
+              <span className="truncate">{scopeLabel(selection)}</span>
+            </button>
           </div>
           <div className="topbar-controls">
-            <CommandCenter routes={commandRoutes} getFavorites={() => favoriteEntries(preferences.data)} getResources={() => commandResourceEntries(queryClient, selection?.generation)} onRefresh={refreshActiveReads} />
-            <ContextSelector selection={selection} />
             <StatusBadge />
+            <CommandCenter routes={commandRoutes} getFavorites={() => favoriteEntries(preferences.data)} getResources={() => commandResourceEntries(queryClient, selection?.generation)} onRefresh={refreshActiveReads} />
           </div>
         </header>
         <main id="main-content"><Outlet /></main>
@@ -256,13 +260,23 @@ export function App() {
   return (
     <Routes>
       <Route element={<Shell />}>
-        {applicationDestinations.map(({ path, page: Page }) => path === '/'
-          ? <Route key={path} index element={<Page />} />
-          : <Route key={path} path={path.slice(1)} element={<Page />} />)}
-        <Route path="workloads/:kind/:namespace/:name" element={<WorkloadsPage />} />
+        <Route index element={<DashboardPage />} />
+        <Route path="events" element={<EventsPage />} />
+        <Route path="namespaces" element={<NamespaceScopeEditor />} />
+        <Route path="permissions" element={<PermissionsMatrixPage />} />
+        <Route path="logs" element={<LogsPage />} />
+        <Route path="pods" element={<PodsPage />} />
         <Route path="pods/:namespace/:name" element={<PodsPage />} />
+        <Route path="workloads" element={<WorkloadsPage />} />
+        <Route path="workloads/kind/:kind" element={<WorkloadsPage />} />
+        <Route path="workloads/:kind/:namespace/:name" element={<WorkloadsPage />} />
+        <Route path="network" element={<NetworkPage />} />
+        <Route path="network/:tab" element={<NetworkPage />} />
         <Route path="network/:tab/:namespace/:name" element={<NetworkPage />} />
+        <Route path="config" element={<ConfigPage />} />
+        <Route path="config/:tab" element={<ConfigPage />} />
         <Route path="config/:tab/:namespace/:name" element={<ConfigPage />} />
+        <Route path="settings" element={<SettingsPage />} />
         <Route path="*" element={<StatePanel kind="error" title="Page not found">Return to Overview using the navigation.</StatePanel>} />
       </Route>
     </Routes>

@@ -11,7 +11,7 @@ const placeholderRoutes = [
   ['/logs', 'Logs'],
   ['/events', 'Events'],
   ['/network', 'Network'],
-  ['/config', 'Config'],
+  ['/config', 'Configuration'],
   ['/settings', 'Settings'],
 ] as const
 
@@ -94,8 +94,8 @@ describe('application shell', () => {
     renderApp()
 
     expect(await screen.findByRole('heading', { name: 'Cluster overview' })).toBeInTheDocument()
-    expect(screen.getByText('development · Finance')).toBeInTheDocument()
-    expect(screen.getByText('dev-cluster · 3 namespaces')).toBeInTheDocument()
+    expect(screen.getByText('development / Finance')).toBeInTheDocument()
+    expect(screen.getByText('development / Finance').closest('button')).toHaveAttribute('data-tip', expect.stringContaining('dev-cluster'))
     expect(window.localStorage).toHaveLength(0)
     expect(window.sessionStorage).toHaveLength(0)
   })
@@ -128,14 +128,23 @@ describe('application shell', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open command center' }))
     expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual([
       expect.stringContaining('Overview'),
-      expect.stringContaining('Workloads'),
-      expect.stringContaining('Pods'),
-      expect.stringContaining('Logs'),
       expect.stringContaining('Events'),
-      expect.stringContaining('Network'),
-      expect.stringContaining('Config'),
       expect.stringContaining('Namespaces'),
+      expect.stringContaining('Workloads'),
+      expect.stringContaining('Deployments'),
+      expect.stringContaining('Pods'),
+      expect.stringContaining('DaemonSets'),
+      expect.stringContaining('StatefulSets'),
+      expect.stringContaining('Jobs'),
+      expect.stringContaining('CronJobs'),
+      expect.stringContaining('Services'),
+      expect.stringContaining('EndpointSlices'),
+      expect.stringContaining('Ingresses'),
+      expect.stringContaining('Port Forwarding'),
+      expect.stringContaining('ConfigMaps'),
+      expect.stringContaining('Secrets'),
       expect.stringContaining('Permissions'),
+      expect.stringContaining('Logs'),
       expect.stringContaining('Settings'),
     ])
 
@@ -173,6 +182,6 @@ describe('application shell', () => {
 
     const heading = screen.getByRole('heading', { name: 'Page not found' })
     expect(heading.closest('section')).toHaveAttribute('aria-live', 'assertive')
-    expect(screen.getByRole('link', { name: 'Overview' })).toBeInTheDocument()
+    expect(screen.getAllByRole('link', { name: 'Overview' }).length).toBeGreaterThan(0)
   })
 })

@@ -7,13 +7,7 @@ export interface CardProps extends HTMLAttributes<HTMLDivElement> {
 
 export function Card({ children, className = '', ...props }: CardProps) {
   return (
-    <div
-      className={`
-        border border-kp-overlay-0 rounded-xl bg-kp-surface-0 shadow-card
-        ${className}
-      `}
-      {...props}
-    >
+    <div className={`border border-kp-overlay-0 rounded-xl bg-kp-surface-0 ${className}`} {...props}>
       {children}
     </div>
   )
@@ -25,7 +19,7 @@ export interface CardHeaderProps {
 }
 
 export function CardHeader({ children, className = '' }: CardHeaderProps) {
-  return <div className={`flex items-center justify-between gap-5 mb-5 ${className}`}>{children}</div>
+  return <div className={`flex items-center justify-between gap-4 mb-4 ${className}`}>{children}</div>
 }
 
 export interface CardTitleProps {

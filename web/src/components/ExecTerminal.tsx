@@ -17,18 +17,19 @@ export interface ExecTerminalProps {
 }
 
 const theme = {
-  background: '#0a0712',
-  foreground: '#cdd6f4',
-  cursor: '#cba6f7',
-  selectionBackground: '#413556',
-  black: '#0e0a16',
-  red: '#f38ba8',
-  green: '#a6e3a1',
-  yellow: '#f9e2af',
-  blue: '#89dceb',
-  magenta: '#cba6f7',
-  cyan: '#89dceb',
-  white: '#cdd6f4',
+  background: '#0e0d13',
+  foreground: '#f4f1f7',
+  cursor: '#a78bfa',
+  cursorAccent: '#0e0d13',
+  selectionBackground: '#4a4166',
+  black: '#0e0d13',
+  red: '#f87171',
+  green: '#4ade80',
+  yellow: '#fbbf24',
+  blue: '#60a5fa',
+  magenta: '#a78bfa',
+  cyan: '#60a5fa',
+  white: '#f4f1f7',
 }
 
 // ExecTerminal renders the real bidirectional exec stream with xterm.js.

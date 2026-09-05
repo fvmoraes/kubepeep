@@ -1,5 +1,6 @@
 import type { MouseEvent, ReactNode } from 'react'
 import { useEffect } from 'react'
+import { X } from 'lucide-react'
 
 export interface DrawerProps {
   open: boolean
@@ -47,22 +48,17 @@ export function Drawer({ open, onClose, title, children, className = '' }: Drawe
       <div
         role="dialog"
         aria-modal="true"
-        className={`
-          absolute top-0 right-0 bottom-0 w-full max-w-xl
-          bg-kp-surface-0 border-l border-kp-overlay-0 shadow-dialog
-          flex flex-col
-          ${className}
-        `}
+        className={`absolute top-0 right-0 bottom-0 w-full max-w-xl bg-kp-surface-0 border-l border-kp-overlay-1 shadow-dialog flex flex-col ${className}`}
       >
-        <header className="flex items-start justify-between gap-4 px-5 py-4 border-b border-kp-overlay-0">
+        <header className="flex items-start justify-between gap-4 px-5 py-3.5 border-b border-kp-overlay-0">
           <div className="min-w-0">{title}</div>
           <button
             type="button"
             onClick={onClose}
-            className="flex-0-0-auto w-8 h-8 grid place-items-center rounded-md text-kp-overlay-text hover:text-kp-text hover:bg-kp-surface-2"
+            className="h-7 w-7 shrink-0 grid place-items-center rounded-md text-kp-overlay-text hover:text-kp-text hover:bg-kp-surface-3"
             aria-label="Close details"
           >
-            ×
+            <X size={16} aria-hidden="true" />
           </button>
         </header>
         <div className="flex-1 overflow-auto p-5">{children}</div>

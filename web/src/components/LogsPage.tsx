@@ -5,7 +5,8 @@ import { useSearchParams } from 'react-router'
 import { APIError, getPermissions, getPod, getPodLogs, getPods, getPreferences, getSession, getStatus } from '../api/client'
 import { streamURL } from '../api/desktop'
 import type { APIErrorPayload, CollectionResult, LogLine, Pod, Preferences, SelectionSummary } from '../api/types'
-import { Badge, Button, Input, Select, type BadgeVariant } from '../components/ui'
+import { Badge, Button, Checkbox, Input, Select, type BadgeVariant } from '../components/ui'
+import { ErrorBanner, InfoBanner, WarningBanner } from '../components/ui/Banner'
 import { SavedFilterControls } from './SavedFilterControls'
 import { StatePanel } from './StatePanel'
 
@@ -226,8 +227,13 @@ export function LogsPage() {
   const selection = status.data?.selection ?? null
 
   return (
-    <div className="resource-page logs-page">
-      <header className="resource-header"><div><span className="eyebrow">cluster resources</span><h1>Logs</h1><p>Current, previous and bounded follow logs. Content stays in memory and is never persisted by the UI.</p></div></header>
+    <div className="flex w-full min-w-0 flex-col gap-4">
+      <header className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="text-2xl text-kp-text">Logs</h1>
+          <p className="mt-0.5 text-sm text-kp-overlay-text">Current, previous and bounded follow logs. Content stays in memory and is never persisted by the UI.</p>
+        </div>
+      </header>
       {status.isPending ? <StatePanel kind="loading" title="Loading active selection">The local service is resolving the current generation.</StatePanel>
         : status.isError ? <StatePanel kind="error" title="Selection unavailable">{message(status.error)}</StatePanel>
           : !selection ? <StatePanel kind="empty" title="Choose a Kubernetes context">Select a context and namespace scope before reading logs.</StatePanel>
@@ -445,24 +451,28 @@ function LogsWorkspace({ selection, params, defaults, preferencesUnavailable }: 
   }
 
   return <>
-    {preferencesUnavailable ? <p className="permission-notice">Saved log preferences are unavailable; safe in-memory defaults are active.</p> : null}
-    {catalog.isPending ? <p className="permission-notice" role="status">Loading the bounded Pod catalog and exact pods.logs.get capabilities…</p>
-      : catalog.isError ? <p className="field-error">Authorized log target catalog unavailable: {message(catalog.error)}</p>
-        : catalog.data ? <p className={catalog.data.complete ? 'field-help' : 'permission-notice'} role="status">{catalog.data.complete
+    {preferencesUnavailable ? <InfoBanner className="mb-3">Saved log preferences are unavailable; safe in-memory defaults are active.</InfoBanner> : null}
+    {catalog.isPending ? <p className="rounded-r-md border-l-2 border-kp-blue-border bg-kp-blue-bg px-3 py-2 text-sm text-kp-sky" role="status">Loading the bounded Pod catalog and exact pods.logs.get capabilities…</p>
+      : catalog.isError ? <ErrorBanner title="Authorized log target catalog unavailable">{message(catalog.error)}</ErrorBanner>
+        : catalog.data ? <p className={catalog.data.complete ? 'text-xs text-kp-overlay-text' : 'rounded-r-md border-l-2 border-kp-yellow-border bg-kp-yellow-bg px-3 py-2 text-sm text-kp-yellow'} role="status">{catalog.data.complete
           ? `${catalog.data.pods.length} log-authorized Pod${catalog.data.pods.length === 1 ? '' : 's'} available in the complete bounded catalog.`
           : `Partial catalog: ${catalog.data.pods.length} log-authorized Pod${catalog.data.pods.length === 1 ? '' : 's'} from the bounded catalog; ${catalog.data.denied} denied and ${catalog.data.unknown} unknown. Some authorized targets may be absent.`}</p> : null}
-    <section className="log-controls" aria-label="Log query">
-      <label>Namespace<Select value={namespaces.includes(namespace) ? namespace : ''} disabled={catalog.isPending || namespaces.length === 0} onChange={(event) => changeTarget(() => { setNamespace(event.target.value); setPod(''); setContainer(''); setPrevious(false) })}><option value="">Choose an authorized namespace</option>{namespaces.map((value) => <option key={value}>{value}</option>)}</Select></label>
-      <label>Pod<Select value={selectedPod?.name ?? ''} disabled={namespace === '' || catalogPods.length === 0} onChange={(event) => changeTarget(() => { setPod(event.target.value); setContainer(''); setPrevious(false) })}><option value="">Choose a log-authorized Pod</option>{catalogPods.map((value) => <option key={value.name}>{value.name}</option>)}</Select></label>
-      <label>Container<Select value={containers.includes(container) ? container : ''} disabled={!selectedPod || podDetail.isPending || containers.length === 0} onChange={(event) => changeTarget(() => { setContainer(event.target.value); setPrevious(false) })}><option value="">Choose an authorized Pod container</option>{containers.map((value) => <option key={value}>{value}</option>)}</Select></label>
-      <label>Tail lines<Input type="number" min="1" max="2000" value={tailLines} onChange={(event) => setTailLines(Number(event.target.value))} /></label>
-      <label>Since<Input aria-invalid={!validSince(since)} placeholder="15m" pattern="[1-9][0-9]*(s|m|h)" value={since} onChange={(event) => setSince(event.target.value)} /></label>
-      <label className="confirmation-check"><input type="checkbox" checked={previous} disabled={!previousAvailable} onChange={(event) => { if (followAbortRef.current) stopFollow('Follow stopped because previous logs were selected.'); setPrevious(event.target.checked) }} />Previous container</label>
-      <label className="confirmation-check"><input type="checkbox" checked={timestamps} onChange={(event) => setTimestamps(event.target.checked)} />Timestamps</label>
-      <div className="form-actions"><Button disabled={!ready || read.isPending} onClick={() => read.mutate()}>{read.isPending ? 'Reading…' : 'Read logs'}</Button><Button variant="secondary" disabled={!ready || previous || isFollowing} onClick={() => void startFollow()}>Follow</Button><Button variant="danger" disabled={!isFollowing} onClick={() => stopFollow()}>Stop</Button></div>
-      {!validSince(since) ? <p className="field-error">Since must use one unit (s, m or h) and cannot exceed 4 hours.</p> : null}
-      {podDetail.isError ? <p className="field-error">Container catalog unavailable: {message(podDetail.error)}</p> : null}
-      {selectedContainer && !previousAvailable ? <p className="field-help">The authorized Pod detail reports no previous instance for this container.</p> : null}
+    <section aria-label="Log query" className="flex flex-wrap items-end gap-2.5 rounded-xl border border-kp-overlay-0 bg-kp-surface-0 p-3">
+      <label className="grid flex-1 gap-1 min-w-[150px]"><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Namespace</span><Select value={namespaces.includes(namespace) ? namespace : ''} disabled={catalog.isPending || namespaces.length === 0} onChange={(event) => changeTarget(() => { setNamespace(event.target.value); setPod(''); setContainer(''); setPrevious(false) })}><option value="">Choose an authorized namespace</option>{namespaces.map((value) => <option key={value}>{value}</option>)}</Select></label>
+      <label className="grid flex-1 gap-1 min-w-[150px]"><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Pod</span><Select value={selectedPod?.name ?? ''} disabled={namespace === '' || catalogPods.length === 0} onChange={(event) => changeTarget(() => { setPod(event.target.value); setContainer(''); setPrevious(false) })}><option value="">Choose a log-authorized Pod</option>{catalogPods.map((value) => <option key={value.name}>{value.name}</option>)}</Select></label>
+      <label className="grid flex-1 gap-1 min-w-[150px]"><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Container</span><Select value={containers.includes(container) ? container : ''} disabled={!selectedPod || podDetail.isPending || containers.length === 0} onChange={(event) => changeTarget(() => { setContainer(event.target.value); setPrevious(false) })}><option value="">Choose an authorized Pod container</option>{containers.map((value) => <option key={value}>{value}</option>)}</Select></label>
+      <label className="grid gap-1 w-24"><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Tail lines</span><Input type="number" min="1" max="2000" value={tailLines} onChange={(event) => setTailLines(Number(event.target.value))} /></label>
+      <label className="grid gap-1 w-28"><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Since</span><Input aria-invalid={!validSince(since)} placeholder="15m" pattern="[1-9][0-9]*(s|m|h)" value={since} onChange={(event) => setSince(event.target.value)} /></label>
+      <Checkbox checked={previous} disabled={!previousAvailable} onChange={(event) => { if (followAbortRef.current) stopFollow('Follow stopped because previous logs were selected.'); setPrevious(event.target.checked) }}>Previous container</Checkbox>
+      <Checkbox checked={timestamps} onChange={(event) => setTimestamps(event.target.checked)}>Timestamps</Checkbox>
+      <div className="flex w-full flex-wrap gap-2">
+        <Button disabled={!ready || read.isPending} onClick={() => read.mutate()}>{read.isPending ? 'Reading…' : 'Read logs'}</Button>
+        <Button variant="success" disabled={!ready || previous || isFollowing} onClick={() => void startFollow()}>Follow</Button>
+        <Button variant="danger" disabled={!isFollowing} onClick={() => stopFollow()}>Stop</Button>
+      </div>
+      {!validSince(since) ? <p className="w-full text-xs text-kp-red">Since must use one unit (s, m or h) and cannot exceed 4 hours.</p> : null}
+      {podDetail.isError ? <p className="w-full text-xs text-kp-red">Container catalog unavailable: {message(podDetail.error)}</p> : null}
+      {selectedContainer && !previousAvailable ? <p className="w-full text-xs text-kp-overlay-text">The authorized Pod detail reports no previous instance for this container.</p> : null}
     </section>
     <SavedFilterControls collection="logs" generation={selection.generation} currentQuery={{
       ...(namespace ? { namespace: [namespace] } : {}),
@@ -475,15 +485,26 @@ function LogsWorkspace({ selection, params, defaults, preferencesUnavailable }: 
       setSearch(savedSearch)
     }} />
     {read.isError ? <StatePanel kind="error" title="Log request failed">{message(read.error)}</StatePanel> : null}
-    {read.data?.truncated ? <p className="permission-notice">The bounded log response was truncated by the server.</p> : null}
-    <section className="log-viewer">
-      <header><div><strong className={`follow-state follow-state--${follow.status}`} aria-live="polite">{paused ? `${follow.message} (paused)` : follow.message}</strong><small>{visibleLines.length} visible of {keptLines.length} line{keptLines.length === 1 ? '' : 's'} kept in the bounded in-memory viewer{paused && followBuffer.length > 0 ? ` · ${followBuffer.length} buffered` : ''}.</small></div><div><Button size="compact" variant="secondary" disabled={!isFollowing && !paused} aria-label={paused ? 'Continue following logs' : 'Pause following logs'} onClick={() => { if (paused) { flushBuffer(); setPaused(false) } else { setPaused(true) } }}>{paused ? 'Continue' : 'Pause'}</Button><Button size="compact" variant="secondary" onClick={() => setWrap(!wrap)}>{wrap ? 'Disable wrap' : 'Wrap lines'}</Button><Button size="compact" variant="secondary" disabled={visibleLines.length === 0} onClick={() => void copyLogs()}>Copy</Button><Button size="compact" variant="secondary" disabled={visibleLines.length === 0} onClick={downloadLogs}>Download</Button><Button size="compact" variant="secondary" disabled={lines.length === 0} onClick={() => { setFollowLines([]); clearBuffer(); read.reset(); setPaused(false) }}>Clear</Button><label className="log-level-filter">Level<Select value={levelFilter} aria-label="Filter by log level" onChange={(event) => setLevelFilter(event.target.value as LogLevel | 'all')}><option value="all">all</option><option value="error">error</option><option value="warn">warn</option><option value="info">info</option><option value="debug">debug</option></Select></label>{levelFilter !== 'all' ? <Badge variant={levelBadgeVariant(levelFilter)} className={levelFilter === 'debug' ? 'text-kp-mauve border-kp-mauve-muted' : ''}>{levelFilter}</Badge> : null}</div></header>
-      <label className="log-search">Search visible logs<Input type="search" data-app-shortcut="search" aria-keyshortcuts="Control+F Meta+F" value={search} maxLength={256} onChange={(event) => setSearch(event.target.value)} /></label>
-      <pre className={`${wrap ? 'whitespace-pre-wrap break-words' : 'whitespace-pre'} min-h-[280px] max-h-[62vh] overflow-auto bg-kp-crust border border-kp-overlay-0 rounded-md p-3.5 text-kp-text text-xs leading-relaxed`} aria-label="Log output">{visibleLines.map((line, index) => {
+    {read.data?.truncated ? <WarningBanner>The bounded log response was truncated by the server.</WarningBanner> : null}
+    <section className="grid gap-2.5 rounded-xl border border-kp-overlay-0 bg-kp-surface-0 p-3.5">
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div><strong className={`block text-sm ${follow.status === 'following' ? 'text-kp-green' : follow.status === 'connecting' ? 'text-kp-sky' : follow.status === 'error' ? 'text-kp-red' : 'text-kp-subtext'}`} aria-live="polite">{paused ? `${follow.message} (paused)` : follow.message}</strong><small className="mt-0.5 block text-xs text-kp-overlay-text">{visibleLines.length} visible of {keptLines.length} line{keptLines.length === 1 ? '' : 's'} kept in the bounded in-memory viewer{paused && followBuffer.length > 0 ? ` · ${followBuffer.length} buffered` : ''}.</small></div>
+        <div className="flex flex-wrap items-center justify-end gap-1.5">
+          <Button size="sm" variant="secondary" disabled={!isFollowing && !paused} aria-label={paused ? 'Continue following logs' : 'Pause following logs'} onClick={() => { if (paused) { flushBuffer(); setPaused(false) } else { setPaused(true) } }}>{paused ? 'Continue' : 'Pause'}</Button>
+          <Button size="sm" variant="secondary" onClick={() => setWrap(!wrap)}>{wrap ? 'Disable wrap' : 'Wrap lines'}</Button>
+          <Button size="sm" variant="secondary" disabled={visibleLines.length === 0} onClick={() => void copyLogs()}>Copy</Button>
+          <Button size="sm" variant="secondary" disabled={visibleLines.length === 0} onClick={downloadLogs}>Download</Button>
+          <Button size="sm" variant="secondary" disabled={lines.length === 0} onClick={() => { setFollowLines([]); clearBuffer(); read.reset(); setPaused(false) }}>Clear</Button>
+          <label className="grid gap-1 w-24"><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Level</span><Select value={levelFilter} aria-label="Filter by log level" onChange={(event) => setLevelFilter(event.target.value as LogLevel | 'all')}><option value="all">all</option><option value="error">error</option><option value="warn">warn</option><option value="info">info</option><option value="debug">debug</option></Select></label>
+          {levelFilter !== 'all' ? <Badge variant={levelBadgeVariant(levelFilter)} className={levelFilter === 'debug' ? 'text-kp-mauve border-kp-mauve-muted' : ''}>{levelFilter}</Badge> : null}
+        </div>
+      </header>
+      <label className="grid max-w-[420px] gap-1"><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Search visible logs</span><Input type="search" data-app-shortcut="search" aria-label="Search visible logs" aria-keyshortcuts="Control+F Meta+F" value={search} maxLength={256} onChange={(event) => setSearch(event.target.value)} /></label>
+      <pre className={`mono min-h-[280px] max-h-[62vh] overflow-auto rounded-lg border border-kp-overlay-0 bg-kp-crust p-3.5 text-xs leading-relaxed text-kp-text ${wrap ? 'whitespace-pre-wrap break-words' : 'whitespace-pre'}`} aria-label="Log output">{visibleLines.map((line, index) => {
         const jsonValue = isJSONObjectLike(line.text)
         return <span key={`${index}-${line.timestamp ?? ''}`}>{timestamps && line.timestamp ? <time className="text-kp-overlay-text">{line.timestamp} </time> : null}{jsonValue ? <HighlightedJSON value={jsonValue} /> : line.text}{line.truncated ? ' [truncated]' : ''}{'\n'}</span>
       })}</pre>
-      {clipboardMessage ? <p className="field-help" role="status">{clipboardMessage}</p> : null}
+      {clipboardMessage ? <p className="text-xs text-kp-overlay-text" role="status">{clipboardMessage}</p> : null}
     </section>
   </>
 }

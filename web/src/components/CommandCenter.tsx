@@ -214,58 +214,64 @@ export function CommandCenter({ routes, getFavorites, getResources, onRefresh }:
     }
   }
 
+  const resultClass = (index: number) => `w-full min-h-[46px] flex items-center justify-between gap-4 px-2.5 py-1.5 rounded-md text-left cursor-pointer border ${
+    index === activeIndex ? 'bg-kp-surface-3 border-kp-overlay-1' : 'bg-transparent border-transparent'
+  }`
+
   return (
     <>
       <Button
-        variant="ghost"
-        size="compact"
-        className="command-center-trigger"
+        variant="secondary"
+        size="md"
+        className="text-kp-overlay-text font-normal"
         aria-label="Open command center"
         aria-keyshortcuts="Control+K Meta+K"
         onClick={() => open('commands')}
       >
         <Search size={14} aria-hidden="true" />
-        <span>Commands</span>
-        <kbd>⌘/Ctrl K</kbd>
+        <span>Search…</span>
+        <kbd>⌘K</kbd>
       </Button>
 
       {view ? (
         <div
-          className="command-center-backdrop"
+          className="fixed z-[var(--z-command-backdrop)] inset-0 grid place-items-start justify-center overflow-y-auto py-[min(12vh,96px)] px-4 bg-black/70 backdrop-blur-sm"
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) close()
           }}
         >
           <div
             ref={dialogRef}
-            className={`command-center-dialog command-center-dialog--${view}`}
             role="dialog"
             aria-modal="true"
+            data-view={view}
             aria-labelledby={titleId}
             aria-describedby={descriptionId}
             onKeyDown={onDialogKeyDown}
+            className={`w-[min(680px,100%)] max-h-[min(720px,78vh)] grid overflow-hidden rounded-xl border border-kp-overlay-1 bg-kp-surface-0 shadow-dialog text-kp-text ${
+              view === 'commands' ? 'grid-rows-[auto_auto_auto_minmax(0,1fr)_auto]' : 'grid-rows-[auto_auto_minmax(0,1fr)_auto]'
+            }`}
           >
-            <header className="command-center-header">
+            <header className="flex items-center justify-between gap-5 px-4 pt-4 pb-2.5">
               <div>
-                <span className="eyebrow">local navigation</span>
-                <h2 id={titleId}>{view === 'commands' ? 'Command center' : 'Keyboard shortcuts'}</h2>
+                <h2 id={titleId} className="text-xl">{view === 'commands' ? 'Command center' : 'Keyboard shortcuts'}</h2>
               </div>
               <button
                 ref={view === 'help' ? helpCloseRef : undefined}
                 type="button"
-                className="command-center-close"
                 aria-label="Close command center"
                 onClick={close}
+                className="h-8 w-8 grid place-items-center rounded-md text-kp-overlay-text hover:text-kp-text hover:bg-kp-surface-3"
               >
-                <X size={17} aria-hidden="true" />
+                <X size={16} aria-hidden="true" />
               </button>
             </header>
 
             {view === 'commands' ? (
               <>
-                <p id={descriptionId} className="command-center-description">{sessionResources.length > 0 ? 'Search pages and resources already loaded in this session. Only names and namespaces are searched; no resource content is read.' : 'Search the pages built into this local application. No cluster data is queried.'}</p>
-                <div className="command-center-search">
-                  <Search size={17} aria-hidden="true" />
+                <p id={descriptionId} className="px-4 pb-2.5 text-xs text-kp-overlay-text leading-relaxed">{sessionResources.length > 0 ? 'Search pages and resources already loaded in this session. Only names and namespaces are searched; no resource content is read.' : 'Search the pages built into this local application. No cluster data is queried.'}</p>
+                <div className="mx-4 mb-3 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2.5 px-3 rounded-md border border-kp-overlay-1 bg-kp-crust focus-within:border-kp-mauve focus-within:shadow-focus">
+                  <Search size={16} aria-hidden="true" className="text-kp-mauve" />
                   <Input
                     ref={inputRef}
                     type="search"
@@ -279,7 +285,7 @@ export function CommandCenter({ routes, getFavorites, getResources, onRefresh }:
                     spellCheck="false"
                     value={query}
                     placeholder="Search Overview, Pods, Logs…"
-                    className="bg-transparent border-0 rounded-none shadow-none focus:border-0 focus:shadow-none px-0 min-h-9"
+                    className="border-0 bg-transparent px-0 shadow-none focus:border-0 focus:shadow-none"
                     onChange={(event) => {
                       setQuery(event.target.value)
                       setActiveIndex(0)
@@ -288,93 +294,60 @@ export function CommandCenter({ routes, getFavorites, getResources, onRefresh }:
                 </div>
 
                 {combinedResults.length > 0 ? (
-                  <div id={listboxId} className="command-center-results" role="listbox" aria-label={sessionResources.length > 0 || sessionFavorites.length > 0 ? 'Favorites, application pages and visible resources' : 'Application pages'}>
-                    {filteredFavorites.map((entry, index) => (
+                  <div id={listboxId} role="listbox" aria-label={sessionResources.length > 0 || sessionFavorites.length > 0 ? 'Favorites, application pages and visible resources' : 'Application pages'} className="min-h-0 grid gap-0.5 content-start overflow-y-auto px-2.5 pb-2.5">
+                    {[...filteredFavorites, ...filteredRoutes, ...filteredResources].map((entry, index) => (
                       <button
-                        key={`favorite-${entry.path}`}
+                        key={`${entry.path}-${index}`}
                         id={`${listboxId}-option-${index}`}
                         type="button"
                         role="option"
                         tabIndex={-1}
                         aria-selected={index === activeIndex}
-                        className={index === activeIndex ? 'command-center-result command-center-result--active' : 'command-center-result'}
+                        className={resultClass(index)}
                         onMouseEnter={() => setActiveIndex(index)}
                         onFocus={() => setActiveIndex(index)}
                         onClick={() => chooseRoute(entry)}
                       >
-                        <span><strong>{entry.label}</strong><small>{entry.description}</small></span>
-                        <code>{entry.path}</code>
+                        <span className="block min-w-0"><strong className="block text-sm text-kp-text">{entry.label}</strong><small className="block mt-0.5 text-xs text-kp-overlay-text">{entry.description}</small></span>
+                        <code className="shrink-0 text-xs">{entry.path}</code>
                       </button>
                     ))}
-                    {filteredRoutes.map((route, offset) => {
-                      const index = filteredFavorites.length + offset
-                      return (
-                      <button
-                        key={route.path}
-                        id={`${listboxId}-option-${index}`}
-                        type="button"
-                        role="option"
-                        tabIndex={-1}
-                        aria-selected={index === activeIndex}
-                        className={index === activeIndex ? 'command-center-result command-center-result--active' : 'command-center-result'}
-                        onMouseEnter={() => setActiveIndex(index)}
-                        onFocus={() => setActiveIndex(index)}
-                        onClick={() => chooseRoute(route)}
-                      >
-                        <span><strong>{route.label}</strong><small>{route.description}</small></span>
-                        <code>{route.path}</code>
-                      </button>
-                      )
-                    })}
-                    {filteredResources.map((entry, offset) => {
-                      const index = filteredFavorites.length + filteredRoutes.length + offset
-                      return (
-                        <button
-                          key={entry.path}
-                          id={`${listboxId}-option-${index}`}
-                          type="button"
-                          role="option"
-                          tabIndex={-1}
-                          aria-selected={index === activeIndex}
-                          className={index === activeIndex ? 'command-center-result command-center-result--active' : 'command-center-result'}
-                          onMouseEnter={() => setActiveIndex(index)}
-                          onFocus={() => setActiveIndex(index)}
-                          onClick={() => chooseRoute(entry)}
-                        >
-                          <span><strong>{entry.label}</strong><small>{entry.description}</small></span>
-                          <code>{entry.path}</code>
-                        </button>
-                      )
-                    })}
                   </div>
                 ) : (
-                  <p className="command-center-empty" role="status">{sessionResources.length > 0 ? 'No page or loaded resource matches this search.' : 'No application page matches this search.'}</p>
+                  <p role="status" className="min-h-[110px] grid place-items-center px-6 text-sm text-kp-overlay-text text-center">{sessionResources.length > 0 ? 'No page or loaded resource matches this search.' : 'No application page matches this search.'}</p>
                 )}
 
-                <footer className="command-center-footer">
-                  <span><ArrowUp size={12} aria-hidden="true" /><ArrowDown size={12} aria-hidden="true" /> move</span>
-                  <span><CornerDownLeft size={12} aria-hidden="true" /> open</span>
-                  <span><kbd>Esc</kbd> close</span>
-                  <button type="button" onClick={() => setView('help')}><Keyboard size={13} aria-hidden="true" /> ? shortcuts</button>
+                <footer className="flex items-center gap-3.5 border-t border-kp-overlay-0 bg-kp-surface-1 px-4 py-2 text-xs text-kp-overlay-text">
+                  <span className="inline-flex items-center gap-1"><ArrowUp size={12} aria-hidden="true" /><ArrowDown size={12} aria-hidden="true" /> move</span>
+                  <span className="inline-flex items-center gap-1"><CornerDownLeft size={12} aria-hidden="true" /> open</span>
+                  <span className="inline-flex items-center gap-1"><kbd>Esc</kbd> close</span>
+                  <button type="button" className="ml-auto inline-flex items-center gap-1.5 text-kp-sky hover:text-kp-text" onClick={() => setView('help')}><Keyboard size={13} aria-hidden="true" /> ? shortcuts</button>
                 </footer>
               </>
             ) : (
               <>
-                <p id={descriptionId} className="command-center-description">Navigation and focus stay local. Refresh repeats only active read queries; no shortcut mutates Kubernetes resources.</p>
-                <dl className="command-center-help">
-                  <div><dt><kbd>⌘/Ctrl K</kbd></dt><dd>Open page search from anywhere.</dd></div>
-                  <div><dt><kbd>⌘/Ctrl R</kbd></dt><dd>Refresh active read-only views instead of reloading the browser.</dd></div>
-                  <div><dt><kbd>⌘/Ctrl F</kbd></dt><dd>Focus and select the current page search; browser Find remains available when no page search exists.</dd></div>
-                  <div><dt><kbd>⌘/Ctrl O</kbd></dt><dd>Open and focus the Kubernetes context selector when it is available.</dd></div>
-                  <div><dt><kbd>⌘/Ctrl B</kbd></dt><dd>Go back when local application history has an earlier entry.</dd></div>
-                  <div><dt><kbd>?</kbd></dt><dd>Open this help outside editable fields.</dd></div>
-                  <div><dt><kbd>↑</kbd> <kbd>↓</kbd></dt><dd>Move through matching pages.</dd></div>
-                  <div><dt><kbd>Enter</kbd></dt><dd>Open the selected page.</dd></div>
-                  <div><dt><kbd>Esc</kbd></dt><dd>Close and return focus.</dd></div>
-                  <div><dt><kbd>Tab</kbd></dt><dd>Move between controls inside the dialog.</dd></div>
+                <p id={descriptionId} className="px-4 pb-2.5 text-xs text-kp-overlay-text leading-relaxed">Navigation and focus stay local. Refresh repeats only active read queries; no shortcut mutates Kubernetes resources.</p>
+                <dl className="min-h-0 grid gap-px overflow-y-auto mx-4 mb-4 content-start">
+                  {[
+                    ['⌘/Ctrl K', 'Open page search from anywhere.'],
+                    ['⌘/Ctrl R', 'Refresh active read-only views instead of reloading the browser.'],
+                    ['⌘/Ctrl F', 'Focus and select the current page search; browser Find remains available when no page search exists.'],
+                    ['⌘/Ctrl O', 'Open and focus the Kubernetes context selector when it is available.'],
+                    ['⌘/Ctrl B', 'Go back when local application history has an earlier entry.'],
+                    ['?', 'Open this help outside editable fields.'],
+                    ['↑ ↓', 'Move through matching pages.'],
+                    ['Enter', 'Open the selected page.'],
+                    ['Esc', 'Close and return focus.'],
+                    ['Tab', 'Move between controls inside the dialog.'],
+                  ].map(([keys, help]) => (
+                    <div key={keys} className="grid grid-cols-[minmax(110px,0.4fr)_1fr] items-center gap-4 rounded-md bg-kp-surface-1 px-2.5 py-2">
+                      <dt><kbd>{keys}</kbd></dt>
+                      <dd className="m-0 text-xs text-kp-subtext leading-relaxed">{help}</dd>
+                    </div>
+                  ))}
                 </dl>
-                <footer className="command-center-footer command-center-footer--help">
-                  <button type="button" onClick={() => setView('commands')}><Search size={13} aria-hidden="true" /> Search pages</button>
+                <footer className="flex items-center justify-end border-t border-kp-overlay-0 bg-kp-surface-1 px-4 py-2">
+                  <button type="button" className="inline-flex items-center gap-1.5 text-kp-sky hover:text-kp-text" onClick={() => setView('commands')}><Search size={13} aria-hidden="true" /> Search pages</button>
                 </footer>
               </>
             )}

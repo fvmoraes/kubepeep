@@ -1,15 +1,25 @@
 import { expect, test } from '@playwright/test'
 
-const catalogDestinations = [
+// Enabled destinations of the Kubernetes navigation tree, in sidebar order.
+const navCatalog = [
   ['/', 'Overview', 'The local API returned an error'],
-  ['/workloads', 'Workloads', 'Workloads'],
-  ['/pods', 'Pods', 'Pods'],
-  ['/logs', 'Logs', 'Logs'],
   ['/events', 'Events', 'Events'],
-  ['/network', 'Network', 'Network'],
-  ['/config', 'Config', 'Config'],
   ['/namespaces', 'Namespaces', 'Namespace scopes are offline'],
+  ['/workloads', 'Overview', 'Workloads'],
+  ['/workloads/kind/deployments', 'Deployments', 'Workloads'],
+  ['/pods', 'Pods', 'Pods'],
+  ['/workloads/kind/daemonsets', 'DaemonSets', 'Workloads'],
+  ['/workloads/kind/statefulsets', 'StatefulSets', 'Workloads'],
+  ['/workloads/kind/jobs', 'Jobs', 'Workloads'],
+  ['/workloads/kind/cronjobs', 'CronJobs', 'Workloads'],
+  ['/network/services', 'Services', 'Network'],
+  ['/network/endpoint-slices', 'EndpointSlices', 'Network'],
+  ['/network/ingresses', 'Ingresses', 'Network'],
+  ['/network/port-forwards', 'Port Forwarding', 'Network'],
+  ['/config/configmaps', 'ConfigMaps', 'Configuration'],
+  ['/config/secrets', 'Secrets', 'Configuration'],
   ['/permissions', 'Permissions', 'Permissions are offline'],
+  ['/logs', 'Logs', 'Logs'],
   ['/settings', 'Settings', 'Settings'],
 ] as const
 
@@ -21,7 +31,7 @@ test('serves the application shell and preserves History API navigation', async 
   await expect(page.getByRole('heading', { name: 'The local API returned an error' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Open command center' })).toBeVisible()
   const renderedDestinations = await page.getByRole('navigation', { name: 'Primary navigation' }).getByRole('link').evaluateAll((links) => links.map((link) => [new URL((link as HTMLAnchorElement).href).pathname, link.textContent?.trim() ?? '']))
-  expect(renderedDestinations).toEqual(catalogDestinations.map(([path, label]) => [path, label]))
+  expect(renderedDestinations).toEqual(navCatalog.map(([path, label]) => [path, label]))
 
   await page.keyboard.press('Control+k')
   await expect(page.getByRole('dialog', { name: 'Command center' })).toBeVisible()
@@ -42,18 +52,19 @@ test('serves the application shell and preserves History API navigation', async 
   await page.keyboard.press('Control+r')
   await expect.poll(() => page.evaluate(() => (window as Window & { kubePeepShortcutDocument?: string }).kubePeepShortcutDocument)).toBe('same-document')
 
-  for (const [path, label, heading] of catalogDestinations) {
-    await page.getByRole('link', { name: label, exact: true }).click()
-    await expect(page).toHaveURL(path === '/' ? /\/$/ : new RegExp(`${path}$`))
-    await expect(page.getByRole('link', { name: label, exact: true })).toHaveAttribute('aria-current', 'page')
-    await expect(page.getByRole('heading', { name: heading })).toBeVisible()
+  const navigation = page.getByRole('navigation', { name: 'Primary navigation' })
+  for (const [path, , heading] of navCatalog) {
+    await navigation.locator(`a[href="${path}"]`).click()
+    await expect(page).toHaveURL(path === '/' ? /\/$/ : new RegExp(`${path.replace(/\//g, '\\/')}$`))
+    await expect(navigation.locator(`a[href="${path}"]`)).toHaveAttribute('aria-current', 'page')
+    await expect(page.getByRole('heading', { name: heading }).first()).toBeVisible()
     await page.reload()
-    await expect(page.getByRole('link', { name: label, exact: true })).toHaveAttribute('aria-current', 'page')
-    await expect(page.getByRole('heading', { name: heading })).toBeVisible()
+    await expect(navigation.locator(`a[href="${path}"]`)).toHaveAttribute('aria-current', 'page')
+    await expect(page.getByRole('heading', { name: heading }).first()).toBeVisible()
   }
 
   await page.keyboard.press('Meta+b')
-  await expect(page).toHaveURL(/\/permissions$/)
+  await expect(page).toHaveURL(/\/logs$/)
 })
 
 test('keeps the dashboard useful with partial data and an explicit bounded log scan', async ({ page }) => {

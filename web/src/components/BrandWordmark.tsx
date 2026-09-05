@@ -6,13 +6,13 @@ interface BrandWordmarkProps {
   alt?: string
 }
 
-export function BrandWordmark({ className, height = 20, alt = 'KubePeep' }: BrandWordmarkProps) {
+export function BrandWordmark({ className = '', height = 16, alt = 'KubePeep' }: BrandWordmarkProps) {
   return (
     <img
       src={wordmark}
       alt={alt}
-      height={height}
-      className={className}
+      style={{ height: `${height}px`, width: 'auto' }}
+      className={`block ${className}`}
     />
   )
 }

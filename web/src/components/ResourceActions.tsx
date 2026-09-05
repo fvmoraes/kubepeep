@@ -25,7 +25,7 @@ import type {
   SelectionSummary,
   WorkloadDetail,
 } from '../api/types'
-import { Badge, Button, Input, Select } from './ui'
+import { Badge, Button, Checkbox, Input, Select } from './ui'
 
 function mutationError(error: unknown): string {
   if (error instanceof APIError) return `${error.code}: ${error.message}`
@@ -71,7 +71,7 @@ function CapabilityNotice({ label, value }: { label: string; value: CapabilityDe
         ? 'could not be verified; action disabled'
         : 'checking Kubernetes permission'
   const variant = value === 'allowed' ? 'healthy' : value === 'denied' ? 'danger' : value === 'unknown' ? 'warning' : 'unknown'
-  return <li><strong>{label}:</strong> <Badge variant={variant}>{copy}</Badge></li>
+  return <li className="flex items-center gap-1.5 text-xs"><strong className="text-kp-subtext">{label}:</strong> <Badge variant={variant}>{copy}</Badge></li>
 }
 
 function useGenerationRequests(generation: string) {
@@ -175,37 +175,36 @@ export function WorkloadActions({ detail, selection }: { detail: WorkloadDetail;
   const replicasValid = Number.isInteger(replicas) && replicas >= 0 && replicas <= 10_000
 
   return (
-    <section className="action-panel" aria-label="Authorized workload actions">
-      <h3>Authorized actions</h3>
-      <p>These capability hints never replace the Kubernetes authorization check performed when the action runs.</p>
-      <ul className="capability-list" aria-label="Workload action permissions">
+    <section className="mt-3 grid gap-2.5 rounded-xl border border-kp-accent-border bg-kp-accent-bg/40 p-3" aria-label="Authorized workload actions">
+      <h3 className="m-0 text-sm text-kp-text">Authorized actions</h3>
+      <p className="m-0 text-xs leading-relaxed text-kp-overlay-text">These capability hints never replace the Kubernetes authorization check performed when the action runs.</p>
+      <ul className="m-0 grid list-none gap-1 p-0" aria-label="Workload action permissions">
         {detail.kind === 'Deployment' ? <CapabilityNotice label="Restart" value={restartDecision} /> : null}
         <CapabilityNotice label="Scale" value={scaleDecision} />
       </ul>
-      {permissions.isError ? <p className="field-error">Permission check failed; actions remain disabled.</p> : null}
-      <label className="confirmation-check">
-        <input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />
+      {permissions.isError ? <p className="m-0 text-xs text-kp-red">Permission check failed; actions remain disabled.</p> : null}
+      <Checkbox checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)}>
         I checked {detail.kind} {detail.metadata.namespace}/{detail.metadata.name} and understand the consequence.
-      </label>
-      <div className="action-row">
+      </Checkbox>
+      <div className="flex flex-wrap items-end gap-2">
         {detail.kind === 'Deployment' ? (
           <Button variant="danger" disabled={!confirmed || restartDecision !== 'allowed' || restart.isPending} onClick={() => restart.mutate()}>
             {restart.isPending ? 'Requesting restart…' : 'Restart Deployment'}
           </Button>
         ) : null}
-        <label>
-          Replicas
+        <label className="grid gap-1 w-28">
+          <span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Replicas</span>
           <Input aria-invalid={!replicasValid} type="number" min="0" max="10000" value={replicas} onChange={(event) => setReplicas(Number(event.target.value))} />
         </label>
         <Button variant="secondary" disabled={!confirmed || scaleDecision !== 'allowed' || scale.isPending || !replicasValid} onClick={() => scale.mutate()}>
           {scale.isPending ? 'Scaling…' : 'Scale'}
         </Button>
       </div>
-      {!replicasValid ? <p className="field-error">Replicas must be a whole number from 0 through 10,000.</p> : null}
-      {restart.isError ? <p className="field-error">{mutationError(restart.error)}</p> : null}
-      {scale.isError ? <p className="field-error">{mutationError(scale.error)}</p> : null}
-      {restart.isSuccess ? <p className="field-success" role="status">Restart accepted; rollout completion is not implied.</p> : null}
-      {scale.isSuccess ? <p className="field-success" role="status">Replica update accepted; Pod readiness is checked separately.</p> : null}
+      {!replicasValid ? <p className="m-0 text-xs text-kp-red">Replicas must be a whole number from 0 through 10,000.</p> : null}
+      {restart.isError ? <p className="m-0 text-xs text-kp-red">{mutationError(restart.error)}</p> : null}
+      {scale.isError ? <p className="m-0 text-xs text-kp-red">{mutationError(scale.error)}</p> : null}
+      {restart.isSuccess ? <p className="m-0 text-xs text-kp-green" role="status">Restart accepted; rollout completion is not implied.</p> : null}
+      {scale.isSuccess ? <p className="m-0 text-xs text-kp-green" role="status">Replica update accepted; Pod readiness is checked separately.</p> : null}
     </section>
   )
 }
@@ -439,43 +438,42 @@ export function PodActions({ detail, selection }: { detail: PodDetail; selection
   }
 
   return (
-    <section className="action-panel" aria-label="Authorized pod actions">
-      <h3>Authorized actions</h3>
-      <p>Delete is destructive. Port-forward binds only to loopback. Exec argv is one item per line and is never joined through a shell.</p>
-      <p className="action-consequence">Owner: {detail.summary.owner ? `${detail.summary.owner.kind}/${detail.summary.owner.name}; its controller may recreate this Pod.` : 'standalone Pod; recreation is not promised.'}</p>
-      <ul className="capability-list" aria-label="Pod action permissions">
+    <section className="mt-3 grid gap-2.5 rounded-xl border border-kp-accent-border bg-kp-accent-bg/40 p-3" aria-label="Authorized pod actions">
+      <h3 className="m-0 text-sm text-kp-text">Authorized actions</h3>
+      <p className="m-0 text-xs leading-relaxed text-kp-overlay-text">Delete is destructive. Port-forward binds only to loopback. Exec argv is one item per line and is never joined through a shell.</p>
+      <p className="m-0 rounded-r-md border-l-2 border-kp-yellow-border bg-kp-yellow-bg px-2.5 py-1.5 text-xs text-kp-yellow">Owner: {detail.summary.owner ? `${detail.summary.owner.kind}/${detail.summary.owner.name}; its controller may recreate this Pod.` : 'standalone Pod; recreation is not promised.'}</p>
+      <ul className="m-0 grid list-none gap-1 p-0" aria-label="Pod action permissions">
         <CapabilityNotice label="Delete" value={deleteDecision} />
         <CapabilityNotice label="Port-forward" value={portForwardDecision} />
         <CapabilityNotice label="Exec" value={execDecision} />
       </ul>
-      {permissions.isError ? <p className="field-error">Permission check failed; actions remain disabled.</p> : null}
-      <label className="confirmation-check">
-        <input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />
+      {permissions.isError ? <p className="m-0 text-xs text-kp-red">Permission check failed; actions remain disabled.</p> : null}
+      <Checkbox checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)}>
         I checked Pod {detail.metadata.namespace}/{detail.metadata.name} (UID {detail.metadata.uid}) and understand these consequences.
-      </label>
-      <div className="action-row">
+      </Checkbox>
+      <div className="flex flex-wrap items-end gap-2">
         <Button variant="danger" disabled={!confirmed || deleteDecision !== 'allowed' || remove.isPending} onClick={() => remove.mutate()}>{remove.isPending ? 'Deleting…' : 'Delete Pod'}</Button>
-        <label>Remote port<Input aria-invalid={!remotePortValid} type="number" min="1" max="65535" value={remotePort} onChange={(event) => setRemotePort(Number(event.target.value))} /></label>
-        <label>Local port (optional)<Input aria-invalid={!localPortValid} inputMode="numeric" value={localPort} onChange={(event) => setLocalPort(event.target.value)} placeholder="automatic" /></label>
+        <label className="grid gap-1 w-28"><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Remote port</span><Input aria-invalid={!remotePortValid} type="number" min="1" max="65535" value={remotePort} onChange={(event) => setRemotePort(Number(event.target.value))} /></label>
+        <label className="grid gap-1 w-36"><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Local port (optional)</span><Input aria-invalid={!localPortValid} inputMode="numeric" value={localPort} onChange={(event) => setLocalPort(event.target.value)} placeholder="automatic" /></label>
         <Button variant="secondary" disabled={!confirmed || portForwardDecision !== 'allowed' || portForward.isPending || !remotePortValid || !localPortValid} onClick={() => portForward.mutate()}>{portForward.isPending ? 'Starting…' : 'Start port-forward'}</Button>
       </div>
-      {!remotePortValid || !localPortValid ? <p className="field-error">Remote port must be 1–65,535; an explicit local port must be 1,024–65,535.</p> : null}
-      {portForward.data ? <p className="field-success" role="status">Loopback listener: <strong>{portForward.data.localAddress}:{portForward.data.localPort}</strong> → {portForward.data.namespace}/{portForward.data.pod}:{portForward.data.remotePort}.</p> : null}
-      <div className="exec-controls">
-        <label>Container<Select value={container} onChange={(event) => setContainer(event.target.value)}>{detail.containers.map((value) => <option key={value.spec.name}>{value.spec.name}</option>)}</Select></label>
-        <label className="exec-command">Command argv (one item per line)<textarea value={command} onChange={(event) => setCommand(event.target.value)} /></label>
+      {!remotePortValid || !localPortValid ? <p className="m-0 text-xs text-kp-red">Remote port must be 1–65,535; an explicit local port must be 1,024–65,535.</p> : null}
+      {portForward.data ? <p className="m-0 text-xs text-kp-green" role="status">Loopback listener: <strong className="mono">{portForward.data.localAddress}:{portForward.data.localPort}</strong> → {portForward.data.namespace}/{portForward.data.pod}:{portForward.data.remotePort}.</p> : null}
+      <div className="flex flex-wrap items-end gap-2 border-t border-kp-overlay-0 pt-2.5">
+        <label className="grid gap-1 w-36"><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Container</span><Select value={container} onChange={(event) => setContainer(event.target.value)}>{detail.containers.map((value) => <option key={value.spec.name}>{value.spec.name}</option>)}</Select></label>
+        <label className="grid flex-1 gap-1 min-w-[220px]"><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Command argv (one item per line)</span><textarea className="min-h-[76px] w-full rounded-md border border-kp-overlay-0 bg-kp-crust px-2.5 py-1.5 text-sm text-kp-text focus:border-kp-mauve focus:shadow-focus focus:outline-none resize-y leading-relaxed" value={command} onChange={(event) => setCommand(event.target.value)} /></label>
         <Button variant="secondary" disabled={!confirmed || execDecision !== 'allowed' || exec.isPending || container === '' || !commandValid} onClick={() => exec.mutate()}>{exec.isPending ? 'Authorizing…' : 'Open exec session'}</Button>
       </div>
-      {!commandValid ? <p className="field-error">Provide 1–64 argv items, at most 4 KiB each and 32 KiB total, without NUL.</p> : null}
+      {!commandValid ? <p className="m-0 text-xs text-kp-red">Provide 1–64 argv items, at most 4 KiB each and 32 KiB total, without NUL.</p> : null}
       {terminal.length > 0 ? (
-        <div className="terminal-panel">
-          <div className="terminal-toolbar">
-            <span aria-live="polite">Exec: {socketState}</span>
-            <Button size="compact" variant="secondary" disabled={socketState !== 'ready'} onClick={closeExec}>Close session</Button>
-            <Button size="compact" variant="secondary" onClick={() => { execTerminalRef.current?.clear(); setTerminal([]) }}>Clear output</Button>
+        <div className="grid gap-2 rounded-lg border border-kp-blue-border bg-kp-crust p-2.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="mr-auto text-xs text-kp-sky" aria-live="polite">Exec: {socketState}</span>
+            <Button size="sm" variant="secondary" disabled={socketState !== 'ready'} onClick={closeExec}>Close session</Button>
+            <Button size="sm" variant="secondary" onClick={() => { execTerminalRef.current?.clear(); setTerminal([]) }}>Clear output</Button>
           </div>
-          <ul className="capability-list" aria-label="Exec session status">
-            {terminal.map((line, index) => <li key={`${index}-${line.stream}`} className="terminal-status">{line.text}</li>)}
+          <ul className="m-0 grid list-none gap-0.5 p-0 text-xs" aria-label="Exec session status">
+            {terminal.map((line, index) => <li key={`${index}-${line.stream}`} className="mono text-kp-sky">{line.text}</li>)}
           </ul>
           <Suspense fallback={<pre aria-label="Exec terminal output" className="min-h-32" />}>
             <ExecTerminal
@@ -487,8 +485,8 @@ export function PodActions({ detail, selection }: { detail: PodDetail; selection
           </Suspense>
         </div>
       ) : null}
-      {[remove, portForward, exec].map((operation, index) => operation.isError ? <p className="field-error" key={index}>{mutationError(operation.error)}</p> : null)}
-      {remove.isSuccess ? <p className="field-success" role="status">Deletion accepted; recreation depends on the owner shown above.</p> : null}
+      {[remove, portForward, exec].map((operation, index) => operation.isError ? <p className="m-0 text-xs text-kp-red" key={index}>{mutationError(operation.error)}</p> : null)}
+      {remove.isSuccess ? <p className="m-0 text-xs text-kp-green" role="status">Deletion accepted; recreation depends on the owner shown above.</p> : null}
     </section>
   )
 }

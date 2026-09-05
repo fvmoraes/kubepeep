@@ -13,13 +13,11 @@ export interface TabsProps {
   className?: string
 }
 
+/** Underline-style tab strip — compact and consistent across pages. */
 export function Tabs({ tabs, activeTab, onChange, className = '' }: TabsProps) {
   return (
     <div className={className}>
-      <div
-        role="tablist"
-        className="flex w-fit max-w-full gap-1 overflow-x-auto p-1 border border-kp-overlay-0 rounded-xl bg-kp-surface-0"
-      >
+      <div role="tablist" className="flex w-fit max-w-full gap-0.5 overflow-x-auto border-b border-kp-overlay-0">
         {tabs.map((tab) => {
           const isActive = tab.id === activeTab
           return (
@@ -29,10 +27,11 @@ export function Tabs({ tabs, activeTab, onChange, className = '' }: TabsProps) {
               aria-selected={isActive}
               type="button"
               onClick={() => onChange(tab.id)}
-              className={`
-                min-h-9 px-2.5 rounded-md text-base whitespace-nowrap cursor-pointer
-                ${isActive ? 'text-kp-mauve bg-kp-surface-4 border border-kp-overlay-4' : 'text-kp-subtext bg-transparent border border-transparent hover:bg-kp-surface-2 hover:text-kp-text'}
-              `}
+              className={`-mb-px h-8 px-3 border-b-2 whitespace-nowrap cursor-pointer text-sm transition-colors ${
+                isActive
+                  ? 'border-kp-mauve text-kp-text font-medium'
+                  : 'border-transparent text-kp-overlay-text hover:text-kp-subtext hover:border-kp-overlay-1'
+              }`}
             >
               {tab.label}
             </button>

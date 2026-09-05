@@ -39,7 +39,8 @@ import {
   type SelectionSummary,
 } from '../api/client'
 import { StatePanel } from './StatePanel'
-import { Badge, Button, Card, CardContent, DataTable, Select, type BadgeVariant } from './ui'
+import { Badge, Button, DataTable, Select, type BadgeVariant } from './ui'
+import { WarningBanner } from './ui/Banner'
 
 const dashboardQueryDefaults = {
   staleTime: 30_000,
@@ -123,18 +124,30 @@ function featureUnavailable(block: DashboardBlock<unknown>): boolean {
   return block.errors.some((error) => error.code === 'FEATURE_UNAVAILABLE')
 }
 
+function blockStateBox(kind: 'loading' | 'offline' | 'unavailable' | 'denied' | 'empty' | 'idle'): string {
+  const border = {
+    loading: 'border-kp-blue-border',
+    offline: 'border-kp-red-border',
+    unavailable: 'border-kp-yellow-border',
+    denied: 'border-kp-red-border',
+    empty: 'border-kp-overlay-0',
+    idle: 'border-kp-overlay-0',
+  }[kind]
+  return `flex flex-col justify-center gap-1 rounded-lg border border-dashed ${border} bg-kp-surface-1 px-4 py-3.5`
+}
+
 function queryFailure(error: Error, optional: boolean): ReactNode {
   if (error instanceof APIError && error.code === 'FORBIDDEN') {
-    return <div className="dashboard-state dashboard-state--denied" role="status"><strong>Access denied</strong><span>This block was not collected. No zero value is implied.</span></div>
+    return <div className={blockStateBox('denied')} role="status"><strong className="text-sm text-kp-text">Access denied</strong><span className="text-xs text-kp-overlay-text">This block was not collected. No zero value is implied.</span></div>
   }
   if (optional && error instanceof APIError && error.code === 'FEATURE_UNAVAILABLE') {
-    return <div className="dashboard-optional" role="status">Metrics API is not available for this cluster.</div>
+    return <div className="rounded-r-md border-l-2 border-kp-blue-border bg-kp-blue-bg px-3 py-2 text-sm text-kp-sky" role="status">Metrics API is not available for this cluster.</div>
   }
   const offline = !(error instanceof APIError) || ['CLUSTER_UNAVAILABLE', 'UPSTREAM_TIMEOUT', 'AUTHENTICATION_UNAVAILABLE'].includes(error.code)
   return (
-    <div className={`dashboard-state dashboard-state--${offline ? 'offline' : 'unavailable'}`} role="status">
-      <strong>{offline ? 'Cluster data is offline' : 'This block is unavailable'}</strong>
-      <span>{error instanceof APIError ? error.message : 'The local API could not complete this query.'}</span>
+    <div className={blockStateBox(offline ? 'offline' : 'unavailable')} role="status">
+      <strong className="text-sm text-kp-text">{offline ? 'Cluster data is offline' : 'This block is unavailable'}</strong>
+      <span className="text-xs text-kp-overlay-text">{error instanceof APIError ? error.message : 'The local API could not complete this query.'}</span>
     </div>
   )
 }
@@ -143,18 +156,21 @@ function PartialFeedback({ block }: { block: DashboardBlock<unknown> }) {
   const coverage = block.coverage
   return (
     <>
-      {block.truncated ? <p className="dashboard-notice" role="status">This is a bounded result. Totals and rankings may be incomplete.</p> : null}
-      {!block.complete && !block.truncated ? <p className="dashboard-notice" role="status">This block is partial; other dashboard blocks remain usable.</p> : null}
+      {block.truncated || !block.complete ? (
+        <WarningBanner className="mb-2.5">
+          {block.truncated ? 'This is a bounded result. Totals and rankings may be incomplete.' : 'This block is partial; other dashboard blocks remain usable.'}
+        </WarningBanner>
+      ) : null}
       {coverage && coverage.requestedNamespaces > 0 && (!block.complete || block.truncated) ? (
-        <p className="dashboard-coverage">
+        <p className="mb-2.5 text-xs text-kp-overlay-text">
           Coverage: {coverage.completedNamespaces} of {coverage.requestedNamespaces} namespaces.
           {coverage.deniedNamespaces.length > 0 ? ` ${coverage.deniedNamespaces.length} denied.` : ''}
         </p>
       ) : null}
       {block.errors.length > 0 ? (
-        <ul className="dashboard-errors" aria-label="Partial collection errors">
+        <ul className="mb-3 grid list-none gap-1 p-0 text-xs text-kp-subtext" aria-label="Partial collection errors">
           {block.errors.map((error, index) => (
-            <li key={`${error.namespace ?? 'global'}-${error.code}-${index}`}>
+            <li key={`${error.namespace ?? 'global'}-${error.code}-${index}`} className="rounded-md border border-kp-red-border bg-kp-red-bg px-2 py-1">
               <code>{error.code}</code>{error.namespace ? ` · ${error.namespace}` : ''}: {error.message}
             </li>
           ))}
@@ -166,33 +182,33 @@ function PartialFeedback({ block }: { block: DashboardBlock<unknown> }) {
 
 function ResultBody<T>({ pending, error, response, isEmpty, emptyCopy, optional = false, children }: ResultBodyProps<T>) {
   if (pending) {
-    return <div className="dashboard-state dashboard-state--loading" role="status" aria-busy="true"><strong>Loading this block</strong><span>Other dashboard queries continue independently.</span></div>
+    return <div className={blockStateBox('loading')} role="status" aria-busy="true"><strong className="text-sm text-kp-text">Loading this block</strong><span className="text-xs text-kp-overlay-text">Other dashboard queries continue independently.</span></div>
   }
   if (error) {
     return queryFailure(error, optional)
   }
   if (!response) {
-    return <div className="dashboard-state dashboard-state--unavailable" role="status"><strong>No response</strong><span>This block has not returned data.</span></div>
+    return <div className={blockStateBox('unavailable')} role="status"><strong className="text-sm text-kp-text">No response</strong><span className="text-xs text-kp-overlay-text">This block has not returned data.</span></div>
   }
   const block = response.block
   if (optional && featureUnavailable(block as DashboardBlock<unknown>) && isEmpty(block.value)) {
-    return <div className="dashboard-optional" role="status">Metrics API is not available. The rest of the dashboard is unaffected.</div>
+    return <div className="rounded-r-md border-l-2 border-kp-blue-border bg-kp-blue-bg px-3 py-2 text-sm text-kp-sky" role="status">Metrics API is not available. The rest of the dashboard is unaffected.</div>
   }
   if (onlyDenied(block as DashboardBlock<unknown>) && isEmpty(block.value)) {
-    return <div className="dashboard-state dashboard-state--denied" role="status"><strong>Access denied</strong><span>This block was not collected. No zero value is implied.</span></div>
+    return <div className={blockStateBox('denied')} role="status"><strong className="text-sm text-kp-text">Access denied</strong><span className="text-xs text-kp-overlay-text">This block was not collected. No zero value is implied.</span></div>
   }
   if (isEmpty(block.value) && !block.complete) {
     return (
       <>
         <PartialFeedback block={block as DashboardBlock<unknown>} />
-        <div className="dashboard-state dashboard-state--unavailable" role="status"><strong>No complete result</strong><span>The query ended before an authoritative empty result was available.</span></div>
+        <div className={blockStateBox('unavailable')} role="status"><strong className="text-sm text-kp-text">No complete result</strong><span className="text-xs text-kp-overlay-text">The query ended before an authoritative empty result was available.</span></div>
       </>
     )
   }
   return (
     <>
       <PartialFeedback block={block as DashboardBlock<unknown>} />
-      {isEmpty(block.value) ? <div className="dashboard-state dashboard-state--empty" role="status"><strong>Nothing found</strong><span>{emptyCopy}</span></div> : children(block.value)}
+      {isEmpty(block.value) ? <div className={blockStateBox('empty')} role="status"><strong className="text-sm text-kp-text">Nothing found</strong><span className="text-xs text-kp-overlay-text">{emptyCopy}</span></div> : children(block.value)}
     </>
   )
 }
@@ -208,21 +224,21 @@ function NamespaceHealthTable({ values }: { values: DashboardNamespaceHealth[] }
       key: 'problematic-pods',
       header: 'Problem pods',
       cell: (row: DashboardNamespaceHealth) => (
-        <Link className="table-link" to={`/pods?namespace=${encodeURIComponent(row.namespace)}&problematic=true`}>{row.problematicPods}</Link>
+        <Link className="text-kp-mauve hover:underline" to={`/pods?namespace=${encodeURIComponent(row.namespace)}&problematic=true`}>{row.problematicPods}</Link>
       ),
     },
     {
       key: 'container-restarts',
       header: 'Restarts',
       cell: (row: DashboardNamespaceHealth) => (
-        <Link className="table-link" to={`/pods?namespace=${encodeURIComponent(row.namespace)}&restarts=gte3`}>{row.containerRestarts}</Link>
+        <Link className="text-kp-mauve hover:underline" to={`/pods?namespace=${encodeURIComponent(row.namespace)}&restarts=gte3`}>{row.containerRestarts}</Link>
       ),
     },
     {
       key: 'degraded-workloads',
       header: 'Degraded workloads',
       cell: (row: DashboardNamespaceHealth) => (
-        <Link className="table-link" to={`/workloads?namespace=${encodeURIComponent(row.namespace)}&status=Degraded`}>{row.degradedWorkloads}</Link>
+        <Link className="text-kp-mauve hover:underline" to={`/workloads?namespace=${encodeURIComponent(row.namespace)}&status=Degraded`}>{row.degradedWorkloads}</Link>
       ),
     },
   ]
@@ -236,17 +252,15 @@ function NamespaceHealthTable({ values }: { values: DashboardNamespaceHealth[] }
   )
 }
 
-function DashboardSection({ id, eyebrow, title, action, children }: { id: string; eyebrow: string; title: string; action?: ReactNode; children: ReactNode }) {
+function DashboardSection({ id, title, action, children }: { id: string; title: string; action?: ReactNode; children: ReactNode }) {
   return (
-    <Card className="dashboard-section" id={id} aria-labelledby={`${id}-title`}>
-      <CardContent className="p-0">
-        <div className="dashboard-section-heading">
-          <div><span className="eyebrow">{eyebrow}</span><h2 id={`${id}-title`}>{title}</h2></div>
-          {action}
-        </div>
-        {children}
-      </CardContent>
-    </Card>
+    <section id={id} aria-labelledby={`${id}-title`} className="rounded-xl border border-kp-overlay-0 bg-kp-surface-0 p-4">
+      <div className="mb-3 flex items-center justify-between gap-4">
+        <h2 id={`${id}-title`} className="text-base text-kp-text">{title}</h2>
+        {action}
+      </div>
+      {children}
+    </section>
   )
 }
 
@@ -270,30 +284,32 @@ function counterBadgeVariant(state: DashboardCounter['state']): BadgeVariant {
 function CounterCard({ label, counter, href, icon }: { label: string; counter: DashboardCounter; href: string; icon: ReactNode }) {
   const card = (
     <>
-      <span className="summary-card-icon" aria-hidden="true">{icon}</span>
-      <span className="summary-card-label">{label}</span>
-      <strong>{counter.value === null ? '—' : counter.value.toLocaleString()}</strong>
-      <Badge variant={counterBadgeVariant(counter.state)} className={`counter-state counter-state--${counter.state}`}>{counterCopy[counter.state]}</Badge>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-xs text-kp-overlay-text">{label}</span>
+        <span className="text-kp-overlay-text" aria-hidden="true">{icon}</span>
+      </div>
+      <strong className="text-3xl text-kp-text">{counter.value === null ? '—' : counter.value.toLocaleString()}</strong>
+      {counter.state !== 'available' ? <Badge variant={counterBadgeVariant(counter.state)} className="justify-self-start">{counterCopy[counter.state]}</Badge> : null}
     </>
   )
   if (counter.state === 'available' || counter.state === 'truncated') {
-    return <Link className="summary-card" to={href} aria-label={`${label}: ${counter.value ?? 0}, ${counterCopy[counter.state]}`}>{card}</Link>
+    return <Link className="grid content-between gap-1.5 rounded-xl border border-kp-overlay-0 bg-kp-surface-0 p-3.5 hover:border-kp-overlay-2" to={href} aria-label={`${label}: ${counter.value ?? 0}, ${counterCopy[counter.state]}`}>{card}</Link>
   }
-  return <div className="summary-card summary-card--disabled" aria-label={`${label}: ${counterCopy[counter.state]}`}>{card}</div>
+  return <div className="grid content-between gap-1.5 rounded-xl border border-kp-overlay-0 bg-kp-surface-0 p-3.5 opacity-75" aria-label={`${label}: ${counterCopy[counter.state]}`}>{card}</div>
 }
 
 function SummaryCards({ summary, logCounter }: { summary: DashboardSummary; logCounter: DashboardCounter }) {
   const cards = [
-    ['Namespaces', summary.namespaces, '/namespaces', <Boxes size={16} key="namespaces" />],
-    ['Pods', summary.podsTotal, '/pods', <Activity size={16} key="pods" />],
-    ['Healthy pods', summary.podsHealthy, '/pods?status=Running', <ShieldCheck size={16} key="healthy" />],
-    ['Problem pods', summary.podsProblematic, '/pods?problematic=true', <AlertTriangle size={16} key="problems" />],
-    ['Degraded workloads', summary.workloadsDegraded, '/workloads?status=Degraded', <Boxes size={16} key="workloads" />],
-    ['Restarts', summary.restarts, '/pods?restarts=gte3', <RotateCcw size={16} key="restarts" />],
-    ['Warning events', summary.warningEvents, '/events?status=Warning', <Clock3 size={16} key="events" />],
-    ['Possible log matches', logCounter, '#log-scan', <ScrollText size={16} key="logs" />],
+    ['Namespaces', summary.namespaces, '/namespaces', <Boxes size={15} key="namespaces" />],
+    ['Pods', summary.podsTotal, '/pods', <Activity size={15} key="pods" />],
+    ['Healthy pods', summary.podsHealthy, '/pods?status=Running', <ShieldCheck size={15} key="healthy" />],
+    ['Problem pods', summary.podsProblematic, '/pods?problematic=true', <AlertTriangle size={15} key="problems" />],
+    ['Degraded workloads', summary.workloadsDegraded, '/workloads?status=Degraded', <Boxes size={15} key="workloads" />],
+    ['Restarts', summary.restarts, '/pods?restarts=gte3', <RotateCcw size={15} key="restarts" />],
+    ['Warning events', summary.warningEvents, '/events?status=Warning', <Clock3 size={15} key="events" />],
+    ['Possible log matches', logCounter, '#log-scan', <ScrollText size={15} key="logs" />],
   ] as const
-  return <div className="summary-grid">{cards.map(([label, counter, href, icon]) => <CounterCard key={label} label={label} counter={counter} href={href} icon={icon} />)}</div>
+  return <div className="grid grid-cols-2 gap-2.5 md:grid-cols-4">{cards.map(([label, counter, href, icon]) => <CounterCard key={label} label={label} counter={counter} href={href} icon={icon} />)}</div>
 }
 
 function severityBadgeVariant(severity: DashboardProblem['severity']): BadgeVariant {
@@ -311,17 +327,17 @@ function ProblemsTable({ values }: { values: DashboardProblem[] }) {
     {
       key: 'severity',
       header: 'Severity',
-      cell: (problem: DashboardProblem) => <Badge variant={severityBadgeVariant(problem.severity)} className={`severity severity--${problem.severity}`}>{problem.severity}</Badge>,
+      cell: (problem: DashboardProblem) => <Badge variant={severityBadgeVariant(problem.severity)}>{problem.severity}</Badge>,
     },
     {
       key: 'pod',
       header: 'Pod',
-      cell: (problem: DashboardProblem) => <><strong>{problem.pod}</strong><small>{problem.namespace}{problem.container ? ` · ${problem.container}` : ''}</small></>,
+      cell: (problem: DashboardProblem) => <><strong className="block text-kp-text">{problem.pod}</strong><small className="block text-xs text-kp-overlay-text">{problem.namespace}{problem.container ? ` · ${problem.container}` : ''}</small></>,
     },
     {
       key: 'diagnosis',
       header: 'Diagnosis',
-      cell: (problem: DashboardProblem) => <><strong>{problem.reason ?? 'No diagnosis reported'}</strong><small>{problem.message ?? `Source: ${problem.source}`}</small></>,
+      cell: (problem: DashboardProblem) => <><strong className="block text-kp-text">{problem.reason ?? 'No diagnosis reported'}</strong><small className="block text-xs text-kp-overlay-text">{problem.message ?? `Source: ${problem.source}`}</small></>,
     },
     {
       key: 'status',
@@ -363,17 +379,17 @@ function RestartsTable({ values }: { values: DashboardRestart[] }) {
     {
       key: 'restarts',
       header: 'Restarts',
-      cell: (restart: DashboardRestart) => <Badge variant={restartSeverityBadgeVariant(restart.severity)} className={`severity severity--${restart.severity}`}>{restart.restarts}</Badge>,
+      cell: (restart: DashboardRestart) => <Badge variant={restartSeverityBadgeVariant(restart.severity)}>{restart.restarts}</Badge>,
     },
     {
       key: 'pod',
       header: 'Pod / owner',
-      cell: (restart: DashboardRestart) => <><strong>{restart.pod}</strong><small>{restart.namespace}{restart.owner ? ` · ${restart.owner.kind}/${restart.owner.name}` : ' · owner unavailable'}</small></>,
+      cell: (restart: DashboardRestart) => <><strong className="block text-kp-text">{restart.pod}</strong><small className="block text-xs text-kp-overlay-text">{restart.namespace}{restart.owner ? ` · ${restart.owner.kind}/${restart.owner.name}` : ' · owner unavailable'}</small></>,
     },
     {
       key: 'container',
       header: 'Container',
-      cell: (restart: DashboardRestart) => <>{restart.container}<small>{restart.containerType}</small></>,
+      cell: (restart: DashboardRestart) => <>{restart.container}<small className="block text-xs text-kp-overlay-text">{restart.containerType}</small></>,
     },
     {
       key: 'status',
@@ -406,12 +422,12 @@ function EventsTable({ values }: { values: DashboardEvent[] }) {
     {
       key: 'object',
       header: 'Object',
-      cell: (event: DashboardEvent) => <><strong>{event.objectKind}/{event.objectName}</strong><small>{event.namespace}</small></>,
+      cell: (event: DashboardEvent) => <><strong className="block text-kp-text">{event.objectKind}/{event.objectName}</strong><small className="block text-xs text-kp-overlay-text">{event.namespace}</small></>,
     },
     {
       key: 'reason',
       header: 'Reason',
-      cell: (event: DashboardEvent) => <><strong>{event.reason}</strong><small>{event.message}</small></>,
+      cell: (event: DashboardEvent) => <><strong className="block text-kp-text">{event.reason}</strong><small className="block text-xs text-kp-overlay-text">{event.message}</small></>,
     },
     {
       key: 'count',
@@ -439,7 +455,7 @@ function MetricsTable({ title, values, metric }: { title: string; values: Metric
     {
       key: 'pod',
       header: 'Pod',
-      cell: (value: MetricRank) => <><strong>{value.pod}</strong><small>{value.namespace}</small></>,
+      cell: (value: MetricRank) => <><strong className="block text-kp-text">{value.pod}</strong><small className="block text-xs text-kp-overlay-text">{value.namespace}</small></>,
     },
     {
       key: 'cpu',
@@ -453,8 +469,8 @@ function MetricsTable({ title, values, metric }: { title: string; values: Metric
     },
   ]
   return (
-    <div className="metrics-ranking">
-      <h3>{title}</h3>
+    <div className="min-w-0 rounded-lg border border-kp-overlay-0 bg-kp-surface-1 p-3">
+      <h3 className="mb-2.5 text-sm text-kp-text">{title}</h3>
       <DataTable
         compact
         columns={columns}
@@ -468,8 +484,8 @@ function MetricsTable({ title, values, metric }: { title: string; values: Metric
 function MetricsView({ value }: { value: DashboardMetrics }) {
   return (
     <>
-      <p className="dashboard-subtle">Metrics window: {formatDuration(value.windowSeconds)} · collected {formatTimestamp(value.collectedAt)}</p>
-      <div className="metrics-grid">
+      <p className="mb-2.5 text-xs text-kp-overlay-text">Metrics window: {formatDuration(value.windowSeconds)} · collected {formatTimestamp(value.collectedAt)}</p>
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
         <MetricsTable title="Top CPU" values={value.topCPU} metric="cpu" />
         <MetricsTable title="Top memory" values={value.topMemory} metric="memory" />
       </div>
@@ -487,17 +503,17 @@ function LogMatchesTable({ values }: { values: DashboardLogMatch[] }) {
     {
       key: 'target',
       header: 'Target',
-      cell: (match: DashboardLogMatch) => <><strong>{match.pod}/{match.container}</strong><small>{match.namespace}{match.workload ? ` · ${match.workload.kind}/${match.workload.name}` : ''}</small></>,
+      cell: (match: DashboardLogMatch) => <><strong className="block text-kp-text">{match.pod}/{match.container}</strong><small className="block text-xs text-kp-overlay-text">{match.namespace}{match.workload ? ` · ${match.workload.kind}/${match.workload.name}` : ''}</small></>,
     },
     {
       key: 'reason',
       header: 'Reason',
-      cell: (match: DashboardLogMatch) => <><code className="text-kp-sky">{match.reasonCode}</code><small>{match.redacted ? 'sensitive value redacted' : 'no redaction needed'}{match.truncated ? ' · excerpt truncated' : ''}</small></>,
+      cell: (match: DashboardLogMatch) => <><code>{match.reasonCode}</code><small className="block text-xs text-kp-overlay-text">{match.redacted ? 'sensitive value redacted' : 'no redaction needed'}{match.truncated ? ' · excerpt truncated' : ''}</small></>,
     },
     {
       key: 'excerpt',
       header: 'Sanitized excerpt',
-      cell: (match: DashboardLogMatch) => <code className="log-excerpt">{match.excerpt}</code>,
+      cell: (match: DashboardLogMatch) => <code className="block max-w-[540px] text-kp-subtext break-all whitespace-pre-wrap">{match.excerpt}</code>,
     },
   ]
   return (
@@ -615,27 +631,26 @@ function DashboardContent({ selection, cluster }: { selection: SelectionSummary;
   ])
 
   return (
-    <div className="dashboard-page">
-      <header className="dashboard-header">
+    <div className="grid gap-4">
+      <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <span className="eyebrow">progressive overview</span>
-          <h1>Cluster overview</h1>
-          <p>Each block has its own budget, cancellation, and authorization result.</p>
+          <h1 className="text-2xl text-kp-text">Cluster overview</h1>
+          <p className="mt-0.5 text-sm text-kp-overlay-text">A quick view of your Kubernetes cluster, workloads and relevant events.</p>
         </div>
         <Button variant="secondary" onClick={refreshAll} disabled={isRefreshing}>
-          <RefreshCw size={15} aria-hidden="true" /> {isRefreshing ? 'Refreshing…' : 'Refresh dashboard'}
+          <RefreshCw size={14} aria-hidden="true" className={isRefreshing ? 'animate-spin-slow' : ''} /> {isRefreshing ? 'Refreshing…' : 'Refresh'}
         </Button>
       </header>
 
-      <div className="dashboard-context" aria-label="Dashboard selection">
-        <div><span>Context</span><strong>{selection.context}</strong><small>{selection.cluster}</small></div>
-        <div><span>Scope</span><strong>{selection.scopeName ?? 'No saved scope'}</strong><small>{selection.namespaceCount} namespace{selection.namespaceCount === 1 ? '' : 's'}{selection.defaultNamespace ? ` · default ${selection.defaultNamespace}` : ''}</small></div>
-        <div><span>Connection</span><strong className={`connection connection--${cluster.status}`}>{cluster.status}</strong><small>{cluster.message}</small></div>
-        <div><span>Last update</span><strong>{collectedAt}</strong><small>generation {selection.generation}</small></div>
-        <div className="dashboard-shortcuts"><Link to="/namespaces">Edit scope</Link><Link to="/permissions">View RBAC</Link></div>
+      <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-kp-overlay-0 bg-kp-overlay-0 md:grid-cols-5" aria-label="Dashboard selection">
+        <div className="min-w-0 bg-kp-surface-1 px-3 py-2.5"><span className="block text-2xs uppercase tracking-wider text-kp-overlay-text">Context</span><strong className="block truncate text-sm text-kp-text">{selection.context}</strong><small className="block truncate text-xs text-kp-overlay-text">{selection.cluster}</small></div>
+        <div className="min-w-0 bg-kp-surface-1 px-3 py-2.5"><span className="block text-2xs uppercase tracking-wider text-kp-overlay-text">Scope</span><strong className="block truncate text-sm text-kp-text">{selection.scopeName ?? 'No saved scope'}</strong><small className="block truncate text-xs text-kp-overlay-text">{selection.namespaceCount} namespace{selection.namespaceCount === 1 ? '' : 's'}{selection.defaultNamespace ? ` · default ${selection.defaultNamespace}` : ''}</small></div>
+        <div className="min-w-0 bg-kp-surface-1 px-3 py-2.5"><span className="block text-2xs uppercase tracking-wider text-kp-overlay-text">Connection</span><strong className={`block text-sm ${cluster.status === 'healthy' ? 'text-kp-green' : cluster.status === 'unhealthy' ? 'text-kp-red' : 'text-kp-yellow'}`}>{cluster.status}</strong><small className="block truncate text-xs text-kp-overlay-text">{cluster.message}</small></div>
+        <div className="min-w-0 bg-kp-surface-1 px-3 py-2.5"><span className="block text-2xs uppercase tracking-wider text-kp-overlay-text">Last update</span><strong className="block truncate text-sm text-kp-text">{collectedAt}</strong><small className="block truncate text-xs text-kp-overlay-text">generation {selection.generation}</small></div>
+        <div className="flex items-center justify-center gap-3 bg-kp-surface-1 px-3 py-2.5 text-xs"><Link className="text-kp-mauve hover:underline" to="/namespaces">Edit scope</Link><Link className="text-kp-mauve hover:underline" to="/permissions">View RBAC</Link></div>
       </div>
 
-      <DashboardSection id="summary" eyebrow="at a glance" title="Summary" action={<BlockAge response={summary.data as DashboardResponse<unknown> | undefined} />}>
+      <DashboardSection id="summary" title="Summary" action={<BlockAge response={summary.data as DashboardResponse<unknown> | undefined} />}>
         <ResultBody
           pending={summary.isPending}
           error={summary.error}
@@ -647,33 +662,35 @@ function DashboardContent({ selection, cluster }: { selection: SelectionSummary;
         </ResultBody>
       </DashboardSection>
 
-      <div className="dashboard-columns">
-        <DashboardSection id="problems" eyebrow="prioritized" title="Problem pods" action={<BlockAge response={problems.data as DashboardResponse<unknown> | undefined} />}>
+      <div className="grid items-start gap-4 lg:grid-cols-2">
+        <DashboardSection id="problems" title="Problem pods" action={<BlockAge response={problems.data as DashboardResponse<unknown> | undefined} />}>
           <ResultBody pending={problems.isPending} error={problems.error} response={problems.data} isEmpty={(value) => value.length === 0} emptyCopy="No problematic pod was found in the completed coverage.">
             {(value) => <ProblemsTable values={value} />}
           </ResultBody>
         </DashboardSection>
 
-        <DashboardSection id="restarts" eyebrow="top 10" title="Container restarts" action={<BlockAge response={restarts.data as DashboardResponse<unknown> | undefined} />}>
+        <DashboardSection id="restarts" title="Container restarts" action={<BlockAge response={restarts.data as DashboardResponse<unknown> | undefined} />}>
           <ResultBody pending={restarts.isPending} error={restarts.error} response={restarts.data} isEmpty={(value) => value.length === 0} emptyCopy="No container restart was found in the completed coverage.">
             {(value) => <RestartsTable values={value} />}
           </ResultBody>
         </DashboardSection>
       </div>
 
-      <DashboardSection id="warning-events" eyebrow="recent signals" title="Warning events" action={<BlockAge response={events.data as DashboardResponse<unknown> | undefined} />}>
-        <ResultBody pending={events.isPending} error={events.error} response={events.data} isEmpty={(value) => value.length === 0} emptyCopy="No Warning event was found in the completed coverage.">
-          {(value) => <EventsTable values={value} />}
-        </ResultBody>
-      </DashboardSection>
+      <div className="grid items-start gap-4 lg:grid-cols-2">
+        <DashboardSection id="warning-events" title="Warning events" action={<BlockAge response={events.data as DashboardResponse<unknown> | undefined} />}>
+          <ResultBody pending={events.isPending} error={events.error} response={events.data} isEmpty={(value) => value.length === 0} emptyCopy="No Warning event was found in the completed coverage.">
+            {(value) => <EventsTable values={value} />}
+          </ResultBody>
+        </DashboardSection>
 
-      <DashboardSection id="namespace-health" eyebrow="by namespace" title="Namespace health" action={<BlockAge response={namespaceHealth.data as DashboardResponse<unknown> | undefined} />}>
-        <ResultBody pending={namespaceHealth.isPending} error={namespaceHealth.error} response={namespaceHealth.data} isEmpty={(value) => value.length === 0} emptyCopy="No namespace health was collected for the active scope.">
-          {(value) => <NamespaceHealthTable values={value} />}
-        </ResultBody>
-      </DashboardSection>
+        <DashboardSection id="namespace-health" title="Namespace health" action={<BlockAge response={namespaceHealth.data as DashboardResponse<unknown> | undefined} />}>
+          <ResultBody pending={namespaceHealth.isPending} error={namespaceHealth.error} response={namespaceHealth.data} isEmpty={(value) => value.length === 0} emptyCopy="No namespace health was collected for the active scope.">
+            {(value) => <NamespaceHealthTable values={value} />}
+          </ResultBody>
+        </DashboardSection>
+      </div>
 
-      <DashboardSection id="metrics" eyebrow="optional API" title="Pod metrics" action={<BlockAge response={metrics.data as DashboardResponse<unknown> | undefined} />}>
+      <DashboardSection id="metrics" title="Pod metrics" action={<BlockAge response={metrics.data as DashboardResponse<unknown> | undefined} />}>
         <ResultBody pending={metrics.isPending} error={metrics.error} response={metrics.data} isEmpty={(value) => value.pods.length === 0} emptyCopy="The Metrics API returned no pod metrics for the completed coverage." optional>
           {(value) => <MetricsView value={value} />}
         </ResultBody>
@@ -681,23 +698,25 @@ function DashboardContent({ selection, cluster }: { selection: SelectionSummary;
 
       <DashboardSection
         id="log-scan"
-        eyebrow="explicit, bounded, in memory"
         title="Possible errors in logs"
         action={(
-          <div className="log-scan-controls">
-            <label>Window<Select aria-label="Log scan window" value={scanWindow} onChange={(event) => setScanWindow(event.target.value as LogScanRequest['window'])}>
-              <option value="15m">15 min</option><option value="30m">30 min</option><option value="1h">1 hour</option><option value="4h">4 hours</option>
-            </Select></label>
+          <div className="flex items-end justify-end gap-2">
+            <label className="grid gap-1">
+              <span className="sr-only">Log scan window</span>
+              <Select aria-label="Log scan window" value={scanWindow} onChange={(event) => setScanWindow(event.target.value as LogScanRequest['window'])}>
+                <option value="15m">15 min</option><option value="30m">30 min</option><option value="1h">1 hour</option><option value="4h">4 hours</option>
+              </Select>
+            </label>
             <Button onClick={() => void runLogScan()} disabled={!session.data || session.isError}>
-              <ScrollText size={15} aria-hidden="true" /> {logScan.kind === 'pending' ? 'Restart scan' : 'Scan logs now'}
+              <ScrollText size={14} aria-hidden="true" /> {logScan.kind === 'pending' ? 'Restart scan' : 'Scan logs now'}
             </Button>
           </div>
         )}
       >
-        <p className="dashboard-subtle">Scans at most 20 pods, 200 lines each, with four concurrent container reads. Results are never saved by this interface.</p>
-        {session.isError ? <div className="dashboard-state dashboard-state--unavailable" role="status"><strong>Scan session unavailable</strong><span>The CSRF bootstrap could not be completed.</span></div> : null}
-        {logScan.kind === 'idle' ? <div className="dashboard-state dashboard-state--idle" role="status"><strong>Scan has not been run</strong><span>Run it explicitly when recent, bounded log inspection is useful.</span></div> : null}
-        {logScan.kind === 'pending' ? <div className="dashboard-state dashboard-state--loading" role="status" aria-busy="true"><strong>Scanning selected targets</strong><span>Starting another scan, switching generation, or leaving this page cancels it.</span></div> : null}
+        <p className="mb-2.5 text-xs text-kp-overlay-text">Scans at most 20 pods, 200 lines each, with four concurrent container reads. Results are never saved by this interface.</p>
+        {session.isError ? <div className={blockStateBox('unavailable')} role="status"><strong className="text-sm text-kp-text">Scan session unavailable</strong><span className="text-xs text-kp-overlay-text">The CSRF bootstrap could not be completed.</span></div> : null}
+        {logScan.kind === 'idle' ? <div className={blockStateBox('idle')} role="status"><strong className="text-sm text-kp-text">Scan has not been run</strong><span className="text-xs text-kp-overlay-text">Run it explicitly when recent, bounded log inspection is useful.</span></div> : null}
+        {logScan.kind === 'pending' ? <div className={blockStateBox('loading')} role="status" aria-busy="true"><strong className="text-sm text-kp-text">Scanning selected targets</strong><span className="text-xs text-kp-overlay-text">Starting another scan, switching generation, or leaving this page cancels it.</span></div> : null}
         {logScan.kind === 'error' ? queryFailure(logScan.error, false) : null}
         {logScan.kind === 'success' ? (
           <ResultBody pending={false} error={null} response={logScan.response} isEmpty={(value) => value.length === 0} emptyCopy="The completed scan found no possible matches.">
@@ -717,9 +736,9 @@ export function DashboardPage() {
   }
   if (status.isError) {
     if (status.error instanceof APIError) {
-      return <StatePanel kind="error" title="The local API returned an error">The response was rejected safely. Retry after checking the local status or running kubePeep doctor.</StatePanel>
+      return <StatePanel kind="error" title="The local API returned an error">The response was rejected safely. Retry after checking the local status or running KubePeep doctor.</StatePanel>
     }
-    return <StatePanel kind="offline" title="The local API is unavailable">Reload after the kubePeep process is ready.</StatePanel>
+    return <StatePanel kind="offline" title="The local API is unavailable">Reload after the KubePeep process is ready.</StatePanel>
   }
   if (!status.data.selection) {
     return <StatePanel kind="empty" title="Choose a Kubernetes context">The local application is ready. Use the context selector in the header to connect a kubeconfig.</StatePanel>

@@ -11,7 +11,7 @@ import {
   type SelectionData,
   type SelectionSummary,
 } from '../api/client'
-import { Button, Select } from './ui'
+import { Select } from './ui'
 
 interface ContextSelectorProps {
   selection: SelectionSummary | null
@@ -40,6 +40,10 @@ function kubeconfigLabel(profile: ClusterProfile): string {
   return paths.length > 0 ? paths.join(' + ') : 'Kubeconfig source unavailable'
 }
 
+/**
+ * Compact header control for kubeconfig, cluster and context.
+ * Selecting a context applies it immediately — no extra confirmation step.
+ */
 export function ContextSelector({ selection, onSelected }: ContextSelectorProps) {
   const queryClient = useQueryClient()
   const selectionController = useRef<AbortController | null>(null)
@@ -86,13 +90,13 @@ export function ContextSelector({ selection, onSelected }: ContextSelectorProps)
   })
 
   const contextSelection = useMutation({
-    mutationFn: async ({ intent, controller }: { intent: number; controller: AbortController }) => {
-      if (effectiveProfileId === null || effectiveContextName === '' || !session.data) {
+    mutationFn: async ({ intent, controller, context }: { intent: number; controller: AbortController; context: string }) => {
+      if (effectiveProfileId === null || context === '' || !session.data) {
         throw new Error('Context selection is not ready.')
       }
       const selected = await selectContext({
         clusterProfileId: effectiveProfileId,
-        context: effectiveContextName,
+        context,
         setDefault: true,
         expectedGeneration: session.data.generation,
       }, session.data.csrfToken, controller.signal)
@@ -122,31 +126,32 @@ export function ContextSelector({ selection, onSelected }: ContextSelectorProps)
 
   useEffect(() => () => selectionController.current?.abort(), [])
 
-  const submitSelection = () => {
+  const submitSelection = (context: string) => {
     selectionController.current?.abort()
     const controller = new AbortController()
     selectionController.current = controller
     selectionIntent.current += 1
     setSelectionError(null)
-    contextSelection.mutate({ intent: selectionIntent.current, controller })
+    contextSelection.mutate({ intent: selectionIntent.current, controller, context })
   }
 
   if (profiles.isPending) {
-    return <div className="context-selector context-selector--message" role="status">Loading kubeconfigs…</div>
+    return <div className="flex h-8 items-center text-xs text-kp-overlay-text" role="status">Loading kubeconfigs…</div>
   }
   if (profiles.isError) {
-    return <div className="context-selector context-selector--message context-selector--error" role="status">{queryError(profiles.error)}</div>
+    return <div className="flex h-8 items-center text-xs text-kp-red" role="status">{queryError(profiles.error)}</div>
   }
   if (profileList.length === 0) {
-    return <div className="context-selector context-selector--message" role="status">No kubeconfig source found</div>
+    return <div className="flex h-8 items-center text-xs text-kp-overlay-text" role="status">No kubeconfig source found</div>
   }
 
   return (
-    <div className="context-selector" aria-label="Kubernetes context selector">
-      <label>
-        <span>Kubeconfig</span>
+    <div className="flex items-center gap-1.5 min-w-0" aria-label="Kubernetes context selector">
+      <div className="relative min-w-0">
         <Select
           aria-label="Kubeconfig source"
+          data-tip={kubeconfigLabel(preferredProfile)}
+          className="!w-auto max-w-[10rem] pr-6 text-sm"
           value={effectiveProfileId ?? ''}
           onChange={(event) => {
             selectionController.current?.abort()
@@ -157,55 +162,47 @@ export function ContextSelector({ selection, onSelected }: ContextSelectorProps)
         >
           {profileList.map((profile) => <option key={profile.id} value={profile.id}>{kubeconfigLabel(profile)}</option>)}
         </Select>
-      </label>
-      <label>
-        <span>Cluster</span>
-        <Select
-          className="cluster-display"
-          disabled
-          aria-label="Selected cluster"
-          value={preferredContext?.cluster ?? ''}
-          onChange={() => {}}
-        >
-          <option value="">{preferredContext?.cluster ?? 'Choose a context'}</option>
-        </Select>
-      </label>
-      <label>
-        <span>Context</span>
-        <Select
-          aria-label="Kubernetes context"
-          aria-keyshortcuts="Control+O Meta+O"
-          data-app-shortcut="context-selector"
-          value={effectiveContextName}
-          disabled={contexts.isPending || contexts.isError || contextList.length === 0}
-          onChange={(event) => {
-            selectionController.current?.abort()
-            setContextName(event.target.value)
-            setSelectionError(null)
-          }}
-        >
-          <option value="">{contexts.isPending
-            ? 'Loading contexts…'
-            : contexts.isError
-              ? 'Contexts unavailable'
-              : contextList.length > 0
-                ? `Choose a context (${contextList.length} available)`
-                : 'Choose a context'}</option>
-          {contextList.map((context) => <option key={context.name} value={context.name}>{context.name} · {context.cluster}</option>)}
-        </Select>
-      </label>
-      <Button
-        size="compact"
-        className="[grid-column:1/-1]"
-        onClick={submitSelection}
-        disabled={effectiveContextName === '' || session.isPending || session.isError}
+      </div>
+      <Select
+        aria-label="Selected cluster"
+        data-tip={preferredContext?.cluster ? `Cluster ${preferredContext.cluster}` : 'Choose a context to resolve the cluster'}
+        className="!w-auto max-w-[9rem] pr-6 text-sm text-kp-sky"
+        disabled
+        value={preferredContext?.cluster ?? ''}
+        onChange={() => {}}
       >
-        {contextSelection.isPending ? 'Switching…' : 'Select'}
-      </Button>
-      {contexts.isError ? <small className="field-error" role="status">{queryError(contexts.error)}</small> : null}
-      {contexts.data && contextList.length === 0 ? <small className="field-error" role="status">No contexts exist in this kubeconfig.</small> : null}
-      {session.isError ? <small className="field-error" role="status">Session bootstrap is unavailable.</small> : null}
-      {selectionError ? <small className="field-error" role="alert">{selectionError}</small> : null}
+        <option value="">{preferredContext?.cluster ?? 'Cluster'}</option>
+      </Select>
+      <Select
+        aria-label="Kubernetes context"
+        aria-keyshortcuts="Control+O Meta+O"
+        data-app-shortcut="context-selector"
+        className="!w-auto max-w-[11rem] pr-6 text-sm"
+        value={effectiveContextName}
+        disabled={contexts.isPending || contexts.isError || contextList.length === 0 || contextSelection.isPending}
+        onChange={(event) => {
+          selectionController.current?.abort()
+          setContextName(event.target.value)
+          setSelectionError(null)
+          if (event.target.value !== '') {
+            submitSelection(event.target.value)
+          }
+        }}
+      >
+        <option value="">{contexts.isPending
+          ? 'Loading contexts…'
+          : contexts.isError
+            ? 'Contexts unavailable'
+            : contextList.length > 0
+              ? `Choose a context (${contextList.length} available)`
+              : 'Choose a context'}</option>
+        {contextList.map((context) => <option key={context.name} value={context.name}>{context.name} · {context.cluster}</option>)}
+      </Select>
+      {contextSelection.isPending ? <span className="text-xs text-kp-overlay-text" role="status">Switching…</span> : null}
+      {contexts.isError ? <span className="text-xs text-kp-red" role="status">{queryError(contexts.error)}</span> : null}
+      {contexts.data && contextList.length === 0 ? <span className="text-xs text-kp-red" role="status">No contexts exist in this kubeconfig.</span> : null}
+      {session.isError ? <span className="text-xs text-kp-red" role="status">Session bootstrap is unavailable.</span> : null}
+      {selectionError ? <span className="text-xs text-kp-red" role="alert">{selectionError}</span> : null}
     </div>
   )
 }

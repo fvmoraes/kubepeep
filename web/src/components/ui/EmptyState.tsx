@@ -8,20 +8,14 @@ export interface EmptyStateProps {
   className?: string
 }
 
+/** Compact empty state — no oversized box, the message is the focus. */
 export function EmptyState({ title, description, icon, action, className = '' }: EmptyStateProps) {
   return (
-    <div
-      className={`
-        min-h-22 flex flex-col justify-center gap-1.5
-        p-4 border border-dashed border-kp-overlay-2 rounded-md
-        text-kp-subtext bg-kp-surface-1
-        ${className}
-      `}
-    >
-      {icon ? <div className="text-kp-text">{icon}</div> : null}
-      <strong className="text-base text-kp-text">{title}</strong>
-      {description ? <span className="text-xs leading-relaxed">{description}</span> : null}
-      {action ? <div className="mt-1">{action}</div> : null}
+    <div className={`flex flex-col items-center justify-center gap-1.5 py-10 px-4 text-center ${className}`}>
+      {icon ? <div className="mb-1 text-kp-text-disabled" aria-hidden="true">{icon}</div> : null}
+      <strong className="text-lg text-kp-text">{title}</strong>
+      {description ? <span className="max-w-md text-sm text-kp-overlay-text leading-relaxed">{description}</span> : null}
+      {action ? <div className="mt-3">{action}</div> : null}
     </div>
   )
 }

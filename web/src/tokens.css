@@ -1,55 +1,81 @@
 @theme {
-  /* Base palette (Catppuccin Mocha inspired) */
-  --color-kp-crust: #0e0a16;
-  --color-kp-mantle: #120e1a;
-  --color-kp-base: #16121f;
-  --color-kp-surface-0: #1c1730;
-  --color-kp-surface-1: #191427;
-  --color-kp-surface-2: #201a30;
-  --color-kp-surface-3: #251d35;
-  --color-kp-surface-4: #261e3a;
-  --color-kp-overlay-0: #33294a;
-  --color-kp-overlay-1: #382e50;
-  --color-kp-overlay-2: #413556;
-  --color-kp-overlay-3: #483d64;
-  --color-kp-overlay-4: #514363;
-  --color-kp-overlay-5: #6c568a;
+  /* ============================================================
+     KubePeep Design Tokens
+     Neutral dark surfaces with a purple brand accent.
+     ============================================================ */
 
-  --color-kp-text: #cdd6f4;
-  --color-kp-subtext: #bac2de;
-  --color-kp-overlay-text: #7f849c;
+  /* Backgrounds — near-neutral, barely purple */
+  --color-kp-crust: #0e0d13;        /* inputs, code, log output      */
+  --color-kp-mantle: #0e0d13;       /* sidebar                       */
+  --color-kp-base: #111016;         /* app background                */
+  --color-kp-surface-0: #18161e;    /* cards                         */
+  --color-kp-surface-1: #1d1a24;    /* elevated surface              */
+  --color-kp-surface-2: #1d1a24;
+  --color-kp-surface-3: #25212d;    /* hover                         */
+  --color-kp-surface-4: #25212d;
+  --color-kp-overlay-0: #302a3a;    /* default border                */
+  --color-kp-overlay-1: #3a3346;    /* strong border / skeleton      */
+  --color-kp-overlay-2: #302a3a;
+  --color-kp-overlay-3: #453d54;
+  --color-kp-overlay-4: #524963;
+  --color-kp-overlay-5: #6b5f7d;
 
-  --color-kp-mauve: #cba6f7;
-  --color-kp-mauve-hover: #d9b8ff;
-  --color-kp-mauve-muted: #6c568a;
+  /* Text hierarchy */
+  --color-kp-text: #f4f1f7;         /* primary   */
+  --color-kp-subtext: #c8c2d0;      /* secondary */
+  --color-kp-overlay-text: #918a9e; /* tertiary  */
+  --color-kp-text-disabled: #686271;
 
-  --color-kp-red: #f38ba8;
-  --color-kp-red-bg: #342231;
-  --color-kp-red-border: #65404c;
+  /* Divider (subtler than overlay-0, for table rows) */
+  --color-kp-divider: #24202e;
 
-  --color-kp-peach: #fab387;
-  --color-kp-peach-bg: #2b2537;
-  --color-kp-peach-border: #5c573e;
+  /* Brand accent — selection, navigation, focus, small highlights */
+  --color-kp-mauve: #a78bfa;
+  --color-kp-mauve-hover: #c4b5fd;
+  --color-kp-mauve-muted: #4a4166;
+  --color-kp-accent-bg: #221e33;
+  --color-kp-accent-border: #4a3d6e;
 
-  --color-kp-yellow: #f9e2af;
-  --color-kp-yellow-bg: #2b2537;
-  --color-kp-yellow-border: #5c573e;
+  /* Semantic — blue: normal/primary actions and info */
+  --color-kp-blue: #3b82f6;
+  --color-kp-blue-hover: #60a5fa;
+  --color-kp-blue-bg: #131f33;
+  --color-kp-blue-border: #24406b;
+  --color-kp-sky: #60a5fa;
+  --color-kp-sky-bg: #131f33;
+  --color-kp-sky-border: #24406b;
 
-  --color-kp-green: #a6e3a1;
-  --color-kp-green-bg: #405b43;
-  --color-kp-green-border: #405b43;
+  /* Semantic — green: success, healthy, running, connected */
+  --color-kp-green: #4ade80;
+  --color-kp-green-solid: #22c55e;
+  --color-kp-green-solid-hover: #34d399;
+  --color-kp-green-bg: #112417;
+  --color-kp-green-border: #1f5133;
 
-  --color-kp-sky: #89dceb;
-  --color-kp-sky-bg: #242c38;
-  --color-kp-sky-border: #405566;
+  /* Semantic — red: delete, stop, destructive, errors, failed */
+  --color-kp-red: #f87171;
+  --color-kp-red-solid: #ef4444;
+  --color-kp-red-solid-hover: #f05252;
+  --color-kp-red-bg: #2b1515;
+  --color-kp-red-border: #5c2626;
 
-  /* Brand gradients */
+  /* Semantic — amber: warnings, pending, stale, degraded */
+  --color-kp-yellow: #fbbf24;
+  --color-kp-amber: #f59e0b;
+  --color-kp-amber-hover: #f5a623;
+  --color-kp-yellow-bg: #2a2110;
+  --color-kp-yellow-border: #56451a;
+
+  /* Attention (orange, informational warnings between amber and red) */
+  --color-kp-peach: #fb923c;
+
+  /* Brand gradients (logo only) */
   --color-kp-brand-violet: #7c3aed;
   --color-kp-brand-indigo: #4f46e5;
   --color-kp-brand-blue: #2563eb;
   --color-kp-brand-fuchsia: #c026d3;
 
-  /* Spacing scale */
+  /* Spacing scale (Tailwind-compatible) */
   --spacing-px: 1px;
   --spacing-0: 0px;
   --spacing-0\.5: 2px;
@@ -75,39 +101,57 @@
 
   /* Radius scale */
   --radius-none: 0px;
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 10px;
-  --radius-xl: 12px;
-  --radius-2xl: 16px;
+  --radius-sm: 5px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 10px;
+  --radius-2xl: 12px;
   --radius-full: 9999px;
 
-  /* Typography */
-  --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  /* Typography — single family for the whole application.
+     Monospace is reserved for logs, YAML/JSON and technical values. */
+  --font-sans: "Inter Variable", Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 
-  --text-2xs: 9px;
-  --text-xs: 10px;
-  --text-sm: 11px;
-  --text-base: 12px;
-  --text-md: 13px;
-  --text-lg: 14px;
-  --text-xl: 16px;
-  --text-2xl: 18px;
-  --text-3xl: 22px;
-  --text-4xl: clamp(22px, 4vw, 32px);
+  /* Type scale — 10/11/12/13/14/16/20/26/32 */
+  --text-2xs: 0.625rem;             /* 10px fine print                    */
+  --text-2xs--line-height: 1.45;
+  --text-xs: 0.6875rem;             /* 11px badges, metadata, labels      */
+  --text-xs--line-height: 1.45;
+  --text-sm: 0.75rem;               /* 12px secondary text                */
+  --text-sm--line-height: 1.45;
+  --text-base: 0.8125rem;           /* 13px menus, tables, inputs         */
+  --text-base--line-height: 1.5;
+  --text-md: 0.8125rem;             /* 13px alias of base                 */
+  --text-md--line-height: 1.5;
+  --text-lg: 0.875rem;              /* 14px default body text             */
+  --text-lg--line-height: 1.5;
+  --text-xl: 1rem;                  /* 16px card / section headings       */
+  --text-xl--line-height: 1.35;
+  --text-2xl: 1.25rem;              /* 20px page titles                   */
+  --text-2xl--line-height: 1.25;
+  --text-3xl: 1.625rem;             /* 26px hero numbers                  */
+  --text-3xl--line-height: 1.2;
+  --text-4xl: 2rem;                 /* 32px rare hero                     */
+  --text-4xl--line-height: 1.15;
+
+  /* Control heights: sm 28 / md 32 / lg 36 (h-7 / h-8 / h-9) */
 
   /* Shadows */
-  --shadow-card: 0 14px 40px rgba(0, 0, 0, 0.16);
-  --shadow-dialog: 0 28px 80px rgba(0, 0, 0, 0.52);
-  --shadow-focus: 0 0 0 2px rgba(203, 166, 247, 0.12);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.45), 0 4px 16px rgba(0, 0, 0, 0.22);
+  --shadow-popover: 0 4px 12px rgba(0, 0, 0, 0.4), 0 12px 32px rgba(0, 0, 0, 0.35);
+  --shadow-dialog: 0 12px 48px rgba(0, 0, 0, 0.55);
+  --shadow-focus: 0 0 0 2px rgba(167, 139, 250, 0.28);
 
   /* Z-index */
   --z-skip-link: 100;
   --z-sidebar-mobile: 10;
   --z-command-backdrop: 120;
+  --z-tooltip: 130;
 
-  /* Layout */
-  --sidebar-width: 220px;
-  --topbar-height: 82px;
+  /* Layout constants */
+  --sidebar-width: 240px;
+  --sidebar-width-compact: 56px;
+  --header-height: 56px;
+  --content-max-width: 1400px;
 }

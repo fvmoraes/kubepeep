@@ -6,14 +6,13 @@ interface BrandLogoProps {
   alt?: string
 }
 
-export function BrandLogo({ className, size = 34, alt = 'KubePeep' }: BrandLogoProps) {
+export function BrandLogo({ className = '', size = 28, alt = 'KubePeep' }: BrandLogoProps) {
   return (
     <img
       src={logo}
       alt={alt}
-      width={size}
-      height={size}
-      className={className}
+      style={{ width: `${size}px`, height: `${size}px` }}
+      className={`block shrink-0 ${className}`}
       aria-hidden="true"
     />
   )

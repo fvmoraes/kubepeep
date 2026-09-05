@@ -48,34 +48,34 @@ export function YamlViewer({ value, pending, error, onLoad, diffTarget }: YamlVi
   }
 
   return (
-    <section className="yaml-viewer" aria-label="Authorized YAML">
-      <Button variant="secondary" size="compact" disabled={pending} onClick={onLoad}>
+    <section className="mt-3 flex flex-col gap-2 border-t border-kp-overlay-0 pt-3" aria-label="Authorized YAML">
+      <Button variant="secondary" size="sm" className="justify-self-start" disabled={pending} onClick={onLoad}>
         {pending ? 'Loading YAML…' : 'Load authorized YAML'}
       </Button>
-      {error ? <p className="field-error">{formatError(error)}</p> : null}
+      {error ? <p className="text-sm text-kp-red">{formatError(error)}</p> : null}
       {value !== undefined ? (
         <div
           aria-label="YAML document"
-          className="yaml-document overflow-auto rounded-md border border-kp-overlay-0 bg-kp-crust p-3"
+          className="mono overflow-auto rounded-md border border-kp-overlay-0 bg-kp-crust p-3 text-xs leading-relaxed"
           role="region"
         >
           <SyntaxHighlighter
             language="yaml"
             PreTag="div"
             style={vscDarkPlus}
-            customStyle={{ background: 'transparent', margin: 0, padding: 0 }}
+            customStyle={{ background: 'transparent', margin: 0, padding: 0, fontFamily: 'inherit' }}
           >
             {value}
           </SyntaxHighlighter>
         </div>
       ) : (
-        <p>YAML is fetched only after this explicit action and remains in memory.</p>
+        <p className="text-xs text-kp-overlay-text">YAML is fetched only after this explicit action and remains in memory.</p>
       )}
       {diffTarget ? (
         <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="secondary"
-            size="compact"
+            size="sm"
             disabled={value === undefined || diffState.kind === 'pending'}
             onClick={() => void loadDiff()}
           >
@@ -84,7 +84,7 @@ export function YamlViewer({ value, pending, error, onLoad, diffTarget }: YamlVi
           {diffState.kind === 'ready' && diffState.diff.truncated ? <Badge variant="warning">truncated</Badge> : null}
         </div>
       ) : null}
-      {diffState.kind === 'error' ? <p className="field-error">{diffState.message}</p> : null}
+      {diffState.kind === 'error' ? <p className="text-sm text-kp-red">{diffState.message}</p> : null}
       {diffState.kind === 'ready' ? (
         diffState.diff.absent ? (
           <p role="status">No last-applied baseline was found; the resource was not applied through kubectl.</p>

@@ -3,13 +3,5 @@ export interface SkeletonProps {
 }
 
 export function Skeleton({ className = '' }: SkeletonProps) {
-  return (
-    <div
-      className={`
-        animate-pulse rounded-md bg-kp-overlay-1
-        ${className}
-      `}
-      aria-hidden="true"
-    />
-  )
+  return <div className={`animate-pulse rounded-md bg-kp-surface-3 ${className}`} aria-hidden="true" />
 }

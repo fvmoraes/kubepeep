@@ -31,24 +31,21 @@ export function DataTable<T>({
   onRowClick,
   getRowKey,
 }: DataTableProps<T>) {
-  const cellPadding = compact ? 'px-2.5 py-2' : 'px-3 py-2.5'
-  const headerPadding = compact ? 'px-2.5 py-2' : 'px-3 py-2.5'
+  const cellPadding = compact ? 'px-2.5 py-1.5' : 'px-3 py-2'
 
   return (
     <div className={`min-w-0 overflow-x-auto ${className}`}>
-      <table className="w-full border-collapse text-xs">
-        {caption ? <caption className="px-3 py-2.5 text-left text-kp-overlay-text">{caption}</caption> : null}
+      <table className="w-full border-collapse text-base">
+        {caption ? <caption className="px-3 py-2 text-left text-xs text-kp-overlay-text">{caption}</caption> : null}
         <thead>
           <tr>
             {columns.map((column) => (
               <th
                 key={column.key}
                 scope="col"
-                className={`
-                  ${headerPadding} border-b border-kp-overlay-0
-                  text-left text-kp-overlay-text uppercase tracking-wide text-2xs whitespace-nowrap
-                  ${column.align === 'right' ? 'text-right' : column.align === 'center' ? 'text-center' : ''}
-                `}
+                className={`${cellPadding} border-b border-kp-overlay-0 text-left text-2xs font-medium text-kp-overlay-text uppercase tracking-wider whitespace-nowrap ${
+                  column.align === 'right' ? 'text-right' : column.align === 'center' ? 'text-center' : ''
+                }`}
                 style={{ width: column.width }}
               >
                 {column.header}
@@ -63,15 +60,14 @@ export function DataTable<T>({
               <tr
                 key={key}
                 onClick={onRowClick ? () => onRowClick(row, index) : undefined}
-                className={onRowClick ? 'cursor-pointer hover:bg-kp-surface-1' : ''}
+                className={`border-b border-kp-divider last:border-b-0 ${onRowClick ? 'cursor-pointer hover:bg-kp-surface-3' : 'hover:bg-kp-surface-2/50'}`}
               >
                 {columns.map((column) => (
                   <td
                     key={column.key}
-                    className={`
-                      ${cellPadding} border-b border-kp-overlay-0 align-top
-                      ${column.align === 'right' ? 'text-right' : column.align === 'center' ? 'text-center' : ''}
-                    `}
+                    className={`${cellPadding} align-top text-kp-subtext ${
+                      column.align === 'right' ? 'text-right' : column.align === 'center' ? 'text-center' : ''
+                    }`}
                   >
                     {column.cell(row, index)}
                   </td>
@@ -80,7 +76,13 @@ export function DataTable<T>({
             )
           })}
         </tbody>
-        {footer ? <tfoot><tr><td colSpan={columns.length} className="px-3 py-3 border-t border-kp-overlay-0">{footer}</td></tr></tfoot> : null}
+        {footer ? (
+          <tfoot>
+            <tr>
+              <td colSpan={columns.length} className="px-3 py-2.5 border-t border-kp-overlay-0">{footer}</td>
+            </tr>
+          </tfoot>
+        ) : null}
       </table>
     </div>
   )

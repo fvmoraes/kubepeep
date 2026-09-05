@@ -4,7 +4,8 @@ import { useMemo, useState } from 'react'
 import { getStatus, type Capability, type CapabilityDecision, type CapabilityMatrix } from '../api/client'
 import { getBatchedPermissions } from '../permissions/batchedPermissions'
 import { StatePanel } from './StatePanel'
-import { Badge, Button, Card, CardContent, CardHeader, DataTable } from './ui'
+import { Badge, Button, Card, CardContent, DataTable, PageHeader } from './ui'
+import { WarningBanner } from './ui/Banner'
 
 const decisionCopy: Record<CapabilityDecision, string> = {
   allowed: 'allowed',
@@ -28,7 +29,7 @@ export function PermissionsMatrixView({ matrix }: { matrix: CapabilityMatrix }) 
     {
       key: 'capability',
       header: 'Capability',
-      cell: (capability: Capability) => <code className="text-kp-sky">{capability.capabilityId}</code>,
+      cell: (capability: Capability) => <code>{capability.capabilityId}</code>,
     },
     {
       key: 'target',
@@ -56,9 +57,9 @@ export function PermissionsMatrixView({ matrix }: { matrix: CapabilityMatrix }) 
   }
   return (
     <>
-      {!matrix.complete ? <p className="permission-notice" role="status">This matrix is partial. Unknown is not treated as a confirmed denial.</p> : null}
-      {matrix.truncated ? <p className="permission-notice" role="status">Only the bounded namespace subset is shown.</p> : null}
-      {matrix.errors.map((error) => <p className="field-error" role="status" key={`${error.namespace ?? 'global'}-${error.code}-${error.message}`}>{error.namespace ? `${error.namespace}: ` : ''}{error.message}</p>)}
+      {!matrix.complete ? <WarningBanner className="mb-2.5">This matrix is partial. Unknown is not treated as a confirmed denial.</WarningBanner> : null}
+      {matrix.truncated ? <WarningBanner className="mb-2.5">Only the bounded namespace subset is shown.</WarningBanner> : null}
+      {matrix.errors.map((error) => <p className="text-xs text-kp-red" role="status" key={`${error.namespace ?? 'global'}-${error.code}-${error.message}`}>{error.namespace ? `${error.namespace}: ` : ''}{error.message}</p>)}
       <DataTable
         caption={`Capabilities for generation ${matrix.generation}`}
         columns={columns}
@@ -93,17 +94,20 @@ export function PermissionsMatrixPage() {
   }
 
   return (
-    <Card className="max-w-[1120px]" aria-labelledby="permissions-title">
-      <CardContent>
-        <CardHeader>
-          <div><span className="eyebrow">RBAC</span><h1 id="permissions-title" className="text-xl text-kp-text mt-1">Permission matrix</h1></div>
-          <Button variant="secondary" size="compact" onClick={() => setRefresh((value) => value + 1)} disabled={permissions.isFetching}>Refresh permissions</Button>
-        </CardHeader>
-        <p className="text-kp-overlay-text text-md leading-[1.65] mb-5">The backend revalidates every protected action. This display never grants authority by itself.</p>
-        {permissions.isPending ? <StatePanel kind="loading" title="Evaluating capabilities">SelfSubjectAccessReview decisions are loading.</StatePanel> : null}
-        {permissions.isError ? <StatePanel kind="unavailable" title="Authorization is unavailable">Permission review could not produce a matrix. No mutation is assumed to be allowed.</StatePanel> : null}
-        {permissions.data ? <PermissionsMatrixView matrix={permissions.data} /> : null}
-      </CardContent>
-    </Card>
+    <div className="flex w-full min-w-0 flex-col gap-4">
+      <PageHeader
+        title="Permission matrix"
+        description="Effective capabilities evaluated by SelfSubjectAccessReview for the active scope."
+        actions={<Button variant="secondary" size="sm" onClick={() => setRefresh((value) => value + 1)} disabled={permissions.isFetching}>Refresh permissions</Button>}
+      />
+      <Card className="p-4">
+        <CardContent className="grid gap-3 p-0">
+          <p className="m-0 text-sm text-kp-overlay-text">The backend revalidates every protected action. This display never grants authority by itself.</p>
+          {permissions.isPending ? <StatePanel kind="loading" title="Evaluating capabilities">SelfSubjectAccessReview decisions are loading.</StatePanel> : null}
+          {permissions.isError ? <StatePanel kind="unavailable" title="Authorization is unavailable">Permission review could not produce a matrix. No mutation is assumed to be allowed.</StatePanel> : null}
+          {permissions.data ? <PermissionsMatrixView matrix={permissions.data} /> : null}
+        </CardContent>
+      </Card>
+    </div>
   )
 }

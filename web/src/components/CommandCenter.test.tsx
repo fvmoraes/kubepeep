@@ -72,7 +72,7 @@ describe('CommandCenter', () => {
 
     fireEvent.keyDown(document.body, { key: '?', shiftKey: true })
     const dialog = screen.getByRole('dialog', { name: 'Keyboard shortcuts' })
-    expect(dialog).toHaveClass('command-center-dialog--help')
+    expect(dialog).toHaveAttribute('data-view', 'help')
     expect(dialog).toHaveTextContent('Refresh repeats only active read queries; no shortcut mutates Kubernetes resources.')
     expect(dialog).toHaveTextContent('Open page search from anywhere.')
     expect(dialog).toHaveTextContent('Refresh active read-only views instead of reloading the browser.')
@@ -85,7 +85,7 @@ describe('CommandCenter', () => {
     expect(onRefresh).not.toHaveBeenCalled()
 
     fireEvent.click(within(dialog).getByRole('button', { name: 'Search pages' }))
-    expect(screen.getByRole('dialog', { name: 'Command center' })).toHaveClass('command-center-dialog--commands')
+    expect(screen.getByRole('dialog', { name: 'Command center' })).toHaveAttribute('data-view', 'commands')
   })
 
   it('refreshes and focuses safe targets with Ctrl/Meta only outside editors', () => {

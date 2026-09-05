@@ -88,7 +88,7 @@ describe('context selector cancellation and states', () => {
     renderSelector()
 
     expect(await screen.findByText('No contexts exist in this kubeconfig.')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Select' })).toBeDisabled()
+    expect(screen.getByRole('combobox', { name: 'Kubernetes context' })).toBeDisabled()
   })
 
   it('cancels a pending selection before submitting a newer context intention', async () => {
@@ -116,7 +116,7 @@ describe('context selector cancellation and states', () => {
             reject(new DOMException('aborted', 'AbortError'))
           }))
         }
-        return Promise.resolve(json({ clusterProfileId: 1, context: 'beta', cluster: 'dev', scopeId: null, scopeName: null, scopeMode: null, scopeSource: 'none', defaultNamespace: null, namespaceCount: 0, generation: 'gen_2' }))
+        return Promise.resolve(json({ clusterProfileId: 1, context: 'alpha', cluster: 'dev', scopeId: null, scopeName: null, scopeMode: null, scopeSource: 'none', defaultNamespace: null, namespaceCount: 0, generation: 'gen_2' }))
       }
       if (url === '/api/v1/status') {
         return Promise.resolve(json({}))
@@ -127,11 +127,10 @@ describe('context selector cancellation and states', () => {
     renderSelector()
 
     const contexts = await screen.findByRole('combobox', { name: 'Kubernetes context' })
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Select' })).toBeEnabled())
-    fireEvent.click(screen.getByRole('button', { name: 'Select' }))
-    await waitFor(() => expect(selectionCalls).toBe(1))
+    await waitFor(() => expect(contexts).toBeEnabled())
     fireEvent.change(contexts, { target: { value: 'beta' } })
-    fireEvent.click(screen.getByRole('button', { name: /Select|Switching/ }))
+    await waitFor(() => expect(selectionCalls).toBe(1))
+    fireEvent.change(contexts, { target: { value: 'alpha' } })
 
     await waitFor(() => expect(firstSelectionAborted).toBe(true))
     await waitFor(() => expect(selectionCalls).toBe(2))

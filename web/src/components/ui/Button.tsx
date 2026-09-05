@@ -1,41 +1,51 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react'
 
+export type ButtonVariant =
+  | 'primary'    // blue — normal/primary actions (apply, refresh, open, connect…)
+  | 'secondary'  // neutral surface — alternative actions
+  | 'success'    // green — positive confirmation
+  | 'danger'     // red — delete, stop, disconnect
+  | 'warning'    // amber — risky-but-required confirmations
+  | 'ghost'      // transparent — inline, table and toolbar actions
+  | 'icon'       // ghost square — icon-only controls
+
+export type ButtonSize = 'sm' | 'md' | 'lg'
+
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: 'primary' | 'secondary' | 'danger' | 'ghost'
-  size?: 'default' | 'compact'
-  children: ReactNode
+  variant?: ButtonVariant
+  size?: ButtonSize
+  children?: ReactNode
 }
 
-export function Button({
-  variant = 'primary',
-  size = 'default',
-  className = '',
-  children,
-  ...props
-}: ButtonProps) {
-  const base =
-    'inline-flex items-center justify-center gap-2 font-bold rounded-md cursor-pointer transition-[filter] disabled:cursor-not-allowed disabled:opacity-48'
+const sizes: Record<ButtonSize, string> = {
+  sm: 'h-7 gap-1.5 px-2.5 text-xs rounded-md',
+  md: 'h-8 gap-2 px-3 text-sm rounded-md',
+  lg: 'h-9 gap-2 px-4 text-base rounded-lg',
+}
 
-  const sizes = {
-    default: 'min-h-9 px-3.5 py-2 text-base',
-    compact: 'min-h-7.5 px-2 py-1 text-xs',
-  }
+const variants: Record<ButtonVariant, string> = {
+  primary:
+    'text-white bg-kp-blue border border-kp-blue hover:not-disabled:bg-kp-blue-hover hover:not-disabled:border-kp-blue-hover',
+  secondary:
+    'text-kp-text bg-kp-surface-3 border border-kp-overlay-1 hover:not-disabled:bg-kp-overlay-0 hover:not-disabled:border-kp-overlay-3',
+  success:
+    'text-white bg-kp-green-solid border border-kp-green-solid hover:not-disabled:bg-kp-green-solid-hover hover:not-disabled:border-kp-green-solid-hover',
+  danger:
+    'text-white bg-kp-red-solid border border-kp-red-solid hover:not-disabled:bg-kp-red-solid-hover hover:not-disabled:border-kp-red-solid-hover',
+  warning:
+    'text-kp-base bg-kp-amber border border-kp-amber hover:not-disabled:bg-kp-amber-hover hover:not-disabled:border-kp-amber-hover',
+  ghost:
+    'text-kp-subtext bg-transparent border border-transparent hover:not-disabled:bg-kp-surface-3 hover:not-disabled:text-kp-text',
+  icon:
+    'h-7 w-7 gap-0 p-0 justify-center text-kp-overlay-text bg-transparent border border-transparent rounded-md hover:not-disabled:bg-kp-surface-3 hover:not-disabled:text-kp-text',
+}
 
-  const variants = {
-    primary:
-      'text-kp-crust bg-kp-mauve border border-kp-mauve-hover hover:not-disabled:brightness-108',
-    secondary:
-      'text-kp-subtext bg-kp-surface-3 border border-kp-overlay-3 hover:not-disabled:bg-kp-surface-4 hover:not-disabled:border-kp-overlay-5',
-    danger:
-      'text-kp-red bg-kp-red-bg border border-kp-red-border hover:not-disabled:brightness-108',
-    ghost:
-      'text-kp-subtext bg-transparent border border-transparent hover:not-disabled:bg-kp-surface-2 hover:not-disabled:text-kp-text',
-  }
-
+export function Button({ variant = 'primary', size = 'md', className = '', type, children, ...props }: ButtonProps) {
+  const sizeClass = variant === 'icon' ? '' : sizes[size]
   return (
     <button
-      type="button"
-      className={`${base} ${sizes[size]} ${variants[variant]} ${className}`}
+      type={type ?? 'button'}
+      className={`inline-flex items-center justify-center font-medium whitespace-nowrap cursor-pointer transition-colors duration-100 disabled:cursor-not-allowed disabled:opacity-45 focus-visible:outline-2 focus-visible:outline-kp-mauve focus-visible:outline-offset-1 ${sizeClass} ${variants[variant]} ${className}`}
       {...props}
     >
       {children}

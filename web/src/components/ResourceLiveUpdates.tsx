@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { APIError, getSession } from '../api/client'
 import { streamURL } from '../api/desktop'
 import type { APIErrorPayload } from '../api/types'
+import { Button } from './ui'
 
 export type ResourceTopic = 'pods' | 'events' | 'workloads' | 'services' | 'ingresses' | 'endpoint-slices' | 'configmaps'
 
@@ -148,13 +149,20 @@ export function ResourceLiveUpdates({ generation, topics, queryKeys }: { generat
     }
   }
 
+  const stateStyles: Record<LiveMode, string> = {
+    idle: 'border-kp-overlay-0 text-kp-overlay-text',
+    connecting: 'border-kp-blue-border text-kp-sky',
+    live: 'border-kp-green-border text-kp-green',
+    error: 'border-kp-red-border text-kp-red',
+  }
+
   return (
-    <section className={`live-updates live-updates--${state.mode}`} aria-label="Resource live updates">
-      <span aria-live="polite">{state.message}</span>
-      <div>
-        <button type="button" className="button button--secondary button--compact" disabled={state.mode === 'connecting' || state.mode === 'live'} onClick={() => void start()}>{state.mode === 'error' ? 'Retry live updates' : 'Start live updates'}</button>
-        <button type="button" className="button button--secondary button--compact" onClick={() => void invalidate()}>Refresh now</button>
-        {state.mode === 'live' || state.mode === 'connecting' ? <button type="button" className="button button--danger button--compact" onClick={stop}>Stop live updates</button> : null}
+    <section className={`flex flex-wrap items-center justify-between gap-2 rounded-xl border bg-kp-surface-0 px-3 py-2 ${stateStyles[state.mode]}`} aria-label="Resource live updates">
+      <span aria-live="polite" className="text-xs leading-snug max-w-[540px]">{state.message}</span>
+      <div className="flex flex-wrap justify-end gap-1.5">
+        <Button size="sm" variant="secondary" disabled={state.mode === 'connecting' || state.mode === 'live'} onClick={() => void start()}>{state.mode === 'error' ? 'Retry live updates' : 'Start live updates'}</Button>
+        <Button size="sm" variant="secondary" onClick={() => void invalidate()}>Refresh now</Button>
+        {state.mode === 'live' || state.mode === 'connecting' ? <Button size="sm" variant="danger" onClick={stop}>Stop live updates</Button> : null}
       </div>
     </section>
   )
