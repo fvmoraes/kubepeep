@@ -79,12 +79,14 @@ describe('namespace scope editor', () => {
   it('supports single, list, and all semantics without ever showing a wildcard item', () => {
     renderForm()
     const input = screen.getByRole('textbox', { name: 'Namespace input' })
+    // A bulk paste auto-switches single → list so save is never stranded.
     fireEvent.change(input, { target: { value: 'payments billing' } })
-    expect(screen.getByRole('alert')).toHaveTextContent('exactly one namespace')
-
-    fireEvent.click(screen.getByRole('radio', { name: 'list' }))
-    expect(screen.queryByText(/exactly one namespace/)).not.toBeInTheDocument()
+    expect(screen.getByText('Switched to list mode: more than one namespace was entered.')).toBeInTheDocument()
     expect(screen.getByRole('combobox', { name: 'Default namespace' })).toHaveValue('payments')
+
+    // Choosing single explicitly with several names stays blocked, with guidance.
+    fireEvent.click(screen.getByRole('radio', { name: 'single' }))
+    expect(screen.getByRole('alert')).toHaveTextContent('exactly one namespace')
 
     fireEvent.click(screen.getByRole('radio', { name: 'all' }))
     expect(screen.queryByRole('textbox', { name: 'Namespace input' })).not.toBeInTheDocument()
@@ -126,8 +128,8 @@ describe('namespace scope editor', () => {
     renderForm('ephemeral-token')
     fireEvent.change(screen.getByRole('textbox', { name: 'Namespace input' }), { target: { value: 'payments' } })
 
-    expect(screen.getByRole('button', { name: 'Validate with cluster' })).toBeDisabled()
-    fireEvent.change(screen.getByRole('textbox', { name: 'Scope name' }), { target: { value: 'Finance' } })
+    // Existence checking no longer requires a scope name: the client always
+    // tries the cluster list when a session exists (F0).
     fireEvent.click(screen.getByRole('button', { name: 'Validate with cluster' }))
 
     expect(await screen.findByText('Existence was not checked: NAMESPACE_LIST_FORBIDDEN.')).toBeInTheDocument()
@@ -167,6 +169,7 @@ describe('namespace scope editor', () => {
       if (path === '/api/v1/status') return Promise.resolve(apiJSON(editorStatus()))
       if (path === '/api/v1/session') return Promise.resolve(apiJSON({ csrfToken: 'csrf_scope', origin: 'http://127.0.0.1:2748', generation: 'gen_42', expiresAt: '2026-08-10T13:00:00Z' }))
       if (path === '/api/v1/namespace-scopes?limit=100') return Promise.resolve(apiJSON([activeScope, otherScope]))
+      if (path === '/api/v1/namespace-scopes/validate') return Promise.resolve(apiJSON({ valid: ['payments'], validCount: 1, duplicateCount: 0, discardedEmptyCount: 0, invalid: [], invalidCount: 0, existence: { checked: false, reasonCode: 'NAMESPACE_LIST_FORBIDDEN' } }))
       if (path === '/api/v1/namespace-scopes/2/select') {
         selectBody = JSON.parse(String(init?.body))
         return Promise.resolve(apiJSON({ ...editorStatus().selection, scopeId: 2, scopeName: 'Other', generation: 'gen_43' }))
@@ -191,6 +194,7 @@ describe('namespace scope editor', () => {
       if (path === '/api/v1/status') return Promise.resolve(apiJSON(editorStatus()))
       if (path === '/api/v1/session') return Promise.resolve(apiJSON({ csrfToken: 'csrf_scope', origin: 'http://127.0.0.1:2748', generation: 'gen_42', expiresAt: '2026-08-10T13:00:00Z' }))
       if (path === '/api/v1/namespace-scopes?limit=100') return Promise.resolve(apiJSON([activeScope, otherScope]))
+      if (path === '/api/v1/namespace-scopes/validate') return Promise.resolve(apiJSON({ valid: ['payments'], validCount: 1, duplicateCount: 0, discardedEmptyCount: 0, invalid: [], invalidCount: 0, existence: { checked: false, reasonCode: 'NAMESPACE_LIST_FORBIDDEN' } }))
       if (path === '/api/v1/namespace-scopes/1') {
         deleteBody = JSON.parse(String(init?.body))
         return Promise.resolve(apiJSON({ ...editorStatus().selection, scopeId: 2, scopeName: 'Other', generation: 'gen_43' }))

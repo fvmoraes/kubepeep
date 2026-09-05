@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import {
   APIError,
@@ -23,6 +23,9 @@ import { Badge, Button, Card, CardContent, CardHeader, Input, Select } from './u
 interface NamespaceScopeFormProps {
   selection: SelectionSummary
   csrfToken: string | null
+  /** Set when the local session could not be established; saving stays fail-closed. */
+  sessionError?: string | null
+  onSessionRetry?: () => void
   scope?: NamespaceScope | null
   onSaved?: (scope: NamespaceScope) => void
   onCancel?: () => void
@@ -41,18 +44,43 @@ const emptyValidation: NamespaceScopeValidation = {
 // Large batch pastes stay responsive: chips render up to this cap and the
 // counters above always cover the whole input.
 const maximumPreviewChips = 300
+// Auto existence check (F0): the backend tries to list namespaces whenever
+// the identity permits it and reports checked/forbidden/unavailable — the
+// client never assumes either way. Debounced to one request per pause.
+const autoCheckDelayMs = 650
 
 function messageFor(error: Error): string {
   return error instanceof APIError ? error.message : 'The local API is offline.'
 }
 
-export function NamespaceScopeForm({ selection, csrfToken, scope = null, onSaved, onCancel }: NamespaceScopeFormProps) {
+function isValidationReport(value: unknown): value is NamespaceScopeValidation {
+  return Boolean(value) && typeof value === 'object' && Array.isArray((value as NamespaceScopeValidation).valid)
+}
+
+function existenceNote(existence: NamespaceScopeValidation['existence'], validCount: number, notFoundCount: number): { tone: 'info' | 'amber'; text: string } | null {
+  if (!existence.checked) {
+    if (existence.reasonCode === 'NAMESPACE_LIST_FORBIDDEN') {
+      return { tone: 'amber', text: 'Namespace listing is denied for this identity — the list is still saved. KubePeep tried to list and will not assume the names exist.' }
+    }
+    if (existence.reasonCode === 'NAMESPACE_LIST_UNAVAILABLE') {
+      return { tone: 'amber', text: 'The cluster namespace list is unavailable right now — the list is still saved.' }
+    }
+    return null
+  }
+  return { tone: 'info', text: `Existence verified against the cluster: ${validCount} found${notFoundCount > 0 ? `, ${notFoundCount} not found` : ''}.` }
+}
+
+export function NamespaceScopeForm({ selection, csrfToken, sessionError, onSessionRetry, scope = null, onSaved, onCancel }: NamespaceScopeFormProps) {
   const [name, setName] = useState(scope?.name ?? '')
   const [mode, setMode] = useState<NamespaceScopeMode>(scope?.mode ?? 'single')
   const [rawInput, setRawInput] = useState(scope ? scope.namespaces.join('\n') : (selection.defaultNamespace ?? ''))
   const [defaultNamespace, setDefaultNamespace] = useState(scope?.defaultNamespace ?? selection.defaultNamespace ?? '')
   const [serverValidation, setServerValidation] = useState<NamespaceScopeValidation | null>(null)
+  const [autoCheckState, setAutoCheckState] = useState<'idle' | 'running' | 'error'>('idle')
+  const [modeSwitched, setModeSwitched] = useState(false)
   const editing = scope !== null
+  const inFlightRef = useRef<AbortController | null>(null)
+  const payloadRef = useRef('')
 
   const parsed = useMemo(() => {
     if (mode === 'all') {
@@ -68,20 +96,45 @@ export function NamespaceScopeForm({ selection, csrfToken, scope = null, onSaved
     }
   }, [mode, rawInput])
 
+  // The server existence check is authoritative when it ran: names missing
+  // from the cluster arrive as NAMESPACE_NOT_FOUND entries. Local parsing
+  // remains the fallback while the request is in flight or was refused.
+  const shownValidation = isValidationReport(serverValidation) ? serverValidation : parsed.validation
   const effectiveDefaultNamespace = mode === 'all'
     ? ''
-    : parsed.validation.valid.includes(defaultNamespace)
+    : shownValidation.valid.includes(defaultNamespace)
       ? defaultNamespace
-      : (parsed.validation.valid[0] ?? '')
+      : (shownValidation.valid[0] ?? '')
 
   const updateMode = (value: NamespaceScopeMode) => {
     setMode(value)
     setServerValidation(null)
+    setModeSwitched(false)
   }
 
   const updateRawInput = (value: string) => {
     setRawInput(value)
     setServerValidation(null)
+    // Bulk journey (F0/U12): pasting several names in the default single mode
+    // must not strand the operator behind a disabled save button.
+    if (mode === 'single') {
+      try {
+        if (parseNamespaceInput(value).validCount > 1) {
+          setMode('list')
+          setModeSwitched(true)
+        }
+      } catch {
+        // Structured-parse errors surface through parsed.error.
+      }
+    }
+  }
+
+  const removeItem = (item: string) => {
+    const remaining = [
+      ...parsed.validation.valid.filter((candidate) => candidate !== item),
+      ...parsed.validation.invalid.map((candidate) => candidate.input).filter((candidate) => candidate !== item),
+    ]
+    updateRawInput(remaining.join('\n'))
   }
 
   const requestBody = () => ({
@@ -92,9 +145,20 @@ export function NamespaceScopeForm({ selection, csrfToken, scope = null, onSaved
     ...(mode === 'all' ? {} : { rawInput, defaultNamespace: effectiveDefaultNamespace || null }),
   })
 
+  // Existence check payload intentionally excludes name/default selections so
+  // typing a title never re-fires a cluster request.
+  const checkPayload = useCallback(() => ({
+    clusterProfileId: selection.clusterProfileId,
+    context: selection.context,
+    mode,
+    ...(mode === 'all' ? {} : { rawInput }),
+  }), [mode, rawInput, selection.clusterProfileId, selection.context])
+
   const validation = useMutation({
-    mutationFn: () => validateNamespaceScope(requestBody(), csrfToken!),
-    onSuccess: setServerValidation,
+    mutationFn: () => validateNamespaceScope(checkPayload(), csrfToken!),
+    onSuccess: (report) => {
+      if (isValidationReport(report)) setServerValidation(report)
+    },
   })
   const save = useMutation({
     mutationFn: () => editing
@@ -113,19 +177,47 @@ export function NamespaceScopeForm({ selection, csrfToken, scope = null, onSaved
     },
   })
 
-  const shownValidation = serverValidation ?? parsed.validation
-  const modeError = parsed.error ?? validateNamespaceMode(mode, parsed.validation)
-  const canContactServer = csrfToken !== null && !validation.isPending && !save.isPending
-  const canValidate = canContactServer && name.trim() !== '' && modeError === null
-  const canSave = canContactServer && name.trim() !== '' && modeError === null
+  // Automatic existence check (F0/V0-04): run shortly after every input pause
+  // whenever a session exists. The backend lists namespaces when RBAC allows
+  // and reports FORBIDDEN/UNAVAILABLE otherwise — the client never guesses.
+  useEffect(() => {
+    if (!csrfToken || mode === 'all' || parsed.error || parsed.validation.valid.length === 0) {
+      return
+    }
+    const payload = checkPayload()
+    payloadRef.current = JSON.stringify(payload)
+    const timer = window.setTimeout(() => {
+      inFlightRef.current?.abort()
+      const controller = new AbortController()
+      inFlightRef.current = controller
+      setAutoCheckState('running')
+      void (async () => {
+        try {
+          const report = await validateNamespaceScope(payload, csrfToken, controller.signal)
+          if (payloadRef.current !== JSON.stringify(payload)) return
+          if (isValidationReport(report)) {
+            setServerValidation(report)
+            setAutoCheckState('idle')
+          }
+        } catch (cause) {
+          if ((cause as Error)?.name === 'AbortError') return
+          setAutoCheckState('error')
+        }
+      })()
+    }, autoCheckDelayMs)
+    return () => {
+      window.clearTimeout(timer)
+      inFlightRef.current?.abort()
+    }
+  }, [checkPayload, csrfToken, mode, parsed.error, parsed.validation])
 
-  const removeItem = (item: string) => {
-    const remaining = [
-      ...parsed.validation.valid.filter((candidate) => candidate !== item),
-      ...parsed.validation.invalid.map((candidate) => candidate.input).filter((candidate) => candidate !== item),
-    ]
-    updateRawInput(remaining.join('\n'))
-  }
+  const shownModeError = parsed.error ?? validateNamespaceMode(mode, shownValidation)
+  const canContactServer = csrfToken !== null && !validation.isPending && !save.isPending
+  const canValidate = canContactServer && name.trim() !== '' && shownModeError === null && mode !== 'all'
+  const canSave = canContactServer && name.trim() !== '' && shownModeError === null
+
+  const notFoundCount = shownValidation.invalid.filter((entry) => entry.code === 'NAMESPACE_NOT_FOUND').length
+  const existence = existenceNote(shownValidation.existence, shownValidation.validCount, notFoundCount)
 
   return (
     <Card aria-labelledby="scope-editor-title">
@@ -133,7 +225,7 @@ export function NamespaceScopeForm({ selection, csrfToken, scope = null, onSaved
         <CardHeader>
           <div>
             <h1 id="scope-editor-title" className="text-xl text-kp-text">{editing ? `Edit ${scope.name}` : 'Create a namespace scope'}</h1>
-            <p className="mt-0.5 text-sm text-kp-overlay-text">Namespace scopes bound this installation to explicit context namespaces.</p>
+            <p className="mt-0.5 text-sm text-kp-overlay-text">Paste the namespaces you work with, review the parsed list, and save once. Saving is local: it never creates Kubernetes objects.</p>
           </div>
           <span className="mono text-xs text-kp-overlay-text">{selection.generation}</span>
         </CardHeader>
@@ -152,6 +244,7 @@ export function NamespaceScopeForm({ selection, csrfToken, scope = null, onSaved
               <span className={`block min-w-[86px] rounded-md border px-3 py-1.5 text-center text-sm cursor-pointer transition-colors peer-focus-visible:outline-2 peer-focus-visible:outline-kp-mauve peer-focus-visible:outline-offset-1 ${mode === candidate ? 'border-kp-accent-border bg-kp-accent-bg text-kp-mauve font-medium' : 'border-kp-overlay-1 bg-kp-surface-3 text-kp-subtext hover:border-kp-overlay-3 hover:text-kp-text'}`}>{candidate}</span>
             </label>
           ))}
+          <small className="w-full text-xs text-kp-overlay-text">single: exactly one namespace · list: the pasted set · all: everything the identity may list (stored as no wildcard).</small>
         </fieldset>
 
         {mode === 'all' ? (
@@ -167,12 +260,22 @@ export function NamespaceScopeForm({ selection, csrfToken, scope = null, onSaved
                 value={rawInput}
                 onChange={(event) => updateRawInput(event.target.value)}
                 rows={8}
-                placeholder={'payments, billing\n---\n- invoices'}
+                placeholder={'payments, billing\ninvoices; observability\ncore'}
                 spellCheck={false}
                 className="min-h-[150px] w-full rounded-md border border-kp-overlay-0 bg-kp-crust px-2.5 py-2 text-sm text-kp-text leading-relaxed focus:border-kp-mauve focus:shadow-focus focus:outline-none resize-y"
               />
             </label>
-            <p className="m-0 text-xs text-kp-overlay-text">Plain delimiters, strict JSON arrays/objects, and simple YAML sequences are accepted.</p>
+            <details className="rounded-md border border-kp-overlay-0 bg-kp-surface-1 px-3 py-2">
+              <summary className="cursor-pointer text-xs text-kp-sky">How to format the list</summary>
+              <div className="mt-2 grid gap-1.5 text-xs leading-relaxed text-kp-subtext">
+                <p className="m-0">Separate names with commas, semicolons, spaces or one per line:</p>
+                <pre className="mono m-0 rounded border border-kp-overlay-0 bg-kp-crust px-2 py-1.5 text-2xs text-kp-text">{`payments, billing\ninvoices; observability`}</pre>
+                <p className="m-0">A JSON string array also works: <code className="mono">["payments", "billing"]</code> or <code className="mono">{'{"namespaces": ["payments"]}'}</code></p>
+                <p className="m-0">Simple YAML sequences are accepted:</p>
+                <pre className="mono m-0 rounded border border-kp-overlay-0 bg-kp-crust px-2 py-1.5 text-2xs text-kp-text">{`---\n- payments\n- billing`}</pre>
+                <p className="m-0">Lowercase letters, digits, hyphens; 1–63 characters. Invalid names block saving — click a red chip to remove it. Duplicates and empty entries are dropped automatically.</p>
+              </div>
+            </details>
           </>
         )}
 
@@ -185,35 +288,40 @@ export function NamespaceScopeForm({ selection, csrfToken, scope = null, onSaved
 
         {mode !== 'all' && (parsed.validation.valid.length > 0 || parsed.validation.invalid.length > 0) ? (
           <div className="flex flex-wrap gap-1.5" aria-label="Parsed namespaces">
-            {parsed.validation.valid.slice(0, maximumPreviewChips).map((namespace) => (
+            {shownValidation.valid.slice(0, maximumPreviewChips).map((namespace) => (
               <button key={`valid-${namespace}`} type="button" className="inline-flex items-center gap-1.5 rounded-full border border-kp-blue-border bg-kp-blue-bg px-2.5 py-1 text-xs text-kp-sky cursor-pointer hover:border-kp-overlay-3" onClick={() => removeItem(namespace)} aria-label={`Remove namespace ${namespace}`} title="Remove this namespace from the input">
                 {namespace}<span aria-hidden="true">×</span>
               </button>
             ))}
-            {parsed.validation.invalid.slice(0, maximumPreviewChips).map(({ input }) => (
-              <button key={`invalid-${input}`} type="button" className="inline-flex items-center gap-1.5 rounded-full border border-kp-red-border bg-kp-red-bg px-2.5 py-1 text-xs text-kp-red cursor-pointer hover:border-kp-overlay-3" onClick={() => removeItem(input)} aria-label={`Remove invalid namespace ${input}`} title="Remove this entry from the input">
+            {shownValidation.invalid.slice(0, maximumPreviewChips).map(({ input, code }) => (
+              <button key={`invalid-${input}`} type="button" className="inline-flex items-center gap-1.5 rounded-full border border-kp-red-border bg-kp-red-bg px-2.5 py-1 text-xs text-kp-red cursor-pointer hover:border-kp-overlay-3" onClick={() => removeItem(input)} aria-label={`Remove ${code === 'NAMESPACE_NOT_FOUND' ? 'namespace not found in cluster' : 'invalid namespace'} ${input}`} title={code === 'NAMESPACE_NOT_FOUND' ? 'Not found in the cluster list — click to remove' : 'Remove this entry from the input'}>
                 {input}<span aria-hidden="true">×</span>
               </button>
             ))}
           </div>
         ) : null}
-        {mode !== 'all' && parsed.validation.valid.length + parsed.validation.invalid.length > maximumPreviewChips ? (
+        {mode !== 'all' && shownValidation.valid.length + shownValidation.invalid.length > maximumPreviewChips ? (
           <p className="m-0 text-xs text-kp-overlay-text" role="note">
-            Showing the first {maximumPreviewChips} of {parsed.validation.validCount + parsed.validation.invalidCount} entries; the counters above cover the whole input.
+            Showing the first {maximumPreviewChips} of {shownValidation.validCount + shownValidation.invalidCount} entries; the counters above cover the whole input.
           </p>
         ) : null}
 
-        {mode !== 'all' ? (
-          <label className="grid max-w-[340px] gap-1">
-            <span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Default namespace</span>
-            <Select aria-label="Default namespace" value={effectiveDefaultNamespace} onChange={(event) => setDefaultNamespace(event.target.value)} disabled={parsed.validation.valid.length === 0}>
-              <option value="">Choose a valid namespace</option>
-              {parsed.validation.valid.map((namespace) => <option key={namespace} value={namespace}>{namespace}</option>)}
-            </Select>
-          </label>
-        ) : null}
+        <label className="grid max-w-[340px] gap-1">
+          <span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Default namespace</span>
+          <Select aria-label="Default namespace" value={effectiveDefaultNamespace} onChange={(event) => setDefaultNamespace(event.target.value)} disabled={shownValidation.valid.length === 0}>
+            <option value="">Choose a valid namespace</option>
+            {shownValidation.valid.map((namespace) => <option key={namespace} value={namespace}>{namespace}</option>)}
+          </Select>
+        </label>
 
-        {modeError ? <p className="m-0 text-xs text-kp-red" role="alert">{modeError}</p> : null}
+        {modeSwitched ? <p className="m-0 text-xs text-kp-sky" role="status">Switched to list mode: more than one namespace was entered.</p> : null}
+        {mode !== 'all' && autoCheckState === 'running' ? <p className="m-0 text-xs text-kp-overlay-text" role="status">Checking the names against the cluster…</p> : null}
+        {mode !== 'all' && autoCheckState === 'error' ? <p className="m-0 text-xs text-kp-yellow" role="status">The automatic cluster check could not run — use “Validate with cluster” to retry.</p> : null}
+        {existence ? (
+          <p className={`m-0 rounded-r-md border-l-2 px-3 py-2 text-xs leading-relaxed ${existence.tone === 'amber' ? 'border-kp-yellow-border bg-kp-yellow-bg text-kp-yellow' : 'border-kp-blue-border bg-kp-blue-bg text-kp-subtext'}`} role="status">
+            {existence.text}
+          </p>
+        ) : null}
         {serverValidation?.existence.checked === false && serverValidation.existence.reasonCode !== 'LOCAL_VALIDATION_ONLY' ? (
           <p className="m-0 text-xs text-kp-overlay-text" role="status">Existence was not checked: {serverValidation.existence.reasonCode ?? 'permission unavailable'}.</p>
         ) : null}
@@ -221,14 +329,23 @@ export function NamespaceScopeForm({ selection, csrfToken, scope = null, onSaved
         {save.isError ? <p className="m-0 text-xs text-kp-red" role="alert">{messageFor(save.error)}</p> : null}
         {save.isSuccess ? <p className="m-0 text-xs text-kp-green" role="status">Scope “{save.data.name}” was {editing ? 'updated' : 'saved'}.</p> : null}
 
+        {shownModeError ? <p className="m-0 text-xs text-kp-red" role="alert">{shownModeError}</p> : null}
+        {sessionError ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-r-md border-l-2 border-kp-red-border bg-kp-red-bg/50 px-3 py-2.5" role="alert">
+            <span className="text-xs text-kp-red">{sessionError}</span>
+            {onSessionRetry ? <Button variant="secondary" size="sm" onClick={onSessionRetry}>Retry session</Button> : null}
+          </div>
+        ) : null}
+        {!csrfToken && !sessionError ? <p className="m-0 text-xs text-kp-overlay-text" role="status">Saving unlocks when the local session is ready.</p> : null}
+
         <div className="flex flex-wrap justify-end gap-2">
-          {editing ? <Button variant="secondary" onClick={onCancel} disabled={save.isPending}>Cancel edit</Button> : null}
+          {editing ? <Button variant="secondary" onClick={() => onCancel?.()} disabled={save.isPending}>Cancel edit</Button> : null}
           <Button variant="secondary" onClick={() => updateRawInput('')} disabled={mode === 'all' || rawInput === ''}>Clear</Button>
           <Button variant="secondary" onClick={() => validation.mutate()} disabled={!canValidate}>
             {validation.isPending ? 'Validating…' : 'Validate with cluster'}
           </Button>
-          <Button onClick={() => save.mutate()} disabled={!canSave}>
-            {save.isPending ? (editing ? 'Updating…' : 'Save scope') : (editing ? 'Update scope' : 'Save scope')}
+          <Button onClick={() => save.mutate()} disabled={!canSave} title={canSave ? undefined : (shownModeError ?? 'Waiting for the local session.')}>
+            {save.isPending ? (editing ? 'Updating…' : 'Saving…') : (editing ? 'Update scope' : 'Save scope')}
           </Button>
         </div>
       </CardContent>
@@ -305,6 +422,8 @@ export function NamespaceScopeEditor() {
         key={editingScope ? `edit-${editingScope.id}-${editingScope.version}` : 'create'}
         selection={selection}
         csrfToken={session.data?.csrfToken ?? null}
+        sessionError={session.isError ? 'The local session could not be established — save is disabled until it succeeds.' : null}
+        onSessionRetry={() => queryClient.invalidateQueries({ queryKey: ['session'] })}
         scope={editingScope}
         onCancel={() => setEditingScopeId(null)}
         onSaved={() => void reconcile()}

@@ -165,15 +165,23 @@ test('yaml diff renders added and removed lines and the absent baseline state (F
 })
 
 test('bulk namespace paste previews counts and saves one scope without cluster discovery (U12)', async ({ page, context }) => {
+  test.setTimeout(60_000)
   const savedScopes: Array<{ id: number; name: string; mode: string; namespaces: string[] }> = []
   // Context-level routes registered after beforeEach win route precedence.
-  await context.route('**/api/v1/namespace-scopes*', async (route) => {
+  await context.route(/\/api\/v1\/namespace-scopes/, async (route) => {
     const request = route.request()
     if (request.method() === 'GET') {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: savedScopes, meta }) })
       return
     }
-    if (request.method() === 'POST' && !new URL(request.url()).pathname.endsWith('validate')) {
+    if (new URL(request.url()).pathname.endsWith('validate')) {
+      // Denial keeps the syntactically valid list intact (U12 contract).
+      const body = request.postDataJSON() as { rawInput?: string }
+      const names = [...new Set((body.rawInput ?? '').split(/[\s,]+/).map((item) => item.trim()).filter(Boolean))]
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { valid: names, validCount: names.length, duplicateCount: 0, discardedEmptyCount: 0, invalid: [], invalidCount: 0, existence: { checked: false, reasonCode: 'NAMESPACE_LIST_FORBIDDEN' } }, meta }) })
+      return
+    }
+    if (request.method() === 'POST') {
       const payload = request.postDataJSON() as { name?: string; mode: string; rawInput?: string }
       const parsed = payload.rawInput?.split(/[\s,]+/).map((item) => item.trim()).filter(Boolean) ?? []
       const scope = { id: savedScopes.length + 1, name: payload.name ?? 'Batch', mode: payload.mode, namespaces: [...new Set(parsed)] }
@@ -186,7 +194,7 @@ test('bulk namespace paste previews counts and saves one scope without cluster d
   await context.route('**/api/v1/namespace-scopes/1/select*', async (route) => {
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { selected: true }, meta }) })
   })
-  await context.route('**/api/v1/namespaces*', async (route) => {
+  await context.route(/\/api\/v1\/namespaces(\?.*)?$/, async (route) => {
     await route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ code: 'FORBIDDEN', message: 'list namespaces denied' }) })
   })
 
@@ -202,7 +210,10 @@ test('bulk namespace paste previews counts and saves one scope without cluster d
   await expect(page.locator('[aria-label="Parsed namespaces"]')).toContainText('invalid_name')
 
   // Invalid entries keep the save fail-closed until they are explicitly removed.
-  await page.getByRole('button', { name: 'Remove invalid namespace invalid_name' }).click()
+  await page.getByRole('button', { name: 'Remove invalid namespace invalid_name' }).click({ timeout: 15_000 })
+  // The automatic existence check runs without any click: the client tried to
+  // list namespaces, was denied, and still offers the save (U12).
+  await expect(page.getByText('Namespace listing is denied for this identity')).toBeVisible()
   await page.getByRole('button', { name: 'Save scope' }).click()
   await expect.poll(() => savedScopes.length).toBe(1)
   expect(savedScopes[0].namespaces).toHaveLength(100)

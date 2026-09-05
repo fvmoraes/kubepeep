@@ -22,6 +22,7 @@ import { Sidebar } from './components/Sidebar'
 import { StatePanel } from './components/StatePanel'
 import { useAppVersion } from './hooks/useAppVersion'
 import { navGroups, settingsNavItem } from './navigation/tree'
+import { desktopPlatform } from './api/desktop'
 
 // Command palette catalog: every enabled navigation destination. Group labels
 // disambiguate repeated item names (e.g. the Workloads "Overview").
@@ -260,11 +261,11 @@ function useShellPreferencePersistence(preferences: Preferences | undefined, onS
 function Shell() {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
-  const location = useLocation()
   const version = useAppVersion()
   const [compact, setCompact] = useState<boolean>(false)
-  const [collapsedGroups, setCollapsedGroups] = useState<string[]>([])
+  const [collapsedGroups, setCollapsedGroups] = useState<string[]>(() => navGroups.map((group) => group.id))
   const [, setRecentVersion] = useState(0)
+  const location = useLocation()
   const status = useQuery({
     queryKey: ['local-status'],
     queryFn: ({ signal }) => getStatus(signal),
@@ -284,16 +285,29 @@ function Shell() {
 
   // Hydration (V6-05): initial state comes from the backend document; local
   // state only diverges after an explicit user action and is persisted by
-  // merging into the current document.
+  // merging into the current document. Sidebar groups default to CLOSED — the
+  // active group auto-expands so the current section is always visible.
   const hydratedRef = useRef(false)
   useEffect(() => {
-    // Hydrate once per document load; later preference saves must not clobber
-    // local UI state (V6-05).
     if (!preferencesData || hydratedRef.current) return
     hydratedRef.current = true
     setCompact(preferencesData.shell?.sidebarCompact ?? false)
-    setCollapsedGroups(preferencesData.shell?.collapsedGroups ?? [])
+    // An empty stored list is the pre-F6 default, not a real choice: groups
+    // start closed unless the user actually expanded them.
+    const stored = preferencesData.shell?.collapsedGroups ?? []
+    setCollapsedGroups(stored.length > 0 ? stored : navGroups.map((group) => group.id))
   }, [preferencesData])
+
+  // The desktop app always opens on Overview; browser deep links keep their
+  // standard URL semantics.
+  const landingRef = useRef(false)
+  useEffect(() => {
+    if (landingRef.current) return
+    landingRef.current = true
+    void desktopPlatform().then((info) => {
+      if (info && location.pathname !== '/') navigate('/', { replace: true })
+    })
+  }, [location.pathname, navigate])
 
   const persistShellPrefs = useShellPreferencePersistence(preferencesData, () => setHydrationError(true))
 

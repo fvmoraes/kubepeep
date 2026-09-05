@@ -207,6 +207,8 @@ describe('application shell', () => {
 
     const heading = screen.getByRole('heading', { name: 'Page not found' })
     expect(heading.closest('section')).toHaveAttribute('aria-live', 'assertive')
+    // Groups start collapsed; expand Cluster to reach the Overview link.
+    fireEvent.click(screen.getByRole('button', { name: 'Cluster' }))
     expect(screen.getAllByRole('link', { name: 'Overview' }).length).toBeGreaterThan(0)
   })
 })

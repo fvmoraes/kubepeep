@@ -48,6 +48,17 @@ const navCatalog = [
   ['/settings', 'Settings', 'Settings'],
 ] as const
 
+// Sidebar groups start collapsed (F6 default); expand every group so the
+// full catalog is mounted.
+async function expandSidebarGroups(page: import('@playwright/test').Page) {
+  const nav = page.getByRole('navigation', { name: 'Primary navigation' })
+  for (let round = 0; round < 12; round += 1) {
+    const collapsed = nav.locator('button[aria-expanded="false"]')
+    if ((await collapsed.count()) === 0) break
+    await collapsed.first().click()
+  }
+}
+
 test('serves the application shell and preserves History API navigation', async ({ page }) => {
   test.setTimeout(90_000)
   await page.goto('/')
@@ -56,6 +67,9 @@ test('serves the application shell and preserves History API navigation', async 
   await expect(page.getByRole('img', { name: 'KubePeep' })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'The local API returned an error' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Open command center' })).toBeVisible()
+  // Sidebar groups start collapsed (F6 default); expand every group so the
+  // full catalog is mounted.
+  await expandSidebarGroups(page)
   const renderedDestinations = await page.getByRole('navigation', { name: 'Primary navigation' }).getByRole('link').evaluateAll((links) => links.map((link) => [new URL((link as HTMLAnchorElement).href).pathname, link.textContent?.trim() ?? '']))
   expect(renderedDestinations).toEqual(navCatalog.map(([path, label]) => [path, label]))
 
@@ -80,6 +94,7 @@ test('serves the application shell and preserves History API navigation', async 
 
   const navigation = page.getByRole('navigation', { name: 'Primary navigation' })
   for (const [path, , heading] of navCatalog) {
+    await expandSidebarGroups(page)
     await navigation.locator(`a[href="${path}"]`).click()
     await expect(page).toHaveURL(path === '/' ? /\/$/ : new RegExp(`${path.replace(/\//g, '\\/')}$`))
     await expect(navigation.locator(`a[href="${path}"]`)).toHaveAttribute('aria-current', 'page')
@@ -251,6 +266,7 @@ test('filters Pods, persists allowlisted saved filters and builds the Logs catal
   expect(savedFromBrowser?.query).not.toHaveProperty('limit')
   expect(savedFromBrowser?.query).not.toHaveProperty('continue')
 
+  await expandSidebarGroups(page)
   await page.getByRole('link', { name: 'Logs', exact: true }).click()
   await expect(page.getByText('1 log-authorized Pod available in the complete bounded catalog.')).toBeVisible()
   await page.getByRole('combobox', { name: 'Namespace', exact: true }).selectOption('payments')

@@ -1,5 +1,6 @@
 import { ArrowDown, ArrowUp, CornerDownLeft, Keyboard, Search, X } from 'lucide-react'
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router'
 
 import { Button, Input } from './ui'
@@ -241,7 +242,7 @@ export function CommandCenter({ routes, getFavorites, getRecent, getResources, o
         <kbd>⌘K</kbd>
       </Button>
 
-      {view ? (
+      {view ? createPortal(
         <div
           className="fixed z-[var(--z-command-backdrop)] inset-0 grid place-items-start justify-center overflow-y-auto py-[min(12vh,96px)] px-4 bg-black/70 backdrop-blur-sm"
           onMouseDown={(event) => {
@@ -361,7 +362,8 @@ export function CommandCenter({ routes, getFavorites, getRecent, getResources, o
               </>
             )}
           </div>
-        </div>
+        </div>,
+        document.body,
       ) : null}
     </>
   )
