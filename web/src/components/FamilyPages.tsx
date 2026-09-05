@@ -41,6 +41,7 @@ import type {
   VolumeAttachmentDetail,
 } from '../api/types'
 import { Badge, DataTable, type DataTableColumn, Drawer, Select, StatusBadge } from './ui'
+import { FavoriteButton } from './FavoriteButton'
 import { ResourceListControls } from './ResourceListControls'
 import type { ActiveListFilter, ListSortOrder, ListSortOption } from './ResourceListControls'
 import { YamlViewer } from './YamlViewer'
@@ -312,6 +313,12 @@ interface StorageSelection {
   name: string
 }
 
+// Cluster-scoped storage tabs support metadata-only favorites (V6-03).
+const clusterFavoriteKinds: Partial<Record<StorageTab, 'persistentvolume' | 'storageclass'>> = {
+  'persistent-volumes': 'persistentvolume',
+  'storage-classes': 'storageclass',
+}
+
 export function StoragePage() {
   const { status, selection } = useActiveSelection()
   const { tab: tabParam, namespace, name } = useParams<{ tab?: string; namespace?: string; name?: string }>()
@@ -415,7 +422,7 @@ export function StoragePage() {
         onNext={setCursor}
         onRestart={() => setCursor('')}
       >
-        <Drawer open={Boolean(activeSelected)} onClose={closeDetail} title={detailTitle(activeSelected ? `Storage ${activeSelected.namespace ? `${activeSelected.namespace}/` : ''}${activeSelected.name}` : 'Resource detail')}>
+        <Drawer open={Boolean(activeSelected)} onClose={closeDetail} title={<span className="flex items-center gap-2">{detailTitle(activeSelected ? `Storage ${activeSelected.namespace ? `${activeSelected.namespace}/` : ''}${activeSelected.name}` : 'Resource detail')}{activeSelected && clusterFavoriteKinds[tab] ? <FavoriteButton kind={clusterFavoriteKinds[tab]} name={activeSelected.name} generation={selection?.generation} label={tab} /> : null}</span>}>
           {activeSelected ? renderStorageDetail(tab, activeSelected, {
             pending: pvDetail.isPending, error: pvDetail.error, data: pvDetail.data as PersistentVolumeDetail | undefined,
             claimPending: claimDetail.isPending, claimError: claimDetail.error, claimData: claimDetail.data as PersistentVolumeClaimDetail | undefined,

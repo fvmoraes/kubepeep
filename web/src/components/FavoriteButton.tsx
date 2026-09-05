@@ -28,13 +28,14 @@ function favoriteId() {
   return `fav_${uuid.replace(/-/g, '').slice(0, 16)}`
 }
 
-function matchesFavorite(item: FavoriteItem, kind: FavoriteKind, namespace: string, name: string) {
+function matchesFavorite(item: FavoriteItem, kind: FavoriteKind, namespace: string | undefined, name: string) {
   return item.kind === kind && item.namespace === namespace && item.name === name
 }
 
 export interface FavoriteButtonProps {
   kind: FavoriteKind
-  namespace: string
+  /** Undefined for cluster-scoped targets (V6-03). */
+  namespace?: string
   name: string
   generation?: string
   label?: string
@@ -60,7 +61,7 @@ export function FavoriteButton({ kind, namespace, name, generation, label = 'res
       const base = preferences.data ?? favoriteDefaults
       const nextItems = isFavorite
         ? items.filter((item) => !matchesFavorite(item, kind, namespace, name))
-        : [...items, { id: favoriteId(), kind, namespace, name }].slice(-50)
+        : [...items, { id: favoriteId(), kind, namespace: namespace || undefined, name }].slice(-50)
       return putPreferences({ ...base, favorites: { version: 1, items: nextItems } }, session.csrfToken)
     },
     onSuccess: (saved) => {

@@ -32,6 +32,10 @@ type PreferencesDTO struct {
 // metadata-only by product rule.
 var favoriteKindAllowlist = []string{"pod", "deployment", "statefulset", "daemonset", "job", "cronjob", "service", "ingress", "endpointslice", "configmap", "secret", "node", "persistentvolume", "storageclass", "ingressclass", "priorityclass", "runtimeclass", "customresourcedefinition"}
 
+// clusterFavoriteKinds are the favorite kinds whose targets exist without a
+// namespace; every other kind requires one (V6-03).
+var clusterFavoriteKinds = []string{"node", "persistentvolume", "storageclass", "ingressclass", "priorityclass", "runtimeclass", "customresourcedefinition"}
+
 var favoriteResourceNamePattern = regexp.MustCompile(`^[a-z0-9](?:[-a-z0-9.]{0,250}[a-z0-9])?$`)
 
 // FavoriteSet stores pinned resources for quick navigation. Only resource
@@ -294,8 +298,12 @@ func validateFavoriteSet(set FavoriteSet) error {
 		if !contains(favoriteKindAllowlist, item.Kind) {
 			return validationError("favorite kind has an invalid value")
 		}
-		if len(item.Namespace) > 253 || !utf8.ValidString(item.Namespace) || (item.Namespace != "" && !favoriteResourceNamePattern.MatchString(item.Namespace)) {
-			return validationError("favorite namespace must be empty or a valid resource identifier")
+		clusterKind := contains(clusterFavoriteKinds, item.Kind)
+		if clusterKind && item.Namespace != "" {
+			return validationError("cluster-scoped favorite must not carry a namespace")
+		}
+		if !clusterKind && (item.Namespace == "" || len(item.Namespace) > 253 || !utf8.ValidString(item.Namespace) || !favoriteResourceNamePattern.MatchString(item.Namespace)) {
+			return validationError("namespaced favorite requires a valid namespace")
 		}
 		if len(item.Name) > 253 || !utf8.ValidString(item.Name) || !favoriteResourceNamePattern.MatchString(item.Name) {
 			return validationError("favorite name must be a valid resource identifier")

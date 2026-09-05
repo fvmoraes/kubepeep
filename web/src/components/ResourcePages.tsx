@@ -48,6 +48,7 @@ import type {
   EndpointSliceDetail,
   EndpointSliceResource,
   Endpoints,
+  EventResource,
   IngressClass,
   NetworkPolicy,
   IngressDetail,
@@ -60,7 +61,7 @@ import type {
   ServiceResource,
   Workload,
 } from '../api/types'
-import { Badge, Button, DataTable, Drawer, Input, Select, StatusBadge } from './ui'
+import { Badge, Button, DataTable, type DataTableColumn, Drawer, Input, Select, StatusBadge } from './ui'
 import { PodActions, WorkloadActions } from './ResourceActions'
 import { ResourceListControls } from './ResourceListControls'
 import type { ActiveListFilter, ListSortOrder, ListSortOption } from './ResourceListControls'
@@ -73,6 +74,7 @@ import { CollectionFooter, QueryState, SelectionGate } from './resource/states'
 import { ResourcePage } from './resource/ResourcePage'
 import { ResourceTabStrip } from './resource/ResourceTabStrip'
 import { TableLink } from './resource/TableLink'
+import { applyColumnVisibility, ColumnVisibilityControl, usePreferenceColumnVisibility } from './resource/columns'
 import { Facts } from './resource/Facts'
 import { age, dateTime } from './resource/format'
 import { eventBadgeVariant, statusBadgeVariant } from './resource/status'
@@ -338,6 +340,14 @@ export function WorkloadsPage() {
     if (selected && selected.generation === selection?.generation) return selected.item
     return null
   }, [paramItem, selected, selection?.generation])
+  const workloadColumnState = usePreferenceColumnVisibility('workloads')
+  const workloadColumns: DataTableColumn<Workload>[] = [
+    { key: 'namespace', header: 'Namespace', cell: (item) => item.namespace },
+    { key: 'name', header: 'Kind / name', cell: (item) => <TableLink aria-label={`Open ${item.kind} ${item.name} in ${item.namespace}`} onClick={() => { requests.abortAll(); setSelected({ generation: selection!.generation, item }); yaml.reset(); navigate(`/workloads/${workloadKindPath(item.kind)}/${encodeURIComponent(item.namespace)}/${encodeURIComponent(item.name)}`) }} primary={item.name} secondary={item.kind} /> },
+    { key: 'ready', header: 'Ready', cell: (item) => `${item.ready ?? '—'} / ${item.desired ?? '—'}` },
+    { key: 'status', header: 'Status', cell: (item) => <StatusBadge variant={statusBadgeVariant(item.status)}>{item.status}</StatusBadge> },
+    { key: 'age', header: 'Age', cell: (item) => age(item.ageSeconds) },
+  ]
   const list = useQuery({
     queryKey: ['resources', 'workloads', selection?.generation, applied, cursor],
     queryFn: ({ signal }) => getWorkloads({ limit: 100, search: applied.search || undefined, namespaces: namespaceValues(applied.namespace), kinds: applied.kind ? [applied.kind] : undefined, statuses: applied.workloadStatus ? [applied.workloadStatus] : undefined, ...optionalSort(applied.sort, applied.order, 'identity', 'asc'), continueToken: cursor || undefined }, signal, selection?.generation),
@@ -390,17 +400,12 @@ export function WorkloadsPage() {
         <QueryState pending={list.isPending} error={list.error} empty={list.data?.items.length === 0}>
           <div className="grid min-w-0 items-start gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(320px,0.85fr)]">
             <div className="min-w-0 overflow-x-auto border border-kp-overlay-0 rounded-xl bg-kp-surface-0">
+              <ColumnVisibilityControl state={workloadColumnState} columns={workloadColumns} />
               <DataTable
                 caption="Authorized workload page"
                 rows={list.data?.items ?? []}
                 getRowKey={(item) => `${item.kind}/${item.namespace}/${item.name}`}
-                columns={[
-                  { key: 'namespace', header: 'Namespace', cell: (item) => item.namespace },
-                  { key: 'name', header: 'Kind / name', cell: (item) => <TableLink aria-label={`Open ${item.kind} ${item.name} in ${item.namespace}`} onClick={() => { requests.abortAll(); setSelected({ generation: selection!.generation, item }); yaml.reset(); navigate(`/workloads/${workloadKindPath(item.kind)}/${encodeURIComponent(item.namespace)}/${encodeURIComponent(item.name)}`) }} primary={item.name} secondary={item.kind} /> },
-                  { key: 'ready', header: 'Ready', cell: (item) => `${item.ready ?? '—'} / ${item.desired ?? '—'}` },
-                  { key: 'status', header: 'Status', cell: (item) => <StatusBadge variant={statusBadgeVariant(item.status)}>{item.status}</StatusBadge> },
-                  { key: 'age', header: 'Age', cell: (item) => age(item.ageSeconds) },
-                ]}
+                columns={applyColumnVisibility(workloadColumns, workloadColumnState)}
               />
               {list.data ? <CollectionFooter result={list.data} onNext={(next) => { setCursor(next); closeDetail() }} onRestart={() => { setCursor(''); closeDetail() }} /> : null}
             </div>
@@ -450,6 +455,15 @@ export function PodsPage() {
     queryFn: ({ signal }) => getPods({ limit: 100, search: applied.search || undefined, namespaces: namespaceValues(applied.namespace), statuses: applied.podStatus ? [applied.podStatus] : undefined, workload: applied.workload || undefined, node: applied.node || undefined, restarts: applied.restarts as 'any' | 'gt0' | 'gte3' | 'gte10', problematic: applied.problematic === '' ? undefined : applied.problematic === 'true', ...optionalSort(applied.sort, applied.order, 'identity', 'asc'), continueToken: cursor || undefined }, signal, selection?.generation),
     enabled: Boolean(selection),
   })
+  const podColumnState = usePreferenceColumnVisibility('pods')
+  const podColumns: DataTableColumn<Pod>[] = [
+    { key: 'namespace', header: 'Namespace / Pod', cell: (item) => <TableLink aria-label={`Open Pod ${item.name} in ${item.namespace}`} onClick={() => { requests.abortAll(); setSelected({ generation: selection!.generation, item }); yaml.reset(); navigate(`/pods/${encodeURIComponent(item.namespace)}/${encodeURIComponent(item.name)}`) }} primary={<>{item.name}{item.problematic ? <Badge variant="danger" className="ml-2">problem</Badge> : null}</>} secondary={item.namespace} /> },
+    { key: 'status', header: 'Status', cell: (item) => <StatusBadge variant={statusBadgeVariant(item.status)}>{item.status}</StatusBadge> },
+    { key: 'ready', header: 'Ready', cell: (item) => `${item.ready.current}/${item.ready.desired}` },
+    { key: 'restarts', header: 'Restarts', cell: (item) => item.restarts },
+    { key: 'node', header: 'Node', cell: (item) => item.node ?? '—' },
+    { key: 'age', header: 'Age', cell: (item) => age(item.ageSeconds) },
+  ]
   const detail = useQuery({ queryKey: ['resources', 'pod-detail', selection?.generation, activeSelected?.namespace, activeSelected?.name], queryFn: ({ signal }) => getPod(activeSelected!.namespace, activeSelected!.name, signal, selection!.generation), enabled: Boolean(selection && activeSelected) })
   // V5-11: Pod metrics render only when the Metrics API is healthy; absence,
   // denial or partial coverage touches this block alone, never the Pod view.
@@ -505,18 +519,12 @@ export function PodsPage() {
         <QueryState pending={list.isPending} error={list.error} empty={list.data?.items.length === 0}>
           <div className="grid min-w-0 items-start gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(320px,0.85fr)]">
             <div className="min-w-0 overflow-x-auto border border-kp-overlay-0 rounded-xl bg-kp-surface-0">
+              <ColumnVisibilityControl state={podColumnState} columns={podColumns} />
               <DataTable
                 caption="Authorized Pod page"
                 rows={list.data?.items ?? []}
                 getRowKey={(item) => `${item.namespace}/${item.name}`}
-                columns={[
-                  { key: 'namespace', header: 'Namespace / Pod', cell: (item) => <TableLink aria-label={`Open Pod ${item.name} in ${item.namespace}`} onClick={() => { requests.abortAll(); setSelected({ generation: selection!.generation, item }); yaml.reset(); navigate(`/pods/${encodeURIComponent(item.namespace)}/${encodeURIComponent(item.name)}`) }} primary={<>{item.name}{item.problematic ? <Badge variant="danger" className="ml-2">problem</Badge> : null}</>} secondary={item.namespace} /> },
-                  { key: 'status', header: 'Status', cell: (item) => <StatusBadge variant={statusBadgeVariant(item.status)}>{item.status}</StatusBadge> },
-                  { key: 'ready', header: 'Ready', cell: (item) => `${item.ready.current}/${item.ready.desired}` },
-                  { key: 'restarts', header: 'Restarts', cell: (item) => item.restarts },
-                  { key: 'node', header: 'Node', cell: (item) => item.node ?? '—' },
-                  { key: 'age', header: 'Age', cell: (item) => age(item.ageSeconds) },
-                ]}
+                columns={applyColumnVisibility(podColumns, podColumnState)}
               />
               {list.data ? <CollectionFooter result={list.data} onNext={(next) => { setCursor(next); closeDetail() }} onRestart={() => { setCursor(''); closeDetail() }} /> : null}
             </div>
@@ -565,6 +573,15 @@ export function EventsPage() {
   const [applied, setApplied] = useState<EventListState>(() => eventsStateFromParams(params))
   const [cursor, setCursor] = useGenerationCursor(selection?.generation)
   const queryClient = useQueryClient()
+  const eventColumnState = usePreferenceColumnVisibility('events')
+  const eventColumns: DataTableColumn<EventResource>[] = [
+    { key: 'time', header: 'Time', cell: (item) => dateTime(item.timestamp) },
+    { key: 'namespace', header: 'Namespace', cell: (item) => item.namespace },
+    { key: 'object', header: 'Object', cell: (item) => `${item.objectKind}/${item.objectName}` },
+    { key: 'type', header: 'Type / reason', cell: (item) => <><Badge variant={eventBadgeVariant(item.type)}>{item.type}</Badge><small className="mt-0.5 block text-xs text-kp-overlay-text">{item.reason}</small></> },
+    { key: 'count', header: 'Count', cell: (item) => item.count },
+    { key: 'message', header: 'Message', cell: (item) => <span className="block max-w-[480px] break-words text-sm leading-snug">{item.message}</span> },
+  ]
   const list = useQuery({ queryKey: ['resources', 'events', selection?.generation, applied, cursor], queryFn: ({ signal }) => getEvents({ limit: 100, search: applied.search || undefined, namespaces: namespaceValues(applied.namespace), statuses: applied.eventType ? [applied.eventType] : undefined, objectKind: applied.objectKind || undefined, reason: applied.reason || undefined, continueToken: cursor || undefined, ...optionalSort(applied.sort, applied.order, 'timestamp', 'desc') }, signal, selection?.generation), enabled: Boolean(selection) })
   return (
     <ResourcePage
@@ -599,18 +616,12 @@ export function EventsPage() {
       <SelectionGate pending={status.isPending} error={status.error} selected={Boolean(selection)}>
         <QueryState pending={list.isPending} error={list.error} empty={list.data?.items.length === 0}>
           <div className="min-w-0 overflow-x-auto border border-kp-overlay-0 rounded-xl bg-kp-surface-0">
+            <ColumnVisibilityControl state={eventColumnState} columns={eventColumns} />
             <DataTable
               caption="Authorized event page"
               rows={list.data?.items ?? []}
               getRowKey={(item, index) => `${item.namespace}/${item.objectKind}/${item.objectName}/${item.timestamp ?? index}`}
-              columns={[
-                { key: 'time', header: 'Time', cell: (item) => dateTime(item.timestamp) },
-                { key: 'namespace', header: 'Namespace', cell: (item) => item.namespace },
-                { key: 'object', header: 'Object', cell: (item) => `${item.objectKind}/${item.objectName}` },
-                { key: 'type', header: 'Type / reason', cell: (item) => <><Badge variant={eventBadgeVariant(item.type)}>{item.type}</Badge><small className="mt-0.5 block text-xs text-kp-overlay-text">{item.reason}</small></> },
-                { key: 'count', header: 'Count', cell: (item) => item.count },
-                { key: 'message', header: 'Message', cell: (item) => <span className="block max-w-[480px] break-words text-sm leading-snug">{item.message}</span> },
-              ]}
+              columns={applyColumnVisibility(eventColumns, eventColumnState)}
             />
             {list.data ? <CollectionFooter result={list.data} onNext={setCursor} onRestart={() => setCursor('')} /> : null}
           </div>
@@ -773,6 +784,13 @@ export function NetworkPage() {
     return { closed, failed }
   }, onSuccess: (result) => { setStopAllResult(result); setStopAllState('idle'); queryClient.invalidateQueries({ queryKey: ['port-forwards'] }) } })
 
+  const networkColumnState = usePreferenceColumnVisibility(`network/${tab}`)
+  const networkColumns: DataTableColumn<NetworkItem>[] = [
+    { key: 'namespace', header: 'Name', cell: (item) => <TableLink aria-label={`Open ${tab} ${item.name}${'namespace' in item ? ` in ${item.namespace}` : ''}`} onClick={() => { closeDetail(); setSelected({ generation: selection!.generation, tab: tab as NetworkSelection['tab'], namespace: 'namespace' in item ? item.namespace : '', name: item.name }); navigate(`/network/${tab}/${'namespace' in item ? `${encodeURIComponent(item.namespace)}/` : ''}${encodeURIComponent(item.name)}`) }} primary={item.name} secondary={'namespace' in item ? item.namespace : 'cluster'} /> },
+    { key: 'type', header: 'Type', cell: (item) => ('type' in item ? item.type : 'className' in item ? (item.className ?? 'Ingress') : 'addressType' in item ? item.addressType : 'podSelector' in item ? item.podSelector || 'none' : 'controller' in item ? item.controller : '—') },
+    { key: 'summary', header: 'Summary', cell: (item) => ('clusterIPs' in item ? item.clusterIPs.join(', ') : 'hosts' in item ? item.hosts.join(', ') : 'addressType' in item ? `${item.endpoints.length} endpoints` : 'readyCount' in item ? `${item.readyCount} ready / ${item.notReadyCount} not ready${item.truncated ? ' (truncated)' : ''}` : 'ruleSummary' in item ? item.ruleSummary.length + ' rules' : item.default ? 'default class' : '—') },
+  ]
+
   const active: CollectionResult<NetworkItem> | undefined = tab === 'services' && services.data ? { ...services.data, items: services.data.items } : tab === 'ingresses' && ingresses.data ? { ...ingresses.data, items: ingresses.data.items } : tab === 'endpoint-slices' && slices.data ? { ...slices.data, items: slices.data.items } : tab === 'endpoints' && endpoints.data ? { ...endpoints.data, items: endpoints.data.items } : tab === 'ingress-classes' && ingressClasses.data ? { ...ingressClasses.data, items: ingressClasses.data.items } : tab === 'network-policies' && networkPolicies.data ? { ...networkPolicies.data, items: networkPolicies.data.items } : undefined
   const activeQuery = tab === 'services' ? services : tab === 'ingresses' ? ingresses : tab === 'endpoint-slices' ? slices : tab === 'endpoints' ? endpoints : tab === 'ingress-classes' ? ingressClasses : networkPolicies
   const currentDetail = activeSelected?.tab === 'services' ? serviceDetail : activeSelected?.tab === 'ingresses' ? ingressDetail : activeSelected?.tab === 'endpoint-slices' ? sliceDetail : activeSelected?.tab === 'endpoints' ? endpointsDetail : activeSelected?.tab === 'ingress-classes' ? ingressClassDetail : networkPolicyDetail
@@ -834,15 +852,12 @@ export function NetworkPage() {
           </QueryState> : <QueryState pending={activeQuery.isPending} error={activeQuery.error} empty={active?.items.length === 0}>
             <div className="grid min-w-0 items-start gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(320px,0.85fr)]">
               <div className="min-w-0 overflow-x-auto border border-kp-overlay-0 rounded-xl bg-kp-surface-0">
+                <ColumnVisibilityControl state={networkColumnState} columns={networkColumns} />
                 <DataTable
                   caption={`Authorized ${tab} page`}
                   rows={active?.items ?? []}
                   getRowKey={(item) => `${'namespace' in item ? `${item.namespace}/` : ''}${item.name}`}
-                  columns={[
-                    { key: 'namespace', header: 'Name', cell: (item) => <TableLink aria-label={`Open ${tab} ${item.name}${'namespace' in item ? ` in ${item.namespace}` : ''}`} onClick={() => { closeDetail(); setSelected({ generation: selection!.generation, tab: tab as NetworkSelection['tab'], namespace: 'namespace' in item ? item.namespace : '', name: item.name }); navigate(`/network/${tab}/${'namespace' in item ? `${encodeURIComponent(item.namespace)}/` : ''}${encodeURIComponent(item.name)}`) }} primary={item.name} secondary={'namespace' in item ? item.namespace : 'cluster'} /> },
-                    { key: 'type', header: 'Type', cell: (item) => ('type' in item ? item.type : 'className' in item ? (item.className ?? 'Ingress') : 'addressType' in item ? item.addressType : 'podSelector' in item ? item.podSelector || 'none' : 'controller' in item ? item.controller : '—') },
-                    { key: 'summary', header: 'Summary', cell: (item) => ('clusterIPs' in item ? item.clusterIPs.join(', ') : 'hosts' in item ? item.hosts.join(', ') : 'addressType' in item ? `${item.endpoints.length} endpoints` : 'readyCount' in item ? `${item.readyCount} ready / ${item.notReadyCount} not ready${item.truncated ? ' (truncated)' : ''}` : 'ruleSummary' in item ? item.ruleSummary.length + ' rules' : item.default ? 'default class' : '—') },
-                  ]}
+                  columns={applyColumnVisibility(networkColumns, networkColumnState)}
                 />
                 {active ? <CollectionFooter result={active} onNext={setCursor} onRestart={() => setCursor('')} /> : null}
               </div>
@@ -937,6 +952,12 @@ export function ConfigPage() {
   const secretDetail = useQuery({ queryKey: ['resources', 'secret-detail', selection?.generation, activeSelected?.namespace, activeSelected?.name], queryFn: ({ signal }) => getSecret(activeSelected!.namespace, activeSelected!.name, signal, selection!.generation), enabled: Boolean(activeSelected && tab === 'secrets') })
   const yaml = useMutation({ mutationFn: (value: ConfigSelection) => requests.run((signal) => getConfigMapYAML(value.namespace, value.name, signal)) })
 
+  const configColumnState = usePreferenceColumnVisibility(`config/${tab}`)
+  const configColumns: DataTableColumn<ConfigItem>[] = [
+    { key: 'namespace', header: 'Namespace / name', cell: (item) => { const value = 'metadata' in item ? item.metadata : item; return <TableLink aria-label={`Open ${tab === 'secrets' ? 'Secret' : 'ConfigMap'} ${value.name} in ${value.namespace}`} onClick={() => { closeDetail(); setSelected({ generation: selection!.generation, namespace: value.namespace, name: value.name }); navigate(`/config/${tab}/${encodeURIComponent(value.namespace)}/${encodeURIComponent(value.name)}`) }} primary={value.name} secondary={value.namespace} /> } },
+    { key: 'uid', header: 'UID', cell: (item) => { const value = 'metadata' in item ? item.metadata : item; return <span className="mono text-xs">{value.uid}</span> } },
+    { key: 'created', header: 'Created', cell: (item) => { const value = 'metadata' in item ? item.metadata : item; return dateTime(value.creationTimestamp) } },
+  ]
   const active: CollectionResult<ConfigItem> | undefined = tab === 'configmaps' && configMaps.data ? { ...configMaps.data, items: configMaps.data.items } : tab === 'secrets' && secrets.data ? { ...secrets.data, items: secrets.data.items } : undefined
   const activeQuery = tab === 'configmaps' ? configMaps : secrets
 
@@ -965,15 +986,12 @@ export function ConfigPage() {
           <QueryState pending={activeQuery.isPending} error={activeQuery.error} empty={active?.items.length === 0}>
             <div className="grid min-w-0 items-start gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(320px,0.85fr)]">
               <div className="min-w-0 overflow-x-auto border border-kp-overlay-0 rounded-xl bg-kp-surface-0">
+                <ColumnVisibilityControl state={configColumnState} columns={configColumns} />
                 <DataTable
                   caption={`Authorized ${tab} metadata page`}
                   rows={active?.items ?? []}
                   getRowKey={(item) => { const value = 'metadata' in item ? item.metadata : item; return `${value.namespace}/${value.name}` }}
-                  columns={[
-                    { key: 'namespace', header: 'Namespace / name', cell: (item) => { const value = 'metadata' in item ? item.metadata : item; return <TableLink aria-label={`Open ${tab === 'secrets' ? 'Secret' : 'ConfigMap'} ${value.name} in ${value.namespace}`} onClick={() => { closeDetail(); setSelected({ generation: selection!.generation, namespace: value.namespace, name: value.name }); navigate(`/config/${tab}/${encodeURIComponent(value.namespace)}/${encodeURIComponent(value.name)}`) }} primary={value.name} secondary={value.namespace} /> } },
-                    { key: 'uid', header: 'UID', cell: (item) => { const value = 'metadata' in item ? item.metadata : item; return <span className="mono text-xs">{value.uid}</span> } },
-                    { key: 'created', header: 'Created', cell: (item) => { const value = 'metadata' in item ? item.metadata : item; return dateTime(value.creationTimestamp) } },
-                  ]}
+                  columns={applyColumnVisibility(configColumns, configColumnState)}
                 />
                 {active ? <CollectionFooter result={active} onNext={setCursor} onRestart={() => setCursor('')} /> : null}
               </div>
