@@ -6,6 +6,40 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versions follow [Semantic Versioning](https://semver.org/) **without the `v`
 prefix** (official tags: `1.4.2`, `1.4.3`, …), and entries are generated
 automatically from Conventional Commits by `.github/workflows/release.yml`.
+## [0.3.0] - 2026-09-05
+
+## Added
+- feat(preferences): shell, columns and recent persistence (F6)
+- feat(ux): operational experience on the existing framework (F5)
+- feat(access): RBAC, CRDs, classes, webhooks, IngressClasses, NetworkPolicies and Endpoints (F4)
+- feat(configuration): ReplicaSets kind, quotas, limits, HPA, PDB and ServiceAccounts (F3)
+- feat(storage): Cluster and Storage families end to end (F2)
+- feat(nodes): cluster-scoped resource contract and Nodes family end to end (F1)
+- feat(web): centralized design system, Kubernetes navigation shell and resource framework
+
+## Changed
+- build(desktop): fall back to WebKitGTK 4.1 via the webkit2_41 tag (F7/V7-04)
+- chore(deps): align apiextensions-apiserver with the Kubernetes v0.35.7 line (F7)
+- docs(rbac): cluster-scoped section and new-family checklist from the Nodes slice (V1-10)
+- test(e2e): prove bulk namespace paste journey without cluster discovery (U12)
+- chore(ci): organize release job names and plan final pipeline improvements
+- chore(repo): ignore Wails dependency fingerprint
+- chore(repo): close remaining hygiene and documentation gaps
+- docs(plan): address multi-namespace loading timeouts
+- docs(plan): prioritize restricted access and bulk namespaces
+- chore(repo): refine v1 plan and keep generated data private
+- chore(repo): v1 execution plan, docs reorganization and repository hygiene
+
+## Fixed
+- fix(resources): configurable collection window budget and honest namespace limits
+
+## Download
+
+Permanently-updated links: https://github.com/fvmoraes/kubepeep/blob/main/docs/download.md
+
+## Full Changelog
+**Full Changelog**: https://github.com/fvmoraes/kubepeep/compare/0.2.2...0.3.0
+
 ## [0.2.2] - 2026-09-04
 
 ## Fixed
@@ -406,3 +440,4 @@ Permanently-updated links: https://github.com/fvmoraes/kubepeep/blob/main/docs/d
 [0.2.0]: https://github.com/fvmoraes/kubepeep/releases/tag/0.2.0
 [0.2.1]: https://github.com/fvmoraes/kubepeep/releases/tag/0.2.1
 [0.2.2]: https://github.com/fvmoraes/kubepeep/releases/tag/0.2.2
+[0.3.0]: https://github.com/fvmoraes/kubepeep/releases/tag/0.3.0
