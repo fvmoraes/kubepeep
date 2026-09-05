@@ -367,6 +367,9 @@ function Shell() {
       const belongsToPreviousGeneration = (query: { queryKey: readonly unknown[] }) => query.queryKey.includes(previous)
       void queryClient.cancelQueries({ predicate: belongsToPreviousGeneration })
       queryClient.removeQueries({ predicate: belongsToPreviousGeneration })
+      // The session nonce rotates with the generation: drop the cached token
+      // so every consumer refetches a fresh one instead of CSRF_REJECTED.
+      queryClient.removeQueries({ queryKey: ['session'] })
     }
     previousGeneration.current = current
   }, [queryClient, selection?.generation])

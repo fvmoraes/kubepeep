@@ -125,6 +125,14 @@ describe('namespace scope editor', () => {
       invalid: [{ input: 'Bad_Name', code: 'INVALID_NAMESPACE_NAME' }], invalidCount: 1,
       existence: { checked: false, reasonCode: 'NAMESPACE_LIST_FORBIDDEN' },
     } }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    fetch.mockImplementation((input: string | URL | Request) => {
+      if (String(input) === '/api/v1/namespaces?limit=500') return Promise.resolve(apiJSON([]))
+      return Promise.resolve(new Response(JSON.stringify({ data: {
+        valid: ['payments'], validCount: 1, duplicateCount: 2, discardedEmptyCount: 3,
+        invalid: [{ input: 'Bad_Name', code: 'INVALID_NAMESPACE_NAME' }], invalidCount: 1,
+        existence: { checked: false, reasonCode: 'NAMESPACE_LIST_FORBIDDEN' },
+      } }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+    })
     vi.stubGlobal('fetch', fetch)
     renderForm('ephemeral-token')
     fireEvent.change(screen.getByRole('textbox', { name: 'Namespace input' }), { target: { value: 'payments' } })
@@ -136,15 +144,21 @@ describe('namespace scope editor', () => {
     expect(await screen.findByText('Existence was not checked: NAMESPACE_LIST_FORBIDDEN.')).toBeInTheDocument()
     expect(counter('duplicates removed')).toHaveTextContent('2')
     expect(counter('empty removed')).toHaveTextContent('3')
-    expect(fetch).toHaveBeenCalledTimes(1)
-    expect(fetch).toHaveBeenCalledWith('/api/v1/namespace-scopes/validate', expect.objectContaining({
+    // The picker's cluster list request may fire alongside the validate POST.
+    const validateCalls = fetch.mock.calls.filter(([input, init]) => String(input) === '/api/v1/namespace-scopes/validate' && Boolean(init))
+    expect(validateCalls.length).toBeGreaterThanOrEqual(1)
+    expect(validateCalls[0][1]).toEqual(expect.objectContaining({
       method: 'POST', cache: 'no-store', credentials: 'same-origin',
       headers: expect.objectContaining({ 'X-KubePeep-CSRF': 'ephemeral-token' }),
     }))
   })
 
   it('updates an existing scope with version and generation preconditions', async () => {
-    const fetch = vi.fn().mockResolvedValue(apiJSON({ ...activeScope, name: 'Updated', version: 4 }))
+    const fetch = vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      void init
+      if (String(input) === '/api/v1/namespaces?limit=500') return Promise.resolve(apiJSON([]))
+      return Promise.resolve(apiJSON({ ...activeScope, name: 'Updated', version: 4 }))
+    })
     vi.stubGlobal('fetch', fetch)
     const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
     render(<QueryClientProvider client={client}>
@@ -155,12 +169,15 @@ describe('namespace scope editor', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Update scope' }))
 
     expect(await screen.findByText('Scope “Updated” was updated.')).toBeInTheDocument()
-    expect(fetch).toHaveBeenCalledWith('/api/v1/namespace-scopes/1', expect.objectContaining({
-      method: 'PUT',
+    const putCall = fetch.mock.calls.find(([input, init]) => String(input) === '/api/v1/namespace-scopes/1' && (init as RequestInit | undefined)?.method === 'PUT') as
+      | [string, RequestInit]
+      | undefined
+    expect(putCall).toBeDefined()
+    expect(putCall![1]).toEqual(expect.objectContaining({
       headers: expect.objectContaining({ 'X-KubePeep-CSRF': 'csrf_edit' }),
       body: expect.stringContaining('"version":3'),
     }))
-    expect(JSON.parse(String(fetch.mock.calls[0][1]?.body))).toEqual(expect.objectContaining({ expectedGeneration: 'gen_42', name: 'Updated' }))
+    expect(JSON.parse(String(putCall![1]?.body))).toEqual(expect.objectContaining({ expectedGeneration: 'gen_42', name: 'Updated' }))
   })
 
   it('selects a saved scope with the current generation precondition', async () => {

@@ -209,7 +209,10 @@ function queryString(entries: Array<[string, string | number | boolean | undefin
   return encoded === '' ? '' : `?${encoded}`
 }
 
-function mutation<T>(path: string, method: 'POST' | 'PUT' | 'DELETE', body: unknown, csrfToken: string, signal?: AbortSignal): Promise<T> {
+function mutation<T>(path: string, method: 'POST' | 'PUT' | 'DELETE', body: unknown, csrfToken: string, signal?: AbortSignal, allowSessionHeal = true): Promise<T> {
+  // A generation change rotates the local session nonce, so a cached token
+  // can be rejected after switching contexts. Heal once with a fresh session
+  // instead of stranding the operator on CSRF_REJECTED.
   return request<T>(path, {
     method,
     headers: {
@@ -218,6 +221,18 @@ function mutation<T>(path: string, method: 'POST' | 'PUT' | 'DELETE', body: unkn
     },
     body: JSON.stringify(body),
     signal,
+  }).catch(async (error) => {
+    if (
+      allowSessionHeal &&
+      error instanceof APIError &&
+      error.status === 403 &&
+      error.code === 'CSRF_REJECTED' &&
+      signal?.aborted !== true
+    ) {
+      const fresh = await getSession(signal)
+      return mutation<T>(path, method, body, fresh.csrfToken, signal, false)
+    }
+    throw error
   })
 }
 

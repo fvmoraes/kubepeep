@@ -286,3 +286,54 @@ test('leases page lists authorized leases in the scoped namespaces (R05/V2)', as
   await expect(page.getByRole('cell', { name: /leader-election/ })).toBeVisible()
   await expect(page.getByText('api-abc').first()).toBeVisible()
 })
+
+
+test('cluster namespaces are listed for picking when the identity may list (U12 picker path)', async ({ page, context }) => {
+  test.setTimeout(60_000)
+  const savedScopes: Array<{ id: number; name: string; mode: string; namespaces: string[] }> = []
+  await context.route('**/api/v1/namespaces?*', async (route) => {
+    const data = [
+      { name: 'alpha', phase: 'Active', selected: false },
+      { name: 'beta', phase: 'Active', selected: false },
+      { name: 'gamma', phase: 'Active', selected: false },
+    ]
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data, meta }) })
+  })
+  await context.route(/\/api\/v1\/namespace-scopes/, async (route) => {
+    const request = route.request()
+    if (request.method() === 'GET') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: savedScopes, meta }) })
+      return
+    }
+    if (new URL(request.url()).pathname.endsWith('validate')) {
+      const body = request.postDataJSON() as { rawInput?: string }
+      const names = [...new Set((body.rawInput ?? '').split(/[\s,]+/).map((item) => item.trim()).filter(Boolean))]
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { valid: names, validCount: names.length, duplicateCount: 0, discardedEmptyCount: 0, invalid: [], invalidCount: 0, existence: { checked: true, reasonCode: 'NAMESPACE_LIST_ALLOWED' } }, meta }) })
+      return
+    }
+    if (request.method() === 'POST') {
+      const payload = request.postDataJSON() as { name?: string; mode: string; rawInput?: string }
+      const parsed = payload.rawInput?.split(/[\s,]+/).map((item) => item.trim()).filter(Boolean) ?? []
+      const scope = { id: savedScopes.length + 1, name: payload.name ?? 'Picked', mode: payload.mode, namespaces: [...new Set(parsed)] }
+      savedScopes.push(scope)
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { ...scope, clusterProfileId: 1, context: 'development', defaultNamespace: scope.namespaces[0] ?? null, version: 1, createdAt: '2026-09-05T00:00:00Z', updatedAt: '2026-09-05T00:00:00Z' }, meta }) })
+      return
+    }
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: [], meta }) })
+  })
+
+  await page.goto('/namespaces')
+  await expect(page.getByRole('heading', { name: 'Create a namespace scope' })).toBeVisible()
+  await expect(page.getByText('Namespaces in this cluster (3)')).toBeVisible()
+
+  await page.getByRole('button', { name: 'alpha', exact: true }).click()
+  await page.getByRole('button', { name: 'beta', exact: true }).click()
+  await expect(page.getByText('Switched to list mode')).toBeVisible()
+
+  // The suggested scope name comes from the first picked namespace.
+  await expect(page.getByLabel('Scope name')).toHaveValue('alpha')
+
+  await page.getByRole('button', { name: 'Save scope' }).click()
+  await expect.poll(() => savedScopes.length).toBe(1)
+  expect(savedScopes[0].namespaces).toEqual(['alpha', 'beta'])
+})

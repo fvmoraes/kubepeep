@@ -5,6 +5,7 @@ import {
   APIError,
   createNamespaceScope,
   deleteNamespaceScope,
+  getNamespaces,
   getNamespaceScopes,
   getSession,
   getStatus,
@@ -72,14 +73,13 @@ function existenceNote(existence: NamespaceScopeValidation['existence'], validCo
 
 export function NamespaceScopeForm({ selection, csrfToken, sessionError, onSessionRetry, scope = null, onSaved, onCancel }: NamespaceScopeFormProps) {
   const [name, setName] = useState(scope?.name ?? '')
-  // Editing starts from a real name; create starts empty and gets suggested.
-  const [nameTouched, setNameTouched] = useState(scope !== null)
   const [mode, setMode] = useState<NamespaceScopeMode>(scope?.mode ?? 'single')
-  const [rawInput, setRawInput] = useState(scope ? scope.namespaces.join('\n') : (selection.defaultNamespace ?? ''))
+  const [rawInput, setRawInput] = useState(scope ? scope.namespaces.join('\n') : '')
   const [defaultNamespace, setDefaultNamespace] = useState(scope?.defaultNamespace ?? selection.defaultNamespace ?? '')
   const [serverValidation, setServerValidation] = useState<NamespaceScopeValidation | null>(null)
   const [autoCheckState, setAutoCheckState] = useState<'idle' | 'running' | 'error'>('idle')
   const [modeSwitched, setModeSwitched] = useState(false)
+  const [pickerFilter, setPickerFilter] = useState('')
   const editing = scope !== null
   const inFlightRef = useRef<AbortController | null>(null)
   const payloadRef = useRef('')
@@ -157,6 +157,22 @@ export function NamespaceScopeForm({ selection, csrfToken, sessionError, onSessi
     ...(mode === 'all' ? {} : { rawInput }),
   }), [mode, rawInput, selection.clusterProfileId, selection.context])
 
+  // F0/U12: when the identity may list namespaces, offer the real cluster
+  // list for picking; otherwise the manual paste flow remains the primary
+  // path. The client never assumes — the endpoint answers for itself.
+  const clusterNamespaces = useQuery({
+    queryKey: ['cluster-namespaces', selection.clusterProfileId, selection.context],
+    queryFn: ({ signal }) => getNamespaces({ limit: 500 }, signal),
+    staleTime: 60_000,
+    retry: false,
+  })
+  const clusterListDenied = clusterNamespaces.isError && (clusterNamespaces.error as APIError).status === 403
+  const clusterNamespaceItems = Array.isArray(clusterNamespaces.data) ? clusterNamespaces.data : []
+  const listedNamespaces = useMemo(() => {
+    const filter = pickerFilter.trim().toLowerCase()
+    return filter === '' ? clusterNamespaceItems : clusterNamespaceItems.filter((namespace) => namespace.name.includes(filter))
+  }, [clusterNamespaceItems, pickerFilter])
+
   const validation = useMutation({
     mutationFn: () => validateNamespaceScope(checkPayload(), csrfToken!),
     onSuccess: (report) => {
@@ -218,13 +234,17 @@ export function NamespaceScopeForm({ selection, csrfToken, sessionError, onSessi
 
   // Auto-suggest the scope name from the first valid namespace (derived, not
   // synced) so the save button is never stranded on an invisible requirement
-  // (F0/U12). Typing a name stops the suggestion from applying.
-  const effectiveName = nameTouched || name !== '' ? name : (shownValidation.valid[0] ?? '')
+  // (F0/U12). An empty field always shows the suggestion — the backend
+  // forbids empty names, so this can only help.
+  const effectiveName = name !== '' ? name : (shownValidation.valid[0] ?? '')
   const nameError = effectiveName.trim() === '' ? 'Scope name is required — for example: Finance workloads.' : null
 
   const canContactServer = csrfToken !== null && !validation.isPending && !save.isPending
   const canValidate = canContactServer && shownModeError === null && mode !== 'all' && parsed.validation.valid.length > 0
-  const canSave = canContactServer && nameError === null && shownModeError === null
+  // All mode resolves through the Kubernetes namespace list at every step, so
+  // saving it for an identity that cannot list would be a guaranteed failure.
+  const allModeBlocked = mode === 'all' && clusterListDenied
+  const canSave = canContactServer && nameError === null && shownModeError === null && !allModeBlocked
 
   const notFoundCount = shownValidation.invalid.filter((entry) => entry.code === 'NAMESPACE_NOT_FOUND').length
   const existence = existenceNote(shownValidation.existence, shownValidation.validCount, notFoundCount)
@@ -243,7 +263,7 @@ export function NamespaceScopeForm({ selection, csrfToken, sessionError, onSessi
         <div className="grid gap-3 md:grid-cols-[minmax(100px,0.6fr)_minmax(160px,1fr)_minmax(180px,1.4fr)]" aria-label="Scope origin">
           <label className="grid gap-1"><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Profile</span><Input aria-label="Scope cluster profile" value={String(selection.clusterProfileId)} readOnly /></label>
           <label className="grid gap-1"><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Context</span><Input aria-label="Scope context" value={selection.context} readOnly /></label>
-          <label className="grid gap-1"><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Name <span aria-hidden="true" className="text-kp-red">*</span></span><Input aria-label="Scope name" aria-invalid={nameError !== null} value={effectiveName} maxLength={120} onChange={(event) => { setNameTouched(true); setName(event.target.value) }} placeholder="Finance workloads" /></label>
+          <label className="grid gap-1"><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Name <span aria-hidden="true" className="text-kp-red">*</span></span><Input aria-label="Scope name" aria-invalid={nameError !== null} value={effectiveName} maxLength={120} onChange={(event) => setName(event.target.value)} placeholder="Finance workloads" /></label>
         </div>
 
         <fieldset className="m-0 flex flex-wrap items-center gap-2 border-0 p-0">
@@ -291,6 +311,36 @@ export function NamespaceScopeForm({ selection, csrfToken, sessionError, onSessi
                 <p className="m-0">Lowercase letters, digits, hyphens; 1–63 characters. Invalid names block saving — click a red chip to remove it. Duplicates and empty entries are dropped automatically.</p>
               </div>
             </details>
+            {clusterNamespaces.isSuccess && clusterNamespaceItems.length > 0 ? (
+              <div className="grid gap-2 rounded-md border border-kp-overlay-0 bg-kp-surface-1 p-2.5" aria-label="Namespaces in this cluster">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Namespaces in this cluster ({clusterNamespaceItems.length})</span>
+                  <Input aria-label="Filter cluster namespaces" value={pickerFilter} maxLength={63} placeholder="Filter…" className="w-44" onChange={(event) => setPickerFilter(event.target.value)} />
+                </div>
+                <div className="grid max-h-44 content-start gap-1 overflow-y-auto">
+                  {listedNamespaces.map((namespace) => {
+                    const picked = shownValidation.valid.includes(namespace.name)
+                    return (
+                      <button
+                        key={namespace.name}
+                        type="button"
+                        aria-pressed={picked}
+                        onClick={() => picked ? removeItem(namespace.name) : updateRawInput(rawInput === '' ? namespace.name : `${rawInput}\n${namespace.name}`)}
+                        className={`flex h-7 items-center justify-between gap-2 rounded px-2 text-left text-xs transition-colors ${picked ? 'bg-kp-accent-bg text-kp-mauve font-medium' : 'text-kp-subtext hover:bg-kp-surface-3 hover:text-kp-text'}`}
+                      >
+                        <span className="truncate">{namespace.name}</span>
+                        {picked ? <span aria-hidden="true">✓</span> : null}
+                      </button>
+                    )
+                  })}
+                  {listedNamespaces.length === 0 ? <p className="m-0 px-2 py-1 text-xs text-kp-overlay-text">No namespace matches this filter.</p> : null}
+                  {clusterNamespaceItems.length >= 500 ? <p className="m-0 px-2 py-1 text-2xs text-kp-overlay-text">Showing the first 500 — filter above or paste the names manually.</p> : null}
+                </div>
+              </div>
+            ) : null}
+            {clusterListDenied ? (
+              <p className="m-0 text-xs text-kp-overlay-text" role="note">Namespace listing is denied for this identity — type or paste the names manually.</p>
+            ) : null}
           </>
         )}
 
@@ -345,6 +395,11 @@ export function NamespaceScopeForm({ selection, csrfToken, sessionError, onSessi
         {save.isSuccess ? <p className="m-0 text-xs text-kp-green" role="status">Scope “{save.data.name}” was {editing ? 'updated' : 'saved'}.</p> : null}
 
         {shownModeError ? <p className="m-0 text-xs text-kp-red" role="alert">{shownModeError}</p> : null}
+        {allModeBlocked ? (
+          <p className="m-0 rounded-r-md border-l-2 border-kp-yellow-border bg-kp-yellow-bg px-3 py-2 text-xs leading-relaxed text-kp-yellow" role="alert">
+            All mode requires namespace listing, which is denied for this identity on this cluster — the save would always fail. Use <strong>list</strong> mode and type the namespace names manually.
+          </p>
+        ) : null}
         {nameError ? <p className="m-0 text-xs text-kp-red" role="alert">{nameError}</p> : null}
         {shownValidation.invalid.some((entry) => entry.code === 'NAMESPACE_NOT_FOUND') ? (
           <p className="m-0 rounded-r-md border-l-2 border-kp-yellow-border bg-kp-yellow-bg px-3 py-2 text-xs leading-relaxed text-kp-yellow" role="note">
