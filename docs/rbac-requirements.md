@@ -53,3 +53,41 @@ Sem a capacidade, o controle correspondente aparece desabilitado com o motivo �
 ## 4. Auditoria
 
 Cada ação registra evento sanitizado (`internal/services/actions/audit.go`): timestamp, operação, contexto, namespace, recurso, duração e código de erro — nunca corpo, comando, saída ou ticket.
+
+## 5. Recursos cluster-scoped (ADR 0006)
+
+Capacidades cluster-scoped são próprias e nunca derivam de um scope
+namespaced. `nodes.list`/`nodes.get` são os primeiros exemplos: exigem apenas
+contexto válido e o verbo Kubernetes correspondente; `get` forma produto com
+`resourceName` (policy `target`). Um operador sem `list nodes` continua com o
+restante do produto útil, e negação de Nodes não bloqueia o fluxo namespaced.
+
+## 6. Checklist de uma família nova
+
+Toda família nova (namespaced ou cluster-scoped) segue o mesmo caminho —
+usar Nodes (`cb86d6b`) como fonte do guia, não abstrações de planos antigos:
+
+1. **Catálogo** — coleção/GVR em `internal/services/resources` (namespaced:
+   `service.go`; cluster-scoped: `cluster.go`) + regras de sort/status em
+   `options.go` + capabilities `list`/`get` em
+   `internal/services/authorization/allowlist.go` (ID ≠ plural Kubernetes).
+2. **DTO/porta** — DTOs de lista/detalhe fechados com limites explícitos e
+   conversores testados; política de YAML definida antes de expor rota
+   (`MarshalReadOnlyYAML` ou documento curado via `MarshalYAMLDocument`).
+3. **Runtime** — lister/getter typed em
+   `internal/integration/kubernetesruntime` (`resources_backend.go` +
+   `resources_adapter.go`), reutilizando `Collect`/`clusterCollect` com o
+   budget de janela configurável.
+4. **Handler/wiring** — métodos em `internal/api/handlers/resources.go`
+   (`handleList`/`handleClusterList`, `detail`/`clusterDetail`,
+   `yaml`/`clusterYAML`), rotas em `routes.go` e `allowedMethods` completos
+   (GET/HEAD; POST/PUT/DELETE separados).
+5. **Cliente** — tipos em `web/src/api/types.ts` e funções em `client.ts`
+   com geração esperada e AbortSignal.
+6. **Página/rota/nav** — página com o resource framework (`ResourcePage`,
+   `ResourceListControls`, `DataTable`, `CollectionFooter`, `Drawer`,
+   `YamlViewer`), rota em `App.tsx`, item com `path` em
+   `navigation/tree.tsx` e ajuste do teste de catálogo da paleta.
+7. **Testes** — unitários de DTO/contrato, integração handler/runtime com
+   cliente fake (403/unknown/vazio distintos) e E2E mockado da jornada
+   lista → detalhe → YAML autorizado.
