@@ -1,3 +1,5 @@
+# Ginger scaffold metadata, retained for ginger doctor.
+# Runtime settings use the per-user config.yaml loaded by internal/config.
 app:
   name: kubePeep
   env: production

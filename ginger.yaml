@@ -6,6 +6,7 @@ structure:
   api: internal/api
   handlers: internal/api/handlers
   middlewares: internal/api/middlewares
+  # Generator defaults; these layers are not directories in the running app.
   models: internal/models
   services: internal/services
   repositories: internal/repositories

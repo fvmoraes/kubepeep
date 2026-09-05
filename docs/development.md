@@ -59,6 +59,23 @@ arquivo, atualizar referências em scripts, workflows, embed, testes e Markdown
 no mesmo commit. Conferir os relacionamentos no Codebase MCP antes de mover
 código; o grafo não substitui a validação dos caminhos literais.
 
+`main.go`/`wails.json` são entradas do Wails; `go.mod`/`go.sum`, Makefile,
+`ginger.yaml` e `skills-lock.json` seguem suas ferramentas. Os instaladores
+permanecem na raiz como fontes públicas referenciadas por versão, testes e CI.
+README, CHANGELOG e avisos legais também são consumidos pelo empacotamento.
+
+`configs/app.yaml` é metadado do scaffold verificado pelo Ginger, não o arquivo
+de configuração do aplicativo. O runtime lê o `config.yaml` privado do usuário
+por `internal/config`. Os destinos `models` e `repositories` de `ginger.yaml`
+são defaults do gerador; a aplicação usa suas camadas existentes. Não criar
+diretórios vazios nem reorganizar serviços para satisfazer esses destinos.
+
+Os cinco scripts de `scripts/` têm funções distintas: `release.sh` calcula
+versões/notas/changelog; `security_check.sh` valida Git; `smoke.sh` verifica
+o ciclo local; `install_test.sh`/`.ps1` testam os instaladores com fixtures.
+O harness Kubernetes fica com seus manifests em `test/kind/`, e o runner
+Windows do spike fica em `spikes/phase1/scripts/`.
+
 ## O que versionar
 
 Versionar código, testes reproduzíveis, fixtures sintéticas mínimas, lockfiles,
@@ -71,6 +88,11 @@ binários, transcripts e logs. Resultados temporários ficam nos diretórios
 ignorados da ferramenta, sem arquivos soltos na raiz. Evidências que precisam
 ser preservadas ficam no projeto privado sob `~/.dwyt/projects/`; a documentação
 registra método, resultado sanitizado e limitações, sem copiar saídas completas.
+
+Perfis/traces de diagnóstico (`*.prof`, `*.pprof`, `*.trace`) também são locais.
+Os intermediários `wails.json.tmp` e `CHANGELOG.md.new` são saídas do tooling
+de release e ficam ignorados; os arquivos finais de metadados continuam
+versionados. Não ignorar pastas genéricas de fontes apenas para esconder saídas.
 
 Kubeconfigs, credenciais, tokens, chaves privadas, PII, caminhos específicos
 da estação e bancos de runtime nunca são versionados. Memória e configuração

@@ -35,6 +35,12 @@ cross-build does not imply a published or natively validated package.
 ## Scripted installation
 
 Select an existing release version. Current tags have no `v` prefix.
+The installer scripts belong to the source tree; the release workflow does
+not publish them as downloadable assets. Use a reviewed checkout of this
+repository containing the chosen release tag. The examples resolve that tag
+to its full commit ID and extract the script from that fixed revision, without
+changing your checkout. Do not substitute `main` or `latest` for the release tag.
+
 The scripts install into `~/.local/bin/kubePeep` on Unix or
 `%LOCALAPPDATA%\Programs\kubePeep\kubePeep.exe` on Windows, without administrator
 privileges. They download the matching archive, require SHA-256 and validate
@@ -44,21 +50,34 @@ Linux or macOS:
 
 ```sh
 version=0.2.2 # replace with the chosen existing release
-curl --fail --location --proto '=https' --tlsv1.2 \
-  "https://github.com/fvmoraes/kubepeep/releases/download/${version}/install.sh" \
-  --output /tmp/kubepeep-install.sh
-sh /tmp/kubepeep-install.sh --version "$version"
+release_commit=$(git rev-parse --verify "refs/tags/${version}^{commit}") || exit 1
+installer_dir=$(mktemp -d "${TMPDIR:-/tmp}/kubepeep-install.XXXXXX") || exit 1
+installer="$installer_dir/install.sh"
+git show "${release_commit}:install.sh" > "$installer" || exit 1
+printf 'Installer: %s\nSource commit: %s\n' "$installer" "$release_commit"
+sh "$installer" --version "$version"
 ```
 
 PowerShell:
 
 ```powershell
 $Version = '0.2.2' # replace with the chosen existing release
-$Installer = Join-Path $env:TEMP 'kubepeep-install.ps1'
-$Uri = "https://github.com/fvmoraes/kubepeep/releases/download/$Version/install.ps1"
-Invoke-WebRequest -UseBasicParsing -Uri $Uri -OutFile $Installer
+$ReleaseCommit = git rev-parse --verify "refs/tags/$Version^{commit}"
+if ($LASTEXITCODE -ne 0) { throw 'The chosen release tag is not available in this checkout.' }
+$ScriptContent = git show "${ReleaseCommit}:install.ps1"
+if ($LASTEXITCODE -ne 0) { throw 'The chosen revision does not contain the installer.' }
+$InstallerDirectory = Join-Path ([IO.Path]::GetTempPath()) ("kubepeep-install-" + [Guid]::NewGuid().ToString('N'))
+New-Item -ItemType Directory -Path $InstallerDirectory -ErrorAction Stop | Out-Null
+$Installer = Join-Path $InstallerDirectory 'install.ps1'
+Set-Content -LiteralPath $Installer -Value $ScriptContent -Encoding UTF8
+Write-Output "Installer: $Installer`nSource commit: $ReleaseCommit"
 & $Installer -Version $Version
 ```
+
+Keep the printed script path and source commit for removal. The variables
+above remain available in the same shell; in a later session, set `installer`
+or `$Installer` to that saved path. If the temporary file has been removed,
+extract the script again from the same reviewed commit before uninstalling.
 
 ## Verification and naming
 
@@ -97,7 +116,7 @@ package installer. Local data is preserved.
 The script uninstallers remove their binary and owned PATH entry:
 
 ```sh
-sh /tmp/kubepeep-install.sh --uninstall
+sh "$installer" --uninstall
 ```
 
 ```powershell
@@ -107,7 +126,7 @@ sh /tmp/kubepeep-install.sh --uninstall
 Deleting local data requires both purge and confirmation flags:
 
 ```sh
-sh /tmp/kubepeep-install.sh --uninstall --purge-data --confirm-purge
+sh "$installer" --uninstall --purge-data --confirm-purge
 ```
 
 ```powershell

@@ -539,14 +539,14 @@ O request repete esses campos e inclui `confirmed: true`. O backend não confia 
 - timeout idle, backpressure e limite de sessões;
 - nenhum conteúdo registrado.
 
-O transporte browser-backend será `github.com/coder/websocket v1.8.15`, com as
-proteções acima. O stream remoto continuará nas bibliotecas oficiais
+O transporte browser-backend usa `github.com/coder/websocket v1.8.15`, com as
+proteções acima. O stream remoto usa as bibliotecas oficiais
 Kubernetes. `pkg/ws` do Ginger foi rejeitado para `exec` pelas lacunas
 comprovadas no ADR 0003.
 
 ## 15. Atualização e supply chain
 
-- GoReleaser produz checksums SHA-256.
+- O workflow de release produz `checksums.txt` com `sha256sum`.
 - Instaladores e `update` abortam sem checksum válido.
 - Download ocorre em arquivo temporário.
 - Troca de binário é atômica com rollback.

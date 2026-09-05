@@ -389,7 +389,8 @@ do merge.
 - Falha mantém versão anterior e impede startup de escrita.
 - O binário não abre frontend como “pronto” antes de migrations concluírem.
 
-A implementação e as migrations de produção vivem em `internal/adapters/sqlite/`.
+O runner SQLite vive em `internal/adapters/sqlite/`; os arquivos SQL ficam em
+`internal/migrations/sql/`, embutidos por `internal/migrations/migrations.go`.
 O spike F1 permanece como reprodução histórica do embed.
 
 ## 9. Backup, update e rollback
