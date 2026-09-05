@@ -1079,3 +1079,171 @@ func restartMatches(value int64, filter resources.RestartFilter) bool {
 		return false
 	}
 }
+
+func (backend *ResourceBackend) ListClusterRoles(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, options resources.ListOptions, cursor *resources.CompositeCursor[resources.RoleDTO]) (resources.ListResult[resources.RoleDTO], error) {
+	return clusterCollect(ctx, backend, binding, resolution, resources.CollectionClusterRoles, options, cursor, clusterRoleIdentityLess, func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[resources.RoleDTO], error) {
+		return backend.listClusterRolePage(ctx, binding, page)
+	}, filterSortRBACRules)
+}
+
+func (backend *ResourceBackend) ListClusterRoleBindings(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, options resources.ListOptions, cursor *resources.CompositeCursor[resources.BindingDTO]) (resources.ListResult[resources.BindingDTO], error) {
+	return clusterCollect(ctx, backend, binding, resolution, resources.CollectionClusterRoleBindings, options, cursor, clusterRoleBindingIdentityLess, func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[resources.BindingDTO], error) {
+		return backend.listClusterRoleBindingPage(ctx, binding, page)
+	}, filterSortBindings)
+}
+
+func (backend *ResourceBackend) ListCustomResourceDefinitions(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, options resources.ListOptions, cursor *resources.CompositeCursor[resources.CustomResourceDefinitionDTO]) (resources.ListResult[resources.CustomResourceDefinitionDTO], error) {
+	return clusterCollect(ctx, backend, binding, resolution, resources.CollectionCRDs, options, cursor, crdIdentityLess, func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[resources.CustomResourceDefinitionDTO], error) {
+		return backend.listCRDPage(ctx, binding, page)
+	}, filterSortCRDs)
+}
+
+func (backend *ResourceBackend) ListPriorityClasses(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, options resources.ListOptions, cursor *resources.CompositeCursor[resources.PriorityClassDTO]) (resources.ListResult[resources.PriorityClassDTO], error) {
+	return clusterCollect(ctx, backend, binding, resolution, resources.CollectionPriorityClasses, options, cursor, priorityClassIdentityLess, func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[resources.PriorityClassDTO], error) {
+		return backend.listPriorityClassPage(ctx, binding, page)
+	}, filterSortPriorityClasses)
+}
+
+func (backend *ResourceBackend) ListRuntimeClasses(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, options resources.ListOptions, cursor *resources.CompositeCursor[resources.RuntimeClassDTO]) (resources.ListResult[resources.RuntimeClassDTO], error) {
+	return clusterCollect(ctx, backend, binding, resolution, resources.CollectionRuntimeClasses, options, cursor, runtimeClassIdentityLess, func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[resources.RuntimeClassDTO], error) {
+		return backend.listRuntimeClassPage(ctx, binding, page)
+	}, filterSortRuntimeClasses)
+}
+
+func (backend *ResourceBackend) ListMutatingWebhookConfigurations(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, options resources.ListOptions, cursor *resources.CompositeCursor[resources.WebhookConfigurationDTO]) (resources.ListResult[resources.WebhookConfigurationDTO], error) {
+	return clusterCollect(ctx, backend, binding, resolution, resources.CollectionMutatingWebhooks, options, cursor, webhookConfigurationIdentityLess, func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[resources.WebhookConfigurationDTO], error) {
+		return backend.listMutatingWebhookConfigurationPage(ctx, binding, page)
+	}, filterSortWebhooks)
+}
+
+func (backend *ResourceBackend) ListValidatingWebhookConfigurations(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, options resources.ListOptions, cursor *resources.CompositeCursor[resources.WebhookConfigurationDTO]) (resources.ListResult[resources.WebhookConfigurationDTO], error) {
+	return clusterCollect(ctx, backend, binding, resolution, resources.CollectionValidatingWebhooks, options, cursor, webhookConfigurationIdentityLess, func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[resources.WebhookConfigurationDTO], error) {
+		return backend.listValidatingWebhookConfigurationPage(ctx, binding, page)
+	}, filterSortWebhooks)
+}
+
+func (backend *ResourceBackend) ListIngressClasses(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, options resources.ListOptions, cursor *resources.CompositeCursor[resources.IngressClassDTO]) (resources.ListResult[resources.IngressClassDTO], error) {
+	return clusterCollect(ctx, backend, binding, resolution, resources.CollectionIngressClasses, options, cursor, ingressClassIdentityLess, func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[resources.IngressClassDTO], error) {
+		return backend.listIngressClassPage(ctx, binding, page)
+	}, filterSortIngressClasses)
+}
+
+func (backend *ResourceBackend) ListRoles(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, options resources.ListOptions, cursor *resources.CompositeCursor[resources.RoleDTO]) (resources.ListResult[resources.RoleDTO], error) {
+	return collectFilteredResource(ctx, backend, binding, resolution, resources.CollectionRoles, options, cursor, roleIdentityLess, func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[resources.RoleDTO], error) {
+		return backend.listRolePage(ctx, binding, page)
+	}, filterSortRBACRules)
+}
+
+func (backend *ResourceBackend) ListRoleBindings(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, options resources.ListOptions, cursor *resources.CompositeCursor[resources.BindingDTO]) (resources.ListResult[resources.BindingDTO], error) {
+	return collectFilteredResource(ctx, backend, binding, resolution, resources.CollectionRoleBindings, options, cursor, roleBindingIdentityLess, func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[resources.BindingDTO], error) {
+		return backend.listRoleBindingPage(ctx, binding, page)
+	}, filterSortBindings)
+}
+
+func (backend *ResourceBackend) ListNetworkPolicies(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, options resources.ListOptions, cursor *resources.CompositeCursor[resources.NetworkPolicyDTO]) (resources.ListResult[resources.NetworkPolicyDTO], error) {
+	return collectFilteredResource(ctx, backend, binding, resolution, resources.CollectionNetworkPolicies, options, cursor, networkPolicyIdentityLess, func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[resources.NetworkPolicyDTO], error) {
+		return backend.listNetworkPolicyPage(ctx, binding, page)
+	}, filterSortNetworkPolicies)
+}
+
+func (backend *ResourceBackend) ListEndpoints(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, options resources.ListOptions, cursor *resources.CompositeCursor[resources.EndpointsDTO]) (resources.ListResult[resources.EndpointsDTO], error) {
+	return collectFilteredResource(ctx, backend, binding, resolution, resources.CollectionEndpoints, options, cursor, endpointsIdentityLess, func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[resources.EndpointsDTO], error) {
+		return backend.listEndpointsPage(ctx, binding, page)
+	}, filterSortEndpoints)
+}
+
+func roleDTOIdentityLess(l, r resources.RoleDTO) bool {
+	if l.Namespace != r.Namespace {
+		return l.Namespace < r.Namespace
+	}
+	return l.Name < r.Name
+}
+func roleIdentityLess(l, r resources.RoleDTO) bool        { return roleDTOIdentityLess(l, r) }
+func clusterRoleIdentityLess(l, r resources.RoleDTO) bool { return roleDTOIdentityLess(l, r) }
+func bindingIdentityLess(l, r resources.BindingDTO) bool {
+	if l.Namespace != r.Namespace {
+		return l.Namespace < r.Namespace
+	}
+	return l.Name < r.Name
+}
+func roleBindingIdentityLess(l, r resources.BindingDTO) bool          { return bindingIdentityLess(l, r) }
+func clusterRoleBindingIdentityLess(l, r resources.BindingDTO) bool   { return bindingIdentityLess(l, r) }
+func crdIdentityLess(l, r resources.CustomResourceDefinitionDTO) bool { return l.Name < r.Name }
+func priorityClassIdentityLess(l, r resources.PriorityClassDTO) bool  { return l.Name < r.Name }
+func runtimeClassIdentityLess(l, r resources.RuntimeClassDTO) bool    { return l.Name < r.Name }
+func webhookConfigurationIdentityLess(l, r resources.WebhookConfigurationDTO) bool {
+	return l.Name < r.Name
+}
+func ingressClassIdentityLess(l, r resources.IngressClassDTO) bool { return l.Name < r.Name }
+func networkPolicyIdentityLess(l, r resources.NetworkPolicyDTO) bool {
+	if l.Namespace != r.Namespace {
+		return l.Namespace < r.Namespace
+	}
+	return l.Name < r.Name
+}
+func endpointsIdentityLess(l, r resources.EndpointsDTO) bool {
+	if l.Namespace != r.Namespace {
+		return l.Namespace < r.Namespace
+	}
+	return l.Name < r.Name
+}
+
+// filterSortNameOnly covers the collections whose only sort keys are
+// identity/name: search over the namespace/name pair, deterministic merge.
+func filterSortNameOnly[T any](items []T, options resources.ListOptions, name func(T) string, namespace func(T) string) []T {
+	result := make([]T, 0, len(items))
+	for _, item := range items {
+		if options.Search == "" || matchesSearch(options, append([]string{namespace(item)}, name(item))...) {
+			result = append(result, item)
+		}
+	}
+	sort.SliceStable(result, func(i, j int) bool {
+		l, r := name(result[i]), name(result[j])
+		primary := strings.Compare(l, r)
+		if options.Sort == "name" {
+			primary = naturalTextCompare(l, r)
+		}
+		return pageSortLess(primary, strings.Compare(l, r), options.Order == resources.OrderDescending)
+	})
+	return result
+}
+
+func filterSortRBACRules(items []resources.RoleDTO, options resources.ListOptions) []resources.RoleDTO {
+	return filterSortNameOnly(items, options, func(item resources.RoleDTO) string { return item.Name }, func(item resources.RoleDTO) string { return item.Namespace })
+}
+
+func filterSortBindings(items []resources.BindingDTO, options resources.ListOptions) []resources.BindingDTO {
+	return filterSortNameOnly(items, options, func(item resources.BindingDTO) string { return item.Name }, func(item resources.BindingDTO) string { return item.Namespace })
+}
+
+func filterSortWebhooks(items []resources.WebhookConfigurationDTO, options resources.ListOptions) []resources.WebhookConfigurationDTO {
+	return filterSortNameOnly(items, options, func(item resources.WebhookConfigurationDTO) string { return item.Name }, func(resources.WebhookConfigurationDTO) string { return "" })
+}
+
+func filterSortNameOnlyDefault[T any](items []T, options resources.ListOptions, name func(T) string, namespace func(T) string, searchFields func(T) []string) []T {
+	return filterSortNameOnly(items, options, name, namespace)
+}
+
+func filterSortCRDs(items []resources.CustomResourceDefinitionDTO, options resources.ListOptions) []resources.CustomResourceDefinitionDTO {
+	return filterSortNameOnly(items, options, func(item resources.CustomResourceDefinitionDTO) string { return item.Name }, func(resources.CustomResourceDefinitionDTO) string { return "" })
+}
+
+func filterSortPriorityClasses(items []resources.PriorityClassDTO, options resources.ListOptions) []resources.PriorityClassDTO {
+	return filterSortNameOnly(items, options, func(item resources.PriorityClassDTO) string { return item.Name }, func(resources.PriorityClassDTO) string { return "" })
+}
+
+func filterSortRuntimeClasses(items []resources.RuntimeClassDTO, options resources.ListOptions) []resources.RuntimeClassDTO {
+	return filterSortNameOnly(items, options, func(item resources.RuntimeClassDTO) string { return item.Name }, func(resources.RuntimeClassDTO) string { return "" })
+}
+
+func filterSortIngressClasses(items []resources.IngressClassDTO, options resources.ListOptions) []resources.IngressClassDTO {
+	return filterSortNameOnly(items, options, func(item resources.IngressClassDTO) string { return item.Name }, func(resources.IngressClassDTO) string { return "" })
+}
+
+func filterSortNetworkPolicies(items []resources.NetworkPolicyDTO, options resources.ListOptions) []resources.NetworkPolicyDTO {
+	return filterSortNameOnly(items, options, func(item resources.NetworkPolicyDTO) string { return item.Name }, func(item resources.NetworkPolicyDTO) string { return item.Namespace })
+}
+
+func filterSortEndpoints(items []resources.EndpointsDTO, options resources.ListOptions) []resources.EndpointsDTO {
+	return filterSortNameOnly(items, options, func(item resources.EndpointsDTO) string { return item.Name }, func(item resources.EndpointsDTO) string { return item.Namespace })
+}

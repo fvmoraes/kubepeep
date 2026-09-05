@@ -38,6 +38,18 @@ func TestAllowlistExactlyMatchesDocumentedMVPIDs(t *testing.T) {
 		"resourcequotas.list", "resourcequotas.get",
 		"limitranges.list", "limitranges.get",
 		"serviceaccounts.list", "serviceaccounts.get",
+		"roles.list", "roles.get",
+		"rolebindings.list", "rolebindings.get",
+		"clusterroles.list", "clusterroles.get",
+		"clusterrolebindings.list", "clusterrolebindings.get",
+		"customresourcedefinitions.list", "customresourcedefinitions.get",
+		"priorityclasses.list", "priorityclasses.get",
+		"runtimeclasses.list", "runtimeclasses.get",
+		"mutatingwebhookconfigurations.list", "mutatingwebhookconfigurations.get",
+		"validatingwebhookconfigurations.list", "validatingwebhookconfigurations.get",
+		"ingressclasses.list", "ingressclasses.get",
+		"networkpolicies.list", "networkpolicies.get",
+		"endpoints.list", "endpoints.get",
 		"metrics.pods.list",
 	}
 	allowlist := Allowlist()
@@ -70,7 +82,11 @@ func TestAllowlistExactlyMatchesDocumentedMVPIDs(t *testing.T) {
 func isClusterListCapability(id string) bool {
 	switch id {
 	case "nodes.list", "persistentvolumes.list", "storageclasses.list",
-		"volumeattachments.list", "csinodes.list", "csidrivers.list":
+		"volumeattachments.list", "csinodes.list", "csidrivers.list",
+		"clusterroles.list", "clusterrolebindings.list",
+		"customresourcedefinitions.list", "priorityclasses.list",
+		"runtimeclasses.list", "mutatingwebhookconfigurations.list",
+		"validatingwebhookconfigurations.list", "ingressclasses.list":
 		return true
 	}
 	return false

@@ -16,8 +16,11 @@ const navCatalog = [
   ['/workloads/kind/jobs', 'Jobs', 'Workloads'],
   ['/workloads/kind/cronjobs', 'CronJobs', 'Workloads'],
   ['/network/services', 'Services', 'Network'],
+  ['/network/endpoints', 'Endpoints', 'Network'],
   ['/network/endpoint-slices', 'EndpointSlices', 'Network'],
   ['/network/ingresses', 'Ingresses', 'Network'],
+  ['/network/ingress-classes', 'IngressClasses', 'Network'],
+  ['/network/network-policies', 'NetworkPolicies', 'Network'],
   ['/network/port-forwards', 'Port Forwarding', 'Network'],
   ['/config/configmaps', 'ConfigMaps', 'Configuration'],
   ['/config/secrets', 'Secrets', 'Configuration'],
@@ -32,8 +35,16 @@ const navCatalog = [
   ['/storage/csi-nodes', 'CSINodes', 'Storage'],
   ['/storage/csi-drivers', 'CSIDrivers', 'Storage'],
   ['/service-accounts', 'ServiceAccounts', 'ServiceAccounts'],
+  ['/access/roles', 'Roles', 'Access Control'],
+  ['/access/role-bindings', 'RoleBindings', 'Access Control'],
+  ['/access/cluster-roles', 'ClusterRoles', 'Access Control'],
+  ['/access/cluster-role-bindings', 'ClusterRoleBindings', 'Access Control'],
   ['/permissions', 'Permissions', 'Permissions are offline'],
   ['/logs', 'Logs', 'Logs'],
+  ['/administration/customresourcedefinitions', 'CustomResourceDefinitions', 'Administration'],
+  ['/administration/priority-classes', 'PriorityClasses', 'Administration'],
+  ['/administration/runtime-classes', 'RuntimeClasses', 'Administration'],
+  ['/administration/mutating-webhook-configurations', 'Admission Webhooks', 'Administration'],
   ['/settings', 'Settings', 'Settings'],
 ] as const
 
@@ -78,8 +89,10 @@ test('serves the application shell and preserves History API navigation', async 
     await expect(page.getByRole('heading', { name: heading }).first()).toBeVisible()
   }
 
+  // Meta+b returns to the previous local history entry (the last catalog page
+  // before Settings, which is now the Admission Webhooks destination).
   await page.keyboard.press('Meta+b')
-  await expect(page).toHaveURL(/\/logs$/)
+  await expect(page).toHaveURL(/\/administration\/mutating-webhook-configurations$/)
 })
 
 test('keeps the dashboard useful with partial data and an explicit bounded log scan', async ({ page }) => {

@@ -14,6 +14,7 @@ import { LogsPage } from './components/LogsPage'
 import { ConfigPage, EventsPage, NetworkPage, NodesPage, PodsPage, WorkloadsPage } from './components/ResourcePages'
 import { LeasesPage, NamespaceObjectPage, StoragePage } from './components/FamilyPages'
 import { ConfigurationPage, ServiceAccountsPage } from './components/ConfigurationPages'
+import { AccessControlPage, AdministrationPage } from './components/AccessPages'
 import { SettingsPage } from './components/SettingsPage'
 import { Sidebar } from './components/Sidebar'
 import { StatePanel } from './components/StatePanel'
@@ -56,6 +57,14 @@ function resourceEntryPath(collection: unknown, item: { name?: string; namespace
     'csi-nodes': '/storage/csi-nodes',
     'csi-drivers': '/storage/csi-drivers',
     'volume-attachments': '/storage/volume-attachments',
+    'cluster-roles': '/access/cluster-roles',
+    'cluster-role-bindings': '/access/cluster-role-bindings',
+    'customresourcedefinitions': '/administration/customresourcedefinitions',
+    'priority-classes': '/administration/priority-classes',
+    'runtime-classes': '/administration/runtime-classes',
+    'mutating-webhook-configurations': '/administration/mutating-webhook-configurations',
+    'validating-webhook-configurations': '/administration/validating-webhook-configurations',
+    'ingress-classes': '/network/ingress-classes',
   }
   if (collection in clusterRoots) return `${clusterRoots[collection]}/${encodeURIComponent(item.name)}`
   if (!item.namespace) return null
@@ -82,6 +91,14 @@ function resourceEntryPath(collection: unknown, item: { name?: string; namespace
       return `/leases/${namespace}/${name}`
     case 'persistent-volume-claims':
       return `/storage/persistent-volume-claims/${namespace}/${name}`
+    case 'roles':
+      return `/access/roles/${namespace}/${name}`
+    case 'role-bindings':
+      return `/access/role-bindings/${namespace}/${name}`
+    case 'network-policies':
+      return `/network/network-policies/${namespace}/${name}`
+    case 'endpoints':
+      return `/network/endpoints/${namespace}/${name}`
     default:
       return null
   }
@@ -292,6 +309,11 @@ export function App() {
         <Route path="configuration/:tab" element={<ConfigurationPage />} />
         <Route path="configuration/:tab/:namespace/:name" element={<ConfigurationPage />} />
         <Route path="service-accounts" element={<ServiceAccountsPage />} />
+        <Route path="access/:tab" element={<AccessControlPage />} />
+        <Route path="access/:tab/:namespace/:name" element={<AccessControlPage />} />
+        <Route path="administration" element={<AdministrationPage />} />
+        <Route path="administration/:tab" element={<AdministrationPage />} />
+        <Route path="administration/:tab/:name" element={<AdministrationPage />} />
         <Route path="permissions" element={<PermissionsMatrixPage />} />
         <Route path="logs" element={<LogsPage />} />
         <Route path="pods" element={<PodsPage />} />

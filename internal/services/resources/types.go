@@ -15,6 +15,18 @@ type Collection string
 
 const (
 	CollectionServiceAccounts Collection = "service-accounts"
+	CollectionRoles           Collection = "roles"
+	CollectionRoleBindings    Collection = "role-bindings"
+	CollectionClusterRoles    Collection = "cluster-roles"
+	CollectionClusterRoleBindings Collection = "cluster-role-bindings"
+	CollectionCRDs            Collection = "customresourcedefinitions"
+	CollectionPriorityClasses Collection = "priority-classes"
+	CollectionRuntimeClasses  Collection = "runtime-classes"
+	CollectionMutatingWebhooks Collection = "mutating-webhook-configurations"
+	CollectionValidatingWebhooks Collection = "validating-webhook-configurations"
+	CollectionIngressClasses  Collection = "ingress-classes"
+	CollectionNetworkPolicies Collection = "network-policies"
+	CollectionEndpoints       Collection = "endpoints"
 	CollectionResourceQuotas  Collection = "resource-quotas"
 	CollectionLimitRanges     Collection = "limit-ranges"
 	CollectionHPAs            Collection = "horizontalpodautoscalers"

@@ -139,6 +139,30 @@ func Register(applicationRouter *router.Router, dependencies Dependencies) {
 		apiRouter.GET("/hpas/{namespace}/{name}", resourceHandler.HPADetail)
 		apiRouter.GET("/pdbs", resourceHandler.PDBs)
 		apiRouter.GET("/pdbs/{namespace}/{name}", resourceHandler.PDBDetail)
+		apiRouter.GET("/roles", resourceHandler.Roles)
+		apiRouter.GET("/roles/{namespace}/{name}", resourceHandler.RoleDetail)
+		apiRouter.GET("/role-bindings", resourceHandler.RoleBindings)
+		apiRouter.GET("/role-bindings/{namespace}/{name}", resourceHandler.RoleBindingDetail)
+		apiRouter.GET("/network-policies", resourceHandler.NetworkPolicies)
+		apiRouter.GET("/network-policies/{namespace}/{name}", resourceHandler.NetworkPolicyDetail)
+		apiRouter.GET("/endpoints", resourceHandler.Endpoints)
+		apiRouter.GET("/endpoints/{namespace}/{name}", resourceHandler.EndpointsDetail)
+		apiRouter.GET("/cluster-roles", resourceHandler.ClusterRoles)
+		apiRouter.GET("/cluster-roles/{name}", resourceHandler.ClusterRoleDetail)
+		apiRouter.GET("/cluster-role-bindings", resourceHandler.ClusterRoleBindings)
+		apiRouter.GET("/cluster-role-bindings/{name}", resourceHandler.ClusterRoleBindingDetail)
+		apiRouter.GET("/customresourcedefinitions", resourceHandler.CustomResourceDefinitions)
+		apiRouter.GET("/customresourcedefinitions/{name}", resourceHandler.CustomResourceDefinitionDetail)
+		apiRouter.GET("/priority-classes", resourceHandler.PriorityClasses)
+		apiRouter.GET("/priority-classes/{name}", resourceHandler.PriorityClassDetail)
+		apiRouter.GET("/runtime-classes", resourceHandler.RuntimeClasses)
+		apiRouter.GET("/runtime-classes/{name}", resourceHandler.RuntimeClassDetail)
+		apiRouter.GET("/mutating-webhook-configurations", resourceHandler.MutatingWebhookConfigurations)
+		apiRouter.GET("/mutating-webhook-configurations/{name}", resourceHandler.MutatingWebhookConfigurationDetail)
+		apiRouter.GET("/validating-webhook-configurations", resourceHandler.ValidatingWebhookConfigurations)
+		apiRouter.GET("/validating-webhook-configurations/{name}", resourceHandler.ValidatingWebhookConfigurationDetail)
+		apiRouter.GET("/ingress-classes", resourceHandler.IngressClasses)
+		apiRouter.GET("/ingress-classes/{name}", resourceHandler.IngressClassDetail)
 	}
 	if dependencies.Preferences != nil {
 		preferenceHandler := NewResources(nil, dependencies.Preferences, dependencies.Selection, dependencies.Cursors)
@@ -203,7 +227,12 @@ func allowedMethods(path string) (string, bool) {
 		apiPrefix + "/persistent-volumes", apiPrefix + "/persistent-volume-claims",
 		apiPrefix + "/storage-classes", apiPrefix + "/csi-drivers", apiPrefix + "/csi-nodes",
 		apiPrefix + "/volume-attachments", apiPrefix + "/service-accounts",
-		apiPrefix + "/resource-quotas", apiPrefix + "/limit-ranges", apiPrefix + "/hpas", apiPrefix + "/pdbs":
+		apiPrefix + "/resource-quotas", apiPrefix + "/limit-ranges", apiPrefix + "/hpas", apiPrefix + "/pdbs",
+		apiPrefix + "/roles", apiPrefix + "/role-bindings", apiPrefix + "/network-policies", apiPrefix + "/endpoints",
+		apiPrefix + "/cluster-roles", apiPrefix + "/cluster-role-bindings",
+		apiPrefix + "/customresourcedefinitions", apiPrefix + "/priority-classes", apiPrefix + "/runtime-classes",
+		apiPrefix + "/mutating-webhook-configurations", apiPrefix + "/validating-webhook-configurations",
+		apiPrefix + "/ingress-classes":
 		return "GET, HEAD", true
 	case apiPrefix + "/preferences":
 		return "GET, HEAD, PUT", true
@@ -259,7 +288,7 @@ func resourceAllowedMethods(path string) (string, bool) {
 		return "GET, HEAD", true
 	case len(parts) == 5 && parts[0] == "pods" && parts[3] == "logs" && parts[4] == "stream":
 		return "GET", true
-	case len(parts) == 3 && (parts[0] == "services" || parts[0] == "ingresses" || parts[0] == "endpoint-slices" || parts[0] == "configmaps" || parts[0] == "secrets" || parts[0] == "leases" || parts[0] == "persistent-volume-claims" || parts[0] == "service-accounts" || parts[0] == "resource-quotas" || parts[0] == "limit-ranges" || parts[0] == "hpas" || parts[0] == "pdbs"):
+	case len(parts) == 3 && (parts[0] == "services" || parts[0] == "ingresses" || parts[0] == "endpoint-slices" || parts[0] == "configmaps" || parts[0] == "secrets" || parts[0] == "leases" || parts[0] == "persistent-volume-claims" || parts[0] == "service-accounts" || parts[0] == "resource-quotas" || parts[0] == "limit-ranges" || parts[0] == "hpas" || parts[0] == "pdbs" || parts[0] == "roles" || parts[0] == "role-bindings" || parts[0] == "network-policies" || parts[0] == "endpoints"):
 		return "GET, HEAD", true
 	case len(parts) == 4 && parts[3] == "yaml" && (parts[0] == "services" || parts[0] == "ingresses" || parts[0] == "endpoint-slices" || parts[0] == "configmaps"):
 		return "GET, HEAD", true
@@ -282,7 +311,10 @@ func resourceAllowedMethods(path string) (string, bool) {
 var clusterNameRoutes = map[string]bool{
 	"nodes": true, "persistent-volumes": true, "storage-classes": true,
 	"csi-drivers": true, "csi-nodes": true, "volume-attachments": true,
-	"namespaces": true,
+	"namespaces": true, "cluster-roles": true, "cluster-role-bindings": true,
+	"customresourcedefinitions": true, "priority-classes": true,
+	"runtime-classes": true, "mutating-webhook-configurations": true,
+	"validating-webhook-configurations": true, "ingress-classes": true,
 }
 
 // clusterYAMLRoutes are the cluster-scoped collections with a YAML action.

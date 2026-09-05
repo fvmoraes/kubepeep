@@ -67,6 +67,18 @@ var rulesByCollection = map[Collection]collectionRules{
 	CollectionLimitRanges:            {sorts: []string{"identity", "name"}, defaultSort: "identity", defaultOrder: OrderAscending},
 	CollectionHPAs:                   {sorts: []string{"identity", "name", "age"}, defaultSort: "identity", defaultOrder: OrderAscending},
 	CollectionPDBs:                   {sorts: []string{"identity", "name"}, defaultSort: "identity", defaultOrder: OrderAscending},
+	CollectionRoles:                  {sorts: []string{"identity", "name"}, defaultSort: "identity", defaultOrder: OrderAscending},
+	CollectionRoleBindings:           {sorts: []string{"identity", "name"}, defaultSort: "identity", defaultOrder: OrderAscending},
+	CollectionClusterRoles:           {sorts: []string{"identity", "name"}, defaultSort: "identity", defaultOrder: OrderAscending},
+	CollectionClusterRoleBindings:    {sorts: []string{"identity", "name"}, defaultSort: "identity", defaultOrder: OrderAscending},
+	CollectionCRDs:                   {sorts: []string{"identity", "name"}, defaultSort: "identity", defaultOrder: OrderAscending},
+	CollectionPriorityClasses:        {sorts: []string{"identity", "name"}, defaultSort: "identity", defaultOrder: OrderAscending},
+	CollectionRuntimeClasses:         {sorts: []string{"identity", "name"}, defaultSort: "identity", defaultOrder: OrderAscending},
+	CollectionMutatingWebhooks:       {sorts: []string{"identity", "name"}, defaultSort: "identity", defaultOrder: OrderAscending},
+	CollectionValidatingWebhooks:     {sorts: []string{"identity", "name"}, defaultSort: "identity", defaultOrder: OrderAscending},
+	CollectionIngressClasses:         {sorts: []string{"identity", "name"}, defaultSort: "identity", defaultOrder: OrderAscending},
+	CollectionNetworkPolicies:        {sorts: []string{"identity", "name"}, defaultSort: "identity", defaultOrder: OrderAscending},
+	CollectionEndpoints:              {sorts: []string{"identity", "name"}, defaultSort: "identity", defaultOrder: OrderAscending},
 }
 
 // NormalizeListOptions applies all bounded, endpoint-specific defaults and

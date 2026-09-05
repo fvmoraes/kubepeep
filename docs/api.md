@@ -222,6 +222,8 @@ promessa de snapshot integral.
 | `/dashboard/events` | `status`: `Normal`, `Warning`, `Unknown` | objectKind, objectName, reason, message | `timestamp` (default desc; page), `count` (page), `identity` (page) | timestamp desc, namespace, uid |
 | `/metrics` | nenhum status | pod, container | `cpu` (default desc; page), `memory` (page), `identity` (page) | medida desc, namespace, pod |
 | `/workloads` | `kind`: os seis plurais de §14, 1–6, default todos; `status`: enum de `WorkloadDTO` | namespace, name, kind | `identity` (default; page), `name` (page), `age` (page), `status` (page) | kind canônico, namespace, name, uid |
+| `/roles`, `/role-bindings`, `/network-policies`, `/endpoints` | nenhum status | namespace, name | `identity` (default; page), `name` (page) | namespace, name, uid |
+| `/cluster-roles`, `/cluster-role-bindings`, `/customresourcedefinitions`, `/priority-classes`, `/runtime-classes`, `/mutating-webhook-configurations`, `/validating-webhook-configurations`, `/ingress-classes` | sem `namespace` (cluster-scoped) | name (+ group/kind quando pertinente) | `identity` (default; page), `name` (page) | name, uid |
 | `/pods` | `status`: `Running`, `Pending`, `Succeeded`, `Failed`, `Unknown`; `workload`, `node`; `restarts`: `any`, `gt0`, `gte3`, `gte10`; `problematic`: `true`/`false` | namespace, name, node, owner name | `identity` (default; page), `name` (page), `age` (page), `restarts` (page), `status` (page) | namespace, name, uid |
 | `/events` | `status`: `Normal`, `Warning`, `Unknown`; `objectKind`, `reason` | namespace, objectKind, objectName, reason, message | `timestamp` (default desc; page), `count` (page), `identity` (page) | timestamp desc, namespace, uid |
 | `/services` | nenhum status | namespace, name, type, clusterIPs | `identity` (default; page), `name` (page), `type` (page) | namespace, name, uid |
@@ -1509,6 +1511,29 @@ Schemas fechados:
 
 HPA usa a API `autoscaling/v2` quando o cluster a serve; API ausente é
 `FEATURE_UNAVAILABLE`, nunca interpretada como ausência de autoscalers.
+
+## 16.3 Network, Access Control e Administration (F4)
+
+Rotas namespaced: `GET /api/v1/roles`, `GET /api/v1/role-bindings`,
+`GET /api/v1/network-policies`, `GET /api/v1/endpoints` (listas) e
+`.../{namespace}/{name}` (detalhe). Rotas cluster-scoped (ADR 0006):
+`GET /api/v1/cluster-roles`, `/cluster-role-bindings`,
+`/customresourcedefinitions`, `/priority-classes`, `/runtime-classes`,
+`/mutating-webhook-configurations`, `/validating-webhook-configurations`,
+`/ingress-classes` (listas) e `.../{name}` (detalhe). Autorização
+`list`/`get` por família (capabilities §11). Sem rota YAML nesta fase.
+
+| DTO | Campos e regras |
+| --- | --- |
+| `RoleDTO` / `RoleDetailDTO` | `namespace`, `name`, `ruleCount`, `ageSeconds`; detalhe com `rules` tipadas (máx. 64; cada uma com `apiGroups`/`resources`/`verbs`, máx. 16 itens) e `truncated`. Regras armazenadas nunca implicam permissões efetivas |
+| `BindingDTO` | `namespace`, `name`, `roleRefKind`/`roleRefName`, `subjects` (máx. 32; `kind`/`name`/`namespace`), `truncated`, `ageSeconds` |
+| `CustomResourceDefinitionDTO` | `name`, `group`, `kind`, `scope`, `versions` (máx. 16; `name`/`served`/`storage`), `conditions` (Established/AcceptingNames), `truncated`, `ageSeconds`. Sem schema, defaults ou exemplos; listar CRDs não autoriza ler instâncias CR |
+| `PriorityClassDTO` | `name`, `value`, `globalDefault`, `preemptionPolicy: string|null`, `ageSeconds` |
+| `RuntimeClassDTO` | `name`, `handler`, `overhead` (máx. 32 quantities) ou null, `ageSeconds` |
+| `WebhookConfigurationDTO` | `name`, `webhookCount`, `webhooks` (máx. 32; `name`, `failurePolicy`, `rules` tipadas, `truncated`), `ageSeconds`. CA bundles, URLs e service refs nunca são projetados; sem YAML |
+| `IngressClassDTO` | `name`, `controller`, `default` (annotation), `parameters: string|null` (kind/name), `ageSeconds` |
+| `NetworkPolicyDTO` | `namespace`, `name`, `podSelector` serializado, `policyTypes`, `ruleSummary` (máx. 16), `ageSeconds` |
+| `EndpointsDTO` | `namespace`, `name`, `readyCount`, `notReadyCount`, `ports` (máx. 8), `truncated` com sinal visível (máx. 512 endereços), `ageSeconds` |
 
 ## 17. Port-forwards
 

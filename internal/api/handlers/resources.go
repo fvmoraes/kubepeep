@@ -67,6 +67,30 @@ type ResourceService interface {
 	ListLimitRanges(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, resourcecore.ListOptions, *resourcecore.CompositeCursor[resourcecore.LimitRangeDTO]) (resourcecore.ListResult[resourcecore.LimitRangeDTO], error)
 	ListHPAs(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, resourcecore.ListOptions, *resourcecore.CompositeCursor[resourcecore.HorizontalPodAutoscalerDTO]) (resourcecore.ListResult[resourcecore.HorizontalPodAutoscalerDTO], error)
 	ListPDBs(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, resourcecore.ListOptions, *resourcecore.CompositeCursor[resourcecore.PodDisruptionBudgetDTO]) (resourcecore.ListResult[resourcecore.PodDisruptionBudgetDTO], error)
+	ListRoles(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, resourcecore.ListOptions, *resourcecore.CompositeCursor[resourcecore.RoleDTO]) (resourcecore.ListResult[resourcecore.RoleDTO], error)
+	ListRoleBindings(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, resourcecore.ListOptions, *resourcecore.CompositeCursor[resourcecore.BindingDTO]) (resourcecore.ListResult[resourcecore.BindingDTO], error)
+	ListClusterRoles(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, resourcecore.ListOptions, *resourcecore.CompositeCursor[resourcecore.RoleDTO]) (resourcecore.ListResult[resourcecore.RoleDTO], error)
+	ListClusterRoleBindings(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, resourcecore.ListOptions, *resourcecore.CompositeCursor[resourcecore.BindingDTO]) (resourcecore.ListResult[resourcecore.BindingDTO], error)
+	ListCustomResourceDefinitions(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, resourcecore.ListOptions, *resourcecore.CompositeCursor[resourcecore.CustomResourceDefinitionDTO]) (resourcecore.ListResult[resourcecore.CustomResourceDefinitionDTO], error)
+	ListPriorityClasses(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, resourcecore.ListOptions, *resourcecore.CompositeCursor[resourcecore.PriorityClassDTO]) (resourcecore.ListResult[resourcecore.PriorityClassDTO], error)
+	ListRuntimeClasses(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, resourcecore.ListOptions, *resourcecore.CompositeCursor[resourcecore.RuntimeClassDTO]) (resourcecore.ListResult[resourcecore.RuntimeClassDTO], error)
+	ListMutatingWebhookConfigurations(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, resourcecore.ListOptions, *resourcecore.CompositeCursor[resourcecore.WebhookConfigurationDTO]) (resourcecore.ListResult[resourcecore.WebhookConfigurationDTO], error)
+	ListValidatingWebhookConfigurations(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, resourcecore.ListOptions, *resourcecore.CompositeCursor[resourcecore.WebhookConfigurationDTO]) (resourcecore.ListResult[resourcecore.WebhookConfigurationDTO], error)
+	ListIngressClasses(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, resourcecore.ListOptions, *resourcecore.CompositeCursor[resourcecore.IngressClassDTO]) (resourcecore.ListResult[resourcecore.IngressClassDTO], error)
+	ListNetworkPolicies(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, resourcecore.ListOptions, *resourcecore.CompositeCursor[resourcecore.NetworkPolicyDTO]) (resourcecore.ListResult[resourcecore.NetworkPolicyDTO], error)
+	ListEndpoints(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, resourcecore.ListOptions, *resourcecore.CompositeCursor[resourcecore.EndpointsDTO]) (resourcecore.ListResult[resourcecore.EndpointsDTO], error)
+	GetRole(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, string, string) (resourcecore.RoleDetailDTO, error)
+	GetRoleBinding(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, string, string) (resourcecore.BindingDTO, error)
+	GetClusterRole(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, string) (resourcecore.RoleDetailDTO, error)
+	GetClusterRoleBinding(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, string) (resourcecore.BindingDTO, error)
+	GetCustomResourceDefinition(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, string) (resourcecore.CustomResourceDefinitionDTO, error)
+	GetPriorityClass(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, string) (resourcecore.PriorityClassDTO, error)
+	GetRuntimeClass(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, string) (resourcecore.RuntimeClassDTO, error)
+	GetMutatingWebhookConfiguration(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, string) (resourcecore.WebhookConfigurationDTO, error)
+	GetValidatingWebhookConfiguration(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, string) (resourcecore.WebhookConfigurationDTO, error)
+	GetIngressClass(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, string) (resourcecore.IngressClassDTO, error)
+	GetNetworkPolicy(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, string, string) (resourcecore.NetworkPolicyDTO, error)
+	GetEndpoints(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, string, string) (resourcecore.EndpointsDTO, error)
 	ResourceYAML(context.Context, namespaces.SelectionBinding, string, string, string) ([]byte, error)
 	ResourceLastAppliedDiff(context.Context, namespaces.SelectionBinding, string, string, string) (resourcecore.LastAppliedDiffDTO, error)
 	ReadLogs(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, string, string, resourcecore.LogQuery) (resourcecore.LogReadDTO, error)
@@ -383,6 +407,127 @@ func (handler *Resources) PDBDetail(w http.ResponseWriter, r *http.Request) {
 		return handler.service.GetPDB(ctx, b, s, r.PathValue("namespace"), r.PathValue("name"))
 	})
 }
+func (handler *Resources) Roles(w http.ResponseWriter, r *http.Request) {
+	handleList(handler, w, r, resourcecore.CollectionRoles, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution, o resourcecore.ListOptions, c *resourcecore.CompositeCursor[resourcecore.RoleDTO]) (resourcecore.ListResult[resourcecore.RoleDTO], error) {
+		return handler.service.ListRoles(ctx, b, s, o, c)
+	})
+}
+func (handler *Resources) RoleBindings(w http.ResponseWriter, r *http.Request) {
+	handleList(handler, w, r, resourcecore.CollectionRoleBindings, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution, o resourcecore.ListOptions, c *resourcecore.CompositeCursor[resourcecore.BindingDTO]) (resourcecore.ListResult[resourcecore.BindingDTO], error) {
+		return handler.service.ListRoleBindings(ctx, b, s, o, c)
+	})
+}
+func (handler *Resources) NetworkPolicies(w http.ResponseWriter, r *http.Request) {
+	handleList(handler, w, r, resourcecore.CollectionNetworkPolicies, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution, o resourcecore.ListOptions, c *resourcecore.CompositeCursor[resourcecore.NetworkPolicyDTO]) (resourcecore.ListResult[resourcecore.NetworkPolicyDTO], error) {
+		return handler.service.ListNetworkPolicies(ctx, b, s, o, c)
+	})
+}
+func (handler *Resources) Endpoints(w http.ResponseWriter, r *http.Request) {
+	handleList(handler, w, r, resourcecore.CollectionEndpoints, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution, o resourcecore.ListOptions, c *resourcecore.CompositeCursor[resourcecore.EndpointsDTO]) (resourcecore.ListResult[resourcecore.EndpointsDTO], error) {
+		return handler.service.ListEndpoints(ctx, b, s, o, c)
+	})
+}
+func (handler *Resources) ClusterRoles(w http.ResponseWriter, r *http.Request) {
+	handleClusterList(handler, w, r, resourcecore.CollectionClusterRoles, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution, o resourcecore.ListOptions, c *resourcecore.CompositeCursor[resourcecore.RoleDTO]) (resourcecore.ListResult[resourcecore.RoleDTO], error) {
+		return handler.service.ListClusterRoles(ctx, b, s, o, c)
+	})
+}
+func (handler *Resources) ClusterRoleBindings(w http.ResponseWriter, r *http.Request) {
+	handleClusterList(handler, w, r, resourcecore.CollectionClusterRoleBindings, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution, o resourcecore.ListOptions, c *resourcecore.CompositeCursor[resourcecore.BindingDTO]) (resourcecore.ListResult[resourcecore.BindingDTO], error) {
+		return handler.service.ListClusterRoleBindings(ctx, b, s, o, c)
+	})
+}
+func (handler *Resources) CustomResourceDefinitions(w http.ResponseWriter, r *http.Request) {
+	handleClusterList(handler, w, r, resourcecore.CollectionCRDs, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution, o resourcecore.ListOptions, c *resourcecore.CompositeCursor[resourcecore.CustomResourceDefinitionDTO]) (resourcecore.ListResult[resourcecore.CustomResourceDefinitionDTO], error) {
+		return handler.service.ListCustomResourceDefinitions(ctx, b, s, o, c)
+	})
+}
+func (handler *Resources) PriorityClasses(w http.ResponseWriter, r *http.Request) {
+	handleClusterList(handler, w, r, resourcecore.CollectionPriorityClasses, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution, o resourcecore.ListOptions, c *resourcecore.CompositeCursor[resourcecore.PriorityClassDTO]) (resourcecore.ListResult[resourcecore.PriorityClassDTO], error) {
+		return handler.service.ListPriorityClasses(ctx, b, s, o, c)
+	})
+}
+func (handler *Resources) RuntimeClasses(w http.ResponseWriter, r *http.Request) {
+	handleClusterList(handler, w, r, resourcecore.CollectionRuntimeClasses, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution, o resourcecore.ListOptions, c *resourcecore.CompositeCursor[resourcecore.RuntimeClassDTO]) (resourcecore.ListResult[resourcecore.RuntimeClassDTO], error) {
+		return handler.service.ListRuntimeClasses(ctx, b, s, o, c)
+	})
+}
+func (handler *Resources) MutatingWebhookConfigurations(w http.ResponseWriter, r *http.Request) {
+	handleClusterList(handler, w, r, resourcecore.CollectionMutatingWebhooks, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution, o resourcecore.ListOptions, c *resourcecore.CompositeCursor[resourcecore.WebhookConfigurationDTO]) (resourcecore.ListResult[resourcecore.WebhookConfigurationDTO], error) {
+		return handler.service.ListMutatingWebhookConfigurations(ctx, b, s, o, c)
+	})
+}
+func (handler *Resources) ValidatingWebhookConfigurations(w http.ResponseWriter, r *http.Request) {
+	handleClusterList(handler, w, r, resourcecore.CollectionValidatingWebhooks, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution, o resourcecore.ListOptions, c *resourcecore.CompositeCursor[resourcecore.WebhookConfigurationDTO]) (resourcecore.ListResult[resourcecore.WebhookConfigurationDTO], error) {
+		return handler.service.ListValidatingWebhookConfigurations(ctx, b, s, o, c)
+	})
+}
+func (handler *Resources) IngressClasses(w http.ResponseWriter, r *http.Request) {
+	handleClusterList(handler, w, r, resourcecore.CollectionIngressClasses, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution, o resourcecore.ListOptions, c *resourcecore.CompositeCursor[resourcecore.IngressClassDTO]) (resourcecore.ListResult[resourcecore.IngressClassDTO], error) {
+		return handler.service.ListIngressClasses(ctx, b, s, o, c)
+	})
+}
+func (handler *Resources) RoleDetail(w http.ResponseWriter, r *http.Request) {
+	handler.detail(w, r, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution) (any, error) {
+		return handler.service.GetRole(ctx, b, s, r.PathValue("namespace"), r.PathValue("name"))
+	})
+}
+func (handler *Resources) RoleBindingDetail(w http.ResponseWriter, r *http.Request) {
+	handler.detail(w, r, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution) (any, error) {
+		return handler.service.GetRoleBinding(ctx, b, s, r.PathValue("namespace"), r.PathValue("name"))
+	})
+}
+func (handler *Resources) NetworkPolicyDetail(w http.ResponseWriter, r *http.Request) {
+	handler.detail(w, r, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution) (any, error) {
+		return handler.service.GetNetworkPolicy(ctx, b, s, r.PathValue("namespace"), r.PathValue("name"))
+	})
+}
+func (handler *Resources) EndpointsDetail(w http.ResponseWriter, r *http.Request) {
+	handler.detail(w, r, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution) (any, error) {
+		return handler.service.GetEndpoints(ctx, b, s, r.PathValue("namespace"), r.PathValue("name"))
+	})
+}
+func (handler *Resources) ClusterRoleDetail(w http.ResponseWriter, r *http.Request) {
+	handler.clusterDetail(w, r, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution) (any, error) {
+		return handler.service.GetClusterRole(ctx, b, s, r.PathValue("name"))
+	})
+}
+func (handler *Resources) ClusterRoleBindingDetail(w http.ResponseWriter, r *http.Request) {
+	handler.clusterDetail(w, r, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution) (any, error) {
+		return handler.service.GetClusterRoleBinding(ctx, b, s, r.PathValue("name"))
+	})
+}
+func (handler *Resources) CustomResourceDefinitionDetail(w http.ResponseWriter, r *http.Request) {
+	handler.clusterDetail(w, r, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution) (any, error) {
+		return handler.service.GetCustomResourceDefinition(ctx, b, s, r.PathValue("name"))
+	})
+}
+func (handler *Resources) PriorityClassDetail(w http.ResponseWriter, r *http.Request) {
+	handler.clusterDetail(w, r, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution) (any, error) {
+		return handler.service.GetPriorityClass(ctx, b, s, r.PathValue("name"))
+	})
+}
+func (handler *Resources) RuntimeClassDetail(w http.ResponseWriter, r *http.Request) {
+	handler.clusterDetail(w, r, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution) (any, error) {
+		return handler.service.GetRuntimeClass(ctx, b, s, r.PathValue("name"))
+	})
+}
+func (handler *Resources) MutatingWebhookConfigurationDetail(w http.ResponseWriter, r *http.Request) {
+	handler.clusterDetail(w, r, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution) (any, error) {
+		return handler.service.GetMutatingWebhookConfiguration(ctx, b, s, r.PathValue("name"))
+	})
+}
+func (handler *Resources) ValidatingWebhookConfigurationDetail(w http.ResponseWriter, r *http.Request) {
+	handler.clusterDetail(w, r, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution) (any, error) {
+		return handler.service.GetValidatingWebhookConfiguration(ctx, b, s, r.PathValue("name"))
+	})
+}
+func (handler *Resources) IngressClassDetail(w http.ResponseWriter, r *http.Request) {
+	handler.clusterDetail(w, r, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution) (any, error) {
+		return handler.service.GetIngressClass(ctx, b, s, r.PathValue("name"))
+	})
+}
+
 func (handler *Resources) NamespaceDetail(w http.ResponseWriter, r *http.Request) {
 	handler.clusterDetail(w, r, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution) (any, error) {
 		return handler.service.GetNamespace(ctx, b, s, r.PathValue("name"))

@@ -7,6 +7,16 @@ useDefault = true
 id = "generic-api-key"
 
     [[rules.allowlists]]
+    description = "Kubernetes RBAC field name APIGroup followed by a public Kubernetes API group; not a credential"
+    condition = "AND"
+    regexTarget = "match"
+    regexes = ['APIGroup: "scheduling.k8s.io"']
+    paths = [
+      '^internal/services/authorization/allowlist.go$',
+      '^internal/integration/kubernetesruntime/resources_adapter.go$',
+    ]
+
+    [[rules.allowlists]]
     description = "RFC 6455 public sample nonce in WebSocket tests"
     condition = "AND"
     regexTarget = "secret"

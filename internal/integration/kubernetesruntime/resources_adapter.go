@@ -9,8 +9,10 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
 	kubeclient "k8s.io/client-go/kubernetes"
@@ -252,6 +254,239 @@ func (backend *ResourceBackend) listLeasePage(ctx context.Context, binding names
 	return result, nil
 }
 
+func (backend *ResourceBackend) listRolePage(ctx context.Context, binding namespaces.SelectionBinding, page resources.PageRequest) (resources.OriginPage[resources.RoleDTO], error) {
+	result := resources.OriginPage[resources.RoleDTO]{Origin: page.Origin, Items: []resources.RoleDTO{}}
+	requestContext, cancel, clients, err := backend.unary(ctx, binding)
+	if err != nil {
+		return result, err
+	}
+	defer cancel()
+	list, err := clients.kubernetes.RbacV1().Roles(page.Origin.Namespace).List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	if err != nil {
+		return result, mapResourceError(err)
+	}
+	now := backend.now().UTC()
+	for index := range list.Items {
+		result.Items = append(result.Items, resources.ConvertRole(&list.Items[index], now))
+	}
+	result.Continue, result.ResourceVersion = list.Continue, list.ResourceVersion
+	return result, nil
+}
+
+func (backend *ResourceBackend) listRoleBindingPage(ctx context.Context, binding namespaces.SelectionBinding, page resources.PageRequest) (resources.OriginPage[resources.BindingDTO], error) {
+	result := resources.OriginPage[resources.BindingDTO]{Origin: page.Origin, Items: []resources.BindingDTO{}}
+	requestContext, cancel, clients, err := backend.unary(ctx, binding)
+	if err != nil {
+		return result, err
+	}
+	defer cancel()
+	list, err := clients.kubernetes.RbacV1().RoleBindings(page.Origin.Namespace).List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	if err != nil {
+		return result, mapResourceError(err)
+	}
+	now := backend.now().UTC()
+	for index := range list.Items {
+		result.Items = append(result.Items, resources.ConvertRoleBinding(&list.Items[index], now))
+	}
+	result.Continue, result.ResourceVersion = list.Continue, list.ResourceVersion
+	return result, nil
+}
+
+func (backend *ResourceBackend) listNetworkPolicyPage(ctx context.Context, binding namespaces.SelectionBinding, page resources.PageRequest) (resources.OriginPage[resources.NetworkPolicyDTO], error) {
+	result := resources.OriginPage[resources.NetworkPolicyDTO]{Origin: page.Origin, Items: []resources.NetworkPolicyDTO{}}
+	requestContext, cancel, clients, err := backend.unary(ctx, binding)
+	if err != nil {
+		return result, err
+	}
+	defer cancel()
+	list, err := clients.kubernetes.NetworkingV1().NetworkPolicies(page.Origin.Namespace).List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	if err != nil {
+		return result, mapResourceError(err)
+	}
+	now := backend.now().UTC()
+	for index := range list.Items {
+		result.Items = append(result.Items, resources.ConvertNetworkPolicy(&list.Items[index], now))
+	}
+	result.Continue, result.ResourceVersion = list.Continue, list.ResourceVersion
+	return result, nil
+}
+
+func (backend *ResourceBackend) listEndpointsPage(ctx context.Context, binding namespaces.SelectionBinding, page resources.PageRequest) (resources.OriginPage[resources.EndpointsDTO], error) {
+	result := resources.OriginPage[resources.EndpointsDTO]{Origin: page.Origin, Items: []resources.EndpointsDTO{}}
+	requestContext, cancel, clients, err := backend.unary(ctx, binding)
+	if err != nil {
+		return result, err
+	}
+	defer cancel()
+	list, err := clients.kubernetes.CoreV1().Endpoints(page.Origin.Namespace).List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	if err != nil {
+		return result, mapResourceError(err)
+	}
+	now := backend.now().UTC()
+	for index := range list.Items {
+		result.Items = append(result.Items, resources.ConvertEndpoints(&list.Items[index], now))
+	}
+	result.Continue, result.ResourceVersion = list.Continue, list.ResourceVersion
+	return result, nil
+}
+
+func (backend *ResourceBackend) listClusterRolePage(ctx context.Context, binding namespaces.SelectionBinding, page resources.PageRequest) (resources.OriginPage[resources.RoleDTO], error) {
+	result := resources.OriginPage[resources.RoleDTO]{Origin: page.Origin, Items: []resources.RoleDTO{}}
+	requestContext, cancel, clients, err := backend.unary(ctx, binding)
+	if err != nil {
+		return result, err
+	}
+	defer cancel()
+	list, err := clients.kubernetes.RbacV1().ClusterRoles().List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	if err != nil {
+		return result, mapResourceError(err)
+	}
+	now := backend.now().UTC()
+	for index := range list.Items {
+		result.Items = append(result.Items, resources.ConvertClusterRole(&list.Items[index], now))
+	}
+	result.Continue, result.ResourceVersion = list.Continue, list.ResourceVersion
+	return result, nil
+}
+
+func (backend *ResourceBackend) listClusterRoleBindingPage(ctx context.Context, binding namespaces.SelectionBinding, page resources.PageRequest) (resources.OriginPage[resources.BindingDTO], error) {
+	result := resources.OriginPage[resources.BindingDTO]{Origin: page.Origin, Items: []resources.BindingDTO{}}
+	requestContext, cancel, clients, err := backend.unary(ctx, binding)
+	if err != nil {
+		return result, err
+	}
+	defer cancel()
+	list, err := clients.kubernetes.RbacV1().ClusterRoleBindings().List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	if err != nil {
+		return result, mapResourceError(err)
+	}
+	now := backend.now().UTC()
+	for index := range list.Items {
+		result.Items = append(result.Items, resources.ConvertClusterRoleBinding(&list.Items[index], now))
+	}
+	result.Continue, result.ResourceVersion = list.Continue, list.ResourceVersion
+	return result, nil
+}
+
+func (backend *ResourceBackend) listIngressClassPage(ctx context.Context, binding namespaces.SelectionBinding, page resources.PageRequest) (resources.OriginPage[resources.IngressClassDTO], error) {
+	result := resources.OriginPage[resources.IngressClassDTO]{Origin: page.Origin, Items: []resources.IngressClassDTO{}}
+	requestContext, cancel, clients, err := backend.unary(ctx, binding)
+	if err != nil {
+		return result, err
+	}
+	defer cancel()
+	list, err := clients.kubernetes.NetworkingV1().IngressClasses().List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	if err != nil {
+		return result, mapResourceError(err)
+	}
+	now := backend.now().UTC()
+	for index := range list.Items {
+		result.Items = append(result.Items, resources.ConvertIngressClass(&list.Items[index], now))
+	}
+	result.Continue, result.ResourceVersion = list.Continue, list.ResourceVersion
+	return result, nil
+}
+
+func (backend *ResourceBackend) listPriorityClassPage(ctx context.Context, binding namespaces.SelectionBinding, page resources.PageRequest) (resources.OriginPage[resources.PriorityClassDTO], error) {
+	result := resources.OriginPage[resources.PriorityClassDTO]{Origin: page.Origin, Items: []resources.PriorityClassDTO{}}
+	requestContext, cancel, clients, err := backend.unary(ctx, binding)
+	if err != nil {
+		return result, err
+	}
+	defer cancel()
+	list, err := clients.kubernetes.SchedulingV1().PriorityClasses().List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	if err != nil {
+		return result, mapResourceError(err)
+	}
+	now := backend.now().UTC()
+	for index := range list.Items {
+		result.Items = append(result.Items, resources.ConvertPriorityClass(&list.Items[index], now))
+	}
+	result.Continue, result.ResourceVersion = list.Continue, list.ResourceVersion
+	return result, nil
+}
+
+func (backend *ResourceBackend) listRuntimeClassPage(ctx context.Context, binding namespaces.SelectionBinding, page resources.PageRequest) (resources.OriginPage[resources.RuntimeClassDTO], error) {
+	result := resources.OriginPage[resources.RuntimeClassDTO]{Origin: page.Origin, Items: []resources.RuntimeClassDTO{}}
+	requestContext, cancel, clients, err := backend.unary(ctx, binding)
+	if err != nil {
+		return result, err
+	}
+	defer cancel()
+	list, err := clients.kubernetes.NodeV1().RuntimeClasses().List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	if err != nil {
+		return result, mapResourceError(err)
+	}
+	now := backend.now().UTC()
+	for index := range list.Items {
+		result.Items = append(result.Items, resources.ConvertRuntimeClass(&list.Items[index], now))
+	}
+	result.Continue, result.ResourceVersion = list.Continue, list.ResourceVersion
+	return result, nil
+}
+
+func (backend *ResourceBackend) listMutatingWebhookConfigurationPage(ctx context.Context, binding namespaces.SelectionBinding, page resources.PageRequest) (resources.OriginPage[resources.WebhookConfigurationDTO], error) {
+	result := resources.OriginPage[resources.WebhookConfigurationDTO]{Origin: page.Origin, Items: []resources.WebhookConfigurationDTO{}}
+	requestContext, cancel, clients, err := backend.unary(ctx, binding)
+	if err != nil {
+		return result, err
+	}
+	defer cancel()
+	list, err := clients.kubernetes.AdmissionregistrationV1().MutatingWebhookConfigurations().List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	if err != nil {
+		return result, mapResourceError(err)
+	}
+	now := backend.now().UTC()
+	for index := range list.Items {
+		result.Items = append(result.Items, resources.ConvertMutatingWebhookConfiguration(&list.Items[index], now))
+	}
+	result.Continue, result.ResourceVersion = list.Continue, list.ResourceVersion
+	return result, nil
+}
+
+func (backend *ResourceBackend) listValidatingWebhookConfigurationPage(ctx context.Context, binding namespaces.SelectionBinding, page resources.PageRequest) (resources.OriginPage[resources.WebhookConfigurationDTO], error) {
+	result := resources.OriginPage[resources.WebhookConfigurationDTO]{Origin: page.Origin, Items: []resources.WebhookConfigurationDTO{}}
+	requestContext, cancel, clients, err := backend.unary(ctx, binding)
+	if err != nil {
+		return result, err
+	}
+	defer cancel()
+	list, err := clients.kubernetes.AdmissionregistrationV1().ValidatingWebhookConfigurations().List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	if err != nil {
+		return result, mapResourceError(err)
+	}
+	now := backend.now().UTC()
+	for index := range list.Items {
+		result.Items = append(result.Items, resources.ConvertValidatingWebhookConfiguration(&list.Items[index], now))
+	}
+	result.Continue, result.ResourceVersion = list.Continue, list.ResourceVersion
+	return result, nil
+}
+
+func (backend *ResourceBackend) listCRDPage(ctx context.Context, binding namespaces.SelectionBinding, page resources.PageRequest) (resources.OriginPage[resources.CustomResourceDefinitionDTO], error) {
+	result := resources.OriginPage[resources.CustomResourceDefinitionDTO]{Origin: page.Origin, Items: []resources.CustomResourceDefinitionDTO{}}
+	requestContext, cancel, clients, err := backend.unary(ctx, binding)
+	if err != nil {
+		return result, err
+	}
+	defer cancel()
+	gvr := schema.GroupVersionResource{Group: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions"}
+	list, listErr := clients.dynamic.Resource(gvr).List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	if listErr != nil {
+		return result, mapResourceError(listErr)
+	}
+	now := backend.now().UTC()
+	for index := range list.Items {
+		typed := &apiextensionsv1.CustomResourceDefinition{}
+		if convertErr := runtime.DefaultUnstructuredConverter.FromUnstructured(list.Items[index].Object, typed); convertErr != nil {
+			return result, mapResourceError(convertErr)
+		}
+		result.Items = append(result.Items, resources.ConvertCustomResourceDefinition(typed, now))
+	}
+	result.Continue, result.ResourceVersion = list.GetContinue(), list.GetResourceVersion()
+	return result, nil
+}
+
 func (backend *ResourceBackend) listServiceAccountPage(ctx context.Context, binding namespaces.SelectionBinding, page resources.PageRequest) (resources.OriginPage[resources.ServiceAccountDTO], error) {
 	result := resources.OriginPage[resources.ServiceAccountDTO]{Origin: page.Origin, Items: []resources.ServiceAccountDTO{}}
 	requestContext, cancel, clients, err := backend.unary(ctx, binding)
@@ -345,6 +580,157 @@ func (backend *ResourceBackend) listPDBPage(ctx context.Context, binding namespa
 	}
 	result.Continue, result.ResourceVersion = list.Continue, list.ResourceVersion
 	return result, nil
+}
+
+func (backend *ResourceBackend) GetClusterRole(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, name string) (resources.RoleDetailDTO, error) {
+	return clusterGet(ctx, backend, binding, resources.Origin{APIGroup: "rbac.authorization.k8s.io", Version: "v1", Resource: "clusterroles"}, name, func(ctx context.Context, clients resourceClientSet) (resources.RoleDetailDTO, error) {
+		value, err := clients.kubernetes.RbacV1().ClusterRoles().Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return resources.RoleDetailDTO{}, mapResourceError(err)
+		}
+		return resources.ConvertClusterRoleDetail(value), nil
+	})
+}
+
+func (backend *ResourceBackend) GetClusterRoleBinding(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, name string) (resources.BindingDTO, error) {
+	return clusterGet(ctx, backend, binding, resources.Origin{APIGroup: "rbac.authorization.k8s.io", Version: "v1", Resource: "clusterrolebindings"}, name, func(ctx context.Context, clients resourceClientSet) (resources.BindingDTO, error) {
+		value, err := clients.kubernetes.RbacV1().ClusterRoleBindings().Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return resources.BindingDTO{}, mapResourceError(err)
+		}
+		return resources.ConvertClusterRoleBinding(value, backend.now().UTC()), nil
+	})
+}
+
+func (backend *ResourceBackend) GetPriorityClass(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, name string) (resources.PriorityClassDTO, error) {
+	return clusterGet(ctx, backend, binding, resources.Origin{APIGroup: "scheduling.k8s.io", Version: "v1", Resource: "priorityclasses"}, name, func(ctx context.Context, clients resourceClientSet) (resources.PriorityClassDTO, error) {
+		value, err := clients.kubernetes.SchedulingV1().PriorityClasses().Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return resources.PriorityClassDTO{}, mapResourceError(err)
+		}
+		return resources.ConvertPriorityClass(value, backend.now().UTC()), nil
+	})
+}
+
+func (backend *ResourceBackend) GetRuntimeClass(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, name string) (resources.RuntimeClassDTO, error) {
+	return clusterGet(ctx, backend, binding, resources.Origin{APIGroup: "node.k8s.io", Version: "v1", Resource: "runtimeclasses"}, name, func(ctx context.Context, clients resourceClientSet) (resources.RuntimeClassDTO, error) {
+		value, err := clients.kubernetes.NodeV1().RuntimeClasses().Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return resources.RuntimeClassDTO{}, mapResourceError(err)
+		}
+		return resources.ConvertRuntimeClass(value, backend.now().UTC()), nil
+	})
+}
+
+func (backend *ResourceBackend) GetIngressClass(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, name string) (resources.IngressClassDTO, error) {
+	return clusterGet(ctx, backend, binding, resources.Origin{APIGroup: "networking.k8s.io", Version: "v1", Resource: "ingressclasses"}, name, func(ctx context.Context, clients resourceClientSet) (resources.IngressClassDTO, error) {
+		value, err := clients.kubernetes.NetworkingV1().IngressClasses().Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return resources.IngressClassDTO{}, mapResourceError(err)
+		}
+		return resources.ConvertIngressClass(value, backend.now().UTC()), nil
+	})
+}
+
+func (backend *ResourceBackend) GetRole(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, namespace, name string) (resources.RoleDetailDTO, error) {
+	origin := resources.Origin{Namespace: namespace, APIGroup: "rbac.authorization.k8s.io", Version: "v1", Resource: "roles"}
+	return getAuthorized(ctx, backend, binding, resolution, origin, name, func(ctx context.Context, _ resources.Origin, name string) (resources.RoleDetailDTO, error) {
+		requestContext, cancel, clients, err := backend.unary(ctx, binding)
+		if err != nil {
+			return resources.RoleDetailDTO{}, err
+		}
+		defer cancel()
+		value, err := clients.kubernetes.RbacV1().Roles(namespace).Get(requestContext, name, metav1.GetOptions{})
+		if err != nil {
+			return resources.RoleDetailDTO{}, mapResourceError(err)
+		}
+		return resources.ConvertRoleDetail(value), nil
+	})
+}
+
+func (backend *ResourceBackend) GetRoleBinding(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, namespace, name string) (resources.BindingDTO, error) {
+	origin := resources.Origin{Namespace: namespace, APIGroup: "rbac.authorization.k8s.io", Version: "v1", Resource: "rolebindings"}
+	return getAuthorized(ctx, backend, binding, resolution, origin, name, func(ctx context.Context, _ resources.Origin, name string) (resources.BindingDTO, error) {
+		requestContext, cancel, clients, err := backend.unary(ctx, binding)
+		if err != nil {
+			return resources.BindingDTO{}, err
+		}
+		defer cancel()
+		value, err := clients.kubernetes.RbacV1().RoleBindings(namespace).Get(requestContext, name, metav1.GetOptions{})
+		if err != nil {
+			return resources.BindingDTO{}, mapResourceError(err)
+		}
+		return resources.ConvertRoleBinding(value, backend.now().UTC()), nil
+	})
+}
+
+func (backend *ResourceBackend) GetNetworkPolicy(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, namespace, name string) (resources.NetworkPolicyDTO, error) {
+	origin := resources.Origin{Namespace: namespace, APIGroup: "networking.k8s.io", Version: "v1", Resource: "networkpolicies"}
+	return getAuthorized(ctx, backend, binding, resolution, origin, name, func(ctx context.Context, _ resources.Origin, name string) (resources.NetworkPolicyDTO, error) {
+		requestContext, cancel, clients, err := backend.unary(ctx, binding)
+		if err != nil {
+			return resources.NetworkPolicyDTO{}, err
+		}
+		defer cancel()
+		value, err := clients.kubernetes.NetworkingV1().NetworkPolicies(namespace).Get(requestContext, name, metav1.GetOptions{})
+		if err != nil {
+			return resources.NetworkPolicyDTO{}, mapResourceError(err)
+		}
+		return resources.ConvertNetworkPolicy(value, backend.now().UTC()), nil
+	})
+}
+
+func (backend *ResourceBackend) GetEndpoints(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, namespace, name string) (resources.EndpointsDTO, error) {
+	origin := resources.Origin{Namespace: namespace, Version: "v1", Resource: "endpoints"}
+	return getAuthorized(ctx, backend, binding, resolution, origin, name, func(ctx context.Context, _ resources.Origin, name string) (resources.EndpointsDTO, error) {
+		requestContext, cancel, clients, err := backend.unary(ctx, binding)
+		if err != nil {
+			return resources.EndpointsDTO{}, err
+		}
+		defer cancel()
+		value, err := clients.kubernetes.CoreV1().Endpoints(namespace).Get(requestContext, name, metav1.GetOptions{})
+		if err != nil {
+			return resources.EndpointsDTO{}, mapResourceError(err)
+		}
+		return resources.ConvertEndpoints(value, backend.now().UTC()), nil
+	})
+}
+
+func (backend *ResourceBackend) GetMutatingWebhookConfiguration(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, name string) (resources.WebhookConfigurationDTO, error) {
+	return clusterGet(ctx, backend, binding, resources.Origin{APIGroup: "admissionregistration.k8s.io", Version: "v1", Resource: "mutatingwebhookconfigurations"}, name, func(ctx context.Context, clients resourceClientSet) (resources.WebhookConfigurationDTO, error) {
+		value, err := clients.kubernetes.AdmissionregistrationV1().MutatingWebhookConfigurations().Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return resources.WebhookConfigurationDTO{}, mapResourceError(err)
+		}
+		return resources.ConvertMutatingWebhookConfiguration(value, backend.now().UTC()), nil
+	})
+}
+
+func (backend *ResourceBackend) GetValidatingWebhookConfiguration(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, name string) (resources.WebhookConfigurationDTO, error) {
+	return clusterGet(ctx, backend, binding, resources.Origin{APIGroup: "admissionregistration.k8s.io", Version: "v1", Resource: "validatingwebhookconfigurations"}, name, func(ctx context.Context, clients resourceClientSet) (resources.WebhookConfigurationDTO, error) {
+		value, err := clients.kubernetes.AdmissionregistrationV1().ValidatingWebhookConfigurations().Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return resources.WebhookConfigurationDTO{}, mapResourceError(err)
+		}
+		return resources.ConvertValidatingWebhookConfiguration(value, backend.now().UTC()), nil
+	})
+}
+
+// GetCustomResourceDefinition reads one CRD through the dynamic client and
+// converts to the bounded DTO; schemas and defaults are discarded.
+func (backend *ResourceBackend) GetCustomResourceDefinition(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, name string) (resources.CustomResourceDefinitionDTO, error) {
+	return clusterGet(ctx, backend, binding, resources.Origin{APIGroup: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions"}, name, func(ctx context.Context, clients resourceClientSet) (resources.CustomResourceDefinitionDTO, error) {
+		gvr := schema.GroupVersionResource{Group: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions"}
+		value, err := clients.dynamic.Resource(gvr).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return resources.CustomResourceDefinitionDTO{}, mapResourceError(err)
+		}
+		typed := &apiextensionsv1.CustomResourceDefinition{}
+		if convertErr := runtime.DefaultUnstructuredConverter.FromUnstructured(value.Object, typed); convertErr != nil {
+			return resources.CustomResourceDefinitionDTO{}, mapResourceError(convertErr)
+		}
+		return resources.ConvertCustomResourceDefinition(typed, backend.now().UTC()), nil
+	})
 }
 
 // mapHPAError marks a missing autoscaling/v2 API as feature unavailability

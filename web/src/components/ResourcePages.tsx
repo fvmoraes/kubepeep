@@ -16,6 +16,12 @@ import {
   getIngress,
   getIngresses,
   getIngressYAML,
+  getEndpointsItem,
+  getEndpointsList,
+  getIngressClass,
+  getIngressClasses,
+  getNetworkPolicy,
+  getNetworkPolicies,
   getNode,
   getNodes,
   getNodeYAML,
@@ -40,6 +46,9 @@ import type {
   ConfigMapResource,
   EndpointSliceDetail,
   EndpointSliceResource,
+  Endpoints,
+  IngressClass,
+  NetworkPolicy,
   IngressDetail,
   IngressResource,
   NodeSummary,
@@ -591,9 +600,9 @@ export function EventsPage() {
   )
 }
 
-type NetworkTab = 'services' | 'ingresses' | 'endpoint-slices' | 'port-forwards'
+type NetworkTab = 'services' | 'endpoints' | 'ingresses' | 'ingress-classes' | 'endpoint-slices' | 'network-policies' | 'port-forwards'
 type NetworkResourceTab = Exclude<NetworkTab, 'port-forwards'>
-type NetworkItem = ServiceResource | IngressResource | EndpointSliceResource
+type NetworkItem = ServiceResource | IngressResource | EndpointSliceResource | Endpoints | IngressClass | NetworkPolicy
 type NetworkSelection = { generation: string; tab: NetworkResourceTab; namespace: string; name: string }
 
 interface SimpleListState {
@@ -605,10 +614,13 @@ interface SimpleListState {
 const defaultSimpleList: SimpleListState = { search: '', sort: 'identity', order: 'asc' }
 const defaultNetworkLists: Record<NetworkResourceTab, SimpleListState> = {
   services: { ...defaultSimpleList },
+  endpoints: { ...defaultSimpleList },
   ingresses: { ...defaultSimpleList },
+  'ingress-classes': { ...defaultSimpleList },
   'endpoint-slices': { ...defaultSimpleList },
+  'network-policies': { ...defaultSimpleList },
 }
-const defaultNetworkCursors: Record<NetworkResourceTab, string> = { services: '', ingresses: '', 'endpoint-slices': '' }
+const defaultNetworkCursors: Record<NetworkResourceTab, string> = { services: '', endpoints: '', ingresses: '', 'ingress-classes': '', 'endpoint-slices': '', 'network-policies': '' }
 
 const networkSortOptions: Record<NetworkResourceTab, readonly ListSortOption[]> = {
   services: [
@@ -625,9 +637,39 @@ const networkSortOptions: Record<NetworkResourceTab, readonly ListSortOption[]> 
     { value: 'name', label: 'Name' },
     { value: 'addressType', label: 'Address type' },
   ],
+  endpoints: [
+    { value: 'identity', label: 'Namespace and name' },
+    { value: 'name', label: 'Name' },
+  ],
+  'ingress-classes': [
+    { value: 'identity', label: 'Name' },
+    { value: 'name', label: 'Name (natural)' },
+  ],
+  'network-policies': [
+    { value: 'identity', label: 'Namespace and name' },
+    { value: 'name', label: 'Name' },
+  ],
 }
 
-function NetworkDetailView({ tab, service, ingress, slice }: { tab: NetworkSelection['tab']; service?: ServiceDetail; ingress?: IngressDetail; slice?: EndpointSliceDetail }) {
+function NetworkDetailView({ tab, service, ingress, slice, endpoints, ingressClass, policy }: { tab: NetworkSelection['tab']; service?: ServiceDetail; ingress?: IngressDetail; slice?: EndpointSliceDetail; endpoints?: Endpoints; ingressClass?: IngressClass; policy?: NetworkPolicy }) {
+  if (tab === 'endpoints' && endpoints) return <Facts facts={[
+    { label: 'Ready addresses', value: String(endpoints.readyCount) },
+    { label: 'Not ready', value: String(endpoints.notReadyCount) },
+    { label: 'Ports', value: endpoints.ports.join(', ') || 'none' },
+    { label: 'Truncated', value: endpoints.truncated ? 'yes — address list exceeds the bounded window' : 'no' },
+  ]} />
+  if (tab === 'ingress-classes' && ingressClass) return <Facts facts={[
+    { label: 'Controller', value: ingressClass.controller },
+    { label: 'Default', value: ingressClass.default ? 'yes' : 'no' },
+    { label: 'Parameters', value: ingressClass.parameters ?? 'none' },
+    { label: 'Age', value: age(ingressClass.ageSeconds) },
+  ]} />
+  if (tab === 'network-policies' && policy) return <Facts facts={[
+    { label: 'Pod selector', value: policy.podSelector || 'none' },
+    { label: 'Policy types', value: policy.policyTypes.join(', ') || 'unknown' },
+    { label: 'Rules', value: policy.ruleSummary.length ? policy.ruleSummary.join(', ') : 'none declared' },
+    { label: 'Age', value: age(policy.ageSeconds) },
+  ]} />
   if (tab === 'services' && service) return <Facts facts={[
     { label: 'Type', value: service.summary.type },
     { label: 'Cluster IPs', value: service.summary.clusterIPs.join(', ') || 'none' },
@@ -650,7 +692,7 @@ function NetworkDetailView({ tab, service, ingress, slice }: { tab: NetworkSelec
 }
 
 function networkTabFromParams(tab: string): NetworkResourceTab | null {
-  return tab === 'services' || tab === 'ingresses' || tab === 'endpoint-slices' ? tab : null
+  return tab === 'services' || tab === 'endpoints' || tab === 'ingresses' || tab === 'ingress-classes' || tab === 'endpoint-slices' || tab === 'network-policies' ? tab : null
 }
 
 export function NetworkPage() {
@@ -678,15 +720,21 @@ export function NetworkPage() {
   const services = useQuery({ queryKey: ['resources', 'services', selection?.generation, appliedLists.services, cursors.services], queryFn: ({ signal }) => getServices(networkOptions('services'), signal, selection?.generation), enabled: Boolean(selection && tab === 'services') })
   const ingresses = useQuery({ queryKey: ['resources', 'ingresses', selection?.generation, appliedLists.ingresses, cursors.ingresses], queryFn: ({ signal }) => getIngresses(networkOptions('ingresses'), signal, selection?.generation), enabled: Boolean(selection && tab === 'ingresses') })
   const slices = useQuery({ queryKey: ['resources', 'endpoint-slices', selection?.generation, appliedLists['endpoint-slices'], cursors['endpoint-slices']], queryFn: ({ signal }) => getEndpointSlices(networkOptions('endpoint-slices'), signal, selection?.generation), enabled: Boolean(selection && tab === 'endpoint-slices') })
+  const endpoints = useQuery({ queryKey: ['resources', 'endpoints', selection?.generation, appliedLists['endpoints'], cursors['endpoints']], queryFn: ({ signal }) => getEndpointsList(networkOptions('endpoints'), signal, selection?.generation), enabled: Boolean(selection && tab === 'endpoints') })
+  const ingressClasses = useQuery({ queryKey: ['resources', 'ingress-classes', selection?.generation, appliedLists['ingress-classes'], cursors['ingress-classes']], queryFn: ({ signal }) => getIngressClasses(networkOptions('ingress-classes'), signal, selection?.generation), enabled: Boolean(selection && tab === 'ingress-classes') })
+  const networkPolicies = useQuery({ queryKey: ['resources', 'network-policies', selection?.generation, appliedLists['network-policies'], cursors['network-policies']], queryFn: ({ signal }) => getNetworkPolicies(networkOptions('network-policies'), signal, selection?.generation), enabled: Boolean(selection && tab === 'network-policies') })
   const forwards = useQuery({ queryKey: ['port-forwards', selection?.generation], queryFn: ({ signal }) => getPortForwards(signal, selection!.generation), enabled: Boolean(selection && tab === 'port-forwards'), refetchInterval: 10_000 })
   const serviceDetail = useQuery({ queryKey: ['resources', 'service-detail', selection?.generation, activeSelected?.namespace, activeSelected?.name], queryFn: ({ signal }) => getService(activeSelected!.namespace, activeSelected!.name, signal, selection!.generation), enabled: activeSelected?.tab === 'services' })
   const ingressDetail = useQuery({ queryKey: ['resources', 'ingress-detail', selection?.generation, activeSelected?.namespace, activeSelected?.name], queryFn: ({ signal }) => getIngress(activeSelected!.namespace, activeSelected!.name, signal, selection!.generation), enabled: activeSelected?.tab === 'ingresses' })
   const sliceDetail = useQuery({ queryKey: ['resources', 'slice-detail', selection?.generation, activeSelected?.namespace, activeSelected?.name], queryFn: ({ signal }) => getEndpointSlice(activeSelected!.namespace, activeSelected!.name, signal, selection!.generation), enabled: activeSelected?.tab === 'endpoint-slices' })
+  const endpointsDetail = useQuery({ queryKey: ['resources', 'endpoints-detail', selection?.generation, activeSelected?.namespace, activeSelected?.name], queryFn: ({ signal }) => getEndpointsItem(activeSelected!.namespace, activeSelected!.name, signal, selection!.generation), enabled: activeSelected?.tab === 'endpoints' })
+  const ingressClassDetail = useQuery({ queryKey: ['resources', 'ingressclass-detail', selection?.generation, activeSelected?.name], queryFn: ({ signal }) => getIngressClass(activeSelected!.name, signal, selection!.generation), enabled: Boolean(activeSelected && activeSelected.tab === 'ingress-classes') })
+  const networkPolicyDetail = useQuery({ queryKey: ['resources', 'networkpolicy-detail', selection?.generation, activeSelected?.namespace, activeSelected?.name], queryFn: ({ signal }) => getNetworkPolicy(activeSelected!.namespace, activeSelected!.name, signal, selection!.generation), enabled: activeSelected?.tab === 'network-policies' })
   const yaml = useMutation({ mutationFn: (value: NetworkSelection) => requests.run((signal) => value.tab === 'services' ? getServiceYAML(value.namespace, value.name, signal) : value.tab === 'ingresses' ? getIngressYAML(value.namespace, value.name, signal) : getEndpointSliceYAML(value.namespace, value.name, signal)) })
   const close = useMutation({ mutationFn: (id: string) => requests.run(async (signal) => { const session = await getSession(signal); if (session.generation !== selection!.generation) throw new APIError(409, { code: 'GENERATION_CHANGED', message: 'The active selection changed.' }); return closePortForward(id, selection!.generation, session.csrfToken, signal) }), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['port-forwards'] }) })
-  const active: CollectionResult<NetworkItem> | undefined = tab === 'services' && services.data ? { ...services.data, items: services.data.items } : tab === 'ingresses' && ingresses.data ? { ...ingresses.data, items: ingresses.data.items } : tab === 'endpoint-slices' && slices.data ? { ...slices.data, items: slices.data.items } : undefined
-  const activeQuery = tab === 'services' ? services : tab === 'ingresses' ? ingresses : slices
-  const currentDetail = activeSelected?.tab === 'services' ? serviceDetail : activeSelected?.tab === 'ingresses' ? ingressDetail : sliceDetail
+  const active: CollectionResult<NetworkItem> | undefined = tab === 'services' && services.data ? { ...services.data, items: services.data.items } : tab === 'ingresses' && ingresses.data ? { ...ingresses.data, items: ingresses.data.items } : tab === 'endpoint-slices' && slices.data ? { ...slices.data, items: slices.data.items } : tab === 'endpoints' && endpoints.data ? { ...endpoints.data, items: endpoints.data.items } : tab === 'ingress-classes' && ingressClasses.data ? { ...ingressClasses.data, items: ingressClasses.data.items } : tab === 'network-policies' && networkPolicies.data ? { ...networkPolicies.data, items: networkPolicies.data.items } : undefined
+  const activeQuery = tab === 'services' ? services : tab === 'ingresses' ? ingresses : tab === 'endpoint-slices' ? slices : tab === 'endpoints' ? endpoints : tab === 'ingress-classes' ? ingressClasses : networkPolicies
+  const currentDetail = activeSelected?.tab === 'services' ? serviceDetail : activeSelected?.tab === 'ingresses' ? ingressDetail : activeSelected?.tab === 'endpoint-slices' ? sliceDetail : activeSelected?.tab === 'endpoints' ? endpointsDetail : activeSelected?.tab === 'ingress-classes' ? ingressClassDetail : networkPolicyDetail
 
   function closeDetail() {
     requests.abortAll()
@@ -705,11 +753,14 @@ export function NetworkPage() {
     <ResourcePage title="Network" description="Services, Ingresses, EndpointSlices and loopback-only port-forward sessions.">
       <ResourceTabStrip ariaLabel="Network resource type" panelId="network-panel" active={tab} onChange={(value) => { setTab(value as NetworkTab); closeDetail() }} tabs={[
         { id: 'services', label: 'services' },
+        { id: 'endpoints', label: 'endpoints' },
         { id: 'ingresses', label: 'ingresses' },
+        { id: 'ingress-classes', label: 'ingress-classes' },
         { id: 'endpoint-slices', label: 'endpoint-slices' },
+        { id: 'network-policies', label: 'network-policies' },
         { id: 'port-forwards', label: 'port-forwards' },
       ]} />
-      {selection && tab !== 'port-forwards' ? <ResourceLiveUpdates key={`${tab}/${selection.generation}`} generation={selection.generation} topics={[tab]} queryKeys={[["resources", tab]]} /> : null}
+      {selection && (tab === 'services' || tab === 'ingresses' || tab === 'endpoint-slices') ? <ResourceLiveUpdates key={`${tab}/${selection.generation}`} generation={selection.generation} topics={[tab]} queryKeys={[["resources", tab]]} /> : null}
       {tab !== 'port-forwards' ? <ResourceListControls search={draft.search} appliedSearch={applied.search} onSearchChange={(value) => setDrafts((current) => ({ ...current, [resourceTab]: { ...current[resourceTab], search: value } }))} onApply={() => { setAppliedLists((current) => ({ ...current, [resourceTab]: { ...draft } })); setCursor(''); closeDetail() }} onRefresh={() => queryClient.invalidateQueries({ queryKey: ['resources', tab] })} onClear={() => { setDrafts((current) => ({ ...current, [resourceTab]: { ...defaultSimpleList } })); setAppliedLists((current) => ({ ...current, [resourceTab]: { ...defaultSimpleList } })); setCursor(''); closeDetail() }} sort={draft.sort} order={draft.order} appliedSort={applied.sort} appliedOrder={applied.order} defaultSort="identity" defaultOrder="asc" hasPendingChanges={!sameListState(draft, applied)} sortOptions={networkSortOptions[resourceTab]} onSortChange={(value) => setDrafts((current) => ({ ...current, [resourceTab]: { ...current[resourceTab], sort: value } }))} onOrderChange={(value) => setDrafts((current) => ({ ...current, [resourceTab]: { ...current[resourceTab], order: value } }))} /> : null}
       <div id="network-panel" role="tabpanel">
         <SelectionGate pending={status.isPending} error={status.error} selected={Boolean(selection)}>
@@ -731,19 +782,19 @@ export function NetworkPage() {
                 <DataTable
                   caption={`Authorized ${tab} page`}
                   rows={active?.items ?? []}
-                  getRowKey={(item) => `${item.namespace}/${item.name}`}
+                  getRowKey={(item) => `${'namespace' in item ? `${item.namespace}/` : ''}${item.name}`}
                   columns={[
-                    { key: 'namespace', header: 'Namespace / name', cell: (item) => <TableLink aria-label={`Open ${tab} ${item.name} in ${item.namespace}`} onClick={() => { closeDetail(); setSelected({ generation: selection!.generation, tab: tab as NetworkSelection['tab'], namespace: item.namespace, name: item.name }); navigate(`/network/${tab}/${encodeURIComponent(item.namespace)}/${encodeURIComponent(item.name)}`) }} primary={item.name} secondary={item.namespace} /> },
-                    { key: 'type', header: 'Type', cell: (item) => ('type' in item ? item.type : 'className' in item ? (item.className ?? 'Ingress') : item.addressType) },
-                    { key: 'summary', header: 'Summary', cell: (item) => ('clusterIPs' in item ? item.clusterIPs.join(', ') : 'hosts' in item ? item.hosts.join(', ') : `${item.endpoints.length} endpoints`) },
+                    { key: 'namespace', header: 'Name', cell: (item) => <TableLink aria-label={`Open ${tab} ${item.name}${'namespace' in item ? ` in ${item.namespace}` : ''}`} onClick={() => { closeDetail(); setSelected({ generation: selection!.generation, tab: tab as NetworkSelection['tab'], namespace: 'namespace' in item ? item.namespace : '', name: item.name }); navigate(`/network/${tab}/${'namespace' in item ? `${encodeURIComponent(item.namespace)}/` : ''}${encodeURIComponent(item.name)}`) }} primary={item.name} secondary={'namespace' in item ? item.namespace : 'cluster'} /> },
+                    { key: 'type', header: 'Type', cell: (item) => ('type' in item ? item.type : 'className' in item ? (item.className ?? 'Ingress') : 'addressType' in item ? item.addressType : 'podSelector' in item ? item.podSelector || 'none' : 'controller' in item ? item.controller : '—') },
+                    { key: 'summary', header: 'Summary', cell: (item) => ('clusterIPs' in item ? item.clusterIPs.join(', ') : 'hosts' in item ? item.hosts.join(', ') : 'addressType' in item ? `${item.endpoints.length} endpoints` : 'readyCount' in item ? `${item.readyCount} ready / ${item.notReadyCount} not ready${item.truncated ? ' (truncated)' : ''}` : 'ruleSummary' in item ? item.ruleSummary.length + ' rules' : item.default ? 'default class' : '—') },
                   ]}
                 />
                 {active ? <CollectionFooter result={active} onNext={setCursor} onRestart={() => setCursor('')} /> : null}
               </div>
-              <Drawer open={Boolean(activeSelected)} onClose={closeDetail} title={<span className="flex items-center gap-2">{detailTitle(activeSelected ? `${activeSelected.namespace}/${activeSelected.name}` : 'Resource detail')}{activeSelected ? <FavoriteButton kind={({ services: 'service', ingresses: 'ingress', 'endpoint-slices': 'endpointslice' } as const)[activeSelected.tab]} namespace={activeSelected.namespace} name={activeSelected.name} generation={selection?.generation} label={activeSelected.tab} /> : null}</span>}>
+              <Drawer open={Boolean(activeSelected)} onClose={closeDetail} title={<span className="flex items-center gap-2">{detailTitle(activeSelected ? `${activeSelected.namespace}/${activeSelected.name}` : 'Resource detail')}{activeSelected && (activeSelected.tab === 'services' || activeSelected.tab === 'ingresses' || activeSelected.tab === 'endpoint-slices') ? <FavoriteButton kind={({ services: 'service', ingresses: 'ingress', 'endpoint-slices': 'endpointslice' } as const)[activeSelected.tab]} namespace={activeSelected.namespace} name={activeSelected.name} generation={selection?.generation} label={activeSelected.tab} /> : null}</span>}>
                 {activeSelected ? <>
-                  {currentDetail.isPending ? <p className="text-sm text-kp-overlay-text" role="status">Loading detail…</p> : currentDetail.isError ? <p className="text-sm text-kp-red" role="alert">{errorMessage(currentDetail.error)}</p> : <NetworkDetailView tab={activeSelected.tab} service={serviceDetail.data} ingress={ingressDetail.data} slice={sliceDetail.data} />}
-                  <YamlViewer value={yaml.data} pending={yaml.isPending} error={yaml.error} onLoad={() => yaml.mutate(activeSelected)} diffTarget={activeSelected ? { collection: activeSelected.tab, namespace: activeSelected.namespace, name: activeSelected.name, generation: selection?.generation } : undefined} />
+                  {currentDetail.isPending ? <p className="text-sm text-kp-overlay-text" role="status">Loading detail…</p> : currentDetail.isError ? <p className="text-sm text-kp-red" role="alert">{errorMessage(currentDetail.error)}</p> : <NetworkDetailView tab={activeSelected.tab} service={serviceDetail.data} ingress={ingressDetail.data} slice={sliceDetail.data} endpoints={endpointsDetail.data} ingressClass={ingressClassDetail.data} policy={networkPolicyDetail.data} />}
+                  {activeSelected.tab === 'services' || activeSelected.tab === 'ingresses' || activeSelected.tab === 'endpoint-slices' ? <YamlViewer value={yaml.data} pending={yaml.isPending} error={yaml.error} onLoad={() => yaml.mutate(activeSelected)} diffTarget={activeSelected ? { collection: activeSelected.tab, namespace: activeSelected.namespace, name: activeSelected.name, generation: selection?.generation } : undefined} /> : <p className="mt-3 text-xs text-kp-overlay-text" role="note">YAML is not offered for this resource type.</p>}
                 </> : null}
               </Drawer>
             </div>

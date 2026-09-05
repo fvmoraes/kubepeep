@@ -833,6 +833,116 @@ export interface HorizontalPodAutoscaler {
   ageSeconds: number
 }
 
+export interface RBACRule {
+  apiGroups: string[]
+  resources: string[]
+  verbs: string[]
+}
+
+export interface RBACSubject {
+  kind: string
+  name: string
+  namespace?: string
+}
+
+export interface Role {
+  namespace: string
+  name: string
+  ruleCount: number
+  ageSeconds: number
+}
+
+export interface RoleDetail {
+  metadata: ResourceMetadata
+  ruleCount: number
+  rules: RBACRule[]
+  truncated: boolean
+}
+
+export interface Binding {
+  namespace: string
+  name: string
+  roleRefKind: string
+  roleRefName: string
+  subjects: RBACSubject[]
+  truncated: boolean
+  ageSeconds: number
+}
+
+export interface CRDVersion {
+  name: string
+  served: boolean
+  storage: boolean
+}
+
+export interface CustomResourceDefinition {
+  name: string
+  group: string
+  kind: string
+  scope: string
+  versions: CRDVersion[]
+  conditions: Condition[]
+  truncated: boolean
+  ageSeconds: number
+}
+
+export interface PriorityClass {
+  name: string
+  value: number
+  globalDefault: boolean
+  preemptionPolicy: string | null
+  ageSeconds: number
+}
+
+export interface RuntimeClass {
+  name: string
+  handler: string
+  overhead: Record<string, string> | null
+  ageSeconds: number
+}
+
+export interface WebhookRule {
+  name: string
+  failurePolicy: string | null
+  rules: RBACRule[]
+  truncated: boolean
+}
+
+export interface WebhookConfiguration {
+  name: string
+  webhookCount: number
+  webhooks: WebhookRule[]
+  truncated: boolean
+  ageSeconds: number
+}
+
+export interface IngressClass {
+  name: string
+  controller: string
+  default: boolean
+  parameters: string | null
+  ageSeconds: number
+}
+
+export interface NetworkPolicy {
+  namespace: string
+  name: string
+  podSelector: string
+  policyTypes: string[]
+  ruleSummary: string[]
+  ageSeconds: number
+}
+
+export interface Endpoints {
+  namespace: string
+  name: string
+  readyCount: number
+  notReadyCount: number
+  ports: string[]
+  truncated: boolean
+  ageSeconds: number
+}
+
 export interface PodDisruptionBudget {
   namespace: string
   name: string

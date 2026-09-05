@@ -1,82 +1,92 @@
 import type {
-  APIErrorPayload,
-  CapabilityMatrix,
-  ClusterProfile,
-  CollectionResult,
-  ConfigMapDetail,
-  ConfigMapResource,
-  DashboardBlock,
-  DashboardEvent,
-  DashboardLogMatch,
-  DashboardMetrics,
-  DashboardNamespaceHealth,
-  DashboardProblem,
-  DashboardResponse,
-  DashboardRestart,
-  DashboardSummary,
-  Envelope,
-  EndpointSliceDetail,
-  EndpointSliceResource,
-  EventResource,
-  ExecTicket,
-  IngressDetail,
-  IngressResource,
-  HorizontalPodAutoscaler,
-  KubernetesContext,
-  CSIDriver,
-  CSIDriverDetail,
-  CSINode,
-  CSINodeDetail,
-  Lease,
-  LeaseDetail,
-  NamespaceObjectDetail,
-  LimitRange,
-  NodeDetail,
-  NodeSummary,
-  PodDisruptionBudget,
-  PersistentVolume,
-  PersistentVolumeClaim,
-  PersistentVolumeClaimDetail,
-  ResourceQuota,
-  ServiceAccount,
-  PersistentVolumeDetail,
-  StorageClass,
-  StorageClassDetail,
-  VolumeAttachment,
-  VolumeAttachmentDetail,
-  YAMLDiff,
-  LogScanRequest,
-  LogQuery,
-  LogRead,
-  Namespace,
-  NamespaceScope,
-  NamespaceScopeDeleteRequest,
-  NamespaceScopeInput,
-  NamespaceScopeUpdateRequest,
-  NamespaceScopeValidation,
-  NamespaceScopeWriteRequest,
-  PageQuery,
-  Pod,
-  PodDeleteActionRequest,
-  PodDetail,
-  PortForward,
-  PortForwardCreateRequest,
-  Preferences,
-  PermissionQuery,
-  SelectContextRequest,
-  SelectionData,
-  SelectNamespaceScopeRequest,
-  SecretMetadata,
-  ServiceDetail,
-  ServiceResource,
-  SessionData,
-  StatusData,
-  ResourceListQuery,
-  RestartActionRequest,
-  ScaleActionRequest,
-  ExecInit,
-  Workload,
-  WorkloadDetail,
+APIErrorPayload,
+CapabilityMatrix,
+ClusterProfile,
+CollectionResult,
+ConfigMapDetail,
+ConfigMapResource,
+Endpoints,
+DashboardBlock,
+DashboardEvent,
+DashboardLogMatch,
+DashboardMetrics,
+DashboardNamespaceHealth,
+DashboardProblem,
+DashboardResponse,
+DashboardRestart,
+DashboardSummary,
+Envelope,
+EndpointSliceDetail,
+EndpointSliceResource,
+EventResource,
+ExecTicket,
+IngressDetail,
+IngressResource,
+HorizontalPodAutoscaler,
+KubernetesContext,
+Binding,
+CustomResourceDefinition,
+CSIDriver,
+CSIDriverDetail,
+CSINode,
+CSINodeDetail,
+IngressClass,
+Lease,
+LeaseDetail,
+NetworkPolicy,
+NamespaceObjectDetail,
+LimitRange,
+NodeDetail,
+NodeSummary,
+PodDisruptionBudget,
+PersistentVolume,
+PersistentVolumeClaim,
+PersistentVolumeClaimDetail,
+ResourceQuota,
+ServiceAccount,
+PersistentVolumeDetail,
+StorageClass,
+StorageClassDetail,
+VolumeAttachment,
+VolumeAttachmentDetail,
+WebhookConfiguration,
+YAMLDiff,
+LogScanRequest,
+LogQuery,
+LogRead,
+Namespace,
+NamespaceScope,
+NamespaceScopeDeleteRequest,
+NamespaceScopeInput,
+NamespaceScopeUpdateRequest,
+NamespaceScopeValidation,
+NamespaceScopeWriteRequest,
+PageQuery,
+Pod,
+PodDeleteActionRequest,
+PodDetail,
+PortForward,
+PortForwardCreateRequest,
+Preferences,
+PermissionQuery,
+SelectContextRequest,
+SelectionData,
+SelectNamespaceScopeRequest,
+SecretMetadata,
+ServiceDetail,
+ServiceResource,
+SessionData,
+StatusData,
+ResourceListQuery,
+RestartActionRequest,
+Role,
+RoleDetail,
+RuntimeClass,
+ScaleActionRequest,
+ExecInit,
+Workload,
+WorkloadDetail,
+PriorityClass,
 } from './types'
 import { desktopRequest } from './desktop'
 
@@ -654,6 +664,102 @@ export function getPDBs(options: ResourceListQuery = {}, signal?: AbortSignal, e
 
 export function getPDB(namespace: string, name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<PodDisruptionBudget> {
   return resourceRequest<PodDisruptionBudget>(`/api/v1/pdbs/${resourcePath(namespace)}/${resourcePath(name)}`, signal, expectedGeneration)
+}
+
+export function getRoles(options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<Role>> {
+  return collectionRequest<Role>('/api/v1/roles', options, signal, expectedGeneration)
+}
+
+export function getRole(namespace: string, name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<RoleDetail> {
+  return resourceRequest<RoleDetail>(`/api/v1/roles/${resourcePath(namespace)}/${resourcePath(name)}`, signal, expectedGeneration)
+}
+
+export function getRoleBindings(options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<Binding>> {
+  return collectionRequest<Binding>('/api/v1/role-bindings', options, signal, expectedGeneration)
+}
+
+export function getRoleBinding(namespace: string, name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<Binding> {
+  return resourceRequest<Binding>(`/api/v1/role-bindings/${resourcePath(namespace)}/${resourcePath(name)}`, signal, expectedGeneration)
+}
+
+export function getNetworkPolicies(options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<NetworkPolicy>> {
+  return collectionRequest<NetworkPolicy>('/api/v1/network-policies', options, signal, expectedGeneration)
+}
+
+export function getNetworkPolicy(namespace: string, name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<NetworkPolicy> {
+  return resourceRequest<NetworkPolicy>(`/api/v1/network-policies/${resourcePath(namespace)}/${resourcePath(name)}`, signal, expectedGeneration)
+}
+
+export function getEndpointsList(options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<Endpoints>> {
+  return collectionRequest<Endpoints>('/api/v1/endpoints', options, signal, expectedGeneration)
+}
+
+export function getEndpointsItem(namespace: string, name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<Endpoints> {
+  return resourceRequest<Endpoints>(`/api/v1/endpoints/${resourcePath(namespace)}/${resourcePath(name)}`, signal, expectedGeneration)
+}
+
+export function getClusterRoles(options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<Role>> {
+  return collectionRequest<Role>('/api/v1/cluster-roles', options, signal, expectedGeneration)
+}
+
+export function getClusterRole(name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<RoleDetail> {
+  return resourceRequest<RoleDetail>(`/api/v1/cluster-roles/${resourcePath(name)}`, signal, expectedGeneration)
+}
+
+export function getClusterRoleBindings(options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<Binding>> {
+  return collectionRequest<Binding>('/api/v1/cluster-role-bindings', options, signal, expectedGeneration)
+}
+
+export function getClusterRoleBinding(name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<Binding> {
+  return resourceRequest<Binding>(`/api/v1/cluster-role-bindings/${resourcePath(name)}`, signal, expectedGeneration)
+}
+
+export function getCustomResourceDefinitions(options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<CustomResourceDefinition>> {
+  return collectionRequest<CustomResourceDefinition>('/api/v1/customresourcedefinitions', options, signal, expectedGeneration)
+}
+
+export function getCustomResourceDefinition(name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<CustomResourceDefinition> {
+  return resourceRequest<CustomResourceDefinition>(`/api/v1/customresourcedefinitions/${resourcePath(name)}`, signal, expectedGeneration)
+}
+
+export function getPriorityClasses(options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<PriorityClass>> {
+  return collectionRequest<PriorityClass>('/api/v1/priority-classes', options, signal, expectedGeneration)
+}
+
+export function getPriorityClass(name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<PriorityClass> {
+  return resourceRequest<PriorityClass>(`/api/v1/priority-classes/${resourcePath(name)}`, signal, expectedGeneration)
+}
+
+export function getRuntimeClasses(options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<RuntimeClass>> {
+  return collectionRequest<RuntimeClass>('/api/v1/runtime-classes', options, signal, expectedGeneration)
+}
+
+export function getRuntimeClass(name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<RuntimeClass> {
+  return resourceRequest<RuntimeClass>(`/api/v1/runtime-classes/${resourcePath(name)}`, signal, expectedGeneration)
+}
+
+export function getMutatingWebhookConfigurations(options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<WebhookConfiguration>> {
+  return collectionRequest<WebhookConfiguration>('/api/v1/mutating-webhook-configurations', options, signal, expectedGeneration)
+}
+
+export function getMutatingWebhookConfiguration(name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<WebhookConfiguration> {
+  return resourceRequest<WebhookConfiguration>(`/api/v1/mutating-webhook-configurations/${resourcePath(name)}`, signal, expectedGeneration)
+}
+
+export function getValidatingWebhookConfigurations(options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<WebhookConfiguration>> {
+  return collectionRequest<WebhookConfiguration>('/api/v1/validating-webhook-configurations', options, signal, expectedGeneration)
+}
+
+export function getValidatingWebhookConfiguration(name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<WebhookConfiguration> {
+  return resourceRequest<WebhookConfiguration>(`/api/v1/validating-webhook-configurations/${resourcePath(name)}`, signal, expectedGeneration)
+}
+
+export function getIngressClasses(options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<IngressClass>> {
+  return collectionRequest<IngressClass>('/api/v1/ingress-classes', options, signal, expectedGeneration)
+}
+
+export function getIngressClass(name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<IngressClass> {
+  return resourceRequest<IngressClass>(`/api/v1/ingress-classes/${resourcePath(name)}`, signal, expectedGeneration)
 }
 
 export function getPreferences(signal?: AbortSignal): Promise<Preferences> {
