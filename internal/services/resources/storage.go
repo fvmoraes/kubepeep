@@ -6,8 +6,8 @@ import (
 	coordinationv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
 	storagev1 "k8s.io/api/storage/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 const (
@@ -69,14 +69,14 @@ func ConvertLeaseDetail(value *coordinationv1.Lease) LeaseDetailDTO {
 
 // PersistentVolumeDTO is the bounded list view of one PV.
 type PersistentVolumeDTO struct {
-	Name          string            `json:"name"`
-	Status        string            `json:"status"`
-	Capacity      string            `json:"capacity"`
-	AccessModes   []string          `json:"accessModes"`
-	ReclaimPolicy string            `json:"reclaimPolicy"`
-	StorageClass  string            `json:"storageClass"`
+	Name          string             `json:"name"`
+	Status        string             `json:"status"`
+	Capacity      string             `json:"capacity"`
+	AccessModes   []string           `json:"accessModes"`
+	ReclaimPolicy string             `json:"reclaimPolicy"`
+	StorageClass  string             `json:"storageClass"`
 	Claim         *VolumeClaimRefDTO `json:"claim"`
-	AgeSeconds    int64             `json:"ageSeconds"`
+	AgeSeconds    int64              `json:"ageSeconds"`
 }
 
 func (PersistentVolumeDTO) resourceListItem() {}
@@ -143,29 +143,29 @@ func ConvertPersistentVolumeDetail(value *corev1.PersistentVolume) PersistentVol
 // PersistentVolumeClaimDTO is the bounded list view of one PVC. Absent
 // capacity stays distinct from zero.
 type PersistentVolumeClaimDTO struct {
-	Namespace     string   `json:"namespace"`
-	Name          string   `json:"name"`
-	Status        string   `json:"status"`
-	VolumeName    string   `json:"volumeName"`
-	Capacity      *string  `json:"capacity"`
-	AccessModes   []string `json:"accessModes"`
-	StorageClass  *string  `json:"storageClass"`
-	AgeSeconds    int64    `json:"ageSeconds"`
+	Namespace    string   `json:"namespace"`
+	Name         string   `json:"name"`
+	Status       string   `json:"status"`
+	VolumeName   string   `json:"volumeName"`
+	Capacity     *string  `json:"capacity"`
+	AccessModes  []string `json:"accessModes"`
+	StorageClass *string  `json:"storageClass"`
+	AgeSeconds   int64    `json:"ageSeconds"`
 }
 
 func (PersistentVolumeClaimDTO) resourceListItem() {}
 
 // PersistentVolumeClaimDetailDTO bounds PVC identity, spec and conditions.
 type PersistentVolumeClaimDetailDTO struct {
-	Metadata       ResourceMetadataDTO `json:"metadata"`
-	Status         string              `json:"status"`
-	VolumeName     string              `json:"volumeName"`
-	Capacity       map[string]string   `json:"capacity"`
-	AccessModes    []string            `json:"accessModes"`
-	StorageClass   *string             `json:"storageClass"`
-	VolumeMode     string              `json:"volumeMode"`
-	Conditions     []ConditionDTO      `json:"conditions"`
-	Truncated      bool                `json:"truncated"`
+	Metadata     ResourceMetadataDTO `json:"metadata"`
+	Status       string              `json:"status"`
+	VolumeName   string              `json:"volumeName"`
+	Capacity     map[string]string   `json:"capacity"`
+	AccessModes  []string            `json:"accessModes"`
+	StorageClass *string             `json:"storageClass"`
+	VolumeMode   string              `json:"volumeMode"`
+	Conditions   []ConditionDTO      `json:"conditions"`
+	Truncated    bool                `json:"truncated"`
 }
 
 func (PersistentVolumeClaimDetailDTO) resourceDetailItem() {}
@@ -203,13 +203,13 @@ func ConvertPersistentVolumeClaimDetail(value *corev1.PersistentVolumeClaim) Per
 // StorageClassDTO is the bounded list view of one StorageClass. Free-form
 // parameters (which may carry provider credentials) are always omitted.
 type StorageClassDTO struct {
-	Name               string `json:"name"`
-	Provisioner        string `json:"provisioner"`
-	Default            bool   `json:"default"`
-	ReclaimPolicy      string `json:"reclaimPolicy"`
-	VolumeBindingMode  string `json:"volumeBindingMode"`
-	AllowVolumeExpansion bool `json:"allowVolumeExpansion"`
-	AgeSeconds         int64  `json:"ageSeconds"`
+	Name                 string `json:"name"`
+	Provisioner          string `json:"provisioner"`
+	Default              bool   `json:"default"`
+	ReclaimPolicy        string `json:"reclaimPolicy"`
+	VolumeBindingMode    string `json:"volumeBindingMode"`
+	AllowVolumeExpansion bool   `json:"allowVolumeExpansion"`
+	AgeSeconds           int64  `json:"ageSeconds"`
 }
 
 func (StorageClassDTO) resourceListItem() {}
@@ -239,7 +239,7 @@ func ConvertStorageClass(value *storagev1.StorageClass, now time.Time) StorageCl
 	}
 	return StorageClassDTO{
 		Name: value.Name, Provisioner: value.Provisioner,
-		Default: value.Annotations["storageclass.kubernetes.io/is-default-class"] == "true",
+		Default:       value.Annotations["storageclass.kubernetes.io/is-default-class"] == "true",
 		ReclaimPolicy: reclaim, VolumeBindingMode: binding,
 		AllowVolumeExpansion: value.AllowVolumeExpansion != nil && *value.AllowVolumeExpansion,
 		AgeSeconds:           int64(now.Sub(value.CreationTimestamp.Time) / time.Second),
@@ -259,11 +259,11 @@ func ConvertStorageClassDetail(value *storagev1.StorageClass) StorageClassDetail
 
 // CSIDriverDTO is the bounded list view of one CSIDriver.
 type CSIDriverDTO struct {
-	Name          string `json:"name"`
-	AttachRequired bool  `json:"attachRequired"`
-	PodInfoOnMount bool  `json:"podInfoOnMount"`
-	StorageCapacity bool `json:"storageCapacity"`
-	AgeSeconds    int64  `json:"ageSeconds"`
+	Name            string `json:"name"`
+	AttachRequired  bool   `json:"attachRequired"`
+	PodInfoOnMount  bool   `json:"podInfoOnMount"`
+	StorageCapacity bool   `json:"storageCapacity"`
+	AgeSeconds      int64  `json:"ageSeconds"`
 }
 
 func (CSIDriverDTO) resourceListItem() {}
@@ -283,7 +283,7 @@ func (CSIDriverDetailDTO) resourceDetailItem() {}
 // ConvertCSIDriver projects one CSIDriver onto the bounded list DTO.
 func ConvertCSIDriver(value *storagev1.CSIDriver, now time.Time) CSIDriverDTO {
 	return CSIDriverDTO{
-		Name: value.Name,
+		Name:            value.Name,
 		AttachRequired:  value.Spec.AttachRequired != nil && *value.Spec.AttachRequired,
 		PodInfoOnMount:  value.Spec.PodInfoOnMount != nil && *value.Spec.PodInfoOnMount,
 		StorageCapacity: value.Spec.StorageCapacity != nil && *value.Spec.StorageCapacity,
@@ -320,10 +320,10 @@ type CSINodeDriverDTO struct {
 
 // CSINodeDetailDTO bounds the registered driver list per node.
 type CSINodeDetailDTO struct {
-	Metadata  ResourceMetadataDTO `json:"metadata"`
-	DriverCount int32             `json:"driverCount"`
-	Drivers   []CSINodeDriverDTO  `json:"drivers"`
-	Truncated bool                `json:"truncated"`
+	Metadata    ResourceMetadataDTO `json:"metadata"`
+	DriverCount int32               `json:"driverCount"`
+	Drivers     []CSINodeDriverDTO  `json:"drivers"`
+	Truncated   bool                `json:"truncated"`
 }
 
 func (CSINodeDetailDTO) resourceDetailItem() {}
@@ -370,13 +370,13 @@ func (VolumeAttachmentDTO) resourceListItem() {}
 // VolumeAttachmentDetailDTO deliberately omits status.attachmentMetadata,
 // raw driver errors and any free-form attributes.
 type VolumeAttachmentDetailDTO struct {
-	Metadata         ResourceMetadataDTO `json:"metadata"`
-	NodeName         string              `json:"nodeName"`
-	Attacher         string              `json:"attacher"`
-	VolumeName       string              `json:"volumeName"`
-	PersistentVolumeName string          `json:"persistentVolumeName"`
-	Attached         bool                `json:"attached"`
-	Omitted          []string            `json:"omitted"`
+	Metadata             ResourceMetadataDTO `json:"metadata"`
+	NodeName             string              `json:"nodeName"`
+	Attacher             string              `json:"attacher"`
+	VolumeName           string              `json:"volumeName"`
+	PersistentVolumeName string              `json:"persistentVolumeName"`
+	Attached             bool                `json:"attached"`
+	Omitted              []string            `json:"omitted"`
 }
 
 func (VolumeAttachmentDetailDTO) resourceDetailItem() {}

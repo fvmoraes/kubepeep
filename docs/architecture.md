@@ -437,8 +437,9 @@ Defaults iniciais do backend:
 | --- | --- |
 | conectividade/discovery Kubernetes | 5 s |
 | SAR individual | 5 s |
-| GET/LIST de uma página/origem | 10 s |
-| bloco comum do dashboard | `dashboard.blockTimeout`, default 8 s |
+| GET/LIST de uma página/origem | 15 s (client factory) |
+| janela total de fan-out de recursos | `resources.collectionTimeout`, default 30 s, 5–300 s |
+| bloco comum do dashboard | `dashboard.blockTimeout`, default 8 s, 1–60 s |
 | consulta individual de log no scan | 8 s |
 | scan completo | 30 s |
 | prontidão local antes de abrir browser | 5 s |
