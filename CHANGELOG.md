@@ -14,6 +14,27 @@ automatically from Conventional Commits by `.github/workflows/release.yml`.
 - feat(ux): column visibility on the main resource pages and cluster favorites (F5/V5-06, F6/V6-03)
 
 ## Changed
+- release: 0.4.0 [skip ci]
+- docs(plan): record v1 execution evidence per task ID (F7/V7-01)
+
+## Fixed
+- fix(release): match native-runtime matrix check runs in the publish gate (F7/V7-14)
+
+## Download
+
+Permanently-updated links: https://github.com/fvmoraes/kubepeep/blob/main/docs/download.md
+
+## Full Changelog
+**Full Changelog**: https://github.com/fvmoraes/kubepeep/compare/0.3.0...0.4.0
+
+## [0.4.0] - 2026-09-05
+
+## Added
+- feat(release): candidate dry-run mode for reproducible validation (F7/V7-07)
+- feat(release): blocking verification gate and prepared 1.0.0 changelog (F7/V7-14, V7-06)
+- feat(ux): column visibility on the main resource pages and cluster favorites (F5/V5-06, F6/V6-03)
+
+## Changed
 - docs(plan): record v1 execution evidence per task ID (F7/V7-01)
 
 ## Download
