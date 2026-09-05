@@ -151,3 +151,52 @@ test('yaml diff renders added and removed lines and the absent baseline state (F
   await page.goto('/workloads')
   await page.waitForTimeout(300)
 })
+
+test('bulk namespace paste previews counts and saves one scope without cluster discovery (U12)', async ({ page, context }) => {
+  const savedScopes: Array<{ id: number; name: string; mode: string; namespaces: string[] }> = []
+  // Context-level routes registered after beforeEach win route precedence.
+  await context.route('**/api/v1/namespace-scopes*', async (route) => {
+    const request = route.request()
+    if (request.method() === 'GET') {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: savedScopes, meta }) })
+      return
+    }
+    if (request.method() === 'POST' && !new URL(request.url()).pathname.endsWith('validate')) {
+      const payload = request.postDataJSON() as { name?: string; mode: string; rawInput?: string }
+      const parsed = payload.rawInput?.split(/[\s,]+/).map((item) => item.trim()).filter(Boolean) ?? []
+      const scope = { id: savedScopes.length + 1, name: payload.name ?? 'Batch', mode: payload.mode, namespaces: [...new Set(parsed)] }
+      savedScopes.push(scope)
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { ...scope, clusterProfileId: 1, context: 'development', defaultNamespace: scope.namespaces[0] ?? null, version: 1, createdAt: '2026-09-05T00:00:00Z', updatedAt: '2026-09-05T00:00:00Z' }, meta }) })
+      return
+    }
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: [], meta }) })
+  })
+  await context.route('**/api/v1/namespace-scopes/1/select*', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { selected: true }, meta }) })
+  })
+  await context.route('**/api/v1/namespaces*', async (route) => {
+    await route.fulfill({ status: 403, contentType: 'application/json', body: JSON.stringify({ code: 'FORBIDDEN', message: 'list namespaces denied' }) })
+  })
+
+  await page.goto('/namespaces')
+  await expect(page.getByRole('heading', { name: 'Create a namespace scope' })).toBeVisible()
+  await page.getByLabel('Scope name').fill('Batch fleet')
+  await page.locator('fieldset').getByText('list', { exact: true }).click()
+  const input = page.getByLabel('Namespace input')
+  const names = Array.from({ length: 100 }, (_, index) => `fleet-${String(index + 1).padStart(3, '0')}`)
+  await input.fill(`${names.join(', ')}, fleet-001, invalid_name,`)
+  await expect(page.getByText('duplicates removed', { exact: false })).toBeVisible()
+  await expect(page.locator('[aria-label="Namespace validation counters"]')).toContainText('100')
+  await expect(page.locator('[aria-label="Parsed namespaces"]')).toContainText('invalid_name')
+
+  // Invalid entries keep the save fail-closed until they are explicitly removed.
+  await page.getByRole('button', { name: 'Remove invalid namespace invalid_name' }).click()
+  await page.getByRole('button', { name: 'Save scope' }).click()
+  await expect.poll(() => savedScopes.length).toBe(1)
+  expect(savedScopes[0].namespaces).toHaveLength(100)
+  await expect(page.getByText('Scope “Batch fleet” was saved.')).toBeVisible()
+
+  // The mocked session already carries scopeId 1, so the saved scope renders as active.
+  await expect(page.getByRole('button', { name: /Edit Batch fleet/i })).toBeVisible()
+  await expect(page.getByText('active', { exact: true })).toBeVisible()
+})
