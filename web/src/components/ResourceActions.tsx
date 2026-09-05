@@ -7,6 +7,7 @@ import {
   createIdempotencyKey,
   createPortForward,
   deletePod,
+  getHPAs,
   getPermissions,
   getSession,
   restartWorkload,
@@ -124,6 +125,17 @@ export function WorkloadActions({ detail, selection }: { detail: WorkloadDetail;
   })
   const restartDecision = decision(permissions.data, 'deployments.restart')
   const scaleDecision = decision(permissions.data, `${detail.kind === 'StatefulSet' ? 'statefulsets' : 'deployments'}.scale`)
+  // V3-10/V5-05: an HPA known to target this workload adds a scale warning.
+  // Without horizontalpodautoscalers.list the presence stays unknown; absence
+  // of access never proves there is no autoscaler.
+  const hpaQuery = useQuery({
+    queryKey: ['resources', 'hpa-check', selection.generation, detail.metadata.namespace, detail.metadata.name],
+    queryFn: ({ signal }) => getHPAs({ namespaces: [detail.metadata.namespace], limit: 100 }, signal, selection.generation),
+    enabled: supportedKind,
+    staleTime: 30_000,
+  })
+  const hpaTarget = hpaQuery.data?.items.find((hpa) => hpa.targetKind === detail.kind && hpa.targetName === detail.metadata.name)
+  const hpaState = hpaQuery.isError ? 'unknown' : hpaQuery.isPending ? 'loading' : hpaTarget ? 'present' : 'absent' 
   const invalidateActionPermissions = () => queryClient.invalidateQueries({ queryKey: ['action-permissions', selection.generation] })
 
   const restart = useMutation({
@@ -202,6 +214,8 @@ export function WorkloadActions({ detail, selection }: { detail: WorkloadDetail;
         </Button>
       </div>
       {!replicasValid ? <p className="m-0 text-xs text-kp-red">Replicas must be a whole number from 0 through 10,000.</p> : null}
+      {hpaState === 'present' ? <p className="m-0 rounded-r-md border-l-2 border-kp-yellow-border bg-kp-yellow-bg px-3 py-2 text-xs text-kp-yellow" role="note">HorizontalPodAutoscaler {hpaTarget?.name} targets this workload; manual scaling may be overridden by the autoscaler.</p> : null}
+      {hpaState === 'unknown' ? <p className="m-0 text-xs text-kp-overlay-text" role="note">Autoscaler presence for this workload is unknown; scaling may conflict with an HPA you cannot list.</p> : null}
       {restart.isError ? <p className="m-0 text-xs text-kp-red">{mutationError(restart.error)}</p> : null}
       {scale.isError ? <p className="m-0 text-xs text-kp-red">{mutationError(scale.error)}</p> : null}
       {restart.isSuccess ? <p className="m-0 text-xs text-kp-green" role="status">Restart accepted; rollout completion is not implied.</p> : null}

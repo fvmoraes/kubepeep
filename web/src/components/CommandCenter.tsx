@@ -20,6 +20,8 @@ interface CommandCenterProps {
   getResources?: () => readonly CommandRoute[]
   // Saved favorite targets (F7-01): resolved at open time, rendered first.
   getFavorites?: () => readonly CommandRoute[]
+  getRecent?: () => readonly CommandRoute[]
+  onClearRecent?: () => void
   onRefresh?: () => void | Promise<unknown>
 }
 
@@ -72,9 +74,10 @@ function matchesQuery(route: CommandRoute, query: string) {
   return terms.every((term) => searchable.includes(term))
 }
 
-export function CommandCenter({ routes, getFavorites, getResources, onRefresh }: CommandCenterProps) {
+export function CommandCenter({ routes, getFavorites, getRecent, getResources, onRefresh, onClearRecent }: CommandCenterProps) {
   const [sessionResources, setSessionResources] = useState<readonly CommandRoute[]>([])
   const [sessionFavorites, setSessionFavorites] = useState<readonly CommandRoute[]>([])
+  const [sessionRecent, setSessionRecent] = useState<readonly CommandRoute[]>([])
   const navigate = useNavigate()
   const [view, setView] = useState<CommandCenterView>(null)
   const [query, setQuery] = useState('')
@@ -95,9 +98,13 @@ export function CommandCenter({ routes, getFavorites, getResources, onRefresh }:
     () => (sessionFavorites.length > 0 ? sessionFavorites.filter((entry) => matchesQuery(entry, query)) : []),
     [query, sessionFavorites],
   )
+  const filteredRecent = useMemo(
+    () => (sessionRecent.length > 0 ? sessionRecent.filter((entry) => matchesQuery(entry, query)) : []),
+    [query, sessionRecent],
+  )
   const combinedResults = useMemo(
-    () => [...filteredFavorites, ...filteredRoutes, ...(filteredResources.length > 0 ? filteredResources : [])],
-    [filteredFavorites, filteredResources, filteredRoutes],
+    () => [...filteredFavorites, ...filteredRecent, ...filteredRoutes, ...(filteredResources.length > 0 ? filteredResources : [])],
+    [filteredFavorites, filteredRecent, filteredResources, filteredRoutes],
   )
 
   const open = useCallback((nextView: Exclude<CommandCenterView, null>) => {
@@ -106,10 +113,11 @@ export function CommandCenter({ routes, getFavorites, getResources, onRefresh }:
     }
     if (nextView === 'commands') {
       setSessionFavorites(getFavorites?.() ?? [])
+      setSessionRecent(getRecent?.() ?? [])
       setSessionResources(getResources?.() ?? [])
     }
     setView(nextView)
-  }, [getFavorites, getResources, view])
+  }, [getFavorites, getRecent, getResources, view])
 
   const close = useCallback(() => {
     setView(null)
@@ -294,8 +302,8 @@ export function CommandCenter({ routes, getFavorites, getResources, onRefresh }:
                 </div>
 
                 {combinedResults.length > 0 ? (
-                  <div id={listboxId} role="listbox" aria-label={sessionResources.length > 0 || sessionFavorites.length > 0 ? 'Favorites, application pages and visible resources' : 'Application pages'} className="min-h-0 grid gap-0.5 content-start overflow-y-auto px-2.5 pb-2.5">
-                    {[...filteredFavorites, ...filteredRoutes, ...filteredResources].map((entry, index) => (
+                  <div id={listboxId} role="listbox" aria-label={sessionResources.length > 0 || sessionFavorites.length > 0 || sessionRecent.length > 0 ? 'Favorites, recent targets, application pages and visible resources' : 'Application pages'} className="min-h-0 grid gap-0.5 content-start overflow-y-auto px-2.5 pb-2.5">
+                    {[...filteredFavorites, ...filteredRecent, ...filteredRoutes, ...filteredResources].map((entry, index) => (
                       <button
                         key={`${entry.path}-${index}`}
                         id={`${listboxId}-option-${index}`}
@@ -321,6 +329,7 @@ export function CommandCenter({ routes, getFavorites, getResources, onRefresh }:
                   <span className="inline-flex items-center gap-1"><ArrowUp size={12} aria-hidden="true" /><ArrowDown size={12} aria-hidden="true" /> move</span>
                   <span className="inline-flex items-center gap-1"><CornerDownLeft size={12} aria-hidden="true" /> open</span>
                   <span className="inline-flex items-center gap-1"><kbd>Esc</kbd> close</span>
+                  {sessionRecent.length > 0 && onClearRecent ? <button type="button" className="inline-flex items-center gap-1.5 text-kp-sky hover:text-kp-text" onClick={() => { onClearRecent(); setSessionRecent([]) }}>clear recent</button> : null}
                   <button type="button" className="ml-auto inline-flex items-center gap-1.5 text-kp-sky hover:text-kp-text" onClick={() => setView('help')}><Keyboard size={13} aria-hidden="true" /> ? shortcuts</button>
                 </footer>
               </>

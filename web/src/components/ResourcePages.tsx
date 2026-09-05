@@ -13,6 +13,7 @@ import {
   getEndpointSlices,
   getEndpointSliceYAML,
   getEvents,
+  getDashboardMetrics,
   getIngress,
   getIngresses,
   getIngressYAML,
@@ -450,6 +451,11 @@ export function PodsPage() {
     enabled: Boolean(selection),
   })
   const detail = useQuery({ queryKey: ['resources', 'pod-detail', selection?.generation, activeSelected?.namespace, activeSelected?.name], queryFn: ({ signal }) => getPod(activeSelected!.namespace, activeSelected!.name, signal, selection!.generation), enabled: Boolean(selection && activeSelected) })
+  // V5-11: Pod metrics render only when the Metrics API is healthy; absence,
+  // denial or partial coverage touches this block alone, never the Pod view.
+  const metricsAvailable = status.data?.components.metrics.status === 'healthy'
+  const metrics = useQuery({ queryKey: ['pod-metrics', selection?.generation], queryFn: ({ signal }) => getDashboardMetrics(signal, selection?.generation), enabled: Boolean(selection && activeSelected && metricsAvailable), staleTime: 30_000 })
+  const podMetric = metrics.data?.block.value.pods.find((value) => value.namespace === activeSelected?.namespace && value.pod === activeSelected?.name)
   const yaml = useMutation({ mutationFn: ({ namespace, name }: Pod) => requests.run((signal) => getPodYAML(namespace, name, signal)) })
 
   function closeDetail() {
@@ -528,6 +534,20 @@ export function PodsPage() {
                   </div>
                   <PodActions key={`${selection!.generation}/${detail.data.metadata.uid}`} detail={detail.data} selection={selection as SelectionSummary} />
                 </> : null}
+                {activeSelected ? (
+                  metricsAvailable ? (
+                    podMetric ? (
+                      <p className="mt-3 rounded-r-md border-l-2 border-kp-blue-border bg-kp-blue-bg px-3 py-2 text-xs text-kp-subtext" role="status">
+                        CPU {podMetric.cpuMillicores} m · memory {Math.round(podMetric.memoryBytes / (1024 * 1024))} MiB
+                        {metrics.data?.block.truncated ? ' · metrics truncated' : ''}
+                      </p>
+                    ) : metrics.isPending ? null : (
+                      <p className="mt-3 text-xs text-kp-overlay-text" role="note">No metrics sample for this Pod in the current window.</p>
+                    )
+                  ) : (
+                    <p className="mt-3 text-xs text-kp-overlay-text" role="note">Metrics API unavailable; Pod metrics are not collected.</p>
+                  )
+                ) : null}
                 <YamlViewer value={yaml.data} pending={yaml.isPending} error={yaml.error} onLoad={() => yaml.mutate(activeSelected)} diffTarget={activeSelected ? { collection: 'pods', namespace: activeSelected.namespace, name: activeSelected.name, generation: selection?.generation } : undefined} />
               </> : null}
             </Drawer>
@@ -732,6 +752,27 @@ export function NetworkPage() {
   const networkPolicyDetail = useQuery({ queryKey: ['resources', 'networkpolicy-detail', selection?.generation, activeSelected?.namespace, activeSelected?.name], queryFn: ({ signal }) => getNetworkPolicy(activeSelected!.namespace, activeSelected!.name, signal, selection!.generation), enabled: activeSelected?.tab === 'network-policies' })
   const yaml = useMutation({ mutationFn: (value: NetworkSelection) => requests.run((signal) => value.tab === 'services' ? getServiceYAML(value.namespace, value.name, signal) : value.tab === 'ingresses' ? getIngressYAML(value.namespace, value.name, signal) : getEndpointSliceYAML(value.namespace, value.name, signal)) })
   const close = useMutation({ mutationFn: (id: string) => requests.run(async (signal) => { const session = await getSession(signal); if (session.generation !== selection!.generation) throw new APIError(409, { code: 'GENERATION_CHANGED', message: 'The active selection changed.' }); return closePortForward(id, selection!.generation, session.csrfToken, signal) }), onSuccess: () => queryClient.invalidateQueries({ queryKey: ['port-forwards'] }) })
+  const [stopAllState, setStopAllState] = useState<'idle' | 'confirm'>('idle')
+  const [stopAllResult, setStopAllResult] = useState<{ closed: number; failed: number } | null>(null)
+  const stopAll = useMutation({ mutationFn: async () => {
+    const active = (forwards.data ?? []).filter((item) => item.status === 'active')
+    let closed = 0
+    let failed = 0
+    for (const session of active) {
+      try {
+        await requests.run(async (signal) => {
+          const sessionData = await getSession(signal)
+          if (sessionData.generation !== selection!.generation) throw new APIError(409, { code: 'GENERATION_CHANGED', message: 'The active selection changed.' })
+          return closePortForward(session.id, selection!.generation, sessionData.csrfToken, signal)
+        })
+        closed += 1
+      } catch {
+        failed += 1
+      }
+    }
+    return { closed, failed }
+  }, onSuccess: (result) => { setStopAllResult(result); setStopAllState('idle'); queryClient.invalidateQueries({ queryKey: ['port-forwards'] }) } })
+
   const active: CollectionResult<NetworkItem> | undefined = tab === 'services' && services.data ? { ...services.data, items: services.data.items } : tab === 'ingresses' && ingresses.data ? { ...ingresses.data, items: ingresses.data.items } : tab === 'endpoint-slices' && slices.data ? { ...slices.data, items: slices.data.items } : tab === 'endpoints' && endpoints.data ? { ...endpoints.data, items: endpoints.data.items } : tab === 'ingress-classes' && ingressClasses.data ? { ...ingressClasses.data, items: ingressClasses.data.items } : tab === 'network-policies' && networkPolicies.data ? { ...networkPolicies.data, items: networkPolicies.data.items } : undefined
   const activeQuery = tab === 'services' ? services : tab === 'ingresses' ? ingresses : tab === 'endpoint-slices' ? slices : tab === 'endpoints' ? endpoints : tab === 'ingress-classes' ? ingressClasses : networkPolicies
   const currentDetail = activeSelected?.tab === 'services' ? serviceDetail : activeSelected?.tab === 'ingresses' ? ingressDetail : activeSelected?.tab === 'endpoint-slices' ? sliceDetail : activeSelected?.tab === 'endpoints' ? endpointsDetail : activeSelected?.tab === 'ingress-classes' ? ingressClassDetail : networkPolicyDetail
@@ -765,6 +806,20 @@ export function NetworkPage() {
       <div id="network-panel" role="tabpanel">
         <SelectionGate pending={status.isPending} error={status.error} selected={Boolean(selection)}>
           {tab === 'port-forwards' ? <QueryState pending={forwards.isPending} error={forwards.error ?? close.error} empty={forwards.data?.length === 0}>
+            {stopAllState !== 'idle' ? (
+              <div role="alertdialog" aria-labelledby="stop-all-title" className="grid gap-2 rounded-lg border border-kp-red-border bg-kp-red-bg/50 p-3.5">
+                <strong id="stop-all-title" className="text-sm text-kp-text">Close all active loopback sessions?</strong>
+                <p className="m-0 text-xs text-kp-subtext">Only sessions of the current selection are closed; each close re-verifies authorization and reports per session.</p>
+                <div className="flex gap-2">
+                  <Button variant="secondary" size="sm" onClick={() => setStopAllState('idle')}>Cancel</Button>
+                  <Button variant="danger" size="sm" disabled={stopAll.isPending} onClick={() => stopAll.mutate()}>{stopAll.isPending ? 'Closing…' : 'Confirm close all'}</Button>
+                </div>
+              </div>
+            ) : null}
+            {stopAllResult ? <p className={stopAllResult.failed === 0 ? 'm-0 text-xs text-kp-green' : 'm-0 text-xs text-kp-yellow'} role="status">{stopAllResult.closed} session{stopAllResult.closed === 1 ? '' : 's'} closed{stopAllResult.failed ? ` · ${stopAllResult.failed} failed` : ''}.</p> : null}
+            {forwards.data?.some((item) => item.status === 'active') && stopAllState === 'idle' ? (
+              <Button variant="danger" size="sm" className="justify-self-start" onClick={() => setStopAllState('confirm')}>Stop all active sessions</Button>
+            ) : null}
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
               {forwards.data?.map((item) => (
                 <article key={item.id} className="grid content-start gap-1.5 rounded-xl border border-kp-overlay-0 bg-kp-surface-0 p-3.5">

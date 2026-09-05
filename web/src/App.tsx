@@ -1,7 +1,9 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Waypoints } from 'lucide-react'
-import { Outlet, Route, Routes, useNavigate } from 'react-router'
+import { Outlet, Route, Routes, useLocation, useNavigate } from 'react-router'
+
+import { clearRecentTargets, recordPath, recentTargets, subscribeRecentTargets } from './recent/recent'
 
 import { getPreferences, getStatus, type Preferences } from './api/client'
 import { Badge } from './components/ui/Badge'
@@ -229,8 +231,19 @@ function StatusBadge() {
 function Shell() {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
+  const location = useLocation()
   const version = useAppVersion()
   const [compact, setCompact] = useState<boolean>(false)
+  const [, setRecentVersion] = useState(0)
+  useEffect(() => {
+    // V5-12: completed detail navigations become in-memory recents. Secrets
+    // and list pages never enter the history.
+    recordPath(location.pathname)
+  }, [location.pathname])
+  useEffect(() => {
+    const unsubscribe = subscribeRecentTargets(() => setRecentVersion((value) => value + 1))
+    return () => { unsubscribe() }
+  }, [])
   const status = useQuery({
     queryKey: ['local-status'],
     queryFn: ({ signal }) => getStatus(signal),
@@ -281,7 +294,12 @@ function Shell() {
           </div>
           <div className="topbar-controls">
             <StatusBadge />
-            <CommandCenter routes={commandRoutes} getFavorites={() => favoriteEntries(preferences.data)} getResources={() => commandResourceEntries(queryClient, selection?.generation)} onRefresh={refreshActiveReads} />
+            <CommandCenter routes={commandRoutes} getFavorites={() => favoriteEntries(preferences.data)} getRecent={() => recentTargets().map((entry) => ({
+              path: entry.path,
+              label: entry.name,
+              description: `recent · ${entry.kind}${entry.namespace ? ` · ${entry.namespace}` : ''}`,
+              keywords: [entry.kind, entry.namespace ?? '', 'recent'],
+            }))} onClearRecent={() => clearRecentTargets()} getResources={() => commandResourceEntries(queryClient, selection?.generation)} onRefresh={refreshActiveReads} />
           </div>
         </header>
         <main id="main-content"><Outlet /></main>
