@@ -25,6 +25,8 @@ LDFLAGS := -s -w \
 WAILS ?= $(shell $(GO) env GOPATH)/bin/wails
 DESKTOP_TAGS := desktop
 DESKTOP_OUT := $(DIST_DIR)/desktop
+# Keep the reviewed Bridge contract, as the native release workflows do.
+WAILS_BINDING_FLAGS := -skipbindings
 
 format:
 	gofmt -w $(GO_FILES)
@@ -88,19 +90,19 @@ verify-ginger:
 # builds require WebView2 (no CGO). Cross-platform releases are produced by the
 # per-OS native CI runners.
 dev-desktop:
-	$(WAILS) dev -tags "$(DESKTOP_TAGS)"
+	$(WAILS) dev $(WAILS_BINDING_FLAGS) -tags "$(DESKTOP_TAGS)"
 
 build-desktop:
-	$(WAILS) build -tags "$(DESKTOP_TAGS)" -clean -o "$(DESKTOP_OUT)/kubePeep"
+	$(WAILS) build $(WAILS_BINDING_FLAGS) -tags "$(DESKTOP_TAGS)" -clean -o "$(DESKTOP_OUT)/kubePeep"
 
 build-desktop-linux:
-	$(WAILS) build -tags "$(DESKTOP_TAGS)" -clean -platform linux/amd64 -o "$(DESKTOP_OUT)/linux-amd64/kubePeep"
+	$(WAILS) build $(WAILS_BINDING_FLAGS) -tags "$(DESKTOP_TAGS)" -clean -platform linux/amd64 -o "$(DESKTOP_OUT)/linux-amd64/kubePeep"
 
 build-desktop-windows:
-	$(WAILS) build -tags "$(DESKTOP_TAGS)" -clean -platform windows/amd64 -o "$(DESKTOP_OUT)/windows-amd64/kubePeep.exe"
+	$(WAILS) build $(WAILS_BINDING_FLAGS) -tags "$(DESKTOP_TAGS)" -clean -platform windows/amd64 -o "$(DESKTOP_OUT)/windows-amd64/kubePeep.exe"
 
 build-desktop-darwin:
-	$(WAILS) build -tags "$(DESKTOP_TAGS)" -clean -platform darwin/amd64 -o "$(DESKTOP_OUT)/darwin-amd64/kubePeep"
+	$(WAILS) build $(WAILS_BINDING_FLAGS) -tags "$(DESKTOP_TAGS)" -clean -platform darwin/amd64 -o "$(DESKTOP_OUT)/darwin-amd64/kubePeep"
 
 verify: format-check lint typecheck test test-e2e build smoke verify-ginger
 

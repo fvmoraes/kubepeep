@@ -1,5 +1,8 @@
 # Evidências da Fase 4 — Kubernetes e RBAC
 
+> Registro histórico: resultados e gates referem-se à execução datada abaixo.
+> A sequência atual de entrega está no [plano v1](../../plan/README.md).
+
 **Data da validação local mais recente:** 2026-08-30
 **Plataforma principal:** Linux amd64
 **Estado:** 58 de 59 tarefas comprovadas; Kind real concluiu F4-50 e F4-49 permanece aberta

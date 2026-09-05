@@ -1,5 +1,8 @@
 # Evidências da Fase 6 — Recursos somente leitura
 
+> Registro histórico: resultados e gates referem-se à execução datada abaixo.
+> A sequência atual de entrega está no [plano v1](../../plan/README.md).
+
 **Data da validação local:** 2026-08-24
 **Data da validação Kind:** 2026-08-30
 **Plataforma principal:** Linux amd64

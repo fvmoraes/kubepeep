@@ -108,5 +108,5 @@ distribuição, junto do build da SPA e do embed.
 - CLI: `inspect --json` não encontrou testes nem rotas; `doctor` saiu com código
   1 somente pela ausência de testes no template.
 
-As saídas completas e sanitizadas estão em `service-inspect.json`,
-`service-doctor.txt`, `cli-inspect.json` e `cli-doctor.txt`.
+As saídas completas foram preservadas no projeto privado sob `~/.dwyt/projects/`;
+o [registro de reprodução](README.md) resume os resultados.

@@ -3,21 +3,15 @@
 Este diretório preserva a prova nativa do desenho de `start`, `status` e
 `stop` antes da implementação de produção da Fase 3.
 
-## Arquivos
+## Registro preservado
 
-- `linux-native-2026-07-27.txt`: black-box Linux, incluindo encerramento por
-  `SIGTERM`, cleanup e repetição do lifecycle vinte vezes;
-- `windows-native-2026-07-27.txt`: suíte completa em Windows 10 Pro amd64,
-  com `TEST_EXIT_CODE=0`;
-- `run-windows-native.cmd`: runner reproduzível usado no guest Windows.
+A validação histórica de 2026-07-27 passou em Linux amd64 (incluindo SIGTERM,
+cleanup e vinte repetições) e Windows amd64 (suíte `control`, exit 0).
+Os transcripts completos e binários ficam privados sob `~/.dwyt/projects/`;
+não são versionados. Esta prova valida o spike, não uma release atual.
 
-Executáveis e ISO são artefatos temporários e não são versionados. Os hashes
-dos artefatos usados na execução Windows final são:
-
-| Artefato | SHA-256 |
-| --- | --- |
-| `f1-control-probe.exe` | `3d8e3dcac0ce72dcd039070f5be2361630f7fef090a97486409c35a07e2e12b8` |
-| `f1-control.test.exe` | `30d21e2367db4f0babc04cac2f21392ed9ebef505d92e899e38192d80409008f` |
+O [runner Windows](../../../../spikes/phase1/scripts/run-windows-native.cmd)
+é fonte reproduzível e acompanha o módulo do spike.
 
 ## Reprodução
 
@@ -33,7 +27,7 @@ GOTOOLCHAIN=go1.25.0 \
   go build -trimpath -o f1-control-probe.exe ./cmd/f1-control-probe
 ```
 
-Copiar os dois executáveis e `run-windows-native.cmd` para o mesmo diretório
+Copiar os dois executáveis e `scripts/run-windows-native.cmd` para o mesmo diretório
 no Windows e executar o `.cmd` sem elevação. O runner registra versão/arquitetura
 do sistema, hashes e a saída verbosa dos testes em
 `%TEMP%\f1-control-results.txt`.
@@ -52,7 +46,7 @@ A suíte nativa cobre:
 - segunda inicialização, estado obsoleto, PID alheio, stop idempotente;
 - cleanup, liberação do lock e sinais Unix.
 
-O adapter de produção da Fase 3 ainda deve usar a raiz de dados por usuário
+O requisito histórico para o adapter de produção era usar a raiz de dados por usuário
 aprovada, testar execução elevada e reduzir operações baseadas apenas em path
 por meio de handles Windows quando aplicável. Essas são exigências de
 reimplementação/hardening, não lacunas da prova de viabilidade F1-44.

@@ -1,42 +1,31 @@
 # Fase 5 — Experiência operacional
 
-> **Objetivo:** fechar o backlog da Fase 9 (experiência operacional) que sobrou após o redesign, priorizando o que aparece todos os dias no uso: port-forward, ações contextuais, colunas e refinamentos de YAML/logs.
-> **Prioridade:** P1. **Dependências:** nenhuma (paralelizável com Fases 2–4). **Complexidade agregada:** L.
+**Prioridade:** P1, obrigatória. **Entrada:** contrato F1; pode avançar junto de F2–F4, integrando os kinds ao concluí-los. **Matriz:** R03/R07–R08/R16–R18/R35 e U04–U09.
+
+Fechar as jornadas de diagnóstico e operação reaproveitando logs, ações, sessões, favoritos e diff last-applied existentes. O catálogo de colunas/referências funciona em memória nesta fase; sua persistência é responsabilidade da F6.
 
 ## Tarefas
 
-### Port-forward dedicado
+- [ ] **V5-01 — Inventário por jornada.** Relacionar componentes/serviços/testes existentes aos itens abaixo. Marcar como integração o que já existe, registrando lacunas concretas. Nenhuma tarefa autoriza substituir uma implementação funcional inteira.
+- [ ] **V5-02 — Painel de port-forward.** Organizar o destino `/network/port-forwards`: alvo/origem, portas, status, criada/expira/encerrada e motivo sanitizado. Iniciar a partir de Pod/Service autorizado, sugerir porta válida e permitir parar uma sessão ou todas após confirmação. “Parar todas” opera sobre sessões pertencentes ao usuário/geração, com resultado por sessão e sem novo bypass de autorização.
+- [ ] **V5-03 — Ciclo das sessões.** Reusar bind loopback e encerramento existentes. Cobrir porta ocupada, limite, alvo desaparecido, cliente desconectado, troca de contexto/scope e shutdown. Não matar processo alheio nem expor porta externa como fallback; UI deve refletir encerramento e falha, sem sucesso antecipado.
+- [ ] **V5-04 — Catálogo contextual.** Menu por linha/detalhe via componentes compartilhados: Pod (detalhes/logs/YAML/exec/port-forward/delete); Deployment (YAML/restart/scale); StatefulSet (YAML/scale); Service (YAML/port-forward). Demais kinds recebem somente ações implementadas e pertinentes. Paleta continua apenas navegação.
+- [ ] **V5-05 — Autorização e confirmação.** Allowed/denied/unknown visíveis com explicação acessível. Backend reautoriza alvo e preconditions; confirmação de mutação contém contexto/namespace/kind/nome/consequência. Reconciliar sucesso, 403, conflito, cancelamento e geração alterada. HPA conhecido no alvo de scale gera aviso adequado; não possuir acesso ao HPA não autoriza afirmar ausência de autoscaler.
+- [ ] **V5-06 — Colunas.** Definir catálogo de IDs seguros por kind e controle acessível de visibilidade/ordem/reset. Preservar coluna identificadora e ações essenciais; nenhum path arbitrário de objeto/annotation/label/Secret vira coluna configurável. Aplicar no framework, não em cópias por página.
+- [ ] **V5-07 — Detalhes e relações.** Consolidar Overview/Details/YAML/Events e tabs específicas úteis (Containers/Logs/Metrics/Conditions/Ports). Relações workload/ReplicaSet/Pod/Service/evento usam origem e identidade validadas. Eventos dependem de autorização própria; ausência de permissão num bloco não apaga o restante do detalhe.
+- [ ] **V5-08 — YAML.** Estender viewer com busca local, próximo/anterior, recolhimento e cópia/download por gesto. Respeitar budgets e truncamento, abortar leitura/diff ao trocar alvo/geração e descartar respostas tardias. Manter conteúdo só em memória; Secret não possui rota/visualização/exportação YAML.
+- [ ] **V5-09 — Diff.** Preservar vivo × last-applied já implementado. Comparação adicional da v1 limita-se a dois objetos autorizados do contexto ativo: origens visíveis, ausência versus vazio, normalização de campos gerenciados opt-in, limites e recusa se qualquer lado for Secret/inacessível. Contrato novo é documentado/testado antes da UI; comparação multi-contexto permanece no backlog.
+- [ ] **V5-10 — Logs.** Revisar atuais/anteriores/follow/stop, namespace/pod/container, tail/since, timestamps/wrap, busca/filtro de nível, limpar e exportar explicitamente. Preservar buffer limitado/backpressure e cancelamento ao sair/trocar origem. Cada origem é identificada; não adicionar agregação de múltiplos streams nesta fase. Ausência de timestamps/nível não deve produzir metadados inventados.
+- [ ] **V5-11 — Métricas e estados.** Integrar CPU/memória/requests/limits em detalhe Pod quando autorizados; API ausente/negada/parcial afeta somente o bloco. Mensagens de loading/vazio/offline/proibido/unknown/parcial/stale/truncado usam componentes existentes e texto legível.
+- [ ] **V5-12 — Favoritos/recentes em memória.** Definir referências mínimas com origem e kind/escopo, limite e expiração para recentes, ação limpar e comportamento de item indisponível. Não manter histórico automático de Secrets. Navegação não revela favorito de outro contexto nem remove dados duráveis por causa de um timeout; persistência/migração ficam na F6.
 
-- [ ] **V5-01** Página `/network/port-forwards` promovida a painel completo (hoje é tab simples): sessões ativas com contexto, namespace/alvo, portas, estado, criada/expira (F9-60); iniciar a partir do detalhe de Pod/Service com sugestão de porta (F9-61); bind loopback obrigatório já garantido pelo backend.
-- [ ] **V5-02** Porta ocupada → mensagem acionável sem fallback externo (F9-62); parar uma sessão / todas com confirmação (F9-63); encerrar no shutdown e marcar sessões mortas por troca de geração (F9-64); teste de colisão/cleanup (F9-65).
+## Aceite e validação
 
-### Ações contextuais
+- E2E exercita menu autorizado/negado/unknown, confirmação e reconciliação de erro; teste backend prova reautorização mesmo com UI antiga.
+- Port-forward cobre criação/colisão/parada individual/todas/troca de seleção/shutdown, com teste de encerramento de conexões/goroutines. A rota nova não duplica o serviço de sessões.
+- YAML/diff cancelado não renderiza o objeto anterior; Secret em qualquer entrada é recusado antes de buscar conteúdo. Sentinelas sintéticas não chegam à persistência/diagnóstico.
+- Logs com cliente lento/buffer cheio/previous container/follow cancelado continuam limitados; exportação só acontece por gesto. Métricas indisponíveis não escondem o Pod.
+- Colunas funcionam com teclado e reset; páginas úteis em 1280×720 e 1920×1080, sem overflow global. Validar alto volume com fixtures sintéticas, sem tornar logs/screenshots artefatos Git.
+- Rodar testes pertinentes e gate integrado do [plano](../README.md); registrar limitações de plataforma honestamente.
 
-- [ ] **V5-03** Menu de ações rápidas por linha/detalhe com o mesmo catálogo tipado das ações (F9-34): Pod (logs, port-forward, exec, delete), Deployment (restart, scale, YAML), Service (port-forward, YAML) — itens só quando pertinentes ao kind (F9-35).
-- [ ] **V5-04** Capability `denied`/`unknown` com tooltip explicativo e ação desabilitada — sem silêncio e sem tentativa às cegas (F9-36, §17); confirmação proporcional em destrutivas (F9-38); reconciliação pós-403/conflito (F9-39).
-
-### Colunas e listas
-
-- [ ] **V5-05** Visibilidade/ordem de colunas por kind a partir de catálogo seguro (F9-24); proibido persistir colunas derivadas de `Secret.data`/annotations arbitrárias (F9-25); preferências via allowlist (Fase 6 fornece o transporte).
-- [ ] **V5-06** Ordenação natural estável (Números em `name-2` < `name-10`) com tie-breaker determinístico (F9-21) — decidir client-side para página já carregada, sem reordenar o resultado do servidor.
-
-### YAML e logs
-
-- [ ] **V5-07** YAML viewer: busca local, seções recolhíveis, truncamento honesto em objetos grandes (F9-41/44); download/cópia só por gesto explícito, `no-store` mantido (F9-45); diff entre dois objetos acessíveis com origens lado a lado (F9-46/47) — Secret em qualquer lado → recusa (F9-48).
-- [ ] **V5-08** Logs: proveniência por linha ao combinar fontes (F9-52), budgets já existentes; métricas CPU/memória em detalhes de Pod quando a Metrics API autorizar, indisponibilidade como estado local do bloco (F9-57/58).
-
-### Favoritos e recentes
-
-- [ ] **V5-09** Favoritos refinados: remoção silenciosa quando o recurso sai do profile/contexto (F9-28); recentes com limite/expiração/limpar (F9-27) — transporte via preferências allowlisted (Fase 6).
-
-## Critérios de aceite
-
-- Painel de port-forward cobre F9-60..65 com testes de colisão e cleanup (sem goroutine órfã — goleak no service).
-- Menu contextual não oferece ação inaplicável ao kind; toda ação continua revalidada no backend.
-- Colunas persistidas passam no gate de catálogo seguro (teste negativo com Secret/annotation).
-- `make test test-e2e` verdes; e2e novo para port-forward (mock) e menu contextual.
-
-## Testes e rollback
-
-- Frontend: Vitest por componente + Playwright; backend: testes de sessão/port-forward existentes estendidos.
-- Rollback: painel e menu são aditivos; colunas/viibilidade dependem da allowlist de preferências (revert = voltar ao padrão fixo).
+**Saída:** jornadas operacionais completas no contexto ativo e contratos de UI prontos para F6. **Rollback:** por jornada; catálogos têm defaults seguros e não exigem apagar preferências já salvas.

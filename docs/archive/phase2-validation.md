@@ -1,5 +1,8 @@
 # Evidência de fechamento da Fase 2
 
+> Registro histórico: resultados e gates referem-se à execução datada abaixo.
+> A sequência atual de entrega está no [plano v1](../../plan/README.md).
+
 **Data:** 2026-08-03  
 **Resultado:** aprovado; Fase 3 autorizada  
 **Snapshot de conteúdo auditado:**

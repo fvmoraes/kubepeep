@@ -5,7 +5,7 @@
 
 ## 1. Fundamentos
 
-- Tailwind CSS 4 com tokens em `web/src/tokens.css` (`@theme`) — nenhum valor visual hardcoded em componente.
+- Tailwind CSS 4 com tokens em `web/src/tokens.css` (`@theme`); novos valores visuais devem usar os tokens.
 - **Uma família tipográfica**: Inter Variable (`@fontsource-variable/inter`). Monospace (`--font-mono`, classe `.mono`) **somente** em logs, YAML/JSON, código e terminal.
 - Superfícies neutras escuras; o roxo (`#A78BFA`) é marca de identidade restrita a **seleção, navegação, foco e pequenos destaques** — nunca cor dominante de texto.
 - Cores semânticas para significado: azul (ação normal), verde (sucesso/healthy), vermelho (destrutivo/erro), âmbar (warning/pending).
@@ -74,6 +74,6 @@ Adicionar um recurso Kubernetes (checklist):
 
 ## 7. Validação
 
-- `make lint typecheck` + `npm test` (Vitest) + `make test-e2e` (Playwright) verdes.
-- E2E cobre as resoluções 1280×720 e 1920×1080; screenshots de evidência ficam **fora do Git**.
+- `make lint typecheck`, `npm --prefix web test` (Vitest) e `make test-e2e` (Playwright) são os gates de validação.
+- Validar a UI em 1280×720 e 1920×1080; screenshots de evidência ficam **fora do Git**.
 - Navegável em 1280×720 sem scroll horizontal global.

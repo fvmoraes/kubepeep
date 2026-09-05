@@ -1,5 +1,8 @@
 # Evidências da Fase 9 — Experiência operacional
 
+> Registro histórico: resultados e gates referem-se à execução datada abaixo.
+> A sequência atual de entrega está no [plano v1](../../plan/README.md).
+
 **Estado:** três fatias verticais validadas localmente (15/84); demais
 facilitadores em execução.
 

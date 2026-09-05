@@ -1,5 +1,8 @@
 # Evidências da Fase 8 — Distribuição
 
+> Registro histórico: resultados e gates referem-se à execução datada abaixo.
+> A sequência atual de entrega está no [plano v1](../../plan/README.md).
+
 **Data da atualização:** 2026-08-30
 **Plataformas:** Linux amd64 local; Linux, macOS e Windows nativos na CI
 **Estado:** 47 de 50 tarefas comprovadas; somente candidate imutável e

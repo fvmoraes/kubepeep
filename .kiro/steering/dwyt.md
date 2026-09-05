@@ -14,6 +14,9 @@ Before every final response, save a session context snapshot with the Obsidian M
 Never rely only on grep/glob when MCP tools are available.
 Keep project context under `~/.dwyt`.
 Never hardcode machine-specific absolute paths in shared markdown instructions.
+Treat the absence of sensitive data as a non-negotiable project premise: never commit credentials, tokens, kubeconfigs, private keys, private PII, machine-specific paths, runtime logs/databases, or generated build/test artifacts.
+Before every commit, run `scripts/security_check.sh HEAD`; commit and tag identities must use an approved GitHub noreply address.
+Golden rule: only commit, never push. Never publish, push refs, or dispatch a release without an explicit user decision.
 
 ## Priority Order
 

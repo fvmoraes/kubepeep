@@ -1,10 +1,10 @@
 # Arquitetura do KubePeep
 
-> **Status:** revisado com as decisões da Fase 1
->
-> **Regra de uso:** este documento incorpora os ADRs 0001–0005 e as evidências reproduzíveis em `docs/research/`.
->
-> **Fontes históricas:** plano de desenvolvimento original e revisão de 2026-08 no histórico Git (`plan/` arquivado no commit `5ac7320^`). Execução atual: [../plan/README.md](../plan/README.md). ADRs em [decisions/](decisions/).
+Arquitetura da base atual. O core é composto por `internal/application.Compose`
+e compartilhado pelos runtimes web e desktop. O [plano v1](../plan/README.md)
+controla a expansão funcional; [ADRs](decisions/README.md) preservam decisões
+históricas. O [desktop](desktop-architecture.md) complementa o lifecycle web
+abaixo com a janela Wails, bridge JSON e loopback de streaming.
 
 ## 1. Direcionadores
 
@@ -13,7 +13,7 @@
 3. Handlers não acessam clientsets, SQLite ou filesystem diretamente.
 4. A API Kubernetes é a autoridade final para dados e autorização.
 5. Todo trabalho remoto pertence a um contexto cancelável e a uma geração de seleção.
-6. O produto funciona em loopback, em um único processo local e sem dependência própria em runtime.
+6. O produto funciona em loopback, em um único processo local e sem servidor de banco ou Node.js em runtime; desktop usa bibliotecas nativas.
 7. Falhas parciais permanecem isoladas.
 8. Streams e sessões têm owner, limite, cancelamento e cleanup.
 9. Dados Kubernetes são convertidos para DTOs próprios.
@@ -52,7 +52,7 @@ As contramedidas estão em [security.md](security.md).
 
 ## 3. Containers e componentes
 
-O MVP possui dois containers lógicos no mesmo artefato:
+O produto possui dois componentes lógicos no mesmo artefato:
 
 1. **Frontend React:** assets imutáveis embutidos, cliente HTTP e estado de apresentação.
 2. **Backend Go:** CLI, lifecycle, HTTP, aplicação, adapters e persistência.
@@ -72,9 +72,9 @@ cmd/kubePeep
           └─ embedded web + migrations
 ```
 
-Essa organização foi confrontada com o scaffold Ginger `--service`. Cobra e os
-adapters locais serão integrados manualmente, sem importar a estrutura
-exclusiva do template `--cli`.
+A composição concreta fica em `internal/application`; os runtimes CLI e
+desktop montam essa mesma plataforma. O scaffold Ginger foi referência
+histórica, sem introduzir dependência do template CLI.
 
 ## 4. Regra hexagonal
 
@@ -96,10 +96,8 @@ Regras verificáveis:
 - Serviço de aplicação coordena ports e políticas; não importa router ou banco concreto.
 - Adapter Kubernetes implementa ports e retorna modelos internos/DTO inputs, nunca objetos crus ao handler.
 - Adapter SQLite não recebe objetos Kubernetes.
-- Revalidação de ações usa o mesmo `AuthorizationService` da Fase 4; não existe serviço paralelo.
+- Revalidação de ações usa o mesmo `AuthorizationService` compartilhado; não existe serviço paralelo.
 - Frontend nunca é autoridade de autorização.
-
-Um teste arquitetural futuro deve falhar se `internal/api/handlers` importar `k8s.io/client-go/kubernetes` ou o adapter SQLite concreto.
 
 > **Implementado:** `internal/ports/architecture_test.go` falha se qualquer arquivo de `internal/api/handlers` importar `internal/adapters/...` ou `internal/integration/...`, e garante que o pacote `internal/ports` permaneça livre de dependências internas. Handlers dependem exclusivamente de interfaces de serviço e DTOs; a fiação concreta pertence a `internal/application.Compose` e aos runtimes (CLI/desktop).
 >
@@ -132,7 +130,7 @@ Todos os métodos remotos recebem `context.Context`. Operações de lista recebe
 
 ## 6. Composição do processo
 
-### 6.1 Estado desejado
+### 6.1 Responsabilidades do runtime web
 
 O processo possui um coordenador de lifecycle, único owner de:
 
@@ -147,7 +145,7 @@ O processo possui um coordenador de lifecycle, único owner de:
 - abertura do navegador;
 - shutdown e cleanup.
 
-### 6.2 Sequência de startup desejada
+### 6.2 Startup web
 
 ```text
 parse CLI e resolver o data root canônico
@@ -168,7 +166,7 @@ obtida do listener adquirido. PID e porta permanecem apenas em memória até o
 health local responder; ambos aparecem juntos no estado versionado, nunca em
 arquivos parcialmente atualizados ou antes da prontidão.
 
-### 6.3 Sequência de shutdown desejada
+### 6.3 Shutdown web
 
 ```text
 cancelar root context
@@ -191,31 +189,28 @@ do contexto raiz; o modo inicial é foreground. O coordenador adquire o listener
 instala o mux externo mínimo de health, publica prontidão e executa seu registro
 LIFO de cleanup em cancelamento, erro de Serve e timeout.
 
-Os spikes F1 comprovaram esses caminhos e fecharam F1-44 com blackbox nativo no
-Linux e no Windows 10 Pro amd64, incluindo lock, fingerprint, identidade,
-`status`/`stop` autenticados e cleanup. Essa prova valida a decisão, não fornece
-código de produção: a Fase 3 reimplementa o adapter e repete sua matriz; a Fase
-8 executa os binários já empacotados nos runners nativos de release.
+O módulo isolado `spikes/phase1/` reproduz a decisão histórica. A produção
+usa `internal/runtime`; validar seu comportamento e os arquivos empacotados
+pelos testes atuais, sem considerar resultados antigos prova de uma release.
 
 ## 7. Contrato operacional CLI
 
-| Comando | Contrato fixado | Evidência/implementação |
-| --- | --- | --- |
-| `kubePeep` | equivalente a `kubePeep start` | provado no spike; implementar na Fase 3 |
-| `start` | foreground, contexto Cobra e lifecycle próprio | ADR 0001; implementar na Fase 3 |
-| `stop` | request autenticado e prova de instance ID/PID/fingerprint antes de cancelar o contexto | probe isolado F1; reimplementação de produção F3-B |
-| `status` | request autenticado, prova da identidade completa e detecção segura de runtime obsoleto | probe isolado F1; reimplementação de produção F3-B |
-| `version` | imprimir version, commit e build date | sem spike bloqueante |
-| `doctor` | checks sanitizados e códigos definidos em `implementation-plan.md` | contrato F2; implementação F3 |
-| `update` | troca verificada e atômica; concluída na Fase 8 | testes por plataforma F8 |
+| Comando | Comportamento |
+| --- | --- |
+| `kubePeep` | janela em build desktop; runtime web em build CLI |
+| `serve` / `start` | runtime web em foreground |
+| `stop` | controle autenticado da instância web; verifica identidade antes de cancelar |
+| `status` | consulta autenticada da instância web e detecção de estado obsoleto |
+| `version` | versão, commit e build date |
+| `doctor` | checks sanitizados de aplicação, filesystem, SQLite e Kubernetes |
+| `update --version X.Y.Z` | download explícito, SHA-256 e substituição com rollback |
 
 O endpoint interno usado pelos comandos `status` e `stop` é distinto de
 `/api/v1/status`: ambos os comandos de controle apresentam o token privado e
-exigem a mesma prova de identidade. A Fase 8 não reaproveita o probe F1; ela
-valida o comando F3 dentro dos archives e instaladores reais.
+exigem a mesma prova de identidade. Os harnesses de distribuição validam os comandos de produção dentro dos
+archives e instaladores reais.
 
-Flags de contexto, kubeconfig e namespace são aceitas na Fase 3 e ligadas ao
-bootstrap Kubernetes na Fase 4. A precedência de source é `--kubeconfig`, lista
+Flags de contexto, kubeconfig e namespace alimentam o bootstrap Kubernetes. A precedência de source é `--kubeconfig`, lista
 ordenada de `KUBECONFIG`, profile persistido `is_default` e path recomendado da
 plataforma; a precedência de contexto é `--context`, `context_name` persistido e
 `current-context` somente no primeiro reconcile. Fonte escolhida inválida não
@@ -238,7 +233,7 @@ fora do perfil Roaming; todos os arquivos permitidos ficam sob esse único root.
 `config.yaml` é um único documento YAML estrito, UTF-8, máximo 64 KiB, sem
 aliases, anchors, tags, duplicate keys ou campos desconhecidos. Ausência cria o
 arquivo com defaults por escrita privada/atômica; arquivo inválido impede
-prontidão e retorna erro sanitizado. Schema v1 completo:
+prontidão e retorna erro sanitizado. Schema v1 (validação em `internal/config`):
 
 ```yaml
 version: 1
@@ -249,6 +244,8 @@ server:
 dashboard:
   blockTimeout: 8s
 observability:
+  metrics:
+    enabled: false
   otel:
     enabled: false
     endpoint: null
@@ -262,8 +259,9 @@ tempo de cada bloco do dashboard (mesma sintaxe de duração), entre 1s e 60s;
 para clusters grandes, aumente o valor quando blocos do overview reportarem
 erros parciais de timeout. O endpoint OTel é obrigatório somente
 quando `enabled=true`: URL absoluta HTTP(S), máximo 2.048 bytes, sem userinfo,
-query ou fragment; HTTP exige host loopback e `insecure=true`. O protocolo do
-MVP é somente `http/protobuf`; headers/tokens não são configuráveis. Com
+query ou fragment; HTTP exige host loopback e `insecure=true`. O schema aceita somente `http/protobuf`; headers/tokens não são configuráveis.
+A exportação OTel ainda não é implementada; aceitar configuração não
+significa iniciar um exporter. Veja [observabilidade](observability.md). Com
 `enabled=false`, endpoint precisa ser null e nenhuma resolução, socket ou
 exporter é iniciado.
 
@@ -411,7 +409,7 @@ selection generation
 + resourceName (quando a consulta é sobre objeto específico)
 ```
 
-- TTL configurável entre 30 e 60 segundos; baseline inicial: 45 segundos.
+- TTL limitado a 30–60 segundos nas opções do serviço; default 45 segundos.
 - Deduplicação de consultas simultâneas para a mesma chave.
 - `SelfSubjectRulesReview` pode preencher dicas de UI, nunca conceder uma ação.
 - `SelfSubjectAccessReview` decide capability quando disponível.
@@ -431,7 +429,7 @@ Defaults iniciais do backend:
 | conectividade/discovery Kubernetes | 5 s |
 | SAR individual | 5 s |
 | GET/LIST de uma página/origem | 10 s |
-| bloco comum do dashboard | 12 s |
+| bloco comum do dashboard | `dashboard.blockTimeout`, default 8 s |
 | consulta individual de log no scan | 8 s |
 | scan completo | 30 s |
 | prontidão local antes de abrir browser | 5 s |
@@ -441,9 +439,8 @@ Defaults iniciais do backend:
 | tentativas automáticas de leitura idempotente | no máximo 2 |
 
 Mutação, port-forward e `exec` não são repetidos automaticamente. O shutdown
-gracioso terá default de 10 s, seguido de fechamento forçado e cleanup; o valor
-é configurável dentro de limites e será exercitado com relógio reduzido nos
-testes.
+gracioso tem default de 10 s, seguido de fechamento forçado e cleanup; o valor
+é configurável dentro dos limites de `config.yaml`.
 
 Watch/reconexão usa somente a sequência fechada da §11 (250 ms até teto de 10
 s, jitter ±20% e reset após 60 s estáveis). Troca de geração cancela o backoff
@@ -485,7 +482,7 @@ rejeitadas. O DTO público continua opaco.
 
 ## 11. Watches e atualização em tempo real
 
-Fluxo desejado:
+Fluxo de atualização:
 
 1. executar LIST inicial e capturar `resourceVersion`;
 2. verificar separadamente `list` e `watch`;
@@ -559,7 +556,8 @@ Cada resposta agregada contém:
 - instante e generation ID;
 - erros parciais sanitizados.
 
-O `DashboardService` coordena ports já usados pelas telas de recursos. A Fase 5 cria apenas a fatia mínima; a Fase 6 estende as mesmas interfaces, evitando implementações duplicadas.
+O dashboard coordena serviços de recursos compartilhados, com budgets e
+erros parciais por bloco. Novas famílias devem estender essas fronteiras.
 
 ## 14. Health e status
 
@@ -589,10 +587,10 @@ Todo evento operacional estruturado usa, quando aplicável:
 
 ```text
 timestamp, level, component, operation, request_id,
-context, namespace, resource, duration, error_code
+context, namespace, resource, duration, duration_ms, error_code
 ```
 
-O tipo `logger.Logger` envolverá um `slog.Logger` com handler próprio do Kube
+O tipo `logger.Logger` envolve um `slog.Logger` com handler próprio do Kube
 Peep, JSON line em stdout/arquivo rotativo e sanitização recursiva antes dos
 sinks. A política de conteúdo está fixada em [security.md](security.md):
 payloads, credenciais, logs Kubernetes e comandos de `exec` não entram no log.
@@ -604,7 +602,7 @@ OpenTelemetry é opt-in, desativado por padrão e não pode ser dependência nec
 | Tema | Decisão |
 | --- | --- |
 | Framework | Ginger service v1.4.4 + Cobra manual; sem Gin |
-| CLI | foreground; raiz=`start`; stop/status por controle autenticado e identidade |
+| CLI | web em foreground; raiz desktop quando compilado com tag; stop/status para a instância web |
 | HTTP | lifecycle próprio, loopback, bind real e raw middleware seguro |
 | Persistência | modernc SQLite sem CGO, migrations/frontend embutidos |
 | Health | crítico local separado de dependências externas degradadas |
@@ -614,32 +612,13 @@ OpenTelemetry é opt-in, desativado por padrão e não pode ser dependência nec
 | Cursor | HMAC, query/generation bound e expiração |
 | Kubeconfig | loader oficial, lista ordenada multi-arquivo e plugins `exec` |
 
-## 17. Rastreabilidade F2
+## 17. Validação e evolução
 
-| Tarefas | Seções |
-| --- | --- |
-| F2-08–10 | contexto, containers, regra hexagonal e ports |
-| F2-11 | composição e lifecycle |
-| F2-12 | geração e cancelamento |
-| F2-13 | caches, concorrência e invalidação |
-| F2-14 | watches, SSE e exec |
-| F2-15 | dashboard progressivo |
-| F2-42 | contrato operacional CLI |
-| F2-46 | OpenTelemetry |
-| F2-49 | cursor composto |
-| F2-50 | health |
-| F2-51 | schema observável |
-| F2-57 | LIST/watch |
-| F2-58 | conjunto ordenado de kubeconfigs |
+Testes arquiteturais, de geração/cursor, RBAC, lifecycle, transportes e
+persistência acompanham as mesmas camadas no código. O [guia de
+desenvolvimento](development.md) descreve como executá-los; a release também
+exige validação nativa e dos instaladores.
 
-## 18. Critérios de revisão
-
-- [x] ADRs 0001–0004 substituem os gates arquiteturais sem contradição.
-- [x] Diagramas e documentos usam os mesmos nomes de ports.
-- [x] Nenhum handler depende de clientset ou adapter concreto.
-- [x] Startup/shutdown possui um único owner; runtime nativo por plataforma é
-  evidência final do desenho F1, a ser reimplementado em F3 e novamente
-  exercitado como artefato de release em F8.
-- [x] Toda sessão é alcançável por um contexto de cancelamento.
-- [x] Cursor e geração rejeitam retomada obsoleta.
-- [x] Health externo degradado não mascara falha local nem derruba o shell útil.
+Para adicionar uma família de recursos, estender adapter, serviço/DTO,
+capabilities, API e resource framework, preservando limites e cancelamento.
+As fases e os critérios de aceite estão no [plano v1](../plan/README.md).

@@ -1,43 +1,44 @@
-# Fase 0 (concluída) e escopo da v1
+# Estado atual e limites da v1
 
-> Executar esta fase **não** requer trabalho: serve de âncora de estado e de vocabulário comum para as fases seguintes.
+Base de código: redesign `5ac7320`, seguido pela organização documental `fc9b052`. Inventário revisado por Codebase MCP e leitura da fonte em setembro de 2026. Um item implementado continua sujeito ao gate de regressão; números de testes de um commit anterior não são prova da release futura.
 
-## 1. O que já está entregue (commit `5ac7320`, 2026-09-04)
+## Base a reutilizar
 
-| Área | Entregue |
-| --- | --- |
-| Design tokens | `web/src/tokens.css` — superfícies neutras (`#111016`/`#18161E`), texto `#F4F1F7`→`#686271`, roxo de marca `#A78BFA` restrito a seleção/navegação/foco, semânticas azul/verde/vermelho/âmbar, escala tipográfica 10–32px, controles 28/32/36px |
-| Tipografia | Inter Variable única família; monospace somente em logs, YAML, código e terminal |
-| Componentes | `web/src/components/ui/`: Button (7 variantes), Badge/StatusBadge, Input, Select, Checkbox, Field, SearchInput, Card, DataTable, Drawer, Tabs, Banner×4, PageHeader, EmptyState, Skeleton |
-| Shell | Sidebar com árvore Kubernetes em grupos colapsáveis + modo compacto com tooltips + versão real (`useAppVersion`); topbar 56px com contexto auto-apply, chip de namespace scope, status; command palette gerada da árvore |
-| Resource framework | `web/src/components/resource/`: ResourcePage, SelectionGate/QueryState/CollectionFooter, TableLink, Facts, ResourceTabStrip, format, status, errors |
-| Páginas migradas | Dashboard, Workloads, Pods, Events, Network, Config, Logs, Namespaces, Permissions, Settings |
-| Navegação | `web/src/navigation/tree.tsx` — fonte única; recursos sem backend aparecem desabilitados ("available in a future release") |
-| Validação | typecheck, lint, 86 unit, 6 e2e, 994 Go, build, screenshots 1280→1920 |
+| Área | Evidência no código | O que falta para a v1 |
+| --- | --- | --- |
+| Design System | `web/src/tokens.css`, `components/ui/`, `components/resource/` | aplicar os mesmos tokens/componentes às novas famílias; revisar §38 da referência |
+| Shell e árvore | `web/src/navigation/tree.tsx`, `components/Sidebar.tsx`, `hooks/useAppVersion.ts` | ligar os destinos novos e persistir compactação/grupos; entradas sem `path` hoje são futuras |
+| Recursos existentes | `web/src/components/ResourcePages.tsx`, `internal/api/handlers/routes.go` | ampliar catálogo e detalhes conforme matriz; manter rotas e filtros atuais |
+| Coleções e autorização | `internal/services/resources/`, `internal/integration/kubernetesruntime/resources_backend.go`, `internal/services/authorization/allowlist.go` | contrato para recursos cluster-scoped e capabilities novas; reutilizar `collectFilteredResource` e matriz existente |
+| Busca e ordenação | `internal/services/resources/search.go`, `internal/integration/kubernetesruntime/resources_sort.go` | já têm termos/frases/negação e ordenação natural; integrar famílias novas, documentar e testar paginação |
+| Preferências/favoritos | `internal/services/resources/preferences.go`, `internal/adapters/sqlite/preferences.go` | compactação/grupos/colunas/recentes e referências com origem e escopo; preservar schema/dados existentes |
+| YAML/diff | `web/src/components/YamlViewer.tsx`, API `yaml-diff` | busca/recolhimento/cancelamento; diff atual é vivo × last-applied, não comparação arbitrária de duas origens |
+| Port-forward/logs/exec | painel em `ResourcePages.tsx`, serviços de ações e streams existentes | organizar sessões e ações contextuais; preservar cancelamento, RBAC e limites |
+| Namespaces | listagem de namespaces e editor de scopes existentes | distinguir inspeção do objeto Namespace da edição de scopes; não recriar a gestão de scopes |
 
-## 2. Suportes que a v1 encontra prontos (backend)
+O helper `useResourceList` e o pacote `internal/services/preferences` citados no plano anterior não existem nesta base. As páginas usam React Query e helpers de geração; preferências pertencem a `internal/services/resources`. Usar os caminhos reais, sem criar duplicatas para satisfazer nomes de um plano antigo.
 
-- Padrão de coleção: `internal/api/handlers/routes.go` (rotas + `allowedMethods`), envelope `data/meta` com `page` (cursor, `complete`, `truncated`, `filterScope`) e `coverage`.
-- RBAC: matriz de capabilities (`internal/services/authorization/matrix.go`), `GET /api/v1/permissions` com SAR por namespace/recurso.
-- Client-go: `internal/adapters/kubernetes` com budgets, cancelamento por geração e client por profile/contexto.
-- Frontend: `useResourceList` pattern (draft/applied + cursor por geração + saved filters), `getPermissions` por ação, `web/src/navigation/tree.tsx` com itens desabilitados prontos para `path`.
+## Contrato do produto 1.0
 
-## 3. Escopo da v1
+- Uma seleção ativa de profile/contexto. Recursos namespaced respeitam o scope; recursos cluster-scoped exigem contexto válido, mas funcionam sem scope de namespaces.
+- Todas as famílias obrigatórias dos §§12/36 da referência têm lista, detalhe útil e navegação. YAML/eventos/ações só aparecem quando o contrato do recurso e a autorização os permitem.
+- ServiceAccounts pertence a **Access Control**, mesmo sendo implementado junto das coleções namespaced na F3. Leases e PVCs são **namespaced**; a posição na sidebar não altera isso.
+- Namespaces mantém a gestão de scopes existente e ganha inspeção do recurso sem confundir os dois conceitos.
+- Ações mutáveis continuam limitadas ao catálogo existente: restart de Deployment, scale de Deployment/StatefulSet, delete de Pod, port-forward e exec. Os exemplos de delete de Service/Deployment na referência não ampliam esse catálogo automaticamente.
+- Preferência “local” significa armazenamento allowlisted no backend local. `localStorage`, `sessionStorage`, IndexedDB e caches persistentes de conteúdo Kubernetes continuam proibidos.
 
-1. Todas as famílias de recursos do grupo de navegação habilitadas (Cluster, Workloads complementares, Configuration, Storage, Access Control, Administration) — exceto Helm e Gateway API (pós-1.0).
-2. Recursos **cluster-scoped** funcionando sem namespace scope (§13 da especificação de referência).
-3. Experiência operacional fechada: port-forward panel, ações contextuais, colunas, favoritos/recentes, YAML/logs refinements.
-4. Preferências de shell persistidas no allowlist do backend.
-5. Release 1.0.0 com RC imutável e documentação atualizada.
+## Decisões que evitam regressões
 
-## 4. Fora de escopo da v1
+1. `meta.page.filterScope` descreve o alcance de **filtro/ordenação** (`page` ou `collection`), não o escopo Kubernetes. Não introduzir `filterScope: "cluster"`. F1 define informação separada quando necessária.
+2. Não requisitar `list namespaces` para abrir Nodes/PVs/ClusterRoles. Permissões de coleção cluster-scoped são próprias e não se deduzem de um scope namespaced.
+3. Não converter indisponibilidade em “lista vazia”: negar autoritativamente → proibido; autorização inconclusiva → unknown/indisponível; resposta parcial → coverage com causa sanitizada.
+4. Secrets continuam metadata-only sem YAML/diff. Outras famílias recebem DTOs explícitos; YAML precisa de política por família, não serialização genérica do objeto cru.
+5. VolumeAttachments é entrega obrigatória da F2 com campos seguros; não se remove a família da v1 por conter campos que devem ser omitidos.
+6. Fases 1–6 são obrigatórias. Adiamentos estão enumerados no backlog; mudar o gate exige atualizar matriz, fase e produto, deixando a decisão visível.
 
-- Helm Releases e Gateway API (grupos já reservados na navegação).
-- Edição/apply de recursos (o produto permanece read-only + ações allowlisted).
-- Multi-cluster simultâneo (multi-contexto readonly segue na Fase 6 como melhor caso; se estourar o orçamento, vira 1.1).
+## Evidência inicial a registrar na primeira execução
 
-## 5. Restrições herdadas
-
-- `web/src/security.test.ts` proíbe localStorage/sessionStorage em produção — preferências de shell vão para `/api/v1/preferences` (allowlist no backend), não para o browser.
-- Secrets nunca expõem `data`/`stringData`/YAML — vale para toda página nova.
-- Nenhuma página nova cria CSS próprio; apenas tokens e componentes de `web/src/components/ui/` + `components/resource/`.
+- SHA de partida, worktree e ferramentas disponíveis; teste/build de referência.
+- Rotas/capabilities/componentes que cada tarefa vai alterar e seus consumidores.
+- Features já implementadas que só precisam de integração, evitando reconstruir busca, sort, diff last-applied, favoritos, logs e sessões.
+- Bloqueios de ambiente nativo/cluster registrados separadamente dos defeitos da aplicação.

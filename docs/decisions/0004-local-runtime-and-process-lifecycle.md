@@ -139,7 +139,7 @@ Rejeitado no MVP conforme ADR 0001.
   cobriu `LockFileEx`, fingerprint de criação, DACL privada e rejeição de
   adulteração, identidade, `status`/`stop`, Host/Origin/token e cleanup, com
   `TEST_EXIT_CODE=0`. A transcrição e os hashes estão em
-  [`../research/evidence/f1-control/windows-native-2026-07-27.txt`](../research/evidence/f1-control/windows-native-2026-07-27.txt).
+  [`../research/evidence/f1-control/windows-native-2026-07-27.txt` — registro histórico](../research/evidence/f1-control/README.md).
 
 Essa evidência fecha F1-44 e a decisão arquitetural. O código do probe é
 descartável: F3 reimplementa o adapter de produção e repete os testes; F8

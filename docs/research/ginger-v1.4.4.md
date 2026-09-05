@@ -1,5 +1,9 @@
 # Ginger v1.4.4 — pesquisa reproduzível para a Fase 1
 
+> Pesquisa histórica datada: versões, ambiente e gates abaixo referem-se
+> ao spike F1. Para build e distribuição atuais, consultar
+> [desenvolvimento](../development.md) e [download](../download.md).
+
 Status: concluída em 2026-07-27
 
 Repositório: [`fvmoraes/ginger`](https://github.com/fvmoraes/ginger)
@@ -54,7 +58,7 @@ A verificação final resolveu explicitamente a CLI com
 e o build info confirmou o checksum do módulo. Isso impediu que uma versão
 anterior disponível no `PATH` do sistema contaminasse os scaffolds. A saída
 sanitizada está em
-[`cli-version.txt`](evidence/ginger-v1.4.4/cli-version.txt).
+[`cli-version.txt` — registro de reprodução](evidence/ginger-v1.4.4/README.md).
 
 ## Scaffolds comparados
 
@@ -303,11 +307,11 @@ código 1 exclusivamente porque o próprio template não gera teste.
 As saídas integrais e sanitizadas são:
 
 - service:
-  [`inspect --json`](evidence/ginger-v1.4.4/service-inspect.json) e
-  [`doctor`](evidence/ginger-v1.4.4/service-doctor.txt);
+  [`inspect --json` — registro de reprodução](evidence/ginger-v1.4.4/README.md) e
+  [`doctor` — registro de reprodução](evidence/ginger-v1.4.4/README.md);
 - CLI:
-  [`inspect --json`](evidence/ginger-v1.4.4/cli-inspect.json) e
-  [`doctor`](evidence/ginger-v1.4.4/cli-doctor.txt).
+  [`inspect --json` — registro de reprodução](evidence/ginger-v1.4.4/README.md) e
+  [`doctor` — registro de reprodução](evidence/ginger-v1.4.4/README.md).
 
 Limitações reproduzidas:
 
@@ -355,7 +359,7 @@ ambos.
 Este relatório e o spike cobrem F1-03–04, F1-11–22, F1-27–35 e F1-39–44.
 F1-44 foi fechado pelo blackbox nativo Linux e pela execução completa no
 Windows amd64, persistida em
-[`windows-native-2026-07-27.txt`](evidence/f1-control/windows-native-2026-07-27.txt).
+[`windows-native-2026-07-27.txt` — registro histórico](evidence/f1-control/README.md).
 Os cross-builds Windows arm64 continuam sendo somente prova de compilação. A
 implementação de produção permanece tarefa F3 e os binários empacotados
 retornam à matriz nativa na Fase 8.

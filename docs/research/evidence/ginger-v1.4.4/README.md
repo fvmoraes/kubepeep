@@ -11,7 +11,7 @@ Sanitização aplicada:
 - o diretório descartável foi substituído por `<TEMP>`;
 - o diretório de binários do usuário foi substituído por `<GO_BIN>`;
 - nenhum token, kubeconfig, variável secreta ou caminho do workspace aparece
-  nestes arquivos;
+  nas análises versionadas;
 - nomes determinísticos `serviceprobe` e `cliprobe` foram preservados porque
   fazem parte da reprodução, não de dados do usuário.
 
@@ -29,10 +29,14 @@ Antes dos diagnósticos, ambos os scaffolds passaram por `go mod tidy`,
 `go test ./...`, `go vet ./...` e `go build ./...` com
 `GOTOOLCHAIN=go1.25.0`.
 
-Arquivos:
+## Arquivos preservados
 
-- `cli-version.txt`: resolução e build info da CLI;
-- `service-inspect.json` e `service-doctor.txt`: saída do scaffold service;
-- `cli-inspect.json` e `cli-doctor.txt`: saída do scaffold CLI;
-- `scaffold-comparison.md`: entrypoints, Makefiles e GoReleaser;
-- `plan-support.md`: inventário completo de suporte a `--plan`.
+- [scaffold-comparison.md](scaffold-comparison.md): análise de entrypoints,
+  Makefiles e GoReleaser dos templates históricos;
+- [plan-support.md](plan-support.md): inventário do suporte a `--plan`.
+
+As saídas completas de versão, `inspect` e `doctor` foram retiradas do Git.
+A cópia histórica fica no projeto privado sob `~/.dwyt/projects/`; este
+registro preserva o método, os resultados sanitizados e os limites.
+Novas saídas devem ser geradas fora do Git, sem caminhos ou dados locais na
+documentação pública.

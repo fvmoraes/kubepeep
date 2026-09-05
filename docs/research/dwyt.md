@@ -1,5 +1,9 @@
 # DWYT — pesquisa reproduzível para a Fase 1
 
+> Pesquisa histórica datada: versões, ambiente e gates abaixo referem-se
+> ao spike F1. Para build e distribuição atuais, consultar
+> [desenvolvimento](../development.md) e [download](../download.md).
+
 Status: concluída em 2026-07-27
 
 Escopo: somente o DWYT, como referência de estrutura, experiência local, frontend,

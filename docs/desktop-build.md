@@ -1,74 +1,66 @@
-# Guia de Build Desktop (Wails v2)
+# Build desktop
 
-## 1. Visão geral
+O desktop usa a mesma composição Go e o mesmo frontend embutido do modo web.
+A tag `desktop` seleciona Wails; JSON passa pela bridge e SSE/WebSocket pelo
+loopback interno. Veja a [arquitetura desktop](desktop-architecture.md).
 
-O binário desktop compartilha o mesmo núcleo do binário web
-(`internal/application.Compose`): a diferença é a tag `desktop`, que compila a
-shell Wails (`internal/desktop/wails`) servindo o frontend embutido por
-`wails://wails` com bridge in-process para streams. O frontend é o mesmo
-`internal/web/dist` embutido por `go:embed` — o build desktop pode pular o
-passo de frontend quando o dist já está atualizado.
+## Ambiente
 
-## 2. Build nativo (requer GTK/WebKit)
+Go, Node, npm e Wails seguem as versões do [guia de desenvolvimento](development.md).
+Bibliotecas nativas dependem da plataforma:
 
-Requisitos Linux: `libgtk-3-dev`, `libwebkit2gtk-4.0-dev`, `pkg-config`,
-`gcc` (CGO), Go 1.26+ e Wails CLI (`go install
-github.com/wailsapp/wails/v2/cmd/wails@v2.15.0`).
+| Plataforma | Requisito |
+| --- | --- |
+| Linux | Compilador C, `pkg-config`, GTK 3 e WebKit2GTK; desktop exige CGO |
+| macOS | Xcode Command Line Tools para compilar a shell nativa |
+| Windows | WebView2 em runtime; NSIS para gerar o instalador |
 
-```bash
-npm --prefix web run build      # atualiza internal/web/dist
-wails build -tags desktop -clean -s -skipbindings -nopackage \
-  -platform linux/amd64 -o dist/desktop/linux-amd64/kubePeep
+O workflow Linux usa GTK 3 e WebKit2GTK 4.1 com `desktop,webkit2_41`.
+Em Debian/Ubuntu compatível, instalar `build-essential`, `pkg-config`,
+`libgtk-3-dev` e `libwebkit2gtk-4.1-dev`. Com WebKit2GTK 4.0, usar a tag
+`desktop` e o pacote `libwebkit2gtk-4.0-dev` correspondente.
+
+## Desenvolvimento e compilação
+
+Na raiz do repositório, com a CLI Wails v2.15.0 instalada:
+
+```sh
+rtk make dev-desktop DESKTOP_TAGS=desktop,webkit2_41
+rtk make build-desktop DESKTOP_TAGS=desktop,webkit2_41
 ```
 
-Flags:
+O override `webkit2_41` é específico do Linux com essa biblioteca. Em macOS,
+Windows ou Linux com WebKit2GTK 4.0, usar os targets sem esse override.
+Os targets `build-desktop-linux`, `build-desktop-windows` e
+`build-desktop-darwin` selecionam a plataforma; dependências nativas ainda
+precisam estar disponíveis no runner adequado.
 
-- `-s` — pula o build do frontend (o dist embutido já está atualizado).
-- `-skipbindings` — os bindings TS já existem em `web/src/wailsjs`.
-- `-nopackage` — produz o binário sem empacotamento extra.
+O Makefile preserva os bindings próprios usando `-skipbindings`, como o
+workflow de release. Geração deliberada de bindings exige revisar o contrato
+em `web/src/wailsjs/go/desktop/Bridge.*`; não substituir esses arquivos como
+parte de um build comum.
 
-Makefile: `make build-desktop-linux` (equivalente, sem `-s`).
+Wails executa os comandos de frontend definidos em `wails.json`. Para um
+build direto após `make web-build`, a flag `-s` permite reutilizar o embed
+atualizado. O destino relativo de `-o` é resolvido pelo Wails dentro de
+`build/bin/`; consulte o caminho impresso no build. Esses resultados são
+locais e ignorados pelo Git.
 
-## 3. Build via contêiner (sem dependências nativas no host)
+`make build` produz o binário CLI/web com `CGO_ENABLED=0`. Essa opção não
+remove a dependência nativa de GTK/WebKit dos builds desktop Linux.
 
-Em máquinas sem `libgtk-3-dev`/`libwebkit2gtk-4.0-dev` (ou sem sudo), o build
-roda num contêiner Ubuntu 22.04 (Debian bookworm não distribui
-`webkit2gtk-4.0`). O Go, o cache de módulos e a CLI Wails do host são
-montados; `GOPROXY=off` evita o sum verifier em redes com TLS interceptado:
+## Distribuição e validação
 
-```bash
-docker run --rm \
-  -v "$PWD":/src -w /src \
-  -v "$(go env GOMODCACHE)":/go/pkg/mod \
-  -v "$(go env GOCACHE)":/root/.cache/go-build \
-  -v "$(go env GOROOT)":/opt/go:ro \
-  -v "$(go env GOPATH)/bin/wails":/go/bin/wails:ro \
-  -e GOROOT=/opt/go -e GOPATH=/go -e GOMODCACHE=/go/pkg/mod \
-  -e PATH=/opt/go/bin:/go/bin:/usr/bin:/bin \
-  -e HOME=/root -e GOPROXY=off -e GOSUMDB=off \
-  ubuntu:22.04 \
-  bash -c "apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq \
-    build-essential libgtk-3-dev libwebkit2gtk-4.0-dev pkg-config && \
-  wails build -tags desktop -clean -s -skipbindings -nopackage \
-    -platform linux/amd64 -o /src/dist/desktop/linux-amd64/kubePeep"
-```
+O [workflow release](../.github/workflows/release.yml) contém a receita
+canônica: Linux em contêiner Ubuntu 22.04 para o baseline de glibc,
+Windows em runner nativo com NSIS e macOS em runners nativos. Os arquivos de
+empacotamento ficam em `build/` e `packaging/`; somente saídas ficam fora do Git.
 
-Notas:
+Após compilar, validar `version` e `--help` usando o caminho do binário gerado.
+O smoke isolado de CLI é `make smoke`; uma janela desktop exige também
+validação visual no ambiente gráfico, streams e encerramento das sessões.
+Para a release, repetir os gates nativos e de instalação descritos no
+[plano v1](../plan/README.md). Não tratar cross-compilation como execução nativa.
 
-- O Wails CLI prefixa `build/bin/` ao `-o` quando o destino é relativo ao
-  repositório; mova o binário para `dist/desktop/linux-amd64/`.
-- O binário resultante é `dynamically linked` (GTK/WebKit do sistema do
-  usuário final) — distribute com a nota de dependências
-  `libgtk-3-0 libwebkit2gtk-4.0-37`.
-- `./kubePeep doctor` funciona sem GUI e valida o frontend embutido
-  (`build/embedded_frontend`).
-
-## 4. Smoke pós-build
-
-```bash
-HOME=$(mktemp -d) dist/desktop/linux-amd64/kubePeep doctor
-HOME=$(mktemp -d) dist/desktop/linux-amd64/kubePeep --help
-```
-
-Ambos não exigem display; a janela só abre no modo interativo
-(`kubePeep` sem subcomando).
+Transcripts, capturas e pacotes gerados ficam privados. Commit local não
+autoriza publicação: nunca iniciar push ou workflow de release automaticamente.

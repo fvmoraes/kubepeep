@@ -1,7 +1,7 @@
 # Spikes da Fase 1
 
-Este módulo é isolado do futuro módulo de produção. Ele existe para validar, antes
-do scaffold definitivo:
+Este módulo histórico é isolado do módulo de produção. Preserva os probes que
+fundamentaram as decisões iniciais de arquitetura:
 
 - composição de Cobra com uma aplicação Ginger `service`;
 - ownership externo do listener e do lifecycle HTTP;
@@ -18,7 +18,7 @@ do scaffold definitivo:
   provam a identidade completa e rejeitam token, Host, Origin ou peer inválido;
 - stop por cancelamento de contexto, sinais foreground e cleanup de estado/lock.
 
-## Evidência atual
+## Evidência histórica
 
 - A suíte Linux completa passou 53 casos em 5 packages. Ela cataloga 37 testes
   top-level, dos quais um é helper de subprocesso ignorado no processo pai.
@@ -27,13 +27,33 @@ do scaffold definitivo:
 - A suíte de controle passou integralmente no Windows 10 Pro 10.0.19045 amd64,
   cobrindo `LockFileEx`, fingerprint, DACL/tamper, identidade,
   `status`/`stop`, Host/Origin/token e cleanup, com `TEST_EXIT_CODE=0`.
-- Linux, macOS e Windows em amd64/arm64 continuam compilando com Go 1.25 e
+- Linux, macOS e Windows em amd64/arm64 foram compilados com Go 1.25 e
   `CGO_ENABLED=0`; cross-build não é apresentado como execução nativa.
 
-As transcrições estão em
+O resumo das provas e as instruções de reprodução estão em
 [`../../docs/research/evidence/f1-control/`](../../docs/research/evidence/f1-control/).
+Transcrições, executáveis e dados das execuções ficam no armazenamento privado
+do projeto, fora do Git.
 
-Nada deste diretório é código de produção. F1 valida o desenho em um probe
-isolado; F3 reimplementa lifecycle e adapters no scaffold definitivo; F8
-executa os comandos nos archives e instaladores reais. As decisões e requisitos
-de reimplementação estão registrados nos ADRs.
+## Reprodução
+
+Na raiz deste módulo:
+
+```sh
+go test -count=1 ./...
+```
+
+A fixture HTML escrita à mão em
+[`spike/assets/frontend/index.html`](spike/assets/frontend/index.html) é fonte
+versionada e embarcada junto das migrations. O spike não depende de um build
+do frontend de produção nem de arquivos locais em `dist/`.
+
+Para a prova nativa Windows, use
+[`scripts/run-windows-native.cmd`](scripts/run-windows-native.cmd). Copie o runner
+e os dois executáveis da prova para o mesmo diretório; a saída vai para
+`%TEMP%\f1-control-results.txt` e não deve ser versionada.
+
+Nada deste diretório é código de produção. As implementações atuais estão em
+`internal/` na raiz do repositório; os ADRs preservam as decisões e requisitos
+originados nestes probes. As fases da versão 1 estão em
+[`../../plan/`](../../plan/).

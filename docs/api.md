@@ -1,14 +1,14 @@
 # Contrato HTTP e streaming
 
-> **Status:** revisado com as evidências e ADRs da Fase 1
+> **Escopo:** contrato da base atual; rotas explicitamente reservadas não são funcionalidades disponíveis. A execução corrente está no [plano v1](../plan/README.md).
 >
-> **Base URL:** origem loopback efetivamente publicada pelo processo
+> **Transporte:** origem loopback no modo web; bridge JSON e loopback de streams no [desktop](desktop-architecture.md).
 >
 > **Versão:** `/api/v1`
 >
 > **Importante:** o envelope público é um requisito do KubePeep.
-> `pkg/response` será reutilizado nos casos comuns; cursores, agregações
-> parciais, health e streams usam DTOs próprios compatíveis com este contrato.
+> Cursores, agregações parciais, health e streams usam DTOs próprios
+> compatíveis com este contrato.
 
 ## 1. Princípios
 
@@ -199,8 +199,14 @@ Ordenação global só é exposta quando pode ser cumprida dentro de limites. Ca
 
 ### 5.3 Filtros e merge por coleção
 
-`search` é substring case-insensitive por Unicode simple case folding nos
-campos enumerados abaixo, depois de converter valores null em ausência. Como a
+Nas coleções de recursos, `search` aceita termos, frases entre aspas e
+exclusões com `-termo` ou `!termo` (incluindo `-"frase exata"`). Todos os
+termos positivos precisam corresponder e nenhuma exclusão pode corresponder.
+Cada termo é comparado como substring usando Unicode simple case folding
+nos campos enumerados abaixo, unidos por espaço; não há regex nem operador `+`.
+O parser é `internal/services/resources.ParseSearch`. Coleções locais e
+blocos do dashboard mantêm seus filtros específicos; não presumir a mesma
+gramática sem integração com esse parser. Como a
 API Kubernetes não oferece substring global, search/sorts marcados `page`
 operam somente sobre a janela coletada para aquela página; `meta.page` inclui
 `filterScope: "page"`. A UI nunca os chama de resultado global quando

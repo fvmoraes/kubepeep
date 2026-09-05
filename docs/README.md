@@ -1,54 +1,41 @@
 # Documentação do KubePeep
 
-> Documentação concisa e executável. O **plano de execução** vive em [`../plan/`](../plan/README.md); este diretório descreve o produto, a arquitetura e os contratos **como estão no código**.
+`docs/` descreve o produto e seus contratos. O trabalho pendente vive no
+[plano v1](../plan/README.md), baseado na
+[referência UI/UX](../plan/reference/KubePeep_UI_UX_Design_System_e_Recursos_Kubernetes.md).
 
-## Índice
+## Usar e desenvolver
 
 | Documento | Conteúdo |
 | --- | --- |
-| [architecture.md](architecture.md) | Arquitetura Go/React, módulos internos, fluxos, decisões incorporadas (ADRs) |
-| [design-system.md](design-system.md) | Design System v2: tokens, componentes, resource framework, regras de adoção |
-| [product-spec.md](product-spec.md) | Especificação de produto: escopo, personas, fluxos, critérios |
-| [api.md](api.md) | Contrato da API local (`/api/v1/…`): rotas, envelope, filtros, streaming |
-| [data-model.md](data-model.md) | Modelo de dados local (SQLite), allowlists e retenção |
-| [security.md](security.md) | Modelo de segurança: loopback, CSRF, RBAC, redaction, Secrets metadata-only |
-| [rbac-requirements.md](rbac-requirements.md) | Catálogo de capabilities e mapeamento para SAR |
-| [observability.md](observability.md) | Logs JSONL, métricas, health checks |
-| [desktop-architecture.md](desktop-architecture.md) | Bridge Wails, loopback para streams, ciclo de vida desktop |
-| [desktop-build.md](desktop-build.md) | Build desktop por plataforma (Wails, dependências nativas) |
-| [download.md](download.md) | Instalação e distribuição por plataforma |
-| [implementation-plan.md](implementation-plan.md) | Plano de implementação do MVP (referência histórica; execução atual em `../plan/`) |
+| [Produto](product-spec.md) | Base disponível, jornadas, estados e limites |
+| [Download e instalação](download.md) | Pacotes, versão explícita, verificação, atualização e remoção |
+| [Desenvolvimento](development.md) | Comandos, layout, validação, arquivos privados e regra de commit |
+| [Build desktop](desktop-build.md) | Wails e dependências por plataforma |
 
-## Estrutura
+## Contratos e arquitetura
 
-```
-docs/
-  decisions/   ADRs numerados (0001–0005) — decisões arquiteturais vigentes
-  research/    Pesquisas vivas (benchmark de UX, matriz de compatibilidade, tooling)
-    evidence/  Evidências reproduzíveis citadas pela arquitetura
-  archive/     Evidências de execução de fases concluídas (phase1–9)
-```
-
-## Layout do repositório
-
-| Caminho | Papel |
+| Documento | Conteúdo |
 | --- | --- |
-| `cmd/kubePeep/` + `main.go` | Entrypoints: CLI/serviço e desktop (Wails exige `main.go` na raiz) |
-| `internal/` | Todo o código Go de produção (adapters, services, api, desktop, runtime) |
-| `web/` | Frontend React (tokens em `src/tokens.css`, UI em `src/components/ui/`, framework em `src/components/resource/`, navegação em `src/navigation/`) |
-| `plan/` | Plano de execução v1 (`v1/phase-*.md`) + especificação de referência (`reference/`) |
-| `docs/` | Esta documentação |
-| `scripts/` | Ferramentas de desenvolvimento (smoke, security_check, testes dos instaladores) |
-| `install.sh` / `install.ps1` | Instaladores públicos — ficam na raiz por contrato: a CI os empacota na raiz dos archives e os harnesses os exercem por path relativo fixo |
-| `build/` `packaging/` `configs/` | Ícones/empacotamento por plataforma e configuração do serviço |
-| `test/kind/` | Harness E2E em cluster Kind efêmero (CI) |
-| `spikes/phase1/` | Protótipo histórico de lifecycle (independente de `internal/`) |
-| `.github/` `.githooks/` | CI (verify/release) e hooks locais de segurança |
-| `*.exe`, `dist/`, `test-results/`, logs | Artefatos locais — **nunca versionados** (`.gitignore`) |
+| [Arquitetura](architecture.md) | Camadas, composição, geração, lifecycle e transportes |
+| [Desktop](desktop-architecture.md) | Bridge Wails e loopback para streams |
+| [Design system](design-system.md) | Tokens, componentes e resource framework |
+| [API](api.md) | Rotas, envelopes, filtros, paginação e streaming |
+| [Dados](data-model.md) | SQLite, schemas e persistência permitida |
+| [Segurança](security.md) | Loopback, CSRF, RBAC, redaction e conteúdo proibido |
+| [RBAC](rbac-requirements.md) | Capabilities e operações Kubernetes |
+| [Observabilidade](observability.md) | Logs operacionais, métricas e diagnóstico |
 
-## Regras
+## Decisões e histórico
 
-1. Documento descreve **o código da tag atual** — nada "planejado" documentado como pronto.
-2. Toda mudança de contrato (API, dados, segurança) atualiza o doc afetado no mesmo commit da feature.
-3. Evidências novas (screenshots, saídas de CLI) ficam **fora do Git** (artefatos locais); o texto registra método e resultado sanitizado.
-4. ADR novo = `decisions/NNNN-titulo.md` numerado sequencialmente, imutável após merge (correção em ADR novo).
+- [ADRs](decisions/README.md): decisões arquiteturais numeradas, incluindo
+  o contexto em que foram tomadas e os documentos que as complementam.
+- [Pesquisa](research/README.md): fundamentos e métodos de reprodução;
+  benchmarks datados não são garantia de compatibilidade atual.
+- [Arquivo](archive/README.md): planejamento MVP e relatos sanitizados de
+  fases concluídas; não são checklists de execução da v1.
+
+Uma alteração de contrato atualiza o documento correspondente no mesmo commit.
+Novas funcionalidades só são descritas como disponíveis após implementação.
+Logs crus, screenshots, JSONs de diagnóstico e resultados de testes ficam
+fora do Git, conforme a [política de desenvolvimento](development.md#o-que-versionar).

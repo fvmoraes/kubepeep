@@ -1,5 +1,9 @@
 # Matriz de compatibilidade da Fase 1
 
+> Pesquisa histórica datada: versões, ambiente e gates abaixo referem-se
+> ao spike F1. Para build e distribuição atuais, consultar
+> [desenvolvimento](../development.md) e [download](../download.md).
+
 Status: validada em 2026-07-27, incluindo probe nativo Linux e Windows
 
 Esta matriz fixa a primeira combinação de dependências que satisfaz o requisito
@@ -100,8 +104,8 @@ F1-44 foi exercitada com o probe isolado, separadamente nos dois sistemas:
 
 | Plataforma | Evidência | Resultado |
 | --- | --- | --- |
-| Linux amd64 | [`linux-native-2026-07-27.txt`](evidence/f1-control/linux-native-2026-07-27.txt) | blackbox, SIGTERM e cleanup passaram; repetição `-count=20` passou |
-| Windows 10 Pro amd64 | [`windows-native-2026-07-27.txt`](evidence/f1-control/windows-native-2026-07-27.txt) | blackbox, `LockFileEx`, fingerprint, DACL, controle autenticado e cleanup passaram; exit 0 |
+| Linux amd64 | [`linux-native-2026-07-27.txt` — registro histórico](evidence/f1-control/README.md) | blackbox, SIGTERM e cleanup passaram; repetição `-count=20` passou |
+| Windows 10 Pro amd64 | [`windows-native-2026-07-27.txt` — registro histórico](evidence/f1-control/README.md) | blackbox, `LockFileEx`, fingerprint, DACL, controle autenticado e cleanup passaram; exit 0 |
 
 Integridade:
 

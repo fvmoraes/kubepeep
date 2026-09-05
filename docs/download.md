@@ -1,164 +1,119 @@
-# Download KubePeep
+# Download, installation and removal
 
-All official assets are published on
-[GitHub Releases](https://github.com/fvmoraes/kubepeep/releases). The links
-below are **permanent**: they always deliver the latest stable release without
-requiring any documentation update.
+Find available versions on [GitHub Releases](https://github.com/fvmoraes/kubepeep/releases).
+The [release workflow](../.github/workflows/release.yml) builds the packages
+below. Latest links are convenient for discovery; use an explicit release tag
+and checksums from that same release for reproducible installation.
 
-Latest release page:
-<https://github.com/fvmoraes/kubepeep/releases/latest>
+## Packages
 
-## Windows 10 / 11 (x86_64)
+| Platform | Architecture | Desktop package |
+| --- | --- | --- |
+| Windows | x86_64 | [Setup EXE](https://github.com/fvmoraes/kubepeep/releases/latest/download/kubepeep-windows-amd64-setup.exe) |
+| Linux | x86_64 | [DEB](https://github.com/fvmoraes/kubepeep/releases/latest/download/kubepeep-linux-amd64.deb), [RPM](https://github.com/fvmoraes/kubepeep/releases/latest/download/kubepeep-linux-amd64.rpm) |
+| Linux | ARM64 | [DEB](https://github.com/fvmoraes/kubepeep/releases/latest/download/kubepeep-linux-arm64.deb), [RPM](https://github.com/fvmoraes/kubepeep/releases/latest/download/kubepeep-linux-arm64.rpm) |
+| macOS | Intel | [DMG](https://github.com/fvmoraes/kubepeep/releases/latest/download/kubepeep-darwin-amd64.dmg) |
+| macOS | Apple Silicon | [DMG](https://github.com/fvmoraes/kubepeep/releases/latest/download/kubepeep-darwin-arm64.dmg) |
 
-Installer (recommended — embeds the WebView2 bootstrapper):
+Linux packages install `/usr/bin/kubepeep`, the desktop entry and icons, and
+declare GTK 3/WebKit2GTK 4.1 runtime dependencies. Windows setup embeds the
+WebView2 bootstrapper. macOS packages contain `kubePeep.app`; install the app
+in Applications. Desktop library and build details are in
+[desktop-build.md](desktop-build.md).
 
-<https://github.com/fvmoraes/kubepeep/releases/latest/download/kubepeep-windows-amd64-setup.exe>
+CLI archives use `kubePeep` (`kubePeep.exe` on Windows):
 
-Portable archive (raw `kubePeep.exe`, used by `install.ps1`):
+| Platform | Asset name |
+| --- | --- |
+| Linux AMD64 / ARM64 | `kubepeep-linux-amd64.tar.gz` / `kubepeep-linux-arm64.tar.gz` |
+| macOS Intel / Apple Silicon | `kubepeep-darwin-amd64.tar.gz` / `kubepeep-darwin-arm64.tar.gz` |
+| Windows AMD64 | `kubepeep-windows-amd64.zip` |
 
-<https://github.com/fvmoraes/kubepeep/releases/latest/download/kubepeep-windows-amd64.zip>
+Windows ARM64 is not in the current publication matrix. A successful
+cross-build does not imply a published or natively validated package.
 
-Notes:
+## Scripted installation
 
-- Requires Windows 10 or 11, 64-bit.
-- Builds are not code-signed yet: SmartScreen may ask for confirmation on the
-  first run. Code signing will be added once certificates are provisioned.
+Select an existing release version. Current tags have no `v` prefix.
+The scripts install into `~/.local/bin/kubePeep` on Unix or
+`%LOCALAPPDATA%\Programs\kubePeep\kubePeep.exe` on Windows, without administrator
+privileges. They download the matching archive, require SHA-256 and validate
+the candidate before installation.
 
-## Linux — Debian / Ubuntu (DEB)
-
-x86_64 (AMD64):
-
-<https://github.com/fvmoraes/kubepeep/releases/latest/download/kubepeep-linux-amd64.deb>
-
-ARM64:
-
-<https://github.com/fvmoraes/kubepeep/releases/latest/download/kubepeep-linux-arm64.deb>
-
-Installs `kubePeep` into `/usr/bin`, registers the desktop entry
-(`kubepeep.desktop`) and the hicolor icon, and declares the Wails runtime
-dependencies (`libgtk-3`, `libwebkit2gtk-4.1`) so the package installs and
-uninstalls cleanly with `apt`/`dpkg`.
-
-## Linux — Fedora / RHEL / Rocky / AlmaLinux (RPM)
-
-x86_64 (AMD64):
-
-<https://github.com/fvmoraes/kubepeep/releases/latest/download/kubepeep-linux-amd64.rpm>
-
-ARM64:
-
-<https://github.com/fvmoraes/kubepeep/releases/latest/download/kubepeep-linux-arm64.rpm>
-
-Same layout and dependencies as the DEB (`gtk3`, `webkit2gtk4.1`), installable
-with `dnf`/`zypper`/`rpm`.
-
-## Linux / macOS — scripted CLI install
-
-The installers download assets only from the immutable release tag, verify the
-published SHA-256 checksum, and install without administrator privileges:
+Linux or macOS:
 
 ```sh
-version=0.1.0
+version=0.2.2 # replace with the chosen existing release
 curl --fail --location --proto '=https' --tlsv1.2 \
   "https://github.com/fvmoraes/kubepeep/releases/download/${version}/install.sh" \
   --output /tmp/kubepeep-install.sh
 sh /tmp/kubepeep-install.sh --version "$version"
 ```
 
+PowerShell:
+
 ```powershell
-$Version = '0.1.0'
+$Version = '0.2.2' # replace with the chosen existing release
 $Installer = Join-Path $env:TEMP 'kubepeep-install.ps1'
-Invoke-WebRequest -UseBasicParsing \
-  -Uri "https://github.com/fvmoraes/kubepeep/releases/download/$Version/install.ps1" \
-  -OutFile $Installer
+$Uri = "https://github.com/fvmoraes/kubepeep/releases/download/$Version/install.ps1"
+Invoke-WebRequest -UseBasicParsing -Uri $Uri -OutFile $Installer
 & $Installer -Version $Version
 ```
 
-CLI archives (raw `kubePeep` binary + documentation), used by the script above
-or for manual installs:
+## Verification and naming
 
-| Platform | Architecture | Asset |
-|----------|--------------|-------|
-| Linux | x86_64 | [kubepeep-linux-amd64.tar.gz](https://github.com/fvmoraes/kubepeep/releases/latest/download/kubepeep-linux-amd64.tar.gz) |
-| Linux | ARM64 | [kubepeep-linux-arm64.tar.gz](https://github.com/fvmoraes/kubepeep/releases/latest/download/kubepeep-linux-arm64.tar.gz) |
-| macOS | x86_64 | [kubepeep-darwin-amd64.tar.gz](https://github.com/fvmoraes/kubepeep/releases/latest/download/kubepeep-darwin-amd64.tar.gz) |
-| macOS | ARM64 | [kubepeep-darwin-arm64.tar.gz](https://github.com/fvmoraes/kubepeep/releases/latest/download/kubepeep-darwin-arm64.tar.gz) |
-
-## macOS — Intel (x86_64)
-
-DMG (recommended):
-
-<https://github.com/fvmoraes/kubepeep/releases/latest/download/kubepeep-darwin-amd64.dmg>
-
-ZIP (`.app`):
-
-<https://github.com/fvmoraes/kubepeep/releases/latest/download/kubepeep-darwin-amd64.zip>
-
-## macOS — Apple Silicon (ARM64, M1/M2/M3/M4+)
-
-DMG (recommended):
-
-<https://github.com/fvmoraes/kubepeep/releases/latest/download/kubepeep-darwin-arm64.dmg>
-
-ZIP (`.app`):
-
-<https://github.com/fvmoraes/kubepeep/releases/latest/download/kubepeep-darwin-arm64.zip>
-
-Notes:
-
-- Builds are not signed/notarized yet: on first launch, right-click the app and
-  choose **Open**, or allow it in *System Settings → Privacy & Security*.
-- Drag `KubePeep.app` (bundle name `kubePeep.app`) into `/Applications`.
-
-## Verification
-
-Every release publishes `checksums.txt` with SHA-256 entries for all assets:
-
-<https://github.com/fvmoraes/kubepeep/releases/latest/download/checksums.txt>
+Each release publishes `checksums.txt` and an SPDX SBOM. Download checksums
+from the same immutable tag as the chosen asset, then verify the selected
+filename and digest before running it. For example, in a directory containing
+only the chosen release files:
 
 ```sh
 sha256sum --ignore-missing -c checksums.txt
 ```
 
-Every release also publishes an SPDX SBOM
-(`kubepeep-<version>.spdx.json`) generated from the release source tree.
+The command must report `OK` for the asset being installed. The checksum
+checks integrity against the release manifest; it is not a code signature.
 
-## Versioned asset names
+Assets have fixed names within each release, such as
+`kubepeep-linux-amd64.deb`. Desktop installers also have versioned aliases,
+such as `kubepeep-0.2.2-linux-amd64.deb`. Their download paths are
+`/releases/download/<version>/<asset>`; `/releases/latest/download/<asset>`
+is a moving link and is not a version pin.
 
-Alongside the fixed-name files above, every release publishes the same
-installers with the release version in the name (for archiving and
-version-pinned automation):
+## Update and removal
 
-```text
-kubepeep-<version>-windows-amd64-setup.exe
-kubepeep-<version>-linux-amd64.deb
-kubepeep-<version>-linux-arm64.deb
-kubepeep-<version>-linux-amd64.rpm
-kubepeep-<version>-linux-arm64.rpm
-kubepeep-<version>-darwin-amd64.dmg
-kubepeep-<version>-darwin-arm64.dmg
-kubepeep-<version>-darwin-amd64.zip
-kubepeep-<version>-darwin-arm64.zip
+For scripted CLI installations, stop the web service and choose the target:
+
+```sh
+kubePeep stop
+kubePeep update --version X.Y.Z
 ```
 
-Download a versioned asset at
-`https://github.com/fvmoraes/kubepeep/releases/download/<version>/kubepeep-<version>-...`.
+Update validates the checksum and candidate version, then replaces the binary
+with rollback on failure. On Windows, replacement finishes after the running
+update process exits. For system packages or app bundles, use the corresponding
+package installer. Local data is preserved.
 
-## Integration notes (kubepeep.online)
+The script uninstallers remove their binary and owned PATH entry:
 
-The official website consumes the same permanent endpoints:
-
-```text
-https://github.com/fvmoraes/kubepeep/releases/latest
-https://github.com/fvmoraes/kubepeep/releases/latest/download/checksums.txt
-https://github.com/fvmoraes/kubepeep/releases/latest/download/kubepeep-windows-amd64-setup.exe
-https://github.com/fvmoraes/kubepeep/releases/latest/download/kubepeep-linux-amd64.deb
-https://github.com/fvmoraes/kubepeep/releases/latest/download/kubepeep-linux-amd64.rpm
-https://github.com/fvmoraes/kubepeep/releases/latest/download/kubepeep-linux-arm64.deb
-https://github.com/fvmoraes/kubepeep/releases/latest/download/kubepeep-linux-arm64.rpm
-https://github.com/fvmoraes/kubepeep/releases/latest/download/kubepeep-darwin-amd64.dmg
-https://github.com/fvmoraes/kubepeep/releases/latest/download/kubepeep-darwin-arm64.dmg
+```sh
+sh /tmp/kubepeep-install.sh --uninstall
 ```
 
-These URLs never change between releases, so download buttons on the site do
-not need maintenance.
+```powershell
+& $Installer -Uninstall
+```
+
+Deleting local data requires both purge and confirmation flags:
+
+```sh
+sh /tmp/kubepeep-install.sh --uninstall --purge-data --confirm-purge
+```
+
+```powershell
+& $Installer -Uninstall -PurgeData -ConfirmPurge
+```
+
+Purge is restricted to the canonical KubePeep data root. It never removes
+kubeconfig files. System packages should be removed through their package
+manager; the script uninstallers only own scripted installations.

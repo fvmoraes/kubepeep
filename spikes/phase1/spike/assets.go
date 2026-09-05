@@ -11,11 +11,11 @@ import (
 // embeddedAssets proves that frontend assets and migrations can coexist in one
 // compiled binary.
 //
-//go:embed assets/dist/* assets/migrations/*
+//go:embed assets/frontend/* assets/migrations/*
 var embeddedAssets embed.FS
 
 func FrontendFS() (fs.FS, error) {
-	return fs.Sub(embeddedAssets, "assets/dist")
+	return fs.Sub(embeddedAssets, "assets/frontend")
 }
 
 func MigrationFS() (fs.FS, error) {

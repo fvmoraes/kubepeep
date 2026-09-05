@@ -67,14 +67,17 @@ observability:
 
 ## 5. Doctor
 
-`kubepeep doctor` valida saúde local (aplicação, SQLite, sink de log). Checks de observabilidade planejados: acessibilidade do sink de log/rotação e, quando habilitado, resposta de `/metrics`.
+`kubePeep doctor` consulta a saúde local e apresenta diagnóstico sanitizado.
+A composição da aplicação inclui a saúde do sink de log e do SQLite;
+validação de rotação e resposta de `/metrics` também integra os testes dos
+pacotes abaixo. Um resultado de doctor não substitui esses testes.
 
 ## 6. Testes
 
 | Garantia | Teste |
 | --- | --- |
 | Campos fora do schema são descartados; sanitização ativa | `internal/logging` |
-| `duration_ms` numérico accompany `duration` | `internal/logging` |
+| `duration_ms` numérico acompanha `duration` | `internal/logging` |
 | Métrica/label desconhecida ignorada; escape; determinismo | `internal/observability` |
 | Middleware captura status reais (incluindo 4xx/5xx) | `internal/observability` |
 | `/metrics` ausente sem registry; presente e correta com registry | `internal/app/metrics_test.go` |

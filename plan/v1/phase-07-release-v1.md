@@ -1,37 +1,36 @@
-# Fase 7 — Release 1.0.0
+# Fase 7 — Validação e preparação da release 1.0
 
-> **Objetivo:** fechar a v1: documentação atualizada, gates de distribuição pendentes (F8-42/46/48), release candidate imutável e tag 1.0.0.
-> **Prioridade:** P0. **Dependências:** Fases 1–5 concluídas (6 pode ter sido adiada para 1.1).
+**Prioridade:** P0. **Entrada:** F1–F6 completas com matriz R/U preenchida. **Saídas distintas:** versão pronta localmente; publicação aprovada e executada pelo usuário. Esta fase não autoriza push ou publicação automática pelo agente.
 
-## Tarefas
+A distribuição atual usa `scripts/release.sh` e `.github/workflows/release.yml`, com builds nativos Wails, pacotes, checksums e SBOM. Tags oficiais seguem `1.0.0`, **sem prefixo `v`**. Não recriar GoReleaser ou copiar a matriz antiga sem conferir o pipeline vigente.
 
-### Documentação
+## Tarefas locais
 
-- [ ] **V7-01** `docs/api.md`: todas as coleções novas da v1 (rotas, envelope, filtros, capabilities).
-- [ ] **V7-02** `docs/architecture.md`: famílias novas, contrato cluster-scoped, padrão "adicionar uma família" (referência à Fase 1/ADR).
-- [ ] **V7-03** `docs/product-spec.md`: grupos de navegação §36 completos, ações contextuais, port-forward panel.
-- [ ] **V7-04** `docs/design-system.md`: revisão final contra o código (tokens/components/framework).
-- [ ] **V7-05** `README.md`: paridade de recursos da v1; screenshots novos do UI redesenhado (locais, sanitizados; só entram no repo se o usuário decidir).
-- [ ] **V7-06** `CHANGELOG.md`: entrada 1.0.0 via ferramenta de release existente.
+- [ ] **V7-01 — Revisão da matriz.** Conferir R01–R36 e U01–U11 contra o binário final; cada requisito obrigatório precisa de evidência no commit avaliado. Manter backlog explícito e não chamar destino desabilitado de recurso entregue.
+- [ ] **V7-02 — Regressão visual e acessível.** Percorrer todas as páginas nos tamanhos 1280×720, 1366×768, 1440×900 e 1920×1080; verificar 2560×1440 adicionalmente. Teclado/Tab/Escape, foco em drawer/dialog/paleta, zoom, contraste, nome KubePeep/versão do build e nenhum scroll horizontal global. Screenshots só como evidência local sanitizada.
+- [ ] **V7-03 — Testes integrados.** Executar `make verify` e race checks aplicáveis. E2E mockado cobre UI; harness `test/kind/` cobre cluster real restritivo e recursos novos com fixtures sintéticas. Testar sem acesso, leitura parcial, operador restrito, contexto sem scope, scope manual sem `list namespaces`, cluster offline e Metrics API ausente.
+- [ ] **V7-04 — Ciclo local e Wails.** CLI/status/stop/start/doctor, única instância, execução sem Node em runtime, instalação ativa/inativa e inicialização sob demanda. Build e smoke desktop nativo: frontend embutido, deep links, versão, troca de seleção, logs/exec/port-forward, fechamento da janela e cleanup. Cross-build não prova execução nativa.
+- [ ] **V7-05 — Dados e segurança.** Rodar gate de segurança, auditoria de dependências conforme versões fixadas em `verify.yml` e inspeção negativa de browser storage, SQLite/WAL/backups/logs/archives. Usar sentinelas sintéticas; confirmar ausência de credenciais, Secret/YAML/logs persistidos e arquivos locais em staging/artefatos. Não apagar dados do usuário como “limpeza”.
+- [ ] **V7-06 — Documentação final.** Alinhar README, API, arquitetura, produto, RBAC, dados, segurança, design-system, instalação/download e troubleshooting à matriz implementada. Links locais válidos, convenções e matriz de plataformas iguais ao pipeline real; limitações explícitas. Preparar changelog/notas `1.0.0` com ferramenta existente, sem invocar publicação.
+- [ ] **V7-07 — Candidate reproduzível.** Fixar commit e manifesto de versões/hash; gerar assets de teste fora do Git. Revisar como produzir candidate sem tag final, commit remoto ou alteração de `latest`: o workflow atual publica em push de `main`/dispatch e não é um dry-run. Implementar suporte de validação isolada quando necessário antes de usá-lo para candidate. Não presumir que o script atual suporta SemVer prerelease.
+- [ ] **V7-08 — Contrato dos pacotes.** Conferir matriz real do workflow, nomes/casing de assets, conteúdo, arquitetura, checksums e SBOM. Smoke de CLI/desktop e instalação/upgrade/remoção preservando dados, checksum adulterado bloqueado e rollback em runners nativos disponíveis. Registrar plataformas ainda sem execução, sem declarar gate verde por compilação.
+- [ ] **V7-09 — Entrega local revisável.** Commit final com identidade noreply aprovada e `scripts/security_check.sh HEAD`; árvore limpa de alterações pendentes. Apresentar SHA, matriz de checks, limitações, notas/manifesto e ações externas ainda necessárias. Salvar contexto no Project Brain. Não criar/pushar tags ou executar workflow com escrita remota por conta própria.
 
-### Distribuição (gates F8)
+## Gates externos de publicação
 
-- [ ] **V7-07** F8-42/46/48 (herdadas da fase 8 original): fechar os itens restantes de distribuição listados em `git show 5ac7320^:plan/09-experiencia-operacional.md` e `git show 5ac7320^:plan/08-distribuicao.md` — reavaliar cada um contra a CI atual antes de executar.
-- [ ] **V7-08** Release candidate imutável: tag `v1.0.0-rc.1`, artefatos de todos os runners nativos verdes, checksums; smoke dos archives (`make smoke` equivalente) e do desktop.
-- [ ] **V7-09** E2E de sanidade contra o RC empacotado (harness kind já usado pela CI).
-- [ ] **V7-10** Tag `v1.0.0` somente após RC aprovado pelo usuário — **commit ok, push decisão do usuário**; a publicação da release no GitHub também é decisão dele.
+Somente após decisão explícita do usuário sobre a candidate concreta. Esses passos não bloqueiam a conclusão da organização documental atual, mas são obrigatórios para declarar **1.0 publicada**.
 
-### Verificação final da v1
+| ID | Gate | Evidência exigida |
+| --- | --- | --- |
+| V7-10 | Candidate imutável e instaladores (herança F8-42) | instalação/upgrade contra os assets exatos da candidate, SHA-256 validado e execução nativa por plataforma anunciada |
+| V7-11 | Fechamento de qualidade (herança F8-46) | R/U desta matriz mais gates de runtime/instalação/segurança, com testes do commit efetivamente empacotado; nenhuma evidência antiga usada como execução nova |
+| V7-12 | Canais canônicos de download (herança F8-48) | comandos publicados baixam os assets esperados da versão aprovada; redirects, casing, arquitetura e checksums testados |
+| V7-13 | Publicação final | plano de versionamento produz `1.0.0`; tag imutável aponta para conteúdo aprovado; builds e verificação do commit empacotado passam; release/latest só atualizados no passo autorizado |
 
-- [ ] **V7-11** Checklist §38 da especificação de referência, reavaliado item a item (fonte única, escala tipográfica, semânticas, sidebar completa, cluster-scoped sem escopo, layout único, sem scroll horizontal em 1280×720, build/testes verdes).
-- [ ] **V7-12** Revisão de higiene: `scripts/security_check.sh HEAD`, `govulncheck`, `npm audit`, nenhum artefato novo versionado por engano (`git status` limpo).
+O pipeline pode criar commit de metadados distinto do SHA de origem. Verificar esse comportamento e exigir teste do conteúdo final empacotado; CI verde do commit anterior não prova uma alteração posterior. Não mover tag imutável para “consertar” uma release.
 
-## Critérios de aceite
+## Critério de saída
 
-- Tag `v1.0.0-rc.1` e `v1.0.0` criadas localmente com CI verde no commit apontado (executar CI via push é decisão do usuário).
-- Documentação descreve exatamente o binário da tag (nenhum recurso "planejado" documentado como pronto).
-- Zero pendências abertas das Fases 1–5 sem item correspondente em backlog pós-1.0.
+**Pronta localmente:** V7-01–09 e F1–F6 concluídas, artefatos/limitações rastreáveis e nenhum push executado. **Publicada:** V7-10–13 também concluídos após autorização. Gate pendente permanece explicitamente pendente; não marcar a fase publicada por falta de ambiente remoto.
 
-## Rollback
-
-- Tag local é descartável (`git tag -d`); releases publicadas seguem o processo de rollback da CI existente.
+**Rollback:** antes da publicação, corrigir por novo commit e gerar nova candidate. Depois, seguir procedimento de rollback/update validado preservando dados e tags imutáveis; revogar/republicar assets ou mover canais remotos exige a decisão do usuário.

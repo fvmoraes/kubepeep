@@ -13,7 +13,7 @@ structure:
   adapters: internal/adapters
   config: internal/config
   docs: docs
-  tests: tests
+  tests: test
   migrations: internal/migrations
 rules:
   overwrite: false

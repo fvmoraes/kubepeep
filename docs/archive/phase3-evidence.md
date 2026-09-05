@@ -1,5 +1,8 @@
 # Evidências da Fase 3 — Fundação
 
+> Registro histórico: resultados e gates referem-se à execução datada abaixo.
+> A sequência atual de entrega está no [plano v1](../../plan/README.md).
+
 **Data da validação local:** 2026-08-10  
 **Plataforma principal:** Linux amd64  
 **Estado:** concluída; gates locais e workflow nativo Linux/macOS/Windows aprovados

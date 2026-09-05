@@ -17,6 +17,16 @@ case "$security_ref" in
 esac
 
 cd "$security_repo_root"
+
+# Ignoring an already tracked file does not remove it from Git. Check the
+# complete index so forced additions cannot reintroduce private build/test data.
+security_ignored_tracked=$(git ls-files --cached --ignored --exclude-standard)
+if [ -n "$security_ignored_tracked" ]; then
+	printf '%s\n' "security-check: ignored local files must not be tracked; offending paths:" >&2
+	printf '%s\n' "$security_ignored_tracked" >&2
+	exit 1
+fi
+
 security_object=$(git rev-parse --verify "${security_ref}^{object}") ||
 	security_fail "the security ref does not resolve to a Git object"
 security_object_type=$(git cat-file -t "$security_object") ||

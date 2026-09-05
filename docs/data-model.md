@@ -1,9 +1,9 @@
 # Modelo de dados local
 
-> **Status:** revisado com as evidências e ADRs da Fase 1
+> **Escopo:** contratos de persistência local; mudanças de schema acompanham a implementação e o [plano v1](../plan/README.md).
 >
-> **Banco:** SQLite com `modernc.org/sqlite v1.54.0`, validado com Go 1.25 e
-> cross-build CGO-free.
+> **Banco:** SQLite com `modernc.org/sqlite`, versão fixada em `go.mod`,
+> sem dependência de CGO no driver.
 >
 > **Regra central:** o banco guarda configuração local allowlisted; nunca é cache de conteúdo do cluster.
 
@@ -356,7 +356,7 @@ Uma atualização de Settings valida o objeto inteiro e grava todas as chaves af
 
 ## 7. Configuração SQLite
 
-Configuração inicial a validar na Fase 3:
+Parâmetros do contrato SQLite:
 
 ```text
 foreign_keys = ON                 por conexão
@@ -374,9 +374,8 @@ Justificativa:
 - pool é pequeno porque existe um único processo e carga local.
 
 Esses valores são contrato inicial, não evidência de comportamento sob carga.
-A matriz F1 confirmou o driver, Go 1.25 e cross-build sem CGO; a Fase 3 deve
-testar WAL/SHM, corrupção simulada, lock, shutdown, concorrência e filesystem
-nativo. Se um valor mudar, registrar decisão e atualizar este documento antes
+A validação cobre WAL/SHM, corrupção simulada, lock, shutdown, concorrência
+e filesystem nativo. Resultados históricos do spike não substituem esses testes. Se um valor mudar, registrar decisão e atualizar este documento antes
 do merge.
 
 ## 8. Migrations
@@ -390,9 +389,8 @@ do merge.
 - Falha mantém versão anterior e impede startup de escrita.
 - O binário não abre frontend como “pronto” antes de migrations concluírem.
 
-O spike F1 comprovou frontend e migration embutidos no mesmo binário e lidos no
-artefato executável. A Fase 3 transforma essa prova no runner de migrations de
-produção.
+A implementação e as migrations de produção vivem em `internal/adapters/sqlite/`.
+O spike F1 permanece como reprodução histórica do embed.
 
 ## 9. Backup, update e rollback
 
@@ -417,10 +415,10 @@ Backup contém apenas dados permitidos, mas ainda recebe permissões restritas. 
 - `stop` não envia sinal a PID sem provar que pertence ao KubePeep esperado.
 - Windows e Unix possuem adapters e testes próprios.
 
-O mecanismo e a identidade foram fixados no ADR 0004. A Fase 3 implementa os
-adapters `flock`/`LockFileEx` e o canal de controle; o smoke nativo Windows
-do probe isolado F1 valida o desenho antes do scaffold, e a implementação
-completa repete essa matriz antes do gate de distribuição.
+O mecanismo e a identidade do runtime web foram fixados no ADR 0004;
+a implementação usa adapters `flock`/`LockFileEx` e canal de controle
+autenticado. A [shell desktop](desktop-architecture.md) usa seu próprio
+ciclo de vida. O gate de distribuição exige testes nativos atuais.
 
 ## 11. Repositórios e DTOs
 
@@ -493,26 +491,11 @@ Nenhum teste usa credencial real.
 
 Critérios MVP relacionados: **MVP-06–10**, **MVP-22–23**.
 
-## 15. Rastreabilidade F2
+## 15. Validação
 
-| Tarefa | Cobertura |
-| --- | --- |
-| F2-24 | tabelas, tipos, chaves, índices e FKs |
-| F2-25 | migrations, backup e rollback |
-| F2-26–27 | invariantes de modos e proibição de `*` |
-| F2-28 | dados proibidos e inspeção |
-| F2-43 | preferências versionadas e allowlisted |
-| F2-56 | PRAGMAs, pool, lock, WAL e backup |
-| F2-58 | conjunto ordenado de kubeconfig |
-
-## 16. Decisões fechadas e evidências de implementação
-
-- [x] F1-25 confirmou a semântica de múltiplos kubeconfigs no loader oficial.
-- [x] F1-35 confirmou o driver sem CGO no Go 1.25 e nos seis cross-builds.
-- [x] F1-40 comprovou frontend e migration embutidos no artefato do spike.
-- [x] O ADR 0004 definiu lock, identidade e canal de controle sem depender de
-  PID como autoridade.
-- [ ] A Fase 3 valida PRAGMAs em toda conexão, migrations, backup, WAL/SHM,
-  recuperação e inspeção de marcadores proibidos.
-- [ ] Os adapters de lock e `stop` passam em runners Unix, macOS e Windows
-  nativos antes da distribuição.
+Executar os testes de SQLite, migrations, preferências e seleção junto dos
+[gates de desenvolvimento](development.md). Exigir rejeição de campos fora
+da allowlist, atomicidade, recuperação e ausência de marcadores proibidos.
+Lock e comandos de controle também precisam passar em runners nativos antes
+da distribuição. A execução histórica está em [archive/](archive/README.md);
+novas chaves de preferência e migrations são trabalho do [plano v1](../plan/README.md).
