@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versions follow [Semantic Versioning](https://semver.org/) **without the `v`
 prefix** (official tags: `1.4.2`, `1.4.3`, …), and entries are generated
 automatically from Conventional Commits by `.github/workflows/release.yml`.
+## [0.4.2] - 2026-09-05
+
+## Fixed
+- fix(ux): namespace editor empty-state guidance and correct window title
+
+## Download
+
+Permanently-updated links: https://github.com/fvmoraes/kubepeep/blob/main/docs/download.md
+
+## Full Changelog
+**Full Changelog**: https://github.com/fvmoraes/kubepeep/compare/0.4.1...0.4.2
+
 ## [0.4.1] - 2026-09-05
 
 ## Fixed
@@ -493,3 +505,4 @@ Permanently-updated links: https://github.com/fvmoraes/kubepeep/blob/main/docs/d
 [0.3.0]: https://github.com/fvmoraes/kubepeep/releases/tag/0.3.0
 [0.4.0]: https://github.com/fvmoraes/kubepeep/releases/tag/0.4.0
 [0.4.1]: https://github.com/fvmoraes/kubepeep/releases/tag/0.4.1
+[0.4.2]: https://github.com/fvmoraes/kubepeep/releases/tag/0.4.2
