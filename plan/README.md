@@ -6,6 +6,8 @@ Comece pelo [estado e limites](v1/00-estado-e-escopo.md), depois consulte a [mat
 
 **Premissa básica:** operadores devem conseguir cadastrar namespaces **em lote** e trabalhar com recursos permitidos sem `list namespaces` nem acesso administrativo ao cluster. Esse caminho é obrigatório/P0, com [gate próprio na Fase 0](v1/phase-00-acesso-restrito-e-lote.md). A imagem **KubePeep.png** enviada pelo usuário define o estilo desejado, conforme a [direção visual e de acesso](reference/direcao-visual-e-premissa-de-acesso.md).
 
+**Problema de uso prioritário:** ajustar o timeout relatado de **60 s** ao carregar múltiplos namespaces. A tarefa **V0-07**, na F0, exige investigar os deadlines e preservar progresso/resultados com limites de carga e cancelamento seguros; a F7 valida a correção.
+
 ## Ordem de execução
 
 | Fase | Entrega | Dependências | Estado |

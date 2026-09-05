@@ -60,7 +60,7 @@ Helm Releases, Gateways, GatewayClasses, HTTPRoutes, GRPCRoutes, VolumeAttribute
 | U05 | 15, 17 | tabs relevantes por kind, relações autorizadas, catálogo contextual e confirmação com alvo/origem | F3–F5 |
 | U06 | 20, 37–38 | todas as páginas em 1280×720, 1366×768, 1440×900, 1920×1080; smoke adicional 2560×1440; sem scroll horizontal global | F7 |
 | U07 | 25–26 | dashboard compacto; logs com altura útil e controles na fonte principal; conteúdo monoespaçado | F5/F7 |
-| U08 | 31 | requests canceláveis, cache por geração, paginação limitada, busca sem scan global, watchers só sob demanda; perfil de carga sintético | F1/F5/F7 |
+| U08 | 31 + relato de timeout | requests canceláveis, cache por geração, paginação/concorrência limitadas, busca sem scan global, watchers sob demanda; ajustar timeout de 60 s relatado com múltiplos namespaces, deadlines coerentes e resultados/progresso preservados (V0-07) | F0/F1/F5/F7 |
 | U09 | 33 | sentinelas sintéticas ausentes de logs internos/persistência/artefatos; Secret sempre metadata-only; exportação somente por gesto | todas; gate F7 |
 | U10 | 34–35 | logo, purple da marca, nomenclatura e tipografia coerentes com assets oficiais existentes; janela Wails com nome correto | F7 |
 | U11 | 37–38 | testes/build/CLI/Wails/instalação sem regressão e validação acessível por teclado/foco/zoom | F7 |
