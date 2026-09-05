@@ -660,7 +660,11 @@ jobs:
           # reexecução manual que recuperou o job não mantém a falha antiga.
           # Falha/cancelamento/timeout só abortam após 3 leituras seguidas
           # sem recuperação; ausência/pending aguardam até o deadline.
-          required_checks="build-and-test native-runtime restricted-kind"
+          # native-runtime é um job de matriz: as pernas se chamam
+          # "native-runtime (macos-latest)" e "native-runtime (windows-latest)",
+          # então o gate exige TODAS as pernas encontradas pelo prefixo.
+          required_checks="build-and-test restricted-kind"
+          native_prefix='^native-runtime \\('
           deadline=$(( $(date +%s) + 45 * 60 ))
           failure_streak=0
           while :; do
@@ -681,8 +685,24 @@ jobs:
                   ;;
               esac
             done
+            native_conclusions=$(printf '%s\n' "$runs" | awk -F'\t' -v p="$native_prefix" '$2 ~ p { print $3 }')
+            if [ -z "$native_conclusions" ]; then
+              pending_checks="$pending_checks native-runtime=none"
+            else
+              case "$native_conclusions" in
+                *failure*|*cancelled*|*timed_out*|*action_required*)
+                  failed_checks="$failed_checks native-runtime=failed-leg"
+                  ;;
+                *pending*|*queued*|*)
+                  # Presença de qualquer leitura não-success mantém a espera.
+                  if printf '%s\n' "$native_conclusions" | grep -qv '^success$'; then
+                    pending_checks="$pending_checks native-runtime=running"
+                  fi
+                  ;;
+              esac
+            fi
             if [ -z "$pending_checks" ] && [ -z "$failed_checks" ]; then
-              echo "verify.yml (build-and-test, native-runtime, restricted-kind) concluded successfully for ${GITHUB_SHA}."
+              echo "verify.yml (build-and-test, restricted-kind, native-runtime matrix) concluded successfully for ${GITHUB_SHA}."
               break
             fi
             if [ -n "$failed_checks" ]; then

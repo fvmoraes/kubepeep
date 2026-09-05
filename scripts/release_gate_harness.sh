@@ -14,29 +14,30 @@ run_gate() {
 	failure_streak=0
 	local readings="${3:-}"
 	local reading=0
-	required_checks="build-and-test native-runtime restricted-kind"
+	required_checks="build-and-test restricted-kind"
+	native_prefix='^native-runtime \\('
 	while :; do
 		local runs=""
 		case "$scenario" in
 			success)
-				runs=$'101\tbuild-and-test\tsuccess\n102\tnative-runtime\tsuccess\n103\trestricted-kind\tsuccess'
+				runs=$'101\tbuild-and-test\tsuccess\n102\tnative-runtime (macos-latest)\tsuccess\n103\tnative-runtime (windows-latest)\tsuccess\n104\trestricted-kind\tsuccess'
 				;;
 			recover)
 				reading=$((reading + 1))
 				case "$reading" in
-					1) runs=$'101\tbuild-and-test\tsuccess\n102\tnative-runtime\tpending' ;;
-					2) runs=$'101\tbuild-and-test\tsuccess\n102\tnative-runtime\tfailure\n103\trestricted-kind\tpending' ;;
-					*) runs=$'101\tbuild-and-test\tsuccess\n102\tnative-runtime\tfailure\n103\trestricted-kind\tsuccess\n204\tnative-runtime\tsuccess' ;;
+					1) runs=$'101\tbuild-and-test\tsuccess\n102\tnative-runtime (macos-latest)\tpending\n103\tnative-runtime (windows-latest)\tpending' ;;
+					2) runs=$'101\tbuild-and-test\tsuccess\n102\tnative-runtime (macos-latest)\tfailure\n103\tnative-runtime (windows-latest)\tpending\n104\trestricted-kind\tpending' ;;
+					*) runs=$'101\tbuild-and-test\tsuccess\n102\tnative-runtime (macos-latest)\tsuccess\n103\tnative-runtime (windows-latest)\tsuccess\n104\trestricted-kind\tsuccess\n204\tnative-runtime (macos-latest)\tsuccess' ;;
 				esac
 				;;
 			hardfail)
-				runs=$'101\tbuild-and-test\tsuccess\n102\tnative-runtime\tfailure\n103\trestricted-kind\tsuccess'
+				runs=$'101\tbuild-and-test\tsuccess\n102\tnative-runtime (macos-latest)\tfailure\n103\tnative-runtime (windows-latest)\tsuccess\n104\trestricted-kind\tsuccess'
 				;;
 			cancel_recovered)
 				reading=$((reading + 1))
 				case "$reading" in
-					1|2) runs=$'101\tbuild-and-test\tsuccess\n102\tnative-runtime\tcancelled\n103\trestricted-kind\tsuccess' ;;
-					*) runs=$'101\tbuild-and-test\tsuccess\n102\tnative-runtime\tsuccess\n103\trestricted-kind\tsuccess\n205\tnative-runtime\tsuccess' ;;
+					1|2) runs=$'101\tbuild-and-test\tsuccess\n102\tnative-runtime (macos-latest)\tcancelled\n103\tnative-runtime (windows-latest)\tsuccess\n104\trestricted-kind\tsuccess' ;;
+					*) runs=$'101\tbuild-and-test\tsuccess\n102\tnative-runtime (macos-latest)\tsuccess\n103\tnative-runtime (windows-latest)\tsuccess\n104\trestricted-kind\tsuccess\n205\tnative-runtime (macos-latest)\tsuccess' ;;
 				esac
 				;;
 			timeout)
@@ -57,6 +58,21 @@ run_gate() {
 					;;
 			esac
 		done
+		native_conclusions=$(printf '%s\n' "$runs" | awk -F'\t' -v p="$native_prefix" '$2 ~ p { print $3 }')
+		if [ -z "$native_conclusions" ]; then
+			pending_checks="$pending_checks native-runtime=none"
+		else
+			case "$native_conclusions" in
+				*failure*|*cancelled*|*timed_out*|*action_required*)
+					failed_checks="$failed_checks native-runtime=failed-leg"
+					;;
+				*)
+					if printf '%s\n' "$native_conclusions" | grep -qv '^success$'; then
+						pending_checks="$pending_checks native-runtime=running"
+					fi
+					;;
+			esac
+		fi
 		if [ -z "$pending_checks" ] && [ -z "$failed_checks" ]; then
 			echo "OUTCOME: success"
 			return 0
@@ -97,8 +113,8 @@ assert() {
 assert success       "OUTCOME: success"              0
 assert recover       "OUTCOME: success"              2
 assert cancel_recovered "OUTCOME: success"           0
-assert hardfail      "OUTCOME: aborted( native-runtime=failure)" 0
-assert timeout       "OUTCOME: timeout( build-and-test=pending native-runtime=none restricted-kind=none)"  2
+assert hardfail      "OUTCOME: aborted( native-runtime=failed-leg)" 0
+assert timeout       "OUTCOME: timeout( build-and-test=pending restricted-kind=none native-runtime=none)"  2
 
 echo "gate-harness: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]
