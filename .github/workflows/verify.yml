@@ -13,7 +13,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Core validation. Keep this check name: release.yml polls build-and-test.
+  # Core validation. Keep this check name: release.yml polls it together with
+# native-runtime and restricted-kind as the blocking set.
   build-and-test:
     runs-on: ubuntu-24.04
     timeout-minutes: 20

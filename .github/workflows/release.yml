@@ -12,7 +12,8 @@
 #   build-windows — Wails nativo (windows-2025) → NSIS setup.exe + zip
 #   build-macos   — Wails nativo (macos-15-intel / macos-15) → dmg + zip + tar.gz
 #         ↓ (todos precisam passar; nada é publicado parcialmente)
-#   publish       — espera o check build-and-test do commit de origem; então cria a
+#   publish       — espera os checks bloqueantes (build-and-test, native-runtime,
+#                   restricted-kind) do commit de origem; então cria a
 #                   tag imutável <X.Y.Z>, checksums.txt, SBOM SPDX e a GitHub
 #                   Release marcada como Latest
 #         ↓
@@ -26,7 +27,7 @@
 #     seu próprio namespace, e /releases/latest/download/<asset> é permanente.
 #   - Nenhum binário é commitado no Git (dist/ é ignorado).
 #   - PRs nunca publicam releases.
-#   - IDs dos jobs, nomes de artifacts e o check build-and-test são contratos
+#   - IDs dos jobs, nomes de artifacts e os checks bloqueantes do verify são contratos
 #     do pipeline. A numeração dos nomes visíveis indica etapas, não dependências.
 
 name: release
@@ -631,40 +632,57 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # Os builds rodam em paralelo com o verify.yml; só publicamos quando
-          # o verify do commit de ORIGEM termina com sucesso. O commit de
+          # TODOS os checks bloqueantes (build-and-test, native-runtime e
+          # restricted-kind) do commit de ORIGEM concluem com sucesso — o
+          # conjunto completo, não apenas build-and-test. O commit de
           # metadados usa [skip ci] por design — altera apenas wails.json e
           # CHANGELOG, nenhum código.
+          #
+          # Para cada check, a leitura mais recente (maior id) decide: uma
+          # reexecução manual que recuperou o job não mantém a falha antiga.
+          # Falha/cancelamento/timeout só abortam após 3 leituras seguidas
+          # sem recuperação; ausência/pending aguardam até o deadline.
+          required_checks="build-and-test native-runtime restricted-kind"
           deadline=$(( $(date +%s) + 45 * 60 ))
           failure_streak=0
           while :; do
-            state=$(gh api \
-              "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/check-runs" \
-              --jq '[.check_runs[] | select(.name == "build-and-test") | .conclusion] | join(",")' 2>/dev/null || echo "")
-            case "$state" in
-              *success*)
-                echo "verify.yml concluded successfully for ${GITHUB_SHA}."
-                break
-                ;;
-              *failure*|*cancelled*|*timed_out*|*action_required*)
-                # A failed reading can come from a flaky job that is being
-                # re-run (a manual re-run flips this check to success later).
-                # Only abort after consecutive failures with no recovery.
-                failure_streak=$((failure_streak + 1))
-                if [ "$failure_streak" -ge 3 ]; then
-                  echo "::error::verify.yml did not succeed for ${GITHUB_SHA} (state: ${state}, $failure_streak consecutive readings). Release aborted — no tag was created."
-                  exit 1
-                fi
-                echo "verify.yml state ${state} (reading ${failure_streak}); re-checking..."
-                sleep 45
-                continue
-                ;;
-            esac
+            runs=$(gh api --paginate \
+              "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/check-runs?per_page=100" \
+              --jq '.check_runs[] | [.id, .name, (.conclusion // "pending")] | @tsv' 2>/dev/null | sort -n -k1,1) || runs=""
+            pending_checks=""
+            failed_checks=""
+            for check in $required_checks; do
+              latest=$(printf '%s\n' "$runs" | awk -F'\t' -v c="$check" '$2 == c { concl = $3 } END { print concl }')
+              case "$latest" in
+                success) ;;
+                failure|cancelled|timed_out|action_required)
+                  failed_checks="$failed_checks $check=$latest"
+                  ;;
+                *)
+                  pending_checks="$pending_checks $check=${latest:-none}"
+                  ;;
+              esac
+            done
+            if [ -z "$pending_checks" ] && [ -z "$failed_checks" ]; then
+              echo "verify.yml (build-and-test, native-runtime, restricted-kind) concluded successfully for ${GITHUB_SHA}."
+              break
+            fi
+            if [ -n "$failed_checks" ]; then
+              failure_streak=$((failure_streak + 1))
+              if [ "$failure_streak" -ge 3 ]; then
+                echo "::error::verify.yml did not succeed for ${GITHUB_SHA} (failed:$failed_checks, $failure_streak consecutive readings). Release aborted — no tag was created."
+                exit 1
+              fi
+              echo "verify.yml state failed:$failed_checks (reading ${failure_streak}); re-checking for re-runs..."
+              sleep 45
+              continue
+            fi
             failure_streak=0
             if [ "$(date +%s)" -ge "$deadline" ]; then
-              echo "::error::Timed out waiting for verify.yml on ${GITHUB_SHA} (last state: ${state:-none})."
+              echo "::error::Timed out waiting for verify.yml on ${GITHUB_SHA} (pending:$pending_checks)."
               exit 1
             fi
-            echo "Waiting for verify.yml on ${GITHUB_SHA} (state: ${state:-none})..."
+            echo "Waiting for verify.yml on ${GITHUB_SHA} (pending:$pending_checks)..."
             sleep 60
           done
 
