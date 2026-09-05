@@ -2,6 +2,8 @@
 
 Fonte: [especificação original](../reference/KubePeep_UI_UX_Design_System_e_Recursos_Kubernetes.md). **Base** indica implementação existente a preservar; **planejado** exige execução da fase. Todas as linhas precisam de evidência no fechamento da F7. “Completo” significa recursos acessíveis conforme RBAC; permissões negadas não habilitam ações nem produzem conteúdo.
 
+A [diretriz visual e de acesso do usuário](../reference/direcao-visual-e-premissa-de-acesso.md) complementa a referência: estilo da imagem KubePeep.png e cadastro de namespaces em lote sem acesso administrativo são obrigatórios. **U12 é a premissa básica/P0**, validada na F0 e preservada em todas as fases.
+
 ## Recursos e navegação
 
 Escopo **N** = namespace; **C** = cluster. `list/get` são verbos distintos; uma lista autorizada não prova permissão de detalhe. Grupos virtuais (Overview, Permissions e sessões) mantêm seus contratos próprios.
@@ -11,7 +13,7 @@ Escopo **N** = namespace; **C** = cluster. `list/get` são verbos distintos; uma
 | R01 | Cluster / Overview | N + contexto | base; F7 | resumo parcial, offline e Metrics API ausente sem bloquear shell |
 | R02 | Cluster / Nodes | C | planejado; F1 | lista/detalhe/conditions/capacity; sem exigir scope |
 | R03 | Cluster / Events | N | base; F5/F7 | filtro por objeto e navegação para recurso autorizado; sem segunda implementação em Observability |
-| R04 | Cluster / Namespaces | C | parcial; F2 | inspeção do objeto e scopes distinguíveis; gestão atual preservada |
+| R04 | Cluster / Namespaces | C; scopes locais separados | parcial; F0/F2 | inspeção do objeto sujeita a RBAC; cadastro local em lote permanece disponível sem list/get Namespace (U12) |
 | R05 | Cluster / Leases | N | planejado; F2 | holder/renewal; só namespaces autorizados |
 | R06 | Workloads / Overview | N | base; F7 | filtros e links preservados |
 | R07 | Deployments, DaemonSets, StatefulSets | N | base; F3/F5 | detalhe, Pods, eventos, YAML permitido e ações do catálogo atual |
@@ -51,7 +53,7 @@ Helm Releases, Gateways, GatewayClasses, HTTPRoutes, GRPCRoutes, VolumeAttribute
 
 | ID | Seções | Entrega/critério verificável | Fase responsável |
 | --- | --- | --- | --- |
-| U01 | 1–8, 18–19, 27–30, 39–40 | Inter principal; mono só conteúdo técnico; tokens de fonte/espaço/altura/semântica; componentes reutilizados; nenhum layout paralelo | base + todas; auditoria F7 |
+| U01 | 1–8, 18–19, 27–30, 39–40 + imagem aprovada | aderência ao estilo KubePeep.png: superfícies escuras, sidebar/topbar compactas, cards/gráficos/tabelas coerentes; Inter/tokens/componentes existentes; contraste e dados honestos | base + todas; alinhamento F5, auditoria F7 |
 | U02 | 9–11, 21–22, 35–36 | contexto/scope distintos, grupos compactáveis, tooltips, versão do build, nome KubePeep, preferências de shell | F1/F6 |
 | U03 | 12–13, 32 | matriz R01–R36 com escopo e RBAC corretos; cliente oficial; sem kubectl como backend novo | F1–F4 |
 | U04 | 14–16, 23–24 | listas/detalhes/filtros compartilhados; loading/vazio/403/unknown/offline/parcial/stale/truncado legíveis | F1–F6 |
@@ -62,6 +64,7 @@ Helm Releases, Gateways, GatewayClasses, HTTPRoutes, GRPCRoutes, VolumeAttribute
 | U09 | 33 | sentinelas sintéticas ausentes de logs internos/persistência/artefatos; Secret sempre metadata-only; exportação somente por gesto | todas; gate F7 |
 | U10 | 34–35 | logo, purple da marca, nomenclatura e tipografia coerentes com assets oficiais existentes; janela Wails com nome correto | F7 |
 | U11 | 37–38 | testes/build/CLI/Wails/instalação sem regressão e validação acessível por teclado/foco/zoom | F7 |
+| U12 | premissa explícita do usuário | colar/revisar/deduplicar/salvar namespaces em lote sem list/get/create Namespace ou cluster-admin; cadastro distinto de acesso; RBAC por recurso, limites claros e resultados parciais preservados | F0 P0; todas preservam; gate F7 |
 
 ## Evidência e regra de conclusão
 

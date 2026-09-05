@@ -17,6 +17,14 @@ O produto não aplica YAML genérico, não gerencia credenciais e nunca apresent
 valores de Secret. Dados do cluster, logs de aplicação e sessões de terminal
 permanecem em memória; exportações exigem ação explícita.
 
+**Premissa básica:** atender operadores com permissões restritas, inclusive
+sem poder listar namespaces ou administrar o cluster. Cadastrar namespaces
+**em lote** como escopo local é uma jornada essencial: informar vários nomes,
+revisar e salvar o conjunto, sem cadastro obrigatório um a um. Isso não cria
+objetos Namespace no Kubernetes. Descoberta global é opcional; acesso efetivo
+continua sujeito ao RBAC de cada recurso e namespace. A [Fase 0 da v1](../plan/v1/phase-00-acesso-restrito-e-lote.md)
+protege esse comportamento e planeja os refinamentos da experiência existente.
+
 ## Base disponível
 
 | Área | Comportamento implementado |
@@ -85,6 +93,11 @@ A navegação agrupa Cluster, Workloads, Helm, Network, Configuration, Storage,
 Access Control, Observability e Administration, com Settings separado. Grupos
 podem conter recursos ainda indisponíveis. Tokens, semântica de cores,
 tipografia e componentes estão no [design system](design-system.md).
+
+A imagem KubePeep.png fornecida pelo usuário define o estilo desejado para a
+v1, registrado na [direção visual aprovada](../plan/reference/direcao-visual-e-premissa-de-acesso.md).
+A seleção All namespaces e os dados ilustrados não representam permissões
+presumidas nem devem substituir a cobertura real do escopo consultado.
 
 Preferências, filtros e navegação usam schema fechado no SQLite; não usam
 `localStorage` nem `sessionStorage`. Toda nova chave precisa de contrato,

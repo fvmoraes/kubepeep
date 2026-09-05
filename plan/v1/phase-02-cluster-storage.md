@@ -16,7 +16,7 @@ Cada família deve seguir o guia da F1 com API/DTO, capabilities, frontend, nave
 | V2-06 | CSIDrivers e CSINodes (`storage.k8s.io`) | driver/attachRequired/podInfoOnMount e drivers por node; explicitar limites e campos ausentes |
 | V2-07 | VolumeAttachments (`storage.k8s.io`) | node/attacher/PV/attached e condição sanitizada; omitir `attachmentMetadata`, erros crus do driver e atributos arbitrários |
 
-- [ ] Concluir **V2-01** ponta a ponta, com link claro entre inspeção de Namespaces e gestão de scopes. Não duplicar CRUD de scopes nem mudar seus endpoints por acidente.
+- [ ] Concluir **V2-01** ponta a ponta, com link claro entre inspeção de Namespaces e gestão de scopes. O cadastro em lote da F0 deve continuar acessível quando `list/get namespaces` é negado; não colocá-lo atrás do gate de inspeção do objeto. Não duplicar CRUD de scopes nem mudar seus endpoints por acidente.
 - [ ] Concluir **V2-02** com capabilities `list/get` no namespace correto; nenhum acesso automático a `kube-node-lease` sem autorização.
 - [ ] Concluir **V2-03** e **V2-04**, incluindo relação PV ↔ PVC validada por namespace/nome/UID quando disponível, sem prefetch proibido.
 - [ ] Concluir **V2-05**, **V2-06** e **V2-07**, mantendo VolumeAttachments habilitada quando autorizada. Revisão de campos limita conteúdo, não elimina a família.
@@ -28,6 +28,7 @@ Cada família deve seguir o guia da F1 com API/DTO, capabilities, frontend, nave
 
 - Storage tem suas seis entradas úteis: PVs, PVCs, VolumeAttachments, StorageClasses, CSINodes e CSIDrivers. Falta legítima de CSI/objetos resulta em estado vazio, não erro global.
 - Scope restrito ou ausente não impede recursos C; Leases/PVCs usam apenas namespaces permitidos. `list` e `get` negados são exercitados separadamente.
+- Sem descoberta/inspeção de Namespace, o operador mantém cadastro e seleção em lote de scopes locais; permissões de Nodes/Storage não são pré-requisito das operações namespaced autorizadas.
 - PV/StorageClass/Attachment com campos sentinela não vazam conteúdo proibido no JSON, YAML, log interno, preferências ou relatório versionado.
 - E2E cobre PV → PVC, scope trocado, acesso negado e Namespace → gestão de scopes; contratos/testes por família cobrem os restantes. Rodar gate integrado do [plano](../README.md).
 

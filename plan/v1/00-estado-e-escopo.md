@@ -14,12 +14,14 @@ Base de código: redesign `5ac7320`, seguido pela organização documental `fc9b
 | Preferências/favoritos | `internal/services/resources/preferences.go`, `internal/adapters/sqlite/preferences.go` | compactação/grupos/colunas/recentes e referências com origem e escopo; preservar schema/dados existentes |
 | YAML/diff | `web/src/components/YamlViewer.tsx`, API `yaml-diff` | busca/recolhimento/cancelamento; diff atual é vivo × last-applied, não comparação arbitrária de duas origens |
 | Port-forward/logs/exec | painel em `ResourcePages.tsx`, serviços de ações e streams existentes | organizar sessões e ações contextuais; preservar cancelamento, RBAC e limites |
-| Namespaces | listagem de namespaces e editor de scopes existentes | distinguir inspeção do objeto Namespace da edição de scopes; não recriar a gestão de scopes |
+| Namespaces | listagem opcional e editor de scopes com colagem, validação e deduplicação de listas | F0 comprova e destaca cadastro em lote sem descoberta; F2 distingue inspeção do objeto Namespace de edição de scopes; não recriar a gestão existente |
 
 O helper `useResourceList` e o pacote `internal/services/preferences` citados no plano anterior não existem nesta base. As páginas usam React Query e helpers de geração; preferências pertencem a `internal/services/resources`. Usar os caminhos reais, sem criar duplicatas para satisfazer nomes de um plano antigo.
 
 ## Contrato do produto 1.0
 
+- **Premissa básica/P0:** cadastrar namespaces em lote no aplicativo e operar em namespaces conhecidos sem `list/get namespaces` nem `cluster-admin`. Cadastro local não cria objetos Namespace. A [F0](phase-00-acesso-restrito-e-lote.md) é gate de entrada, e U12 permanece bloqueante até a release.
+- A imagem KubePeep.png enviada pelo usuário define a [direção visual aprovada](../reference/direcao-visual-e-premissa-de-acesso.md). Seus dados e a seleção All namespaces são ilustrativos; o layout se adapta às permissões e à cobertura reais.
 - Uma seleção ativa de profile/contexto. Recursos namespaced respeitam o scope; recursos cluster-scoped exigem contexto válido, mas funcionam sem scope de namespaces.
 - Todas as famílias obrigatórias dos §§12/36 da referência têm lista, detalhe útil e navegação. YAML/eventos/ações só aparecem quando o contrato do recurso e a autorização os permitem.
 - ServiceAccounts pertence a **Access Control**, mesmo sendo implementado junto das coleções namespaced na F3. Leases e PVCs são **namespaced**; a posição na sidebar não altera isso.
@@ -34,7 +36,7 @@ O helper `useResourceList` e o pacote `internal/services/preferences` citados no
 3. Não converter indisponibilidade em “lista vazia”: negar autoritativamente → proibido; autorização inconclusiva → unknown/indisponível; resposta parcial → coverage com causa sanitizada.
 4. Secrets continuam metadata-only sem YAML/diff. Outras famílias recebem DTOs explícitos; YAML precisa de política por família, não serialização genérica do objeto cru.
 5. VolumeAttachments é entrega obrigatória da F2 com campos seguros; não se remove a família da v1 por conter campos que devem ser omitidos.
-6. Fases 1–6 são obrigatórias. Adiamentos estão enumerados no backlog; mudar o gate exige atualizar matriz, fase e produto, deixando a decisão visível.
+6. Fases 0–6 são obrigatórias. Adiamentos estão enumerados no backlog; mudar o gate exige atualizar matriz, fase e produto, deixando a decisão visível.
 
 ## Evidência inicial a registrar na primeira execução
 

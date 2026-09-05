@@ -1,6 +1,6 @@
 # Fase 1 — Contrato de recursos e Nodes ponta a ponta
 
-**Prioridade:** P0. **Entrada:** base preservada e checks locais conhecidos. **Desbloqueia:** F2–F5. **Matriz:** R02, U02–U04, U08–U09.
+**Prioridade:** P0. **Entrada:** [F0](phase-00-acesso-restrito-e-lote.md) comprovada, base preservada e checks locais conhecidos. **Desbloqueia:** F2–F5. **Matriz:** R02, U02–U04, U08–U09; preservar U12.
 
 Entregar uma família completa antes de expandir o catálogo. O backend já possui coleções, paginação, geração, capabilities e helpers genéricos: ampliar o necessário sem uma refatoração global.
 
@@ -29,6 +29,7 @@ Entregar uma família completa antes de expandir o catálogo. O backend já poss
 | Duas páginas de fixture grande | limite cumprido, ordenação honesta (`page`), sem repetição/perda causada pelo novo código |
 | Troca de contexto durante detalhe/YAML | resposta anterior descartada; nenhum flash de conteúdo obsoleto |
 | Regressão Pods/Workloads | mesmos envelopes, filtros, RBAC, rotas e ações existentes |
+| Operador sem acesso a Nodes nem descoberta de namespaces | cadastro em lote e operações autorizadas no scope manual continuam funcionando; Nodes negado não bloqueia a entrada no produto |
 
 Cobrir unitários de DTO/contrato, integração handler/runtime com API controlada e E2E lista → detalhe → YAML autorizado, inclusive 403 e contexto sem scope. Usar cliente metadata/typed conforme a política; testes negativos comprovam que campos proibidos não chegam à resposta. Executar o gate integrado do [plano](../README.md).
 

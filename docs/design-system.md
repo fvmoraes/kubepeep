@@ -2,6 +2,7 @@
 
 > **Status:** vigente — implementado no redesign de 2026-09-04 (commit `5ac7320`). A fonte da verdade é o código: `web/src/tokens.css`, `web/src/components/ui/` e `web/src/components/resource/`.
 > **Especificação original:** [`../plan/reference/KubePeep_UI_UX_Design_System_e_Recursos_Kubernetes.md`](../plan/reference/KubePeep_UI_UX_Design_System_e_Recursos_Kubernetes.md).
+> **Direção visual da v1:** a imagem KubePeep.png enviada pelo usuário é a [referência de estilo aprovada](../plan/reference/direcao-visual-e-premissa-de-acesso.md). Este documento descreve os componentes atuais; a F5 alinha a composição à imagem e a F7 valida o resultado, preservando acesso restrito e cadastro de namespaces em lote.
 
 ## 1. Fundamentos
 

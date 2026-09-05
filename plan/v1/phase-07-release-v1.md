@@ -1,14 +1,14 @@
 # Fase 7 — Validação e preparação da release 1.0
 
-**Prioridade:** P0. **Entrada:** F1–F6 completas com matriz R/U preenchida. **Saídas distintas:** versão pronta localmente; publicação aprovada e executada pelo usuário. Esta fase não autoriza push ou publicação automática pelo agente.
+**Prioridade:** P0. **Entrada:** F0–F6 completas com matriz R/U preenchida. **Saídas distintas:** versão pronta localmente; publicação aprovada e executada pelo usuário. Esta fase não autoriza push ou publicação automática pelo agente.
 
 A distribuição atual usa `scripts/release.sh` e `.github/workflows/release.yml`, com builds nativos Wails, pacotes, checksums e SBOM. Tags oficiais seguem `1.0.0`, **sem prefixo `v`**. Não recriar GoReleaser ou copiar a matriz antiga sem conferir o pipeline vigente.
 
 ## Tarefas locais
 
-- [ ] **V7-01 — Revisão da matriz.** Conferir R01–R36 e U01–U11 contra o binário final; cada requisito obrigatório precisa de evidência no commit avaliado. Manter backlog explícito e não chamar destino desabilitado de recurso entregue.
-- [ ] **V7-02 — Regressão visual e acessível.** Percorrer todas as páginas nos tamanhos 1280×720, 1366×768, 1440×900 e 1920×1080; verificar 2560×1440 adicionalmente. Teclado/Tab/Escape, foco em drawer/dialog/paleta, zoom, contraste, nome KubePeep/versão do build e nenhum scroll horizontal global. Screenshots só como evidência local sanitizada.
-- [ ] **V7-03 — Testes integrados.** Executar `make verify` e race checks aplicáveis. E2E mockado cobre UI; harness `test/kind/` cobre cluster real restritivo e recursos novos com fixtures sintéticas. Testar sem acesso, leitura parcial, operador restrito, contexto sem scope, scope manual sem `list namespaces`, cluster offline e Metrics API ausente.
+- [ ] **V7-01 — Revisão da matriz.** Conferir R01–R36 e U01–U12 contra o binário final; cada requisito obrigatório precisa de evidência no commit avaliado. U12 (cadastro em lote sem acesso administrativo) é bloqueante, mesmo com todas as novas famílias prontas. Manter backlog explícito e não chamar destino desabilitado de recurso entregue.
+- [ ] **V7-02 — Regressão visual e acessível.** Comparar shell, Overview e páginas ao estilo da imagem KubePeep.png conservada no Project Brain, conforme a [direção aprovada](../reference/direcao-visual-e-premissa-de-acesso.md). Percorrer todas as páginas nos tamanhos 1280×720, 1366×768, 1440×900 e 1920×1080; verificar 2560×1440 adicionalmente. Teclado/Tab/Escape, foco em drawer/dialog/paleta, zoom, contraste, nome KubePeep/versão do build e nenhum scroll horizontal global. Validar também aparência útil com RBAC restrito e dados parciais. Screenshots só como evidência local sanitizada.
+- [ ] **V7-03 — Testes integrados.** Executar `make verify` e race checks aplicáveis. E2E mockado cobre UI; harness `test/kind/` cobre cluster real restritivo e recursos novos com fixtures sintéticas. Repetir os cenários da F0: colagem em lote → preview → salvar → selecionar → consultar recursos permitidos, sem list/get Namespace nem cluster-admin; misturar namespaces permitidos/negados e comprovar persistência, limites e cobertura parcial. Testar ainda sem acesso, contexto sem scope, cluster offline e Metrics API ausente.
 - [ ] **V7-04 — Ciclo local e Wails.** CLI/status/stop/start/doctor, única instância, execução sem Node em runtime, instalação ativa/inativa e inicialização sob demanda. Build e smoke desktop nativo: frontend embutido, deep links, versão, troca de seleção, logs/exec/port-forward, fechamento da janela e cleanup. Cross-build não prova execução nativa.
 - [ ] **V7-05 — Dados e segurança.** Rodar gate de segurança, auditoria de dependências conforme versões fixadas em `verify.yml` e inspeção negativa de browser storage, SQLite/WAL/backups/logs/archives. Usar sentinelas sintéticas; confirmar ausência de credenciais, Secret/YAML/logs persistidos e arquivos locais em staging/artefatos. Não apagar dados do usuário como “limpeza”.
 - [ ] **V7-06 — Documentação final.** Alinhar README, API, arquitetura, produto, RBAC, dados, segurança, design-system, instalação/download e troubleshooting à matriz implementada. Links locais válidos, convenções e matriz de plataformas iguais ao pipeline real; limitações explícitas. Preparar changelog/notas `1.0.0` com ferramenta existente, sem invocar publicação.
@@ -31,6 +31,6 @@ O pipeline pode criar commit de metadados distinto do SHA de origem. Verificar e
 
 ## Critério de saída
 
-**Pronta localmente:** V7-01–09 e F1–F6 concluídas, artefatos/limitações rastreáveis e nenhum push executado. **Publicada:** V7-10–13 também concluídos após autorização. Gate pendente permanece explicitamente pendente; não marcar a fase publicada por falta de ambiente remoto.
+**Pronta localmente:** V7-01–09 e F0–F6 concluídas, U12 comprovado, referência visual atendida, artefatos/limitações rastreáveis e nenhum push executado. **Publicada:** V7-10–13 também concluídos após autorização. Gate pendente permanece explicitamente pendente; não marcar a fase publicada por falta de ambiente remoto.
 
 **Rollback:** antes da publicação, corrigir por novo commit e gerar nova candidate. Depois, seguir procedimento de rollback/update validado preservando dados e tags imutáveis; revogar/republicar assets ou mover canais remotos exige a decisão do usuário.

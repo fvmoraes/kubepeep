@@ -4,18 +4,21 @@ Este plano transforma a [especificação UI/UX original](reference/KubePeep_UI_U
 
 Comece pelo [estado e limites](v1/00-estado-e-escopo.md), depois consulte a [matriz de entregas e aceite](v1/01-matriz-de-entregas.md). A documentação em [docs/](../docs/README.md) descreve o comportamento implementado; este diretório define o próximo trabalho.
 
+**Premissa básica:** operadores devem conseguir cadastrar namespaces **em lote** e trabalhar com recursos permitidos sem `list namespaces` nem acesso administrativo ao cluster. Esse caminho é obrigatório/P0, com [gate próprio na Fase 0](v1/phase-00-acesso-restrito-e-lote.md). A imagem **KubePeep.png** enviada pelo usuário define o estilo desejado, conforme a [direção visual e de acesso](reference/direcao-visual-e-premissa-de-acesso.md).
+
 ## Ordem de execução
 
 | Fase | Entrega | Dependências | Estado |
 | --- | --- | --- | --- |
 | Base | [Estado atual e escopo](v1/00-estado-e-escopo.md) | redesign `5ac7320` | implementado; regressão revalidada na F7 |
-| 1 | [Contrato de recursos e Nodes ponta a ponta](v1/phase-01-backend-recursos.md) | base | planejado |
+| 0 | [Operador restrito e cadastro em lote](v1/phase-00-acesso-restrito-e-lote.md) | base | validar e completar o fluxo existente; P0 |
+| 1 | [Contrato de recursos e Nodes ponta a ponta](v1/phase-01-backend-recursos.md) | F0 | planejado |
 | 2 | [Cluster e Storage](v1/phase-02-cluster-storage.md) | F1 | planejado |
 | 3 | [Workloads e Configuration](v1/phase-03-workloads-configuracao.md) | F1 | planejado |
 | 4 | [Network, Access Control e Administration](v1/phase-04-acesso-administracao.md) | F1; integra ServiceAccounts da F3 | planejado |
 | 5 | [Experiência operacional](v1/phase-05-experiencia-operacional.md) | F1; integra famílias F2–F4 ao fechá-las | planejado |
 | 6 | [Preferências e integração final](v1/phase-06-preferencias-integracao.md) | F2–F5 | planejado |
-| 7 | [Validação e preparação da release](v1/phase-07-release-v1.md) | F1–F6 | planejado |
+| 7 | [Validação e preparação da release](v1/phase-07-release-v1.md) | F0–F6 | planejado |
 
 Após F1, as famílias de F2–F4 e o trabalho de UX em F5 podem avançar em paralelo, coordenando os arquivos compartilhados. F5 define colunas e referências em memória; F6 persiste esses contratos. Não há dependência circular. Cada fase admite vários commits pequenos por família ou jornada.
 
@@ -52,5 +55,7 @@ Os alvos podem repetir etapas; na execução diária, usar os equivalentes já d
 ## Escopo e histórico
 
 A v1 inclui todos os recursos obrigatórios da matriz, preferências de shell e UX consistente. Helm, Gateway API e os recursos explicitamente condicionais da especificação ficam no [backlog pós-v1](v1/02-backlog-pos-v1.md). Multi-contexto simultâneo também tem escopo próprio ali; **F6 permanece obrigatória** para a v1.
+
+Cadastro em lote sem descoberta global e aderência à referência visual são critérios obrigatórios de aceite; não podem ser adiados como melhorias opcionais.
 
 Planos anteriores permanecem no Git (`5ac7320^:plan/`). Seus checkboxes registram diferentes momentos e não representam um percentual global de conclusão. A referência original é preservada; decisões de recorte ficam neste plano, sem reescrever o pedido original.
