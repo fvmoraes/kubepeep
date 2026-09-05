@@ -115,6 +115,7 @@ export function NamespaceScopeForm({ selection, csrfToken, sessionError, onSessi
   const updateRawInput = (value: string) => {
     setRawInput(value)
     setServerValidation(null)
+    if (value.trim() === '') setAutoCheckState('idle')
     // Bulk journey (F0/U12): pasting several names in the default single mode
     // must not strand the operator behind a disabled save button.
     if (mode === 'single') {
@@ -265,6 +266,11 @@ export function NamespaceScopeForm({ selection, csrfToken, sessionError, onSessi
                 className="min-h-[150px] w-full rounded-md border border-kp-overlay-0 bg-kp-crust px-2.5 py-2 text-sm text-kp-text leading-relaxed focus:border-kp-mauve focus:shadow-focus focus:outline-none resize-y"
               />
             </label>
+            {rawInput.trim() === '' ? (
+              <p className="m-0 rounded-r-md border-l-2 border-kp-blue-border bg-kp-blue-bg px-3 py-2 text-xs leading-relaxed text-kp-subtext" role="note">
+                Type or paste your real namespace names in the field above — the gray text there is only an example template. Names appear as chips below with live counters.
+              </p>
+            ) : null}
             <details className="rounded-md border border-kp-overlay-0 bg-kp-surface-1 px-3 py-2">
               <summary className="cursor-pointer text-xs text-kp-sky">How to format the list</summary>
               <div className="mt-2 grid gap-1.5 text-xs leading-relaxed text-kp-subtext">
@@ -316,7 +322,7 @@ export function NamespaceScopeForm({ selection, csrfToken, sessionError, onSessi
 
         {modeSwitched ? <p className="m-0 text-xs text-kp-sky" role="status">Switched to list mode: more than one namespace was entered.</p> : null}
         {mode !== 'all' && autoCheckState === 'running' ? <p className="m-0 text-xs text-kp-overlay-text" role="status">Checking the names against the cluster…</p> : null}
-        {mode !== 'all' && autoCheckState === 'error' ? <p className="m-0 text-xs text-kp-yellow" role="status">The automatic cluster check could not run — use “Validate with cluster” to retry.</p> : null}
+        {mode !== 'all' && autoCheckState === 'error' && rawInput.trim() !== '' ? <p className="m-0 text-xs text-kp-yellow" role="status">The automatic cluster check could not run — use “Validate with cluster” to retry.</p> : null}
         {existence ? (
           <p className={`m-0 rounded-r-md border-l-2 px-3 py-2 text-xs leading-relaxed ${existence.tone === 'amber' ? 'border-kp-yellow-border bg-kp-yellow-bg text-kp-yellow' : 'border-kp-blue-border bg-kp-blue-bg text-kp-subtext'}`} role="status">
             {existence.text}

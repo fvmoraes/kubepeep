@@ -110,7 +110,7 @@ func Run(ctx context.Context, params Params) error {
 	bridge := desktop.NewBridge(platform.Handler, platform.Origin, loopback.Base())
 
 	applicationOptions := &options.App{
-		Title:            "Kube Peep",
+		Title:            "KubePeep",
 		Width:            1360,
 		Height:           860,
 		MinWidth:         1024,
