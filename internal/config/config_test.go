@@ -227,3 +227,22 @@ func TestToGingerKeepsLoopbackAndFixedPool(t *testing.T) {
 		t.Fatalf("unexpected database config: %#v", ginger.Database)
 	}
 }
+
+func TestResourcesCollectionTimeoutBounds(t *testing.T) {
+	cfg := Default()
+	if cfg.Resources.CollectionTimeout.Duration != DefaultResourcesCollectionTimeout {
+		t.Fatalf("unexpected collection default: %#v", cfg.Resources)
+	}
+	cfg.Resources.CollectionTimeout.Duration = 4 * time.Second
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected below-minimum collectionTimeout to be rejected")
+	}
+	cfg.Resources.CollectionTimeout.Duration = 301 * time.Second
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected above-ceiling collectionTimeout to be rejected")
+	}
+	cfg.Resources.CollectionTimeout.Duration = 120 * time.Second
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}

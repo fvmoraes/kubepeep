@@ -140,6 +140,64 @@ func TestCollectReauthorizesBufferedCursorBeforeReturningIt(t *testing.T) {
 	}
 }
 
+func TestNormalizeListWindowTimeout(t *testing.T) {
+	cases := map[string]struct {
+		input    time.Duration
+		expected time.Duration
+	}{
+		"zero falls back to default":      {input: 0, expected: DefaultListWindowTimeout},
+		"negative falls back to default":  {input: -time.Second, expected: DefaultListWindowTimeout},
+		"configured value is preserved":   {input: 45 * time.Second, expected: 45 * time.Second},
+		"above ceiling is clamped":        {input: MaximumListWindowTimeout + time.Minute, expected: MaximumListWindowTimeout},
+		"below minimum is still accepted": {input: time.Second, expected: time.Second},
+	}
+	for name, testCase := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := NormalizeListWindowTimeout(testCase.input); got != testCase.expected {
+				t.Fatalf("NormalizeListWindowTimeout(%v) = %v, want %v", testCase.input, got, testCase.expected)
+			}
+		})
+	}
+}
+
+// A slow namespace must not invalidate the healthy set: the window budget
+// covers the whole fan-out while the per-origin call keeps its own deadline.
+func TestCollectPreservesHealthyOriginsWhenOneOriginIsSlow(t *testing.T) {
+	names := []string{"healthy-1", "healthy-2", "healthy-3", "healthy-4", "slow"}
+	origins, _ := OriginsFor(CollectionPods, names, nil)
+	lister := &fakeStringLister{pages: map[string]OriginPage[testListItem]{}, errs: map[string]error{}, delay: 0}
+	for _, name := range names {
+		if name == "slow" {
+			lister.errs[name] = context.DeadlineExceeded
+			continue
+		}
+		lister.pages[name] = OriginPage[testListItem]{Items: []testListItem{testListItem(name)}}
+	}
+	request := CollectionRequest[testListItem]{
+		Selection: Selection{Generation: "gen", Context: "ctx", Scope: "scope"},
+		Options:   ListOptions{Limit: 20}, Origins: origins, Lister: lister,
+		Authorizer: &fakeAuthorization{decisions: map[string]authorization.Decision{}},
+		Less:       func(a, b testListItem) bool { return a < b },
+		Timeout:    30 * time.Second,
+	}
+	result, err := Collect(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Items) != 4 {
+		t.Fatalf("healthy items = %d, want 4", len(result.Items))
+	}
+	found := false
+	for _, failure := range result.Coverage.Failed {
+		if failure.Namespace == "slow" && failure.Code == CodeUpstreamTimeout {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("slow namespace missing from coverage failures: %+v", result.Coverage.Failed)
+	}
+}
+
 func TestCollectCapsFanoutConcurrencyAtFour(t *testing.T) {
 	names := []string{"a", "b", "c", "d", "e", "f", "g", "h"}
 	origins, _ := OriginsFor(CollectionPods, names, nil)

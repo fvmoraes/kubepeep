@@ -243,6 +243,8 @@ server:
   shutdownTimeout: 10s
 dashboard:
   blockTimeout: 8s
+resources:
+  collectionTimeout: 30s
 observability:
   metrics:
     enabled: false
@@ -257,7 +259,14 @@ observability:
 positivo seguido de `s`, entre 1s e 30s. `dashboard.blockTimeout` limita o
 tempo de cada bloco do dashboard (mesma sintaxe de duração), entre 1s e 60s;
 para clusters grandes, aumente o valor quando blocos do overview reportarem
-erros parciais de timeout. O endpoint OTel é obrigatório somente
+erros parciais de timeout. `resources.collectionTimeout` limita a janela total
+de um fan-out de listagem de recursos (mesma sintaxe), entre 5s e 300s; o
+default cobre scopes típicos e o teto evita esperas sem limite. Deadline por
+chamada Kubernetes permanece fixo no cliente (15s); o budget configurável é o
+total da janela, não por chamada. Resultados autorizados de namespaces
+concluídos são preservados quando outra origem falha; a paginação por cursor
+continua o caminho explícito para concluir cargas maiores que o budget de uma
+janela. O endpoint OTel é obrigatório somente
 quando `enabled=true`: URL absoluta HTTP(S), máximo 2.048 bytes, sem userinfo,
 query ou fragment; HTTP exige host loopback e `insecure=true`. O schema aceita somente `http/protobuf`; headers/tokens não são configuráveis.
 A exportação OTel ainda não é implementada; aceitar configuração não

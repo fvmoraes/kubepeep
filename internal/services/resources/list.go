@@ -10,6 +10,28 @@ import (
 	"github.com/fvmoraes/kubepeep/internal/services/authorization"
 )
 
+// Collection window budgets. The per-call Kubernetes deadline is enforced by
+// the client factory; this budget bounds one whole fan-out window so queued
+// origins always finish inside a defined limit. DefaultListWindowTimeout used
+// to be a fixed 10s that starved large scopes (fan-out 4); it is now only the
+// fallback when wiring does not supply a configured budget.
+const (
+	DefaultListWindowTimeout = 30 * time.Second
+	MaximumListWindowTimeout = 300 * time.Second
+)
+
+// NormalizeListWindowTimeout clamps a configured collection budget into the
+// supported range, keeping zero/negative values at the default.
+func NormalizeListWindowTimeout(value time.Duration) time.Duration {
+	if value <= 0 {
+		return DefaultListWindowTimeout
+	}
+	if value > MaximumListWindowTimeout {
+		return MaximumListWindowTimeout
+	}
+	return value
+}
+
 type CollectionRequest[T ListItem] struct {
 	Selection           Selection
 	Options             ListOptions

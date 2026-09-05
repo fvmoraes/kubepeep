@@ -10,9 +10,17 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"time"
 
 	"github.com/fvmoraes/kubepeep/internal/buildinfo"
 )
+
+// invokeRequestTimeout is the desktop bridge's outer ceiling for one JSON API
+// call. Wails bindings cannot carry the frontend AbortSignal, so every
+// operation must terminate through its own internal deadlines (per-call
+// Kubernetes deadline, collection window budget, dashboard block budget); this
+// ceiling is defense-in-depth so no bridge call can outlive them all.
+const invokeRequestTimeout = 5 * time.Minute
 
 // PlatformInfoDTO is the sanitized environment surface exposed to the React
 // frontend. It deliberately carries no credentials or paths.
@@ -87,7 +95,9 @@ func (bridge *Bridge) Invoke(method string, path string, headers map[string]stri
 	if !invokePathAllowed(path) {
 		return InvokeResult{}, fmt.Errorf("desktop: path is not allowed through bindings")
 	}
-	request, err := http.NewRequestWithContext(context.Background(), method, "http://"+bridge.host+path, strings.NewReader(body))
+	requestContext, cancel := context.WithTimeout(context.Background(), invokeRequestTimeout)
+	defer cancel()
+	request, err := http.NewRequestWithContext(requestContext, method, "http://"+bridge.host+path, strings.NewReader(body))
 	if err != nil {
 		return InvokeResult{}, fmt.Errorf("desktop: build request: %w", err)
 	}

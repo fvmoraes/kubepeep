@@ -38,6 +38,10 @@ const emptyValidation: NamespaceScopeValidation = {
   existence: { checked: false, reasonCode: 'MODE_ALL' },
 }
 
+// Large batch pastes stay responsive: chips render up to this cap and the
+// counters above always cover the whole input.
+const maximumPreviewChips = 300
+
 function messageFor(error: Error): string {
   return error instanceof APIError ? error.message : 'The local API is offline.'
 }
@@ -181,17 +185,22 @@ export function NamespaceScopeForm({ selection, csrfToken, scope = null, onSaved
 
         {mode !== 'all' && (parsed.validation.valid.length > 0 || parsed.validation.invalid.length > 0) ? (
           <div className="flex flex-wrap gap-1.5" aria-label="Parsed namespaces">
-            {parsed.validation.valid.map((namespace) => (
+            {parsed.validation.valid.slice(0, maximumPreviewChips).map((namespace) => (
               <button key={`valid-${namespace}`} type="button" className="inline-flex items-center gap-1.5 rounded-full border border-kp-blue-border bg-kp-blue-bg px-2.5 py-1 text-xs text-kp-sky cursor-pointer hover:border-kp-overlay-3" onClick={() => removeItem(namespace)} aria-label={`Remove namespace ${namespace}`} title="Remove this namespace from the input">
                 {namespace}<span aria-hidden="true">×</span>
               </button>
             ))}
-            {parsed.validation.invalid.map(({ input }) => (
+            {parsed.validation.invalid.slice(0, maximumPreviewChips).map(({ input }) => (
               <button key={`invalid-${input}`} type="button" className="inline-flex items-center gap-1.5 rounded-full border border-kp-red-border bg-kp-red-bg px-2.5 py-1 text-xs text-kp-red cursor-pointer hover:border-kp-overlay-3" onClick={() => removeItem(input)} aria-label={`Remove invalid namespace ${input}`} title="Remove this entry from the input">
                 {input}<span aria-hidden="true">×</span>
               </button>
             ))}
           </div>
+        ) : null}
+        {mode !== 'all' && parsed.validation.valid.length + parsed.validation.invalid.length > maximumPreviewChips ? (
+          <p className="m-0 text-xs text-kp-overlay-text" role="note">
+            Showing the first {maximumPreviewChips} of {parsed.validation.validCount + parsed.validation.invalidCount} entries; the counters above cover the whole input.
+          </p>
         ) : null}
 
         {mode !== 'all' ? (

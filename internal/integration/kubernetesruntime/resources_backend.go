@@ -13,6 +13,14 @@ import (
 	"github.com/fvmoraes/kubepeep/internal/services/resources"
 )
 
+// ResourceBackendOptions carries production wiring for the resource backend.
+type ResourceBackendOptions struct {
+	// ListWindowTimeout bounds one collection fan-out window. Zero falls back
+	// to the resources package default; values are clamped to the supported
+	// ceiling.
+	ListWindowTimeout time.Duration
+}
+
 // ResourceBackend is the Phase 6 application-facing adapter. It owns no
 // credentials: every operation obtains a generation-bound lease from Runtime
 // and exposes only resource DTOs or a bounded YAML document.
@@ -23,6 +31,8 @@ type ResourceBackend struct {
 	redactor   resources.TextRedactor
 	now        func() time.Time
 
+	listWindowTimeout time.Duration
+
 	watchMu         sync.Mutex
 	watchManager    *resources.WatchManager
 	watchGeneration string
@@ -30,10 +40,18 @@ type ResourceBackend struct {
 }
 
 func NewResourceBackend(runtime *Runtime, authorizer resources.AuthorizationChecker, redactor resources.TextRedactor) (*ResourceBackend, error) {
+	return NewResourceBackendWithOptions(runtime, authorizer, redactor, ResourceBackendOptions{})
+}
+
+func NewResourceBackendWithOptions(runtime *Runtime, authorizer resources.AuthorizationChecker, redactor resources.TextRedactor, options ResourceBackendOptions) (*ResourceBackend, error) {
 	if runtime == nil || authorizer == nil {
 		return nil, errors.New("resource backend: runtime and authorizer are required")
 	}
-	backend := &ResourceBackend{runtime: runtime, clients: runtimeResourceClientProvider{runtime: runtime}, authorizer: authorizer, redactor: redactor, now: time.Now, watchBindings: make(map[string]namespaces.SelectionBinding)}
+	backend := &ResourceBackend{
+		runtime: runtime, clients: runtimeResourceClientProvider{runtime: runtime}, authorizer: authorizer, redactor: redactor, now: time.Now,
+		listWindowTimeout: resources.NormalizeListWindowTimeout(options.ListWindowTimeout),
+		watchBindings:     make(map[string]namespaces.SelectionBinding),
+	}
 	backend.watchManager = resources.NewWatchManager(&resourceWatchPort{backend: backend})
 	return backend, nil
 }
@@ -127,6 +145,7 @@ func collectResource[T resources.ListItem](
 			return resources.Collect(ctx, resources.CollectionRequest[T]{
 				Selection: selection, Options: options, Origins: origins, Cursor: cursor,
 				Lister: list, Authorizer: backend.authorizer, Less: less,
+				Timeout:             backend.listWindowTimeout,
 				RequestedNamespaces: len(resolution.Namespaces),
 			})
 		}
@@ -152,7 +171,9 @@ func collectResource[T resources.ListItem](
 	}
 	return resources.Collect(ctx, resources.CollectionRequest[T]{
 		Selection: selection, Options: options, Origins: origins, Cursor: cursor,
-		Lister: list, Authorizer: backend.authorizer, Less: less, RequestedNamespaces: len(names),
+		Lister: list, Authorizer: backend.authorizer, Less: less,
+		Timeout:             backend.listWindowTimeout,
+		RequestedNamespaces: len(names),
 	})
 }
 

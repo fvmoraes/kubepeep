@@ -25,6 +25,10 @@ const (
 	MinDashboardBlockTimeout     = 1 * time.Second
 	DefaultDashboardBlockTimeout = 8 * time.Second
 	MaxDashboardBlockTimeout     = 60 * time.Second
+
+	MinResourcesCollectionTimeout     = 5 * time.Second
+	DefaultResourcesCollectionTimeout = 30 * time.Second
+	MaxResourcesCollectionTimeout     = 300 * time.Second
 )
 
 var secondsPattern = regexp.MustCompile(`^[1-9][0-9]*s$`)
@@ -60,6 +64,7 @@ type Config struct {
 	Version       int                 `yaml:"version"`
 	Server        ServerConfig        `yaml:"server"`
 	Dashboard     DashboardConfig     `yaml:"dashboard"`
+	Resources     ResourcesConfig     `yaml:"resources"`
 	Observability ObservabilityConfig `yaml:"observability"`
 }
 
@@ -74,6 +79,14 @@ type ServerConfig struct {
 // unbounded waits.
 type DashboardConfig struct {
 	BlockTimeout Duration `yaml:"blockTimeout"`
+}
+
+// ResourcesConfig bounds the total fan-out window of one resource list page.
+// The per-call Kubernetes deadline stays fixed at the client factory; this
+// budget only extends how long one collection window may keep working across
+// the bounded fan-out before reporting partial coverage.
+type ResourcesConfig struct {
+	CollectionTimeout Duration `yaml:"collectionTimeout"`
 }
 
 type ObservabilityConfig struct {
@@ -112,6 +125,9 @@ func Default() Config {
 		},
 		Dashboard: DashboardConfig{
 			BlockTimeout: Duration{Duration: DefaultDashboardBlockTimeout},
+		},
+		Resources: ResourcesConfig{
+			CollectionTimeout: Duration{Duration: DefaultResourcesCollectionTimeout},
 		},
 		Observability: ObservabilityConfig{OTel: OTelConfig{
 			Protocol: OTelHTTPProtobuf,
@@ -154,6 +170,9 @@ func (c Config) Validate() error {
 	}
 	if c.Dashboard.BlockTimeout.Duration < MinDashboardBlockTimeout || c.Dashboard.BlockTimeout.Duration > MaxDashboardBlockTimeout || c.Dashboard.BlockTimeout.Duration%time.Second != 0 {
 		return fmt.Errorf("config: dashboard.blockTimeout must be between 1s and 60s")
+	}
+	if c.Resources.CollectionTimeout.Duration < MinResourcesCollectionTimeout || c.Resources.CollectionTimeout.Duration > MaxResourcesCollectionTimeout || c.Resources.CollectionTimeout.Duration%time.Second != 0 {
+		return fmt.Errorf("config: resources.collectionTimeout must be between 5s and 300s")
 	}
 
 	otel := c.Observability.OTel

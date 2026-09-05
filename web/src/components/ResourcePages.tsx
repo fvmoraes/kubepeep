@@ -152,7 +152,25 @@ function savedFirst(query: Record<string, unknown>, key: string, allowed?: reado
 }
 
 function namespaceValues(value: string): string[] {
-  return [...new Set(value.split(/[\s,]+/).map((item) => item.trim()).filter(Boolean))].slice(0, 50)
+  return [...new Set(value.split(/[\s,]+/).map((item) => item.trim()).filter(Boolean))]
+}
+
+// Mirrors the backend collection limit for one list request (MaximumNamespaces).
+const maximumNamespaceFilter = 100
+
+function NamespaceFilterInput({ value, onChange }: { value: string; onChange: (value: string) => void }) {
+  const entries = namespaceValues(value)
+  return (
+    <label className="min-w-0">
+      Namespace
+      <Input value={value} maxLength={4096} placeholder="active scope; comma-separated" onChange={(event) => onChange(event.target.value)} />
+      {entries.length > maximumNamespaceFilter ? (
+        <small role="note" className="mt-1 block text-xs text-kp-yellow">
+          {entries.length} namespaces listed; a query accepts at most {maximumNamespaceFilter}. Narrow the filter before applying.
+        </small>
+      ) : null}
+    </label>
+  )
 }
 
 function savedNamespaces(query: Record<string, unknown>): string {
@@ -333,7 +351,7 @@ export function WorkloadsPage() {
       <ResourceListControls search={draft.search} appliedSearch={applied.search} onSearchChange={(value) => setDraft((current) => ({ ...current, search: value }))} onApply={() => { setApplied(draft); setCursor(''); closeDetail() }} onRefresh={() => queryClient.invalidateQueries({ queryKey: ['resources', 'workloads'] })} onClear={() => { setDraft({ ...defaultWorkloadList, kind: kindPreset }); setApplied({ ...defaultWorkloadList, kind: kindPreset }); setCursor(''); closeDetail() }} activeFilters={[
         ...activeFilter('namespace', 'Namespace', namespaceValues(applied.namespace)), ...activeFilter('kind', 'Kind', applied.kind), ...activeFilter('status', 'Status', applied.workloadStatus),
       ]} sort={draft.sort} order={draft.order} appliedSort={applied.sort} appliedOrder={applied.order} defaultSort="identity" defaultOrder="asc" hasPendingChanges={!sameListState(draft, applied)} sortOptions={workloadSortOptions} onSortChange={(value) => setDraft((current) => ({ ...current, sort: value }))} onOrderChange={(value) => setDraft((current) => ({ ...current, order: value }))}>
-        <label>Namespace<Input value={draft.namespace} maxLength={256} placeholder="active scope; comma-separated" onChange={(event) => setDraft((current) => ({ ...current, namespace: event.target.value }))} /></label>
+        <NamespaceFilterInput value={draft.namespace} onChange={(value) => setDraft((current) => ({ ...current, namespace: value }))} />
         <label>Kind<Select value={draft.kind} onChange={(event) => setDraft((current) => ({ ...current, kind: event.target.value }))}><option value="">All kinds</option><option value="deployments">Deployments</option><option value="statefulsets">StatefulSets</option><option value="daemonsets">DaemonSets</option><option value="jobs">Jobs</option><option value="cronjobs">CronJobs</option></Select></label>
         <label>Status<Select value={draft.workloadStatus} onChange={(event) => setDraft((current) => ({ ...current, workloadStatus: event.target.value }))}><option value="">All statuses</option>{workloadStatuses.map((value) => <option key={value}>{value}</option>)}</Select></label>
       </ResourceListControls>
@@ -436,7 +454,7 @@ export function PodsPage() {
       <ResourceListControls search={draft.search} appliedSearch={applied.search} onSearchChange={(value) => setDraft((current) => ({ ...current, search: value }))} onApply={() => { setApplied(draft); setCursor(''); closeDetail() }} onRefresh={() => queryClient.invalidateQueries({ queryKey: ['resources', 'pods'] })} onClear={() => { setDraft({ ...defaultPodList }); setApplied({ ...defaultPodList }); setCursor(''); closeDetail() }} activeFilters={[
         ...activeFilter('namespace', 'Namespace', namespaceValues(applied.namespace)), ...activeFilter('workload', 'Workload owner', applied.workload), ...activeFilter('node', 'Node', applied.node), ...activeFilter('status', 'Status', applied.podStatus), ...activeFilter('restarts', 'Restarts', applied.restarts === 'any' ? '' : applied.restarts), ...activeFilter('problematic', 'Problem evidence', applied.problematic === 'true' ? 'problematic only' : applied.problematic === 'false' ? 'without evidence' : ''),
       ]} sort={draft.sort} order={draft.order} appliedSort={applied.sort} appliedOrder={applied.order} defaultSort="identity" defaultOrder="asc" hasPendingChanges={!sameListState(draft, applied)} sortOptions={podSortOptions} onSortChange={(value) => setDraft((current) => ({ ...current, sort: value }))} onOrderChange={(value) => setDraft((current) => ({ ...current, order: value }))}>
-        <label>Namespace<Input value={draft.namespace} maxLength={256} placeholder="active scope; comma-separated" onChange={(event) => setDraft((current) => ({ ...current, namespace: event.target.value }))} /></label>
+        <NamespaceFilterInput value={draft.namespace} onChange={(value) => setDraft((current) => ({ ...current, namespace: value }))} />
         <label>Workload owner<Input value={draft.workload} maxLength={256} placeholder="exact owner name" onChange={(event) => setDraft((current) => ({ ...current, workload: event.target.value }))} /></label>
         <label>Node<Input value={draft.node} maxLength={256} onChange={(event) => setDraft((current) => ({ ...current, node: event.target.value }))} /></label>
         <label>Status<Select value={draft.podStatus} onChange={(event) => setDraft((current) => ({ ...current, podStatus: event.target.value }))}><option value="">All statuses</option>{podStatuses.map((value) => <option key={value}>{value}</option>)}</Select></label>
@@ -523,7 +541,7 @@ export function EventsPage() {
       <ResourceListControls search={draft.search} appliedSearch={applied.search} onSearchChange={(value) => setDraft((current) => ({ ...current, search: value }))} onApply={() => { setApplied(draft); setCursor('') }} onRefresh={() => queryClient.invalidateQueries({ queryKey: ['resources', 'events'] })} onClear={() => { setDraft({ ...defaultEventList }); setApplied({ ...defaultEventList }); setCursor('') }} activeFilters={[
         ...activeFilter('namespace', 'Namespace', namespaceValues(applied.namespace)), ...activeFilter('type', 'Type', applied.eventType), ...activeFilter('objectKind', 'Object kind', applied.objectKind), ...activeFilter('reason', 'Reason', applied.reason),
       ]} sort={draft.sort} order={draft.order} appliedSort={applied.sort} appliedOrder={applied.order} defaultSort="timestamp" defaultOrder="desc" hasPendingChanges={!sameListState(draft, applied)} sortOptions={eventSortOptions} onSortChange={(value) => setDraft((current) => ({ ...current, sort: value }))} onOrderChange={(value) => setDraft((current) => ({ ...current, order: value }))}>
-        <label>Namespace<Input value={draft.namespace} maxLength={256} placeholder="active scope; comma-separated" onChange={(event) => setDraft((current) => ({ ...current, namespace: event.target.value }))} /></label>
+        <NamespaceFilterInput value={draft.namespace} onChange={(value) => setDraft((current) => ({ ...current, namespace: value }))} />
         <label>Type<Select value={draft.eventType} onChange={(event) => setDraft((current) => ({ ...current, eventType: event.target.value }))}><option value="">All types</option>{eventTypes.map((value) => <option key={value}>{value}</option>)}</Select></label>
         <label>Object kind<Input value={draft.objectKind} maxLength={256} onChange={(event) => setDraft((current) => ({ ...current, objectKind: event.target.value }))} /></label>
         <label>Reason<Input value={draft.reason} maxLength={256} onChange={(event) => setDraft((current) => ({ ...current, reason: event.target.value }))} /></label>

@@ -151,10 +151,12 @@ func Compose(ctx context.Context, options Options) (*Platform, error) {
 	if err != nil {
 		return nil, err
 	}
-	resourceBackend, err := kuberuntime.NewResourceBackend(kubernetesRuntime, authorizationService, resourcecore.TextRedactorFunc(func(value string) string {
+	resourceBackend, err := kuberuntime.NewResourceBackendWithOptions(kubernetesRuntime, authorizationService, resourcecore.TextRedactorFunc(func(value string) string {
 		redacted, _ := dashboard.Redact(value)
 		return redacted
-	}))
+	}), kuberuntime.ResourceBackendOptions{
+		ListWindowTimeout: options.Config.Resources.CollectionTimeout.Duration,
+	})
 	if err != nil {
 		return nil, err
 	}
