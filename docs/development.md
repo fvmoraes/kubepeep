@@ -93,6 +93,8 @@ Perfis/traces de diagnóstico (`*.prof`, `*.pprof`, `*.trace`) também são loca
 Os intermediários `wails.json.tmp` e `CHANGELOG.md.new` são saídas do tooling
 de release e ficam ignorados; os arquivos finais de metadados continuam
 versionados. Não ignorar pastas genéricas de fontes apenas para esconder saídas.
+O Wails gera `web/package.json.md5` como cache local de dependências; somente
+esse checksum fica ignorado, preservando `package.json` e seu lockfile no Git.
 
 Kubeconfigs, credenciais, tokens, chaves privadas, PII, caminhos específicos
 da estação e bancos de runtime nunca são versionados. Memória e configuração
