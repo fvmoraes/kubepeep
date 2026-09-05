@@ -55,15 +55,18 @@ function kindForPath(path: string): { kind: string; namespace: string | null; na
   return null
 }
 
-// recordPath registers a completed navigation to an eligible detail target.
-export function recordPath(path: string) {
+// recordPath registers a completed navigation to an eligible detail target and
+// reports whether the in-memory set changed (callers persist it then).
+export function recordPath(path: string): boolean {
   const parsed = kindForPath(path)
-  if (!parsed) return
+  if (!parsed) return false
+  if (entries.length > 0 && entries[0].path === path) return false
   entries = [
     { path, kind: parsed.kind, namespace: parsed.namespace, name: parsed.name, recordedAt: Date.now() },
     ...entries.filter((entry) => entry.path !== path),
   ].slice(0, recentLimit)
   emit()
+  return true
 }
 
 export function recentTargets(): RecentTarget[] {

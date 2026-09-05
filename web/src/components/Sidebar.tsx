@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo } from 'react'
 import { NavLink, useLocation } from 'react-router'
 import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 
@@ -17,11 +17,12 @@ interface SidebarProps {
   version: string
   compact: boolean
   onToggleCompact: () => void
+  collapsedGroups: string[]
+  onToggleGroup: (id: string) => void
 }
 
-export function Sidebar({ version, compact, onToggleCompact }: SidebarProps) {
+export function Sidebar({ version, compact, onToggleCompact, collapsedGroups, onToggleGroup }: SidebarProps) {
   const location = useLocation()
-  const [collapsed, setCollapsed] = useState<string[]>([])
 
   // The group owning the active route is always rendered expanded (derived,
   // never stored, so navigation can never hide the active item).
@@ -31,7 +32,7 @@ export function Sidebar({ version, compact, onToggleCompact }: SidebarProps) {
   )
 
   const toggleGroup = (id: string) => {
-    setCollapsed((current) => (current.includes(id) ? current.filter((value) => value !== id) : [...current, id]))
+    onToggleGroup(id)
   }
 
   const renderItem = useMemo(() => {
@@ -92,7 +93,7 @@ export function Sidebar({ version, compact, onToggleCompact }: SidebarProps) {
           ) : (
             <div className="grid gap-3">
               {navGroups.map((group) => {
-                const isCollapsed = collapsed.includes(group.id) && group.id !== activeGroupId
+                const isCollapsed = collapsedGroups.includes(group.id) && group.id !== activeGroupId
                 return (
                   <section key={group.id} aria-label={group.label}>
                     <button

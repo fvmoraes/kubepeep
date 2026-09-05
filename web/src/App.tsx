@@ -5,7 +5,7 @@ import { Outlet, Route, Routes, useLocation, useNavigate } from 'react-router'
 
 import { clearRecentTargets, recordPath, recentTargets, subscribeRecentTargets } from './recent/recent'
 
-import { getPreferences, getStatus, type Preferences } from './api/client'
+import { getPreferences, getSession, getStatus, putPreferences, type Preferences } from './api/client'
 import { Badge } from './components/ui/Badge'
 import { CommandCenter, type CommandRoute } from './components/CommandCenter'
 import { ContextSelector } from './components/ContextSelector'
@@ -110,7 +110,19 @@ function resourceEntryKeywords(collection: string, item: { kind?: string; namesp
   return [item.kind ?? '', item.namespace ?? '', collection]
 }
 
-function favoriteEntryPath(kind: string, namespace: string, name: string): string | null {
+function favoriteEntryPath(kind: string, namespace: string | undefined, name: string): string | null {
+  // Cluster-scoped favorites (V6-03) resolve by name only.
+  const clusterRoots: Record<string, string> = {
+    node: '/nodes',
+    persistentvolume: '/storage/persistent-volumes',
+    storageclass: '/storage/storage-classes',
+    ingressclass: '/network/ingress-classes',
+    priorityclass: '/administration/priority-classes',
+    runtimeclass: '/administration/runtime-classes',
+    customresourcedefinition: '/administration/customresourcedefinitions',
+  }
+  if (kind in clusterRoots) return `${clusterRoots[kind]}/${encodeURIComponent(name)}`
+  if (!namespace) return null
   switch (kind) {
     case 'pod':
       return `/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`
@@ -147,8 +159,8 @@ function favoriteEntries(preferences: Preferences | undefined) {
     entries.push({
       path,
       label: item.name,
-      description: `${item.kind} · ${item.namespace}`,
-      keywords: [item.kind, item.namespace, 'favorite'],
+      description: `${item.kind} · ${item.namespace ?? 'cluster'}`,
+      keywords: [item.kind, item.namespace ?? '', 'favorite'],
     })
   }
   return entries
@@ -228,22 +240,31 @@ function StatusBadge() {
   return <Badge variant={variant}>{local}</Badge>
 }
 
+// persistShellPrefs merges the shell change into the current preferences
+// document so concurrent updates (filters, favorites, recent) are never lost
+// (V6-05). A failed save keeps the UI usable and shows a recoverable error.
+function useShellPreferencePersistence(preferences: Preferences | undefined, onSaved: () => void) {
+  const queryClient = useQueryClient()
+  return useCallback(async (change: (current: Preferences) => Preferences) => {
+    if (!preferences) return
+    try {
+      const session = await getSession()
+      const saved = await putPreferences(change(structuredClone(preferences)), session.csrfToken)
+      queryClient.setQueryData(['preferences'], saved)
+    } catch {
+      onSaved()
+    }
+  }, [onSaved, preferences, queryClient])
+}
+
 function Shell() {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const location = useLocation()
   const version = useAppVersion()
   const [compact, setCompact] = useState<boolean>(false)
+  const [collapsedGroups, setCollapsedGroups] = useState<string[]>([])
   const [, setRecentVersion] = useState(0)
-  useEffect(() => {
-    // V5-12: completed detail navigations become in-memory recents. Secrets
-    // and list pages never enter the history.
-    recordPath(location.pathname)
-  }, [location.pathname])
-  useEffect(() => {
-    const unsubscribe = subscribeRecentTargets(() => setRecentVersion((value) => value + 1))
-    return () => { unsubscribe() }
-  }, [])
   const status = useQuery({
     queryKey: ['local-status'],
     queryFn: ({ signal }) => getStatus(signal),
@@ -258,10 +279,72 @@ function Shell() {
     queryFn: ({ signal }) => getPreferences(signal),
     staleTime: 60_000,
   })
+  const preferencesData = preferences.data
+  const [, setHydrationError] = useState(false)
 
+  // Hydration (V6-05): initial state comes from the backend document; local
+  // state only diverges after an explicit user action and is persisted by
+  // merging into the current document.
+  const hydratedRef = useRef(false)
+  useEffect(() => {
+    // Hydrate once per document load; later preference saves must not clobber
+    // local UI state (V6-05).
+    if (!preferencesData || hydratedRef.current) return
+    hydratedRef.current = true
+    setCompact(preferencesData.shell?.sidebarCompact ?? false)
+    setCollapsedGroups(preferencesData.shell?.collapsedGroups ?? [])
+  }, [preferencesData])
+
+  const persistShellPrefs = useShellPreferencePersistence(preferencesData, () => setHydrationError(true))
+
+  const persistRecent = useCallback(() => {
+    void persistShellPrefs((currentPrefs) => {
+      currentPrefs.recent = {
+        version: 1,
+        items: recentTargets().map((entry) => ({
+          kind: entry.kind,
+          namespace: entry.namespace ?? undefined,
+          name: entry.name,
+          recordedAt: new Date(entry.recordedAt).toISOString(),
+        })),
+      }
+      return currentPrefs
+    })
+  }, [persistShellPrefs])
   const toggleCompact = useCallback(() => {
-    setCompact((current) => !current)
+    setCompact((current) => {
+      const next = !current
+      void persistShellPrefs((currentPrefs) => {
+        currentPrefs.shell = { ...(currentPrefs.shell ?? { sidebarCompact: false, collapsedGroups: [] }), sidebarCompact: next }
+        return currentPrefs
+      })
+      return next
+    })
+  }, [persistShellPrefs])
+
+  useEffect(() => {
+    // V5-12/V6-04: completed detail navigations become in-memory recents.
+    // Secrets and list pages never enter the history; a change is persisted
+    // by merging into the current preferences document.
+    if (recordPath(location.pathname)) {
+      persistRecent()
+    }
+  }, [location.pathname, persistRecent])
+  useEffect(() => {
+    const unsubscribe = subscribeRecentTargets(() => setRecentVersion((value) => value + 1))
+    return () => { unsubscribe() }
   }, [])
+
+  const toggleGroup = useCallback((id: string) => {
+    setCollapsedGroups((current) => {
+      const next = current.includes(id) ? current.filter((value) => value !== id) : [...current, id]
+      void persistShellPrefs((currentPrefs) => {
+        currentPrefs.shell = { ...(currentPrefs.shell ?? { sidebarCompact: false, collapsedGroups: [] }), collapsedGroups: next }
+        return currentPrefs
+      })
+      return next
+    })
+  }, [persistShellPrefs])
 
   useEffect(() => {
     const current = selection?.generation ?? null
@@ -277,7 +360,7 @@ function Shell() {
   return (
     <div className={`app-shell ${compact ? 'app-shell--compact' : ''}`}>
       <a className="skip-link" href="#main-content">Skip to main content</a>
-      <Sidebar version={version} compact={compact} onToggleCompact={toggleCompact} />
+      <Sidebar version={version} compact={compact} onToggleCompact={toggleCompact} collapsedGroups={collapsedGroups} onToggleGroup={toggleGroup} />
       <div className="workspace">
         <header className="topbar">
           <div className="topbar-controls">
@@ -299,7 +382,7 @@ function Shell() {
               label: entry.name,
               description: `recent · ${entry.kind}${entry.namespace ? ` · ${entry.namespace}` : ''}`,
               keywords: [entry.kind, entry.namespace ?? '', 'recent'],
-            }))} onClearRecent={() => clearRecentTargets()} getResources={() => commandResourceEntries(queryClient, selection?.generation)} onRefresh={refreshActiveReads} />
+            }))} onClearRecent={() => { clearRecentTargets(); void persistShellPrefs((currentPrefs) => { currentPrefs.recent = { version: 1, items: [] }; return currentPrefs }) }} getResources={() => commandResourceEntries(queryClient, selection?.generation)} onRefresh={refreshActiveReads} />
           </div>
         </header>
         <main id="main-content"><Outlet /></main>

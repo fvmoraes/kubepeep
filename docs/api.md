@@ -849,6 +849,26 @@ possível construir nenhuma decisão para a geração ativa.
 
 ## 12. Preferências
 
+Seções da fase F6 (mesmo schema v1, chaves versionadas por seção):
+
+- `shell`: `sidebarCompact` boolean e `collapsedGroups` — IDs do catálogo de
+  grupos de navegação (`cluster`, `workloads`, `helm`, `network`,
+  `configuration`, `storage`, `access-control`, `observability`,
+  `administration`); nenhuma chave arbitrária.
+- `columns.hidden`: mapa de ID de coleção → lista de IDs de coluna ocultas
+  (máx. 32 por coleção, IDs `^[a-z0-9-]{1,32}$`); coleção fora do catálogo é
+  rejeitada.
+- `recent`: `version: 1` e `items` (máx. 20) com `kind`, `namespace`
+  opcional, `name` e `recordedAt` RFC 3339. Kinds elegíveis excluem Secret;
+  itens expirados (> 30 dias) são descartados na gravação; limpeza explícita é
+  um PUT com itens vazios.
+
+Favoritos cluster-scoped (V6-03) passam a aceitar `namespace` vazio para kinds
+de recursos cluster-scoped (`node`, `persistentvolume`, `storageclass`,
+`ingressclass`, `priorityclass`, `runtimeclass`,
+`customresourcedefinition`); favorito antigo sem namespace de kind namespaced
+continua inválido. 
+
 | Método/rota | Classe | Request | Response | Autorização | Erros |
 | --- | --- | --- | --- | --- | --- |
 | `GET /api/v1/preferences` | MVP | vazio | `PreferencesDTO`, 200 | Host/origin local; sem RBAC | — |

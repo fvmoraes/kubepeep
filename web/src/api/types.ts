@@ -997,6 +997,23 @@ export interface Preferences {
   dashboard: { logScanWindow: '15m' | '30m' | '1h' | '4h'; sectionOrder: string[]; hiddenSections: string[] }
   filters: Record<SavedFilterCollection, SavedFilterSet>
   favorites?: FavoriteSet
+  shell?: ShellPreferences
+  columns?: ColumnPreferences
+  recent?: RecentSet
+}
+
+export interface ShellPreferences {
+  sidebarCompact: boolean
+  collapsedGroups: string[]
+}
+
+export interface ColumnPreferences {
+  hidden: Record<string, string[]>
+}
+
+export interface RecentSet {
+  version: 1
+  items: Array<{ kind: string; namespace?: string; name: string; recordedAt: string }>
 }
 
 export type FavoriteKind =
@@ -1011,11 +1028,18 @@ export type FavoriteKind =
   | 'endpointslice'
   | 'configmap'
   | 'secret'
+  | 'node'
+  | 'persistentvolume'
+  | 'storageclass'
+  | 'ingressclass'
+  | 'priorityclass'
+  | 'runtimeclass'
+  | 'customresourcedefinition'
 
 export interface FavoriteItem {
   id: string
   kind: FavoriteKind
-  namespace: string
+  namespace?: string
   name: string
 }
 

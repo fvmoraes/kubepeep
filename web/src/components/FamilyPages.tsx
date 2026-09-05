@@ -48,6 +48,7 @@ import { errorMessage } from './resource/errors'
 import { CollectionFooter, QueryState, SelectionGate } from './resource/states'
 import { ResourcePage } from './resource/ResourcePage'
 import { ResourceTabStrip } from './resource/ResourceTabStrip'
+import { applyColumnVisibility, ColumnVisibilityControl, usePreferenceColumnVisibility } from './resource/columns'
 import { TableLink } from './resource/TableLink'
 import { Facts } from './resource/Facts'
 import { age, dateTime } from './resource/format'
@@ -222,6 +223,7 @@ export function LeasesPage() {
     navigate('/leases')
   }
 
+  const leaseColumnState = usePreferenceColumnVisibility('leases')
   const columns: DataTableColumn<Lease>[] = [
     { key: 'namespace', header: 'Namespace / name', cell: (item) => (
       <TableLink aria-label={`Open Lease ${item.name} in ${item.namespace}`} onClick={() => { requests.abortAll(); setSelected({ generation: selection!.generation, namespace: item.namespace, name: item.name }); yaml.reset(); navigate(`/leases/${encodeURIComponent(item.namespace)}/${encodeURIComponent(item.name)}`) }} primary={item.name} secondary={item.namespace} />
@@ -234,10 +236,11 @@ export function LeasesPage() {
 
   return (
     <ResourcePage title="Leases" description="coordination.k8s.io leases with holders and renewal timing in the active scope.">
+      <ColumnVisibilityControl state={leaseColumnState} columns={columns} />
       <FamilyList<Lease>
         caption="Authorized lease page"
         rows={list.data?.items ?? []} rowKey={(item) => `${item.namespace}/${item.name}`}
-        columns={columns}
+        columns={applyColumnVisibility(columns, leaseColumnState)}
         gatePending={status.isPending} gateError={status.error} gateSelected={Boolean(selection)}
         queryPending={list.isPending} queryError={list.error} result={list.data}
         draft={draft} applied={applied} statuses={[]}
@@ -379,10 +382,12 @@ export function StoragePage() {
     navigate(`/storage/${tab}/${encodedNamespace}${encodedName}`)
   }
 
-  const columns = buildStorageColumns(tab, openDetail)
+  const storageColumnState = usePreferenceColumnVisibility(`storage/${tab}`)
+  const columns = applyColumnVisibility(buildStorageColumns(tab, openDetail), storageColumnState)
 
   return (
     <ResourcePage title="Storage" description="PersistentVolumes, claims, attachments, classes and CSI objects; claim inspection respects the active scope.">
+      <ColumnVisibilityControl state={storageColumnState} columns={columns} />
       <ResourceTabStrip ariaLabel="Storage resource type" panelId="storage-panel" active={tab} onChange={(value) => {
         requests.abortAll()
         pvYaml.reset()

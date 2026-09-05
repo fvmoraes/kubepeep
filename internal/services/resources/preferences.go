@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 	"unicode/utf8"
 )
 
@@ -21,12 +22,15 @@ type PreferencesDTO struct {
 	Dashboard DashboardPreferences `json:"dashboard"`
 	Filters   FilterPreferences    `json:"filters"`
 	Favorites FavoriteSet          `json:"favorites"`
+	Shell     ShellPreferences     `json:"shell"`
+	Columns   ColumnPreferences    `json:"columns"`
+	Recent    RecentSet            `json:"recent"`
 }
 
 // favoriteKindAllowlist bounds favorite targets to resources whose detail
 // views expose metadata only; Secrets are allowed because Secret detail is
 // metadata-only by product rule.
-var favoriteKindAllowlist = []string{"pod", "deployment", "statefulset", "daemonset", "job", "cronjob", "service", "ingress", "endpointslice", "configmap", "secret"}
+var favoriteKindAllowlist = []string{"pod", "deployment", "statefulset", "daemonset", "job", "cronjob", "service", "ingress", "endpointslice", "configmap", "secret", "node", "persistentvolume", "storageclass", "ingressclass", "priorityclass", "runtimeclass", "customresourcedefinition"}
 
 var favoriteResourceNamePattern = regexp.MustCompile(`^[a-z0-9](?:[-a-z0-9.]{0,250}[a-z0-9])?$`)
 
@@ -72,9 +76,46 @@ type SavedFilter struct {
 	Query map[string]any `json:"query"`
 }
 
+// ShellPreferences persists the navigation shell state (V6-01): compact
+// sidebar and collapsed group IDs from the navigation catalog only.
+type ShellPreferences struct {
+	SidebarCompact  bool     `json:"sidebarCompact"`
+	CollapsedGroups []string `json:"collapsedGroups"`
+}
+
+// ColumnPreferences maps collection IDs to hidden column IDs. Only catalog
+// identifiers are valid; arbitrary object paths are rejected (V6-02).
+type ColumnPreferences struct {
+	Hidden map[string][]string `json:"hidden"`
+}
+
+// RecentSet stores recently visited targets with identity only. Secrets are
+// never eligible; limit and expiration are enforced server-side (V6-04).
+type RecentSet struct {
+	Version int          `json:"version"`
+	Items   []RecentItem `json:"items"`
+}
+
+type RecentItem struct {
+	Kind       string `json:"kind"`
+	Namespace  string `json:"namespace,omitempty"`
+	Name       string `json:"name"`
+	RecordedAt string `json:"recordedAt"`
+}
+
+var navigationGroupIDs = []string{"cluster", "workloads", "helm", "network", "configuration", "storage", "access-control", "observability", "administration"}
+
+var columnCollectionIDs = []string{"workloads", "pods", "events", "services", "ingresses", "endpoint-slices", "configmaps", "secrets", "nodes", "leases", "persistent-volumes", "persistent-volume-claims", "volume-attachments", "storage-classes", "csi-nodes", "csi-drivers", "service-accounts", "resource-quotas", "limit-ranges", "hpas", "pdbs", "roles", "role-bindings", "cluster-roles", "cluster-role-bindings", "customresourcedefinitions", "priority-classes", "runtime-classes", "mutating-webhook-configurations", "validating-webhook-configurations", "ingress-classes", "network-policies", "endpoints"}
+
+var recentKindAllowlist = []string{"pod", "deployment", "statefulset", "daemonset", "job", "cronjob", "replicasets", "lease", "persistentvolumeclaim", "role", "rolebinding", "networkpolicy", "endpoints", "node", "persistentvolume", "storageclass", "ingressclass", "priorityclass", "runtimeclass", "customresourcedefinition", "mutatingwebhookconfiguration", "validatingwebhookconfiguration", "service", "ingress", "endpointslice", "configmap"}
+
+const maximumRecentItems = 20
+
+const recentExpiration = 30 * 24 * time.Hour
+
 func DefaultPreferences() PreferencesDTO {
 	empty := func() SavedFilterSet { return SavedFilterSet{Version: 1, Items: []SavedFilter{}} }
-	return PreferencesDTO{Version: 1, UI: UIPreferences{Language: "en"}, Logs: LogPreferences{Wrap: false, Timestamps: true, TailLines: 200}, Dashboard: DashboardPreferences{LogScanWindow: "15m", SectionOrder: append([]string(nil), dashboardSectionIDs...), HiddenSections: []string{}}, Filters: FilterPreferences{Workloads: empty(), Pods: empty(), Events: empty(), Logs: empty()}, Favorites: FavoriteSet{Version: 1, Items: []FavoriteItem{}}}
+	return PreferencesDTO{Version: 1, UI: UIPreferences{Language: "en"}, Logs: LogPreferences{Wrap: false, Timestamps: true, TailLines: 200}, Dashboard: DashboardPreferences{LogScanWindow: "15m", SectionOrder: append([]string(nil), dashboardSectionIDs...), HiddenSections: []string{}}, Filters: FilterPreferences{Workloads: empty(), Pods: empty(), Events: empty(), Logs: empty()}, Favorites: FavoriteSet{Version: 1, Items: []FavoriteItem{}}, Shell: ShellPreferences{SidebarCompact: false, CollapsedGroups: []string{}}, Columns: ColumnPreferences{Hidden: map[string][]string{}}, Recent: RecentSet{Version: 1, Items: []RecentItem{}}}
 }
 
 type PreferenceService struct {
@@ -161,7 +202,75 @@ func ValidatePreferences(value PreferencesDTO) error {
 			return err
 		}
 	}
+	if err := validateShellPreferences(value.Shell); err != nil {
+		return err
+	}
+	if err := validateColumnPreferences(value.Columns); err != nil {
+		return err
+	}
+	if err := validateRecentSet(value.Recent); err != nil {
+		return err
+	}
 	return validateFavoriteSet(value.Favorites)
+}
+
+func validateShellPreferences(shell ShellPreferences) error {
+	_, err := canonicalStrings(shell.CollapsedGroups, len(navigationGroupIDs), navigationGroupIDs, "collapsed group")
+	return err
+}
+
+var columnIDPattern = regexp.MustCompile(`^[a-z0-9-]{1,32}$`)
+
+func validateColumnPreferences(columns ColumnPreferences) error {
+	if len(columns.Hidden) > len(columnCollectionIDs) {
+		return validationError("column hidden map exceeds the collection catalog")
+	}
+	for collection, hidden := range columns.Hidden {
+		if !contains(columnCollectionIDs, collection) {
+			return validationError("column collection has an invalid value")
+		}
+		if len(hidden) > 32 {
+			return validationError("hidden column list exceeds 32 entries")
+		}
+		for _, id := range hidden {
+			if len(id) > 32 || !utf8.ValidString(id) || !columnIDPattern.MatchString(id) {
+				return validationError("hidden column id has an invalid value")
+			}
+		}
+	}
+	return nil
+}
+
+func validateRecentSet(set RecentSet) error {
+	if set.Version == 0 && len(set.Items) == 0 {
+		return nil
+	}
+	if set.Version != 1 {
+		return validationError("recent set version must be 1")
+	}
+	if len(set.Items) > maximumRecentItems {
+		return validationError("recent set exceeds 20 items")
+	}
+	seen := map[string]struct{}{}
+	for _, item := range set.Items {
+		if !contains(recentKindAllowlist, item.Kind) {
+			return validationError("recent kind has an invalid value")
+		}
+		for _, text := range []string{item.Namespace, item.Name} {
+			if len(text) > 253 || !utf8.ValidString(text) || !favoriteResourceNamePattern.MatchString(text) {
+				return validationError("recent namespace and name must be valid resource identifiers")
+			}
+		}
+		if _, err := time.Parse(time.RFC3339, item.RecordedAt); err != nil {
+			return validationError("recent recordedAt must be RFC 3339")
+		}
+		identity := item.Kind + "/" + item.Namespace + "/" + item.Name
+		if _, ok := seen[identity]; ok {
+			return validationError("recent target must be unique")
+		}
+		seen[identity] = struct{}{}
+	}
+	return nil
 }
 
 // validateFavoriteSet bounds favorites to 50 metadata-only targets. A zero
@@ -185,10 +294,11 @@ func validateFavoriteSet(set FavoriteSet) error {
 		if !contains(favoriteKindAllowlist, item.Kind) {
 			return validationError("favorite kind has an invalid value")
 		}
-		for _, text := range []string{item.Namespace, item.Name} {
-			if len(text) > 253 || !utf8.ValidString(text) || !favoriteResourceNamePattern.MatchString(text) {
-				return validationError("favorite namespace and name must be valid resource identifiers")
-			}
+		if len(item.Namespace) > 253 || !utf8.ValidString(item.Namespace) || (item.Namespace != "" && !favoriteResourceNamePattern.MatchString(item.Namespace)) {
+			return validationError("favorite namespace must be empty or a valid resource identifier")
+		}
+		if len(item.Name) > 253 || !utf8.ValidString(item.Name) || !favoriteResourceNamePattern.MatchString(item.Name) {
+			return validationError("favorite name must be a valid resource identifier")
 		}
 		identity := item.Kind + "/" + item.Namespace + "/" + item.Name
 		if _, ok := seen[identity]; ok {
@@ -312,7 +422,7 @@ func stringSlice(value any) ([]string, bool) {
 }
 
 func preferenceRecords(value PreferencesDTO) ([]PreferenceRecord, error) {
-	pairs := map[string]any{"ui.language": value.UI.Language, "logs.wrap": value.Logs.Wrap, "logs.timestamps": value.Logs.Timestamps, "logs.tail_lines": value.Logs.TailLines, "dashboard.log_scan_window": value.Dashboard.LogScanWindow, "dashboard.section_order": value.Dashboard.SectionOrder, "dashboard.hidden_sections": value.Dashboard.HiddenSections, "filters.workloads": value.Filters.Workloads, "filters.pods": value.Filters.Pods, "filters.events": value.Filters.Events, "filters.logs": value.Filters.Logs, "favorites": favoritesOrDefault(value.Favorites)}
+	pairs := map[string]any{"ui.language": value.UI.Language, "logs.wrap": value.Logs.Wrap, "logs.timestamps": value.Logs.Timestamps, "logs.tail_lines": value.Logs.TailLines, "dashboard.log_scan_window": value.Dashboard.LogScanWindow, "dashboard.section_order": value.Dashboard.SectionOrder, "dashboard.hidden_sections": value.Dashboard.HiddenSections, "filters.workloads": value.Filters.Workloads, "filters.pods": value.Filters.Pods, "filters.events": value.Filters.Events, "filters.logs": value.Filters.Logs, "favorites": favoritesOrDefault(value.Favorites), "shell.sidebar_compact": value.Shell.SidebarCompact, "shell.collapsed_groups": value.Shell.CollapsedGroups, "columns.hidden": value.Columns.Hidden, "recent": recentOrDefault(value.Recent)}
 	keys := make([]string, 0, len(pairs))
 	for key := range pairs {
 		keys = append(keys, key)
@@ -355,6 +465,14 @@ func applyPreferenceRecord(value *PreferencesDTO, record PreferenceRecord) error
 		return json.Unmarshal(record.ValueJSON, &value.Filters.Logs)
 	case "favorites":
 		return json.Unmarshal(record.ValueJSON, &value.Favorites)
+	case "shell.sidebar_compact":
+		return json.Unmarshal(record.ValueJSON, &value.Shell.SidebarCompact)
+	case "shell.collapsed_groups":
+		return json.Unmarshal(record.ValueJSON, &value.Shell.CollapsedGroups)
+	case "columns.hidden":
+		return json.Unmarshal(record.ValueJSON, &value.Columns.Hidden)
+	case "recent":
+		return json.Unmarshal(record.ValueJSON, &value.Recent)
 	default:
 		return nil
 	}
@@ -375,4 +493,23 @@ func favoritesOrDefault(set FavoriteSet) FavoriteSet {
 		return FavoriteSet{Version: 1, Items: []FavoriteItem{}}
 	}
 	return set
+}
+
+// recentOrDefault normalizes an omitted recent section. Expired entries are
+// dropped on write so the stored record stays within the retention window.
+func recentOrDefault(set RecentSet) RecentSet {
+	if set.Version == 0 {
+		return RecentSet{Version: 1, Items: []RecentItem{}}
+	}
+	cutoff := time.Now().Add(-recentExpiration).UTC()
+	kept := make([]RecentItem, 0, len(set.Items))
+	for _, item := range set.Items {
+		if recorded, err := time.Parse(time.RFC3339, item.RecordedAt); err == nil && recorded.After(cutoff) {
+			kept = append(kept, item)
+		}
+	}
+	if len(kept) > maximumRecentItems {
+		kept = kept[:maximumRecentItems]
+	}
+	return RecentSet{Version: 1, Items: kept}
 }
