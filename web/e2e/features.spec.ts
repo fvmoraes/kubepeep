@@ -175,10 +175,16 @@ test('bulk namespace paste previews counts and saves one scope without cluster d
       return
     }
     if (new URL(request.url()).pathname.endsWith('validate')) {
-      // Denial keeps the syntactically valid list intact (U12 contract).
+      // Denial keeps the syntactically valid list intact (U12 contract); the
+      // mock applies the same name rule as the real backend.
       const body = request.postDataJSON() as { rawInput?: string }
-      const names = [...new Set((body.rawInput ?? '').split(/[\s,]+/).map((item) => item.trim()).filter(Boolean))]
-      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { valid: names, validCount: names.length, duplicateCount: 0, discardedEmptyCount: 0, invalid: [], invalidCount: 0, existence: { checked: false, reasonCode: 'NAMESPACE_LIST_FORBIDDEN' } }, meta }) })
+      const valid: string[] = []
+      const invalid: Array<{ input: string; code: string }> = []
+      for (const name of new Set((body.rawInput ?? '').split(/[\s,]+/).map((item) => item.trim()).filter(Boolean))) {
+        if (/^[a-z0-9](?:[-a-z0-9]*[a-z0-9])?$/.test(name) && name.length <= 63) valid.push(name)
+        else invalid.push({ input: name, code: 'INVALID_NAMESPACE_NAME' })
+      }
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { valid, validCount: valid.length, duplicateCount: 0, discardedEmptyCount: 0, invalid, invalidCount: invalid.length, existence: { checked: false, reasonCode: 'NAMESPACE_LIST_FORBIDDEN' } }, meta }) })
       return
     }
     if (request.method() === 'POST') {

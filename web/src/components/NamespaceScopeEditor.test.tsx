@@ -91,7 +91,8 @@ describe('namespace scope editor', () => {
     fireEvent.click(screen.getByRole('radio', { name: 'all' }))
     expect(screen.queryByRole('textbox', { name: 'Namespace input' })).not.toBeInTheDocument()
     expect(screen.getByRole('note')).toHaveTextContent('stores no wildcard')
-    expect(screen.queryByText('*')).not.toBeInTheDocument()
+    // No wildcard item ever becomes a namespace chip.
+    expect(screen.queryByLabelText('Remove namespace *')).not.toBeInTheDocument()
     expect(counter('valid')).toHaveTextContent('0')
   })
 

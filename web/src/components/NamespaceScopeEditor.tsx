@@ -72,6 +72,8 @@ function existenceNote(existence: NamespaceScopeValidation['existence'], validCo
 
 export function NamespaceScopeForm({ selection, csrfToken, sessionError, onSessionRetry, scope = null, onSaved, onCancel }: NamespaceScopeFormProps) {
   const [name, setName] = useState(scope?.name ?? '')
+  // Editing starts from a real name; create starts empty and gets suggested.
+  const [nameTouched, setNameTouched] = useState(scope !== null)
   const [mode, setMode] = useState<NamespaceScopeMode>(scope?.mode ?? 'single')
   const [rawInput, setRawInput] = useState(scope ? scope.namespaces.join('\n') : (selection.defaultNamespace ?? ''))
   const [defaultNamespace, setDefaultNamespace] = useState(scope?.defaultNamespace ?? selection.defaultNamespace ?? '')
@@ -165,11 +167,11 @@ export function NamespaceScopeForm({ selection, csrfToken, sessionError, onSessi
     mutationFn: () => editing
       ? updateNamespaceScope(scope.id, {
         ...requestBody(),
-        name: name.trim(),
+        name: effectiveName,
         version: scope.version,
         expectedGeneration: selection.generation,
       }, csrfToken!)
-      : createNamespaceScope({ ...requestBody(), name: name.trim() }, csrfToken!),
+      : createNamespaceScope({ ...requestBody(), name: effectiveName }, csrfToken!),
     onSuccess: (scope) => {
       onSaved?.(scope)
       if (!editing) {
@@ -213,9 +215,16 @@ export function NamespaceScopeForm({ selection, csrfToken, sessionError, onSessi
   }, [checkPayload, csrfToken, mode, parsed.error, parsed.validation])
 
   const shownModeError = parsed.error ?? validateNamespaceMode(mode, shownValidation)
+
+  // Auto-suggest the scope name from the first valid namespace (derived, not
+  // synced) so the save button is never stranded on an invisible requirement
+  // (F0/U12). Typing a name stops the suggestion from applying.
+  const effectiveName = nameTouched || name !== '' ? name : (shownValidation.valid[0] ?? '')
+  const nameError = effectiveName.trim() === '' ? 'Scope name is required — for example: Finance workloads.' : null
+
   const canContactServer = csrfToken !== null && !validation.isPending && !save.isPending
-  const canValidate = canContactServer && name.trim() !== '' && shownModeError === null && mode !== 'all'
-  const canSave = canContactServer && name.trim() !== '' && shownModeError === null
+  const canValidate = canContactServer && shownModeError === null && mode !== 'all' && parsed.validation.valid.length > 0
+  const canSave = canContactServer && nameError === null && shownModeError === null
 
   const notFoundCount = shownValidation.invalid.filter((entry) => entry.code === 'NAMESPACE_NOT_FOUND').length
   const existence = existenceNote(shownValidation.existence, shownValidation.validCount, notFoundCount)
@@ -234,7 +243,7 @@ export function NamespaceScopeForm({ selection, csrfToken, sessionError, onSessi
         <div className="grid gap-3 md:grid-cols-[minmax(100px,0.6fr)_minmax(160px,1fr)_minmax(180px,1.4fr)]" aria-label="Scope origin">
           <label className="grid gap-1"><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Profile</span><Input aria-label="Scope cluster profile" value={String(selection.clusterProfileId)} readOnly /></label>
           <label className="grid gap-1"><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Context</span><Input aria-label="Scope context" value={selection.context} readOnly /></label>
-          <label className="grid gap-1"><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Name</span><Input aria-label="Scope name" value={name} maxLength={120} onChange={(event) => setName(event.target.value)} placeholder="Finance workloads" /></label>
+          <label className="grid gap-1"><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Name <span aria-hidden="true" className="text-kp-red">*</span></span><Input aria-label="Scope name" aria-invalid={nameError !== null} value={effectiveName} maxLength={120} onChange={(event) => { setNameTouched(true); setName(event.target.value) }} placeholder="Finance workloads" /></label>
         </div>
 
         <fieldset className="m-0 flex flex-wrap items-center gap-2 border-0 p-0">
@@ -336,6 +345,12 @@ export function NamespaceScopeForm({ selection, csrfToken, sessionError, onSessi
         {save.isSuccess ? <p className="m-0 text-xs text-kp-green" role="status">Scope “{save.data.name}” was {editing ? 'updated' : 'saved'}.</p> : null}
 
         {shownModeError ? <p className="m-0 text-xs text-kp-red" role="alert">{shownModeError}</p> : null}
+        {nameError ? <p className="m-0 text-xs text-kp-red" role="alert">{nameError}</p> : null}
+        {shownValidation.invalid.some((entry) => entry.code === 'NAMESPACE_NOT_FOUND') ? (
+          <p className="m-0 rounded-r-md border-l-2 border-kp-yellow-border bg-kp-yellow-bg px-3 py-2 text-xs leading-relaxed text-kp-yellow" role="note">
+            Names marked <strong>not found</strong> do not exist in the cluster above — click their chips to remove them, or switch to the right cluster. Saving stays blocked while they are listed.
+          </p>
+        ) : null}
         {sessionError ? (
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-r-md border-l-2 border-kp-red-border bg-kp-red-bg/50 px-3 py-2.5" role="alert">
             <span className="text-xs text-kp-red">{sessionError}</span>

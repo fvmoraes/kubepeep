@@ -51,12 +51,10 @@ const navCatalog = [
 // Sidebar groups start collapsed (F6 default); expand every group so the
 // full catalog is mounted.
 async function expandSidebarGroups(page: import('@playwright/test').Page) {
-  const nav = page.getByRole('navigation', { name: 'Primary navigation' })
-  for (let round = 0; round < 12; round += 1) {
-    const collapsed = nav.locator('button[aria-expanded="false"]')
-    if ((await collapsed.count()) === 0) break
-    await collapsed.first().click()
-  }
+  // One DOM pass avoids locator invalidation while React re-renders.
+  await page.getByRole('navigation', { name: 'Primary navigation' }).evaluate((nav) => {
+    nav.querySelectorAll<HTMLButtonElement>('button[aria-expanded="false"]').forEach((button) => button.click())
+  })
 }
 
 test('serves the application shell and preserves History API navigation', async ({ page }) => {
