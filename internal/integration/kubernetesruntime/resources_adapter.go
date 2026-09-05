@@ -204,6 +204,131 @@ func (backend *ResourceBackend) listIngressPage(ctx context.Context, binding nam
 	result.Continue, result.ResourceVersion = list.Continue, list.ResourceVersion
 	return result, nil
 }
+func (backend *ResourceBackend) listNodePage(ctx context.Context, binding namespaces.SelectionBinding, page resources.PageRequest) (resources.OriginPage[resources.NodeDTO], error) {
+	result := resources.OriginPage[resources.NodeDTO]{Origin: page.Origin, Items: []resources.NodeDTO{}}
+	requestContext, cancel, clients, err := backend.unary(ctx, binding)
+	if err != nil {
+		return result, err
+	}
+	defer cancel()
+	list, err := clients.kubernetes.CoreV1().Nodes().List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	if err != nil {
+		return result, mapResourceError(err)
+	}
+	now := backend.now().UTC()
+	for index := range list.Items {
+		result.Items = append(result.Items, resources.ConvertNode(&list.Items[index], now))
+	}
+	result.Continue, result.ResourceVersion = list.Continue, list.ResourceVersion
+	return result, nil
+}
+
+func (backend *ResourceBackend) GetNode(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, name string) (resources.NodeDetailDTO, error) {
+	if name == "" {
+		return resources.NodeDetailDTO{}, resourceDomain(resources.CodeValidationFailed, "The resource target is incomplete.", nil)
+	}
+	capability := backend.authorizer.Check(ctx, authorization.Key{Generation: binding.Generation, APIGroup: "", Resource: "nodes", Verb: "get", ResourceName: name})
+	switch capability.Decision {
+	case authorization.DecisionDenied:
+		return resources.NodeDetailDTO{}, resourceDomain(resources.CodeForbidden, "Access to this resource was denied.", nil)
+	case authorization.DecisionUnknown:
+		return resources.NodeDetailDTO{}, resourceDomain(resources.CodeAuthorizationUnavailable, "Authorization could not be confirmed.", nil)
+	}
+	requestContext, cancel, clients, err := backend.unary(ctx, binding)
+	if err != nil {
+		return resources.NodeDetailDTO{}, err
+	}
+	defer cancel()
+	value, err := clients.kubernetes.CoreV1().Nodes().Get(requestContext, name, metav1.GetOptions{})
+	if err != nil {
+		return resources.NodeDetailDTO{}, mapResourceError(err)
+	}
+	return resources.ConvertNodeDetail(value, backend.now().UTC()), nil
+}
+
+// nodeSafeYAML is the reviewed read-only Node document (ADR 0006/V1-06). It
+// is assembled from the sanitized detail DTO only: annotations, managedFields,
+// finalizers, provider IDs, pod CIDRs and arbitrary labels never enter it.
+type nodeSafeYAML struct {
+	APIVersion string           `json:"apiVersion"`
+	Kind       string           `json:"kind"`
+	Metadata   nodeSafeMetadata `json:"metadata"`
+	Status     nodeSafeStatus   `json:"status"`
+	Omitted    []string         `json:"x-kubepeep-omitted"`
+}
+
+type nodeSafeMetadata struct {
+	Name              string   `json:"name"`
+	UID               string   `json:"uid"`
+	CreationTimestamp string   `json:"creationTimestamp"`
+	Roles             []string `json:"roles,omitempty"`
+}
+
+type nodeSafeStatus struct {
+	Ready       bool                     `json:"ready"`
+	Conditions  []resources.ConditionDTO `json:"conditions,omitempty"`
+	InternalIP  *string                  `json:"internalIP,omitempty"`
+	Capacity    map[string]string        `json:"capacity,omitempty"`
+	Allocatable map[string]string        `json:"allocatable,omitempty"`
+	Taints      []resources.NodeTaintDTO `json:"taints,omitempty"`
+	NodeInfo    nodeSafeNodeInfo         `json:"nodeInfo,omitempty"`
+}
+
+type nodeSafeNodeInfo struct {
+	KubeletVersion  string `json:"kubeletVersion,omitempty"`
+	OSImage         string `json:"osImage,omitempty"`
+	Architecture    string `json:"architecture,omitempty"`
+	OperatingSystem string `json:"operatingSystem,omitempty"`
+}
+
+// NodeYAMLDocument serves the curated Node document after an exact get
+// authorization. The raw Kubernetes object is never serialized.
+func (backend *ResourceBackend) NodeYAMLDocument(ctx context.Context, binding namespaces.SelectionBinding, name string) ([]byte, error) {
+	capability := backend.authorizer.Check(ctx, authorization.Key{Generation: binding.Generation, APIGroup: "", Resource: "nodes", Verb: "get", ResourceName: name})
+	switch capability.Decision {
+	case authorization.DecisionDenied:
+		return nil, resourceDomain(resources.CodeForbidden, "Access to this resource was denied.", nil)
+	case authorization.DecisionUnknown:
+		return nil, resourceDomain(resources.CodeAuthorizationUnavailable, "Authorization could not be confirmed.", nil)
+	}
+	requestContext, cancel, clients, err := backend.unary(ctx, binding)
+	if err != nil {
+		return nil, err
+	}
+	defer cancel()
+	value, err := clients.kubernetes.CoreV1().Nodes().Get(requestContext, name, metav1.GetOptions{})
+	if err != nil {
+		return nil, mapResourceError(err)
+	}
+	detail := resources.ConvertNodeDetail(value, backend.now().UTC())
+	document := nodeSafeYAML{
+		APIVersion: "v1",
+		Kind:       "Node",
+		Metadata: nodeSafeMetadata{
+			Name:              detail.Metadata.Name,
+			UID:               detail.Metadata.UID,
+			CreationTimestamp: detail.Metadata.CreationTimestamp,
+			Roles:             detail.Roles,
+		},
+		Status: nodeSafeStatus{
+			Ready:       detail.Ready,
+			Conditions:  detail.Conditions,
+			InternalIP:  detail.InternalIP,
+			Capacity:    detail.Capacity,
+			Allocatable: detail.Allocatable,
+			Taints:      detail.Taints,
+			NodeInfo: nodeSafeNodeInfo{
+				KubeletVersion:  value.Status.NodeInfo.KubeletVersion,
+				OSImage:         value.Status.NodeInfo.OSImage,
+				Architecture:    value.Status.NodeInfo.Architecture,
+				OperatingSystem: value.Status.NodeInfo.OperatingSystem,
+			},
+		},
+		Omitted: []string{"metadata.annotations", "metadata.labels (non-role)", "metadata.managedFields", "metadata.finalizers", "spec", "status.config", "status.images", "status.volumesInUse", "status.volumesAttached"},
+	}
+	return resources.MarshalYAMLDocument(document)
+}
+
 func (backend *ResourceBackend) listEndpointSlicePage(ctx context.Context, binding namespaces.SelectionBinding, page resources.PageRequest) (resources.OriginPage[resources.EndpointSliceDTO], error) {
 	result := resources.OriginPage[resources.EndpointSliceDTO]{Origin: page.Origin, Items: []resources.EndpointSliceDTO{}}
 	requestContext, cancel, clients, err := backend.unary(ctx, binding)

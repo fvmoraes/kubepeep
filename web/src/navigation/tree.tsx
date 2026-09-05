@@ -61,7 +61,7 @@ export const navGroups: NavGroup[] = [
     label: 'Cluster',
     items: [
       { id: 'overview', label: 'Overview', path: '/', icon: LayoutDashboard, tip: 'Overview', keywords: ['dashboard', 'health'] },
-      { id: 'nodes', label: 'Nodes', icon: Server, tip: 'Nodes' },
+      { id: 'nodes', label: 'Nodes', path: '/nodes', icon: Server, tip: 'Nodes' },
       { id: 'events', label: 'Events', path: '/events', icon: FileText, tip: 'Events', keywords: ['warning', 'reason'] },
       { id: 'namespaces', label: 'Namespaces', path: '/namespaces', icon: Boxes, tip: 'Namespaces', keywords: ['scope'] },
       { id: 'leases', label: 'Leases', icon: Timer, tip: 'Leases' },

@@ -16,6 +16,25 @@ import (
 
 const MaximumYAMLBytes = 10 << 20
 
+// MarshalYAMLDocument encodes an already-sanitized application document and
+// enforces the same response ceiling as MarshalReadOnlyYAML. It is for curated
+// documents (ADR 0006) whose assembly already applied the per-family policy;
+// raw Kubernetes objects still have to pass MarshalReadOnlyYAML.
+func MarshalYAMLDocument(value any) ([]byte, error) {
+	jsonBytes, err := json.Marshal(value)
+	if err != nil {
+		return nil, fmt.Errorf("resources: marshal YAML source: %w", err)
+	}
+	yamlBytes, err := yaml.JSONToYAML(jsonBytes)
+	if err != nil {
+		return nil, fmt.Errorf("resources: encode YAML: %w", err)
+	}
+	if len(yamlBytes) > MaximumYAMLBytes {
+		return nil, domainError(CodeLimitExceeded, "The YAML document exceeds the response limit.", nil)
+	}
+	return yamlBytes, nil
+}
+
 // MarshalReadOnlyYAML accepts only the concrete MVP kinds that have a YAML
 // route. Secret, unstructured and generic runtime.Object inputs are rejected
 // before serialization. The input is deep-copied before managedFields removal.

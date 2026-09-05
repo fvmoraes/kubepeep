@@ -262,6 +262,86 @@ func (backend *ResourceBackend) ListSecrets(ctx context.Context, binding namespa
 	}, filterSortSecrets)
 }
 
+// clusterCollect runs one cluster-scoped collection window (ADR 0006). The
+// local scope label is identity material only; no namespace list applies.
+func clusterCollect[T resources.ListItem](ctx context.Context, backend *ResourceBackend, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, collection resources.Collection, options resources.ListOptions, cursor *resources.CompositeCursor[T], less func(T, T) bool, list originListerFunc[T], filterSort func([]T, resources.ListOptions) []T) (resources.ListResult[T], error) {
+	normalized, err := resources.NormalizeListOptions(collection, options)
+	if err != nil {
+		return resources.ListResult[T]{}, err
+	}
+	origin, err := resources.ClusterOriginFor(collection)
+	if err != nil {
+		return resources.ListResult[T]{}, err
+	}
+	selection := resourceSelection(binding, resolution)
+	selection.Namespaces = nil
+	if selection.Scope == "" {
+		// No local scope is active; keep the honest label instead of failing
+		// the namespaced selection validation.
+		selection.Scope = "none"
+	}
+	result, collectErr := resources.Collect(ctx, resources.CollectionRequest[T]{
+		Selection: selection, Options: normalized, Origins: []resources.Origin{origin}, Cursor: cursor,
+		Lister: list, Authorizer: backend.authorizer, Less: less,
+		Timeout: backend.listWindowTimeout,
+	})
+	if collectErr != nil {
+		return resources.ListResult[T]{}, collectErr
+	}
+	// Cluster-scoped lists never simulate namespace fan-out (ADR 0006): the
+	// single empty namespace origin must not surface as fictitious counts.
+	result.Coverage = resources.CoverageDTO{RequestedNamespaces: 0, CompletedNamespaces: 0, DeniedNamespaces: []string{}, Failed: sanitizeClusterFailures(result.Coverage.Failed)}
+	result.Items = filterSort(result.Items, normalized)
+	return result, nil
+}
+
+func sanitizeClusterFailures(failures []resources.PartialErrorDTO) []resources.PartialErrorDTO {
+	sanitized := make([]resources.PartialErrorDTO, 0, len(failures))
+	for _, failure := range failures {
+		failure.Namespace = ""
+		sanitized = append(sanitized, failure)
+	}
+	return sanitized
+}
+
+func (backend *ResourceBackend) ListNodes(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, options resources.ListOptions, cursor *resources.CompositeCursor[resources.NodeDTO]) (resources.ListResult[resources.NodeDTO], error) {
+	return clusterCollect(ctx, backend, binding, resolution, resources.CollectionNodes, options, cursor, nodeIdentityLess, func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[resources.NodeDTO], error) {
+		return backend.listNodePage(ctx, binding, page)
+	}, filterSortNodes)
+}
+
+func nodeIdentityLess(left, right resources.NodeDTO) bool {
+	return left.Name < right.Name
+}
+
+func filterSortNodes(items []resources.NodeDTO, options resources.ListOptions) []resources.NodeDTO {
+	result := items[:0]
+	statuses := stringSet(options.Statuses)
+	for _, item := range items {
+		if len(statuses) > 0 && !statuses[item.Status] {
+			continue
+		}
+		if options.Search != "" && !matchesSearch(options, item.Name, strings.Join(item.Roles, " "), item.KubeletVersion) {
+			continue
+		}
+		result = append(result, item)
+	}
+	sort.SliceStable(result, func(i, j int) bool {
+		l, r := result[i], result[j]
+		primary := strings.Compare(l.Name, r.Name)
+		switch options.Sort {
+		case "name":
+			primary = naturalTextCompare(l.Name, r.Name)
+		case "age":
+			primary = int64Compare(l.AgeSeconds, r.AgeSeconds)
+		case "status":
+			primary = naturalTextCompare(l.Status, r.Status)
+		}
+		return pageSortLess(primary, strings.Compare(l.Name, r.Name), options.Order == resources.OrderDescending)
+	})
+	return result
+}
+
 func workloadIdentityLess(left, right resources.WorkloadDTO) bool {
 	if left.Kind != right.Kind {
 		return workloadKindRank(left.Kind) < workloadKindRank(right.Kind)

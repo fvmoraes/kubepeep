@@ -229,6 +229,7 @@ promessa de snapshot integral.
 | `/endpoint-slices` | `addressType`: `IPv4`, `IPv6`, `FQDN`, `Unknown` | namespace, name, addresses | `identity` (default; page), `name` (page), `addressType` (page) | namespace, name, uid |
 | `/configmaps` | nenhum status | namespace, name | `identity` (default; page), `name` (page), `createdAt` (page) | namespace, name, uid |
 | `/secrets` | nenhum status | namespace, name | `identity` (default; page), `name` (page), `createdAt` (page) | namespace, name, uid |
+| `/nodes` | `status`: `Ready`, `NotReady`, `Unknown`; sem `namespace` (cluster-scoped) | name, roles, kubeletVersion | `identity` (default; page), `name` (page), `age` (page), `status` (page) | name |
 
 `order` default é o indicado por `desc`; nos demais casos é `asc`. UID faz
 parte do modelo interno/list metadata mesmo quando um DTO compacto não o
@@ -809,6 +810,8 @@ Allowlist completa do MVP (`group=""` significa core):
 | `configmaps.watch` | `""` | configmaps | watch | namespace / vazio |
 | `secrets.list` | `""` | secrets | list | namespace / vazio |
 | `secrets.get` | `""` | secrets | get | namespace / target |
+| `nodes.list` | `""` | nodes | list | cluster / vazio |
+| `nodes.get` | `""` | nodes | get | cluster / target |
 | `metrics.pods.list` | `metrics.k8s.io` | pods | list | namespace / vazio |
 
 O backend separa `resource` e `subresource` no `Capability`; a barra da tabela é
@@ -1440,6 +1443,28 @@ truncamento, embora o limite nativo do Kubernetes normalmente seja menor.
   }
 }
 ```
+
+## 16.1 Recursos cluster-scoped (ADR 0006)
+
+Leitura cluster-scoped exige contexto e geração válidos; **não** exige
+namespace scope. Filtro `namespace` retorna `VALIDATION_FAILED`. A cobertura
+nunca reporta contagens de namespaces: `requestedNamespaces`,
+`completedNamespaces` e `deniedNamespaces` são `0`/`[]`, e falhas parciais
+chegam em `coverage.failed` com `namespace` ausente (nível cluster).
+
+| Método/rota | Request | Response | Autorização | Paginação/erros |
+| --- | --- | --- | --- | --- |
+| `GET /api/v1/nodes` | query comum sem `namespace`; `status`: `Ready`, `NotReady`, `Unknown` | `NodeDTO[]`, 200 | `list nodes` (cluster) | cursor/parcial; 403/409/410/503/504 |
+| `GET /api/v1/nodes/{name}` | vazio | `NodeDetailDTO`, 200 | `get nodes` com resourceName | 403/404/409/503/504 |
+| `GET /api/v1/nodes/{name}/yaml` | vazio | YAML curado, 200 | `get nodes` com resourceName | 403/404/409/413/503/504 |
+
+Schemas da família Nodes:
+
+| DTO | Campos e regras |
+| --- | --- |
+| `NodeDTO` | `name`, `status` (`Ready`, `NotReady` ou `Unknown`), `ready` boolean, `roles` apenas da família de labels `node-role.kubernetes.io/*` (máx. 8), `kubeletVersion`, `internalIP: string|null`, `ageSeconds` |
+| `NodeDetailDTO` | `metadata` (sem namespace), campos de `NodeDTO`, `conditions` (máx. 20), `capacity`/`allocatable` (máx. 32 entradas cada), `taints` (máx. 32; `key`/`value`/`effect`) e `truncated` boolean |
+| YAML de Node | documento curado: apiVersion/kind/metadata (nome, uid, creationTimestamp, roles)/status (ready, conditions, internalIP, capacity, allocatable, taints, nodeInfo) + `x-kubepeep-omitted` listando annotations, managedFields, finalizers, spec, config, images e volumes. O objeto cru nunca é serializado |
 
 ## 17. Port-forwards
 

@@ -28,6 +28,7 @@ type ResourceService interface {
 	ListEndpointSlices(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, resourcecore.ListOptions, *resourcecore.CompositeCursor[resourcecore.EndpointSliceDTO]) (resourcecore.ListResult[resourcecore.EndpointSliceDTO], error)
 	ListConfigMaps(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, resourcecore.ListOptions, *resourcecore.CompositeCursor[resourcecore.ConfigMapListDTO]) (resourcecore.ListResult[resourcecore.ConfigMapListDTO], error)
 	ListSecrets(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, resourcecore.ListOptions, *resourcecore.CompositeCursor[resourcecore.SecretMetadataDTO]) (resourcecore.ListResult[resourcecore.SecretMetadataDTO], error)
+	ListNodes(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, resourcecore.ListOptions, *resourcecore.CompositeCursor[resourcecore.NodeDTO]) (resourcecore.ListResult[resourcecore.NodeDTO], error)
 	GetWorkload(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, string, string, string) (resourcecore.WorkloadDetailDTO, error)
 	WorkloadYAMLDocument(context.Context, namespaces.SelectionBinding, string, string, string) ([]byte, error)
 	GetPod(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, string, string) (resourcecore.PodDetailDTO, error)
@@ -37,6 +38,8 @@ type ResourceService interface {
 	GetEndpointSlice(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, string, string) (resourcecore.EndpointSliceDetailDTO, error)
 	GetConfigMap(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, string, string) (resourcecore.ConfigMapDetailDTO, error)
 	GetSecret(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, string, string) (resourcecore.SecretMetadataDTO, error)
+	GetNode(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, string) (resourcecore.NodeDetailDTO, error)
+	NodeYAMLDocument(context.Context, namespaces.SelectionBinding, string) ([]byte, error)
 	ResourceYAML(context.Context, namespaces.SelectionBinding, string, string, string) ([]byte, error)
 	ResourceLastAppliedDiff(context.Context, namespaces.SelectionBinding, string, string, string) (resourcecore.LastAppliedDiffDTO, error)
 	ReadLogs(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, string, string, resourcecore.LogQuery) (resourcecore.LogReadDTO, error)
@@ -100,6 +103,12 @@ func (handler *Resources) Secrets(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (handler *Resources) Nodes(w http.ResponseWriter, r *http.Request) {
+	handleClusterList(handler, w, r, resourcecore.CollectionNodes, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution, o resourcecore.ListOptions, c *resourcecore.CompositeCursor[resourcecore.NodeDTO]) (resourcecore.ListResult[resourcecore.NodeDTO], error) {
+		return handler.service.ListNodes(ctx, b, s, o, c)
+	})
+}
+
 type listCall[T resourcecore.ListItem] func(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, resourcecore.ListOptions, *resourcecore.CompositeCursor[T]) (resourcecore.ListResult[T], error)
 type resourceListEnvelope[T resourcecore.ListItem] struct {
 	Data []T              `json:"data"`
@@ -128,6 +137,31 @@ func handleList[T resourcecore.ListItem](handler *Resources, w http.ResponseWrit
 		api.WriteError(w, r, err)
 		return
 	}
+	writeListResult(handler, w, r, collection, options, binding, resolution, call)
+}
+
+// handleClusterList serves cluster-scoped collections (ADR 0006): a valid
+// context is required, but no namespace scope. The namespace filter is
+// rejected by the collection normalization.
+func handleClusterList[T resourcecore.ListItem](handler *Resources, w http.ResponseWriter, r *http.Request, collection resourcecore.Collection, call listCall[T]) {
+	if handler == nil || handler.service == nil || handler.selection == nil || handler.cursors == nil {
+		api.WriteError(w, r, api.NewHTTPError(http.StatusServiceUnavailable, api.CodeFeatureUnavailable, "The resource API is unavailable.", nil, nil))
+		return
+	}
+	options, err := decodeResourceListQuery(r, collection)
+	if err != nil {
+		api.WriteError(w, r, err)
+		return
+	}
+	binding, resolution, err := handler.clusterSelection()
+	if err != nil {
+		api.WriteError(w, r, err)
+		return
+	}
+	writeListResult(handler, w, r, collection, options, binding, resolution, call)
+}
+
+func writeListResult[T resourcecore.ListItem](handler *Resources, w http.ResponseWriter, r *http.Request, collection resourcecore.Collection, options resourcecore.ListOptions, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, call listCall[T]) {
 	queryOptions := options
 	queryOptions.Continue = ""
 	queryJSON, _ := json.Marshal(queryOptions)
@@ -195,6 +229,37 @@ func (handler *Resources) SecretDetail(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (handler *Resources) NodeDetail(w http.ResponseWriter, r *http.Request) {
+	handler.clusterDetail(w, r, func(ctx context.Context, b namespaces.SelectionBinding, s namespaces.ScopeResolution) (any, error) {
+		return handler.service.GetNode(ctx, b, s, r.PathValue("name"))
+	})
+}
+
+// clusterDetail serves one cluster-scoped detail: no namespace in the path,
+// name-only validation, no scope membership check.
+func (handler *Resources) clusterDetail(w http.ResponseWriter, r *http.Request, call detailCall) {
+	if err := validateDetailRequest(r); err != nil {
+		api.WriteError(w, r, err)
+		return
+	}
+	binding, resolution, err := handler.clusterSelection()
+	if err != nil {
+		api.WriteError(w, r, err)
+		return
+	}
+	name := r.PathValue("name")
+	if name == "" || len(validation.IsDNS1123Subdomain(name)) > 0 {
+		api.WriteError(w, r, validationHTTPError("The resource path is invalid.", nil))
+		return
+	}
+	value, err := call(r.Context(), binding, resolution)
+	if err != nil {
+		api.WriteError(w, r, resourceHTTPError(err))
+		return
+	}
+	handler.writeJSONIfCurrent(w, r, binding, map[string]any{"data": value, "meta": map[string]any{"requestId": api.RequestIDFromContext(r.Context()), "generation": binding.Generation, "collectedAt": handler.now().UTC().Format(time.RFC3339Nano)}})
+}
+
 type detailCall func(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution) (any, error)
 
 func (handler *Resources) detail(w http.ResponseWriter, r *http.Request, call detailCall) {
@@ -241,9 +306,52 @@ func (handler *Resources) EndpointSliceYAML(w http.ResponseWriter, r *http.Reque
 func (handler *Resources) ConfigMapYAML(w http.ResponseWriter, r *http.Request) {
 	handler.collectionYAML(w, r, "configmaps")
 }
+func (handler *Resources) NodeYAML(w http.ResponseWriter, r *http.Request) {
+	handler.clusterYAML(w, r, func(ctx context.Context, b namespaces.SelectionBinding) ([]byte, error) {
+		return handler.service.NodeYAMLDocument(ctx, b, r.PathValue("name"))
+	})
+}
+
+// clusterYAML serves one cluster-scoped YAML action with the same fencing and
+// no-store rules as the namespaced YAML routes.
 func (handler *Resources) collectionYAML(w http.ResponseWriter, r *http.Request, collection string) {
 	handler.yaml(w, r, func(ctx context.Context, b namespaces.SelectionBinding) ([]byte, error) {
 		return handler.service.ResourceYAML(ctx, b, collection, r.PathValue("namespace"), r.PathValue("name"))
+	})
+}
+
+// clusterYAML serves one cluster-scoped YAML action with the same fencing and
+// no-store rules as the namespaced YAML routes.
+func (handler *Resources) clusterYAML(w http.ResponseWriter, r *http.Request, call func(context.Context, namespaces.SelectionBinding) ([]byte, error)) {
+	if err := validateDetailRequest(r); err != nil {
+		api.WriteError(w, r, err)
+		return
+	}
+	binding, _, err := handler.clusterSelection()
+	if err != nil {
+		api.WriteError(w, r, err)
+		return
+	}
+	name := r.PathValue("name")
+	if name == "" || len(validation.IsDNS1123Subdomain(name)) > 0 {
+		api.WriteError(w, r, validationHTTPError("The resource path is invalid.", nil))
+		return
+	}
+	document, err := call(r.Context(), binding)
+	if err != nil {
+		httpErr := resourceHTTPError(err)
+		if resourcecore.ErrorCodeOf(err) == resourcecore.CodeLimitExceeded {
+			httpErr = api.NewHTTPError(http.StatusRequestEntityTooLarge, api.CodeBodyTooLarge, "The YAML document exceeds the response limit.", nil, err)
+		}
+		api.WriteError(w, r, httpErr)
+		return
+	}
+	handler.writeIfCurrent(w, r, binding, func() {
+		noStore(w)
+		w.Header().Set("Content-Type", "application/yaml; charset=utf-8")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(document)
 	})
 }
 
@@ -399,6 +507,19 @@ func (handler *Resources) activeSelection() (namespaces.SelectionBinding, namesp
 	binding, resolution := handler.selection.Snapshot()
 	if binding.ClusterProfileID <= 0 || binding.Context == "" || binding.Generation == "" || len(resolution.Namespaces) == 0 {
 		return binding, resolution, api.NewHTTPError(http.StatusConflict, api.CodeGenerationChanged, "No active Kubernetes resource scope is available.", nil, nil)
+	}
+	return binding, resolution, nil
+}
+
+// clusterSelection is the cluster-scoped reader binding (ADR 0006): a valid
+// context and generation are required; namespaces in the scope are not.
+func (handler *Resources) clusterSelection() (namespaces.SelectionBinding, namespaces.ScopeResolution, error) {
+	if handler == nil || handler.service == nil || handler.selection == nil {
+		return namespaces.SelectionBinding{}, namespaces.ScopeResolution{}, api.NewHTTPError(http.StatusServiceUnavailable, api.CodeFeatureUnavailable, "The resource API is unavailable.", nil, nil)
+	}
+	binding, resolution := handler.selection.Snapshot()
+	if binding.ClusterProfileID <= 0 || binding.Context == "" || binding.Generation == "" {
+		return binding, resolution, api.NewHTTPError(http.StatusConflict, api.CodeGenerationChanged, "No active Kubernetes context is available.", nil, nil)
 	}
 	return binding, resolution, nil
 }

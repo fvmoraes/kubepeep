@@ -23,6 +23,7 @@ func TestAllowlistExactlyMatchesDocumentedMVPIDs(t *testing.T) {
 		"endpoint-slices.list", "endpoint-slices.get", "endpoint-slices.watch",
 		"configmaps.list", "configmaps.get", "configmaps.watch",
 		"secrets.list", "secrets.get",
+		"nodes.list", "nodes.get",
 		"metrics.pods.list",
 	}
 	allowlist := Allowlist()
@@ -38,7 +39,7 @@ func TestAllowlistExactlyMatchesDocumentedMVPIDs(t *testing.T) {
 			t.Fatalf("duplicate capability ID %q", specification.ID)
 		}
 		seen[specification.ID] = struct{}{}
-		if specification.ResourceNamePolicy == ResourceNameEmpty && specification.Scope == ScopeCluster && specification.ID != "namespaces.list" {
+		if specification.ResourceNamePolicy == ResourceNameEmpty && specification.Scope == ScopeCluster && specification.ID != "namespaces.list" && specification.ID != "nodes.list" {
 			t.Fatalf("unexpected cluster capability: %+v", specification)
 		}
 	}

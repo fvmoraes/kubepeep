@@ -502,3 +502,46 @@ func TestSecretListUsesOnlyMetadataClientAndNeverTypedSecret(t *testing.T) {
 }
 
 func stringPointer(value string) *string { return &value }
+
+func TestListNodesIsClusterScopedWithoutNamespaceCounts(t *testing.T) {
+	client := kubefake.NewSimpleClientset(
+		&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "worker-1", CreationTimestamp: metav1.Now()}, Status: corev1.NodeStatus{Conditions: []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue}}, NodeInfo: corev1.NodeSystemInfo{KubeletVersion: "1.32.0"}}},
+	)
+	authorizer := &allowResourceAuthorization{}
+	backend := &ResourceBackend{clients: fixedResourceClientProvider{set: resourceClientSet{kubernetes: client}}, authorizer: authorizer, now: time.Now}
+	binding := namespaces.SelectionBinding{ClusterProfileID: 1, Context: "ctx", Generation: "gen"}
+	resolution := namespaces.ScopeResolution{ScopeSource: "none"}
+	result, err := backend.ListNodes(context.Background(), binding, resolution, resources.ListOptions{Limit: 10}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Items) != 1 || result.Items[0].Name != "worker-1" || !result.Items[0].Ready {
+		t.Fatalf("items=%#v", result.Items)
+	}
+	if result.Coverage.RequestedNamespaces != 0 || result.Coverage.CompletedNamespaces != 0 || len(result.Coverage.DeniedNamespaces) != 0 {
+		t.Fatalf("cluster coverage must not report namespace counts: %#v", result.Coverage)
+	}
+	for _, key := range authorizer.keys {
+		if key.Namespace != "" || key.Resource != "nodes" {
+			t.Fatalf("non-cluster authorization key=%#v", key)
+		}
+	}
+}
+
+func TestListNodesDeniedIsAuthoritativeNotEmpty(t *testing.T) {
+	client := kubefake.NewSimpleClientset()
+	authorizer := &selectiveResourceAuthorization{denied: map[string]authorization.Decision{"/nodes/list": authorization.DecisionDenied}}
+	backend := &ResourceBackend{clients: fixedResourceClientProvider{set: resourceClientSet{kubernetes: client}}, authorizer: authorizer, now: time.Now}
+	binding := namespaces.SelectionBinding{ClusterProfileID: 1, Context: "ctx", Generation: "gen"}
+	_, err := backend.ListNodes(context.Background(), binding, namespaces.ScopeResolution{}, resources.ListOptions{Limit: 10}, nil)
+	var domain *resources.DomainError
+	if !errors.As(err, &domain) || domain.Code != resources.CodeForbidden {
+		t.Fatalf("denied list error=%v", err)
+	}
+	unknown := &selectiveResourceAuthorization{denied: map[string]authorization.Decision{"/nodes/list": authorization.DecisionUnknown}}
+	backend = &ResourceBackend{clients: fixedResourceClientProvider{set: resourceClientSet{kubernetes: client}}, authorizer: unknown, now: time.Now}
+	_, err = backend.ListNodes(context.Background(), binding, namespaces.ScopeResolution{}, resources.ListOptions{Limit: 10}, nil)
+	if !errors.As(err, &domain) || domain.Code != resources.CodeAuthorizationUnavailable {
+		t.Fatalf("unknown list error=%v", err)
+	}
+}

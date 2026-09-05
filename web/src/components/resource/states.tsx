@@ -45,7 +45,10 @@ export function CollectionFooter<T>({ result, onNext, onRestart }: { result: Col
         </small>
         {coverage ? (
           <small className="block">
-            {coverage.completedNamespaces}/{coverage.requestedNamespaces} namespaces completed · {coverage.deniedNamespaces.length} denied · {coverage.failed.length} failed
+            {coverage.requestedNamespaces === 0
+              ? 'Cluster-scoped result'
+              : `${coverage.completedNamespaces}/${coverage.requestedNamespaces} namespaces completed · ${coverage.deniedNamespaces.length} denied`}
+            {coverage.failed.length ? ` · ${coverage.failed.length} failed` : ''}
           </small>
         ) : null}
       </div>

@@ -22,6 +22,8 @@ import type {
   IngressDetail,
   IngressResource,
   KubernetesContext,
+  NodeDetail,
+  NodeSummary,
   YAMLDiff,
   LogScanRequest,
   LogQuery,
@@ -504,6 +506,18 @@ export function getSecrets(options: ResourceListQuery = {}, signal?: AbortSignal
 
 export function getSecret(namespace: string, name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<SecretMetadata> {
   return resourceRequest<SecretMetadata>(`/api/v1/secrets/${resourcePath(namespace)}/${resourcePath(name)}`, signal, expectedGeneration)
+}
+
+export function getNodes(options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<NodeSummary>> {
+  return collectionRequest<NodeSummary>('/api/v1/nodes', options, signal, expectedGeneration)
+}
+
+export function getNode(name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<NodeDetail> {
+  return resourceRequest<NodeDetail>(`/api/v1/nodes/${resourcePath(name)}`, signal, expectedGeneration)
+}
+
+export function getNodeYAML(name: string, signal?: AbortSignal): Promise<string> {
+  return requestYAML(`/api/v1/nodes/${resourcePath(name)}/yaml`, signal)
 }
 
 export function getPreferences(signal?: AbortSignal): Promise<Preferences> {

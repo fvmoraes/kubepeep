@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -32,8 +33,9 @@ func (stub *resourceSelectionStub) IfCurrent(binding namespaces.SelectionBinding
 
 type resourceServiceStub struct {
 	ResourceService
-	podOptions resourcecore.ListOptions
-	calls      int
+	podOptions  resourcecore.ListOptions
+	nodeOptions resourcecore.ListOptions
+	calls       int
 }
 
 type resourceStreamServiceStub struct {
@@ -62,6 +64,14 @@ func (stub *resourceStreamServiceStub) FollowLogs(_ context.Context, binding nam
 		return resourcecore.FollowTerminal{}, err
 	}
 	return resourcecore.FollowTerminal{Reason: "upstream_eof", Generation: binding.Generation}, nil
+}
+
+func (stub *resourceServiceStub) ListNodes(_ context.Context, _ namespaces.SelectionBinding, _ namespaces.ScopeResolution, options resourcecore.ListOptions, _ *resourcecore.CompositeCursor[resourcecore.NodeDTO]) (resourcecore.ListResult[resourcecore.NodeDTO], error) {
+	return stub.listNodes(options)
+}
+
+func (stub *resourceServiceStub) GetNode(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, string) (resourcecore.NodeDetailDTO, error) {
+	return resourcecore.NodeDetailDTO{}, errors.New("node reader is unavailable in this stub")
 }
 
 func (stub *resourceServiceStub) ListPods(_ context.Context, _ namespaces.SelectionBinding, _ namespaces.ScopeResolution, options resourcecore.ListOptions, _ *resourcecore.CompositeCursor[resourcecore.PodDTO]) (resourcecore.ListResult[resourcecore.PodDTO], error) {
@@ -254,5 +264,89 @@ func TestResourceAllowedMethodsMergeReadAndDelete(t *testing.T) {
 	}
 	if allow, known = allowedMethods("/api/v1/secrets/default/name/yaml"); known || allow != "" {
 		t.Fatalf("secret YAML unexpectedly reserved: allow=%q known=%v", allow, known)
+	}
+}
+
+func (stub *resourceServiceStub) listNodes(options resourcecore.ListOptions) (resourcecore.ListResult[resourcecore.NodeDTO], error) {
+	stub.calls++
+	stub.nodeOptions = options
+	origin := resourcecore.Origin{Version: "v1", Resource: "nodes"}
+	cursor := resourcecore.NewCompositeCursor[resourcecore.NodeDTO]([]resourcecore.Origin{origin})
+	return resourcecore.ListResult[resourcecore.NodeDTO]{Items: []resourcecore.NodeDTO{{Name: "worker-1", Status: "Ready", Ready: true}}, Cursor: &cursor, Page: resourcecore.PageDTO{Limit: options.Limit, FilterScope: resourcecore.FilterScopePage}, Coverage: resourcecore.CoverageDTO{RequestedNamespaces: 0, CompletedNamespaces: 0, DeniedNamespaces: []string{}, Failed: []resourcecore.PartialErrorDTO{}}, CollectedAt: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)}, nil
+}
+
+func TestNodeListWorksWithoutNamespaceScope(t *testing.T) {
+	codec, err := api.NewCursorCodec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := &resourceServiceStub{}
+	// No scope resolution namespaces: cluster-scoped reads must still pass.
+	selection := &resourceSelectionStub{binding: namespaces.SelectionBinding{ClusterProfileID: 1, Context: "ctx", Generation: "gen"}, resolution: namespaces.ScopeResolution{ScopeSource: "none"}}
+	handler := NewResources(service, nil, selection, codec)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/nodes?limit=25", nil)
+	response := httptest.NewRecorder()
+	handler.Nodes(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	if service.nodeOptions.Limit != 25 {
+		t.Fatalf("options=%#v", service.nodeOptions)
+	}
+	if strings.Contains(response.Body.String(), `"requestedNamespaces":1`) {
+		t.Fatalf("cluster list must not report namespace fan-out: %s", response.Body.String())
+	}
+}
+
+func TestNodeListRejectsNamespaceFilterAndMissingContext(t *testing.T) {
+	codec, err := api.NewCursorCodec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := &resourceServiceStub{}
+	selection := &resourceSelectionStub{binding: namespaces.SelectionBinding{ClusterProfileID: 1, Context: "ctx", Generation: "gen"}, resolution: namespaces.ScopeResolution{ScopeSource: "none"}}
+	handler := NewResources(service, nil, selection, codec)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/nodes?namespace=default", nil)
+	response := httptest.NewRecorder()
+	handler.Nodes(response, request)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("namespace filter status=%d body=%s", response.Code, response.Body.String())
+	}
+	if service.calls != 0 {
+		t.Fatalf("service called=%d", service.calls)
+	}
+	empty := &resourceSelectionStub{binding: namespaces.SelectionBinding{}, resolution: namespaces.ScopeResolution{}}
+	handler = NewResources(service, nil, empty, codec)
+	noContext := httptest.NewRequest(http.MethodGet, "/api/v1/nodes", nil)
+	noContextResponse := httptest.NewRecorder()
+	handler.Nodes(noContextResponse, noContext)
+	if noContextResponse.Code != http.StatusConflict {
+		t.Fatalf("no-context status=%d body=%s", noContextResponse.Code, noContextResponse.Body.String())
+	}
+}
+
+func TestNodeDetailAndYAMLRequireOnlyContext(t *testing.T) {
+	service := &resourceServiceStub{}
+	selection := &resourceSelectionStub{binding: namespaces.SelectionBinding{ClusterProfileID: 1, Context: "ctx", Generation: "gen"}, resolution: namespaces.ScopeResolution{ScopeSource: "none"}}
+	handler := NewResources(service, nil, selection, nil)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/nodes/worker-1", nil)
+	request.SetPathValue("name", "worker-1")
+	response := httptest.NewRecorder()
+	handler.NodeDetail(response, request)
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("detail without service reader status=%d", response.Code)
+	}
+	invalid := httptest.NewRequest(http.MethodGet, "/api/v1/nodes/Bad_Name", nil)
+	invalid.SetPathValue("name", "Bad_Name")
+	invalidResponse := httptest.NewRecorder()
+	handler.NodeDetail(invalidResponse, invalid)
+	if invalidResponse.Code != http.StatusBadRequest {
+		t.Fatalf("invalid name status=%d", invalidResponse.Code)
+	}
+	if allow, known := allowedMethods("/api/v1/nodes/worker-1/yaml"); !known || allow != "GET, HEAD" {
+		t.Fatalf("nodes yaml allow=%q known=%v", allow, known)
+	}
+	if allow, known := allowedMethods("/api/v1/nodes"); !known || allow != "GET, HEAD" {
+		t.Fatalf("nodes allow=%q known=%v", allow, known)
 	}
 }

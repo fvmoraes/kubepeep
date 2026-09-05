@@ -128,6 +128,7 @@ describe('application shell', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Open command center' }))
     expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual([
       expect.stringContaining('Overview'),
+      expect.stringContaining('Nodes'),
       expect.stringContaining('Events'),
       expect.stringContaining('Namespaces'),
       expect.stringContaining('Workloads'),

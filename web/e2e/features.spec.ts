@@ -20,6 +20,8 @@ function statusPayload() {
 
 const pod = { namespace: 'payments', name: 'api-abc', status: 'Running', ready: { current: 1, desired: 1 }, restarts: 0, node: 'worker-1', ip: '10.0.0.8', owner: { kind: 'Deployment', name: 'api' }, ageSeconds: 60, problematic: false }
 
+const node = { name: 'worker-1', status: 'Ready', ready: true, roles: ['control-plane'], kubeletVersion: '1.32.0', internalIP: '192.168.8.10', ageSeconds: 86400 }
+
 let preferences = {
   version: 1 as const,
   ui: { language: 'en' as const },
@@ -90,6 +92,16 @@ test.beforeEach(async ({ context }) => {
       }
     } else if (url.pathname === '/api/v1/resources/deployments/payments/api/yaml-diff') {
       data = { absent: true, truncated: false, lines: [] }
+    } else if (url.pathname === '/api/v1/nodes' && url.searchParams.has('limit')) {
+      data = [node]
+      responseMeta = { generation, page: { limit: 100, next: '', complete: true, truncated: false, filterScope: 'page' }, coverage: { requestedNamespaces: 0, completedNamespaces: 0, deniedNamespaces: [], failed: [] } }
+    } else if (url.pathname === '/api/v1/nodes/worker-1') {
+      data = {
+        metadata: { namespace: '', name: 'worker-1', uid: 'uid-node', resourceVersion: '42', creationTimestamp: '2026-06-01T10:00:00Z', labels: {} },
+        status: 'Ready', ready: true, roles: ['control-plane'], kubeletVersion: '1.32.0', internalIP: '192.168.8.10',
+        conditions: [{ type: 'Ready', status: 'True', reason: 'KubeletReady', message: 'kubelet is posting ready status', lastTransitionTime: '2026-06-01T10:05:00Z' }],
+        capacity: { cpu: '8', memory: '16Gi' }, allocatable: { cpu: '8', memory: '16Gi' }, taints: [], truncated: false,
+      }
     }
     await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data, meta: responseMeta }) })
   })
@@ -199,4 +211,26 @@ test('bulk namespace paste previews counts and saves one scope without cluster d
   // The mocked session already carries scopeId 1, so the saved scope renders as active.
   await expect(page.getByRole('button', { name: /Edit Batch fleet/i })).toBeVisible()
   await expect(page.getByText('active', { exact: true })).toBeVisible()
+})
+
+test('nodes lists and details without namespace scope and honors authorization (R02/V1)', async ({ page }) => {
+  await page.goto('/nodes')
+  await expect(page.getByRole('heading', { name: 'Nodes' })).toBeVisible()
+  await expect(page.getByRole('cell', { name: /worker-1/ })).toBeVisible()
+  await expect(page.getByText('Cluster-scoped result')).toBeVisible()
+
+  await page.getByRole('button', { name: /Open Node worker-1/i }).click()
+  await expect(page).toHaveURL(/\/nodes\/worker-1$/)
+  await expect(page.getByRole('dialog')).toBeVisible()
+  await expect(page.getByText('control-plane').first()).toBeVisible()
+  await expect(page.getByText('Kubelet', { exact: true })).toBeVisible()
+  await expect(page.getByText('1.32.0').first()).toBeVisible()
+  await expect(page.getByText('Condition', { exact: true })).toBeVisible()
+})
+
+test('nodes route is reachable from the sidebar navigation tree (V1-08)', async ({ page }) => {
+  await page.goto('/')
+  await page.getByRole('link', { name: 'Nodes' }).click()
+  await expect(page).toHaveURL(/\/nodes$/)
+  await expect(page.getByRole('heading', { name: 'Nodes' })).toBeVisible()
 })

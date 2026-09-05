@@ -11,7 +11,7 @@ import { DashboardPage } from './components/Dashboard'
 import { NamespaceScopeEditor } from './components/NamespaceScopeEditor'
 import { PermissionsMatrixPage } from './components/PermissionsMatrix'
 import { LogsPage } from './components/LogsPage'
-import { ConfigPage, EventsPage, NetworkPage, PodsPage, WorkloadsPage } from './components/ResourcePages'
+import { ConfigPage, EventsPage, NetworkPage, NodesPage, PodsPage, WorkloadsPage } from './components/ResourcePages'
 import { SettingsPage } from './components/SettingsPage'
 import { Sidebar } from './components/Sidebar'
 import { StatePanel } from './components/StatePanel'
@@ -45,7 +45,10 @@ const commandRoutes: CommandRoute[] = [
 const maximumCommandResources = 200
 
 function resourceEntryPath(collection: unknown, item: { name?: string; namespace?: string; kind?: string }): string | null {
-  if (typeof collection !== 'string' || !item.name || !item.namespace) return null
+  if (typeof collection !== 'string' || !item.name) return null
+  // Cluster-scoped entries (ADR 0006) resolve by name only; no fake namespace.
+  if (collection === 'nodes') return `/nodes/${encodeURIComponent(item.name)}`
+  if (!item.namespace) return null
   const namespace = encodeURIComponent(item.namespace)
   const name = encodeURIComponent(item.name)
   switch (collection) {
@@ -135,7 +138,7 @@ function commandResourceEntries(queryClient: ReturnType<typeof useQueryClient>, 
       entries.push({
         path,
         label: item.name ?? '',
-        description: `${item.kind ?? collection} · ${item.namespace ?? ''}`,
+        description: `${item.kind ?? collection} · ${item.namespace ?? 'cluster'}`,
         keywords: resourceEntryKeywords(collection, item),
       })
       if (entries.length >= maximumCommandResources) return entries
@@ -262,6 +265,8 @@ export function App() {
       <Route element={<Shell />}>
         <Route index element={<DashboardPage />} />
         <Route path="events" element={<EventsPage />} />
+        <Route path="nodes" element={<NodesPage />} />
+        <Route path="nodes/:name" element={<NodesPage />} />
         <Route path="namespaces" element={<NamespaceScopeEditor />} />
         <Route path="permissions" element={<PermissionsMatrixPage />} />
         <Route path="logs" element={<LogsPage />} />

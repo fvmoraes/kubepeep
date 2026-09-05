@@ -606,6 +606,36 @@ export interface SecretMetadata {
   }
 }
 
+export interface NodeSummary {
+  name: string
+  status: string
+  ready: boolean
+  roles: string[]
+  kubeletVersion: string
+  internalIP: string | null
+  ageSeconds: number
+}
+
+export interface NodeTaint {
+  key: string
+  value: string
+  effect: string
+}
+
+export interface NodeDetail {
+  metadata: ResourceMetadata
+  status: string
+  ready: boolean
+  roles: string[]
+  kubeletVersion: string
+  internalIP: string | null
+  conditions: Condition[]
+  capacity: Record<string, string> | null
+  allocatable: Record<string, string> | null
+  taints: NodeTaint[]
+  truncated: boolean
+}
+
 export interface LogLine {
   timestamp: string | null
   text: string

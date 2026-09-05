@@ -16,6 +16,9 @@ import {
   getIngress,
   getIngresses,
   getIngressYAML,
+  getNode,
+  getNodes,
+  getNodeYAML,
   getPod,
   getPods,
   getPodYAML,
@@ -39,6 +42,7 @@ import type {
   EndpointSliceResource,
   IngressDetail,
   IngressResource,
+  NodeSummary,
   Pod,
   SecretMetadata,
   SelectionSummary,
@@ -876,6 +880,139 @@ export function ConfigPage() {
           </QueryState>
         </SelectionGate>
       </div>
+    </ResourcePage>
+  )
+}
+
+interface NodeListState {
+  search: string
+  nodeStatus: string
+  sort: string
+  order: ListSortOrder
+}
+
+const nodeStatuses = ['Ready', 'NotReady', 'Unknown'] as const
+const defaultNodeList: NodeListState = { search: '', nodeStatus: '', sort: 'identity', order: 'asc' }
+const nodeSortOptions: readonly ListSortOption[] = [
+  { value: 'identity', label: 'Name' },
+  { value: 'name', label: 'Name (natural)' },
+  { value: 'age', label: 'Age' },
+  { value: 'status', label: 'Status' },
+]
+
+function nodeStateFromParams(params: URLSearchParams): NodeListState {
+  return {
+    ...defaultNodeList,
+    search: paramValue(params, 'search'),
+    nodeStatus: listedValue(paramValue(params, 'status'), nodeStatuses),
+  }
+}
+
+// NodesPage is the cluster-scoped reference family (F1/ADR 0006): a selected
+// context is enough; no namespace scope and no namespace filter exist here.
+export function NodesPage() {
+  const { status, selection } = useActiveSelection()
+  const { name } = useParams<{ name: string }>()
+  const navigate = useNavigate()
+  const [params] = useSearchParams()
+  const [draft, setDraft] = useState<NodeListState>(() => nodeStateFromParams(params))
+  const [applied, setApplied] = useState<NodeListState>(() => nodeStateFromParams(params))
+  const [cursor, setCursor] = useGenerationCursor(selection?.generation)
+  const [selected, setSelected] = useState<GenerationSelection<NodeSummary> | null>(null)
+  const queryClient = useQueryClient()
+  const requests = useGenerationRequests(selection?.generation)
+  const paramItem = useMemo(() => (name ? { name, status: 'Unknown', ready: false, roles: [], kubeletVersion: '', internalIP: null, ageSeconds: 0 } : null), [name])
+  const activeSelected = useMemo(() => {
+    if (paramItem) return paramItem
+    if (selected && selected.generation === selection?.generation) return selected.item
+    return null
+  }, [paramItem, selected, selection?.generation])
+  const list = useQuery({
+    queryKey: ['resources', 'nodes', selection?.generation, applied, cursor],
+    queryFn: ({ signal }) => getNodes({ limit: 100, search: applied.search || undefined, statuses: applied.nodeStatus ? [applied.nodeStatus] : undefined, ...optionalSort(applied.sort, applied.order, 'identity', 'asc'), continueToken: cursor || undefined }, signal, selection?.generation),
+    enabled: Boolean(selection),
+  })
+  const detail = useQuery({
+    queryKey: ['resources', 'node-detail', selection?.generation, activeSelected?.name],
+    queryFn: ({ signal }) => getNode(activeSelected!.name, signal, selection!.generation),
+    enabled: Boolean(selection && activeSelected),
+  })
+  const yaml = useMutation({ mutationFn: (value: NodeSummary) => requests.run((signal) => getNodeYAML(value.name, signal)) })
+
+  function closeDetail() {
+    requests.abortAll()
+    yaml.reset()
+    setSelected(null)
+    navigate('/nodes')
+  }
+
+  return (
+    <ResourcePage
+      title="Nodes"
+      description="Cluster nodes with readiness, roles, capacity and taints; a selected context is enough and no namespace filter applies."
+    >
+      <ResourceListControls search={draft.search} appliedSearch={applied.search} onSearchChange={(value) => setDraft((current) => ({ ...current, search: value }))} onApply={() => { setApplied(draft); setCursor(''); closeDetail() }} onRefresh={() => queryClient.invalidateQueries({ queryKey: ['resources', 'nodes'] })} onClear={() => { setDraft({ ...defaultNodeList }); setApplied({ ...defaultNodeList }); setCursor(''); closeDetail() }} activeFilters={[
+        ...activeFilter('status', 'Status', applied.nodeStatus),
+      ]} sort={draft.sort} order={draft.order} appliedSort={applied.sort} appliedOrder={applied.order} defaultSort="identity" defaultOrder="asc" hasPendingChanges={!sameListState(draft, applied)} sortOptions={nodeSortOptions} onSortChange={(value) => setDraft((current) => ({ ...current, sort: value }))} onOrderChange={(value) => setDraft((current) => ({ ...current, order: value }))}>
+        <label>Status<Select value={draft.nodeStatus} onChange={(event) => setDraft((current) => ({ ...current, nodeStatus: event.target.value }))}><option value="">All statuses</option>{nodeStatuses.map((value) => <option key={value}>{value}</option>)}</Select></label>
+      </ResourceListControls>
+      <SelectionGate pending={status.isPending} error={status.error} selected={Boolean(selection)}>
+        <QueryState pending={list.isPending} error={list.error} empty={list.data?.items.length === 0}>
+          <div className="grid min-w-0 items-start gap-4 lg:grid-cols-[minmax(0,1.6fr)_minmax(320px,0.85fr)]">
+            <div className="min-w-0 overflow-x-auto border border-kp-overlay-0 rounded-xl bg-kp-surface-0">
+              <DataTable
+                caption="Authorized node page"
+                rows={list.data?.items ?? []}
+                getRowKey={(item) => item.name}
+                columns={[
+                  { key: 'name', header: 'Node', cell: (item) => <TableLink aria-label={`Open Node ${item.name}`} onClick={() => { requests.abortAll(); setSelected({ generation: selection!.generation, item }); yaml.reset(); navigate(`/nodes/${encodeURIComponent(item.name)}`) }} primary={item.name} secondary={item.roles.join(', ') || 'no role'} /> },
+                  { key: 'status', header: 'Status', cell: (item) => <StatusBadge variant={statusBadgeVariant(item.status)}>{item.status}</StatusBadge> },
+                  { key: 'version', header: 'Version', cell: (item) => item.kubeletVersion || '—' },
+                  { key: 'internal-ip', header: 'Internal IP', cell: (item) => item.internalIP ?? '—' },
+                  { key: 'age', header: 'Age', cell: (item) => age(item.ageSeconds) },
+                ]}
+              />
+              {list.data ? <CollectionFooter result={list.data} onNext={(next) => { setCursor(next); closeDetail() }} onRestart={() => { setCursor(''); closeDetail() }} /> : null}
+            </div>
+            <Drawer open={Boolean(activeSelected)} onClose={closeDetail} title={detailTitle(activeSelected ? `Node ${activeSelected.name}` : 'Resource detail')}>
+              {activeSelected ? <>
+                {detail.isPending ? <p className="text-sm text-kp-overlay-text" role="status">Loading detail…</p> : detail.isError ? <p className="text-sm text-kp-red" role="alert">{errorMessage(detail.error)}</p> : detail.data ? <>
+                  <Facts facts={[
+                    { label: 'Status', value: detail.data.status },
+                    { label: 'Roles', value: detail.data.roles.join(', ') || 'none' },
+                    { label: 'Kubelet', value: detail.data.kubeletVersion || 'unknown' },
+                    { label: 'Internal IP', value: detail.data.internalIP ?? '—' },
+                    { label: 'UID', value: detail.data.metadata.uid },
+                    { label: 'Taints', value: detail.data.taints.map((taint) => `${taint.key}=${taint.value}:${taint.effect}`).join(', ') || 'none' },
+                  ]} />
+                  {detail.data.conditions.length ? (
+                    <div className="mt-3 overflow-x-auto rounded-lg border border-kp-overlay-0">
+                      <table className="w-full border-collapse text-left text-sm">
+                        <thead><tr className="border-b border-kp-overlay-0 text-2xs uppercase tracking-wider text-kp-overlay-text"><th className="px-2.5 py-1.5 font-medium">Condition</th><th className="px-2.5 py-1.5 font-medium">Status</th><th className="px-2.5 py-1.5 font-medium">Since</th></tr></thead>
+                        <tbody>
+                          {detail.data.conditions.map((condition) => (
+                            <tr key={condition.type} className="border-b border-kp-overlay-0/50 last:border-0">
+                              <td className="px-2.5 py-1.5 text-kp-text">{condition.type}</td>
+                              <td className="px-2.5 py-1.5"><StatusBadge variant={statusBadgeVariant(condition.status === 'True' ? 'Healthy' : condition.status === 'False' ? 'Degraded' : 'Unknown')}>{condition.status}</StatusBadge></td>
+                              <td className="px-2.5 py-1.5 text-kp-subtext">{dateTime(condition.lastTransitionTime)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : null}
+                  {detail.data.capacity ? (
+                    <p className="mt-3 text-xs text-kp-overlay-text">
+                      Capacity: {Object.entries(detail.data.capacity).slice(0, 4).map(([key, value]) => `${key} ${value}`).join(' · ')}
+                    </p>
+                  ) : null}
+                </> : null}
+                <YamlViewer value={yaml.data} pending={yaml.isPending} error={yaml.error} onLoad={() => yaml.mutate(activeSelected)} />
+              </> : null}
+            </Drawer>
+          </div>
+        </QueryState>
+      </SelectionGate>
     </ResourcePage>
   )
 }

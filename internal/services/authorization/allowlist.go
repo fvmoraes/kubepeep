@@ -72,6 +72,8 @@ var capabilityAllowlist = [...]CapabilitySpec{
 	{ID: "configmaps.watch", Resource: "configmaps", Verb: "watch", Scope: ScopeNamespace, ResourceNamePolicy: ResourceNameEmpty},
 	{ID: "secrets.list", Resource: "secrets", Verb: "list", Scope: ScopeNamespace, ResourceNamePolicy: ResourceNameEmpty},
 	{ID: "secrets.get", Resource: "secrets", Verb: "get", Scope: ScopeNamespace, ResourceNamePolicy: ResourceNameTarget},
+	{ID: "nodes.list", Resource: "nodes", Verb: "list", Scope: ScopeCluster, ResourceNamePolicy: ResourceNameEmpty},
+	{ID: "nodes.get", Resource: "nodes", Verb: "get", Scope: ScopeCluster, ResourceNamePolicy: ResourceNameTarget},
 	{ID: "metrics.pods.list", APIGroup: "metrics.k8s.io", Resource: "pods", Verb: "list", Scope: ScopeNamespace, ResourceNamePolicy: ResourceNameEmpty},
 }
 

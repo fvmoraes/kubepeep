@@ -54,6 +54,7 @@ var rulesByCollection = map[Collection]collectionRules{
 	CollectionEndpointSlices: {sorts: []string{"identity", "name", "addressType"}, defaultSort: "identity", defaultOrder: OrderAscending},
 	CollectionConfigMaps:     {sorts: []string{"identity", "name", "createdAt"}, defaultSort: "identity", defaultOrder: OrderAscending},
 	CollectionSecrets:        {sorts: []string{"identity", "name", "createdAt"}, defaultSort: "identity", defaultOrder: OrderAscending},
+	CollectionNodes:          {sorts: []string{"identity", "name", "age", "status"}, defaultSort: "identity", defaultOrder: OrderAscending},
 }
 
 // NormalizeListOptions applies all bounded, endpoint-specific defaults and
@@ -77,6 +78,9 @@ func NormalizeListOptions(collection Collection, options ListOptions) (ListOptio
 		return ListOptions{}, validationError("search must be valid UTF-8 up to 256 bytes")
 	}
 	options.SearchQuery = ParseSearch(options.Search)
+	if isClusterScoped(collection) && len(options.Namespaces) > 0 {
+		return ListOptions{}, validationError("namespace is not supported by this cluster-scoped collection")
+	}
 	var err error
 	options.Namespaces, err = canonicalStrings(options.Namespaces, MaximumNamespaces, nil, "namespace")
 	if err != nil {

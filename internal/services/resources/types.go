@@ -22,6 +22,7 @@ const (
 	CollectionEndpointSlices Collection = "endpoint-slices"
 	CollectionConfigMaps     Collection = "configmaps"
 	CollectionSecrets        Collection = "secrets"
+	CollectionNodes          Collection = "nodes"
 )
 
 type WorkloadKind string

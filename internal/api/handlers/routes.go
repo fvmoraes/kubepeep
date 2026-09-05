@@ -107,6 +107,9 @@ func Register(applicationRouter *router.Router, dependencies Dependencies) {
 		apiRouter.GET("/resources/{collection}/{namespace}/{name}/yaml-diff", resourceHandler.ResourceYAMLDiff)
 		apiRouter.GET("/secrets", resourceHandler.Secrets)
 		apiRouter.GET("/secrets/{namespace}/{name}", resourceHandler.SecretDetail)
+		apiRouter.GET("/nodes", resourceHandler.Nodes)
+		apiRouter.GET("/nodes/{name}", resourceHandler.NodeDetail)
+		apiRouter.GET("/nodes/{name}/yaml", resourceHandler.NodeYAML)
 	}
 	if dependencies.Preferences != nil {
 		preferenceHandler := NewResources(nil, dependencies.Preferences, dependencies.Selection, dependencies.Cursors)
@@ -166,7 +169,8 @@ func allowedMethods(path string) (string, bool) {
 		apiPrefix + "/dashboard/restarts", apiPrefix + "/dashboard/events", apiPrefix + "/metrics",
 		apiPrefix + "/port-forwards", apiPrefix + "/workloads", apiPrefix + "/pods",
 		apiPrefix + "/events", apiPrefix + "/services", apiPrefix + "/ingresses",
-		apiPrefix + "/endpoint-slices", apiPrefix + "/configmaps", apiPrefix + "/secrets":
+		apiPrefix + "/endpoint-slices", apiPrefix + "/configmaps", apiPrefix + "/secrets",
+		apiPrefix + "/nodes":
 		return "GET, HEAD", true
 	case apiPrefix + "/preferences":
 		return "GET, HEAD, PUT", true
@@ -225,6 +229,10 @@ func resourceAllowedMethods(path string) (string, bool) {
 	case len(parts) == 3 && (parts[0] == "services" || parts[0] == "ingresses" || parts[0] == "endpoint-slices" || parts[0] == "configmaps" || parts[0] == "secrets"):
 		return "GET, HEAD", true
 	case len(parts) == 4 && parts[3] == "yaml" && (parts[0] == "services" || parts[0] == "ingresses" || parts[0] == "endpoint-slices" || parts[0] == "configmaps"):
+		return "GET, HEAD", true
+	case len(parts) == 2 && parts[0] == "nodes":
+		return "GET, HEAD", true
+	case len(parts) == 3 && parts[0] == "nodes" && parts[2] == "yaml":
 		return "GET, HEAD", true
 	default:
 		return "", false
