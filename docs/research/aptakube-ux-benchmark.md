@@ -112,7 +112,8 @@ separada e mais restrita; não é consequência automática de visualizar YAML.
 
 ## 6. Evidência obrigatória
 
-Cada requisito da [matriz UX](../../plan/matriz-aceite-ux.md) precisa registrar:
+Cada requisito da matriz UX (histórico Git, `plan/matriz-aceite-ux.md` no
+commit `5ac7320^`) precisa registrar:
 
 - fonte oficial e decisão de adaptação;
 - superfície de UI e contrato de API usado;

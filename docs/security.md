@@ -4,7 +4,7 @@
 >
 > **Escopo:** processo local, browser, kubeconfig, Kubernetes, SQLite, logs, streams e distribuição.
 >
-> **Princípio:** o Kube Peep representa e revalida autorização Kubernetes; não cria autorização própria.
+> **Princípio:** o KubePeep representa e revalida autorização Kubernetes; não cria autorização própria.
 
 ## 1. Objetivos de segurança
 
@@ -52,7 +52,7 @@ deve ser copiado para issue, commit, log ou relatório de auditoria.
 
 - O dispositivo e a conta local do usuário não são considerados comprometidos.
 - O kubeconfig já existe e é responsabilidade do usuário.
-- Plugins `exec` referenciados pelo kubeconfig podem ser necessários; o Kube Peep não os instala.
+- Plugins `exec` referenciados pelo kubeconfig podem ser necessários; o KubePeep não os instala.
 - A API Kubernetes e seus authorizers são a autoridade.
 - Loopback reduz exposição de rede, mas não impede DNS rebinding, CSRF ou abuso por outro processo local.
 - Redaction reduz risco, mas não transforma logs de aplicações em dados confiáveis.
@@ -106,7 +106,7 @@ Cada seta exige validação e sanitização nos dois sentidos pertinentes.
 
 | Classe | Exemplos | Memória | SQLite | Log local | Resposta HTTP |
 | --- | --- | --- | --- | --- | --- |
-| Pública | versão do Kube Peep, nomes de campos | sim | opcional | sim | sim |
+| Pública | versão do KubePeep, nomes de campos | sim | opcional | sim | sim |
 | Operacional allowlisted | nome de contexto, paths de kubeconfig, nome de escopo, preferências | sim | sim | somente quando necessário | sim |
 | Cluster não sensível | nomes/status de recursos autorizados | sim, com limite | não | somente identificadores allowlisted | sim, `no-store` |
 | Sensível transitória | logs, YAML permitido, saída de `exec` | sim, pelo menor tempo | nunca | nunca como payload | sim, `no-store` |
@@ -650,7 +650,7 @@ Evidências ainda exigidas da implementação:
 A Fase 9 introduz superfícies que aceleram navegação e troubleshooting, mas
 não altera as fronteiras de confiança. O benchmark funcional está documentado
 em [research/aptakube-ux-benchmark.md](research/aptakube-ux-benchmark.md); a
-implementação e a identidade continuam sendo próprias do Kube Peep.
+implementação e a identidade continuam sendo próprias do KubePeep.
 
 ### 20.1 Paleta, busca, favoritos e recentes
 
@@ -711,7 +711,7 @@ implementação e a identidade continuam sendo próprias do Kube Peep.
 - Toda mutação exige um único alvo/origem explícito e reautorização imediata;
   não há restart/scale/delete/exec/port-forward em massa implícito.
 - Kubeconfigs continuam somente leitura e clusters não precisam se conectar
-  entre si nem receber componente do Kube Peep.
+  entre si nem receber componente do KubePeep.
 
 ### 20.5 Port-forward e conexão
 

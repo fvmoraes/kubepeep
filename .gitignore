@@ -57,7 +57,4 @@ coverage/
 *opencode.json
 # dwyt end
 .codebase-memory/
-AGENTS.md
-AGENTS.md
-skills-lock.json
-AGENTS.md
+/test-results/

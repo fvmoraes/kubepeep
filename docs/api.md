@@ -6,7 +6,7 @@
 >
 > **Versão:** `/api/v1`
 >
-> **Importante:** o envelope público é um requisito do Kube Peep.
+> **Importante:** o envelope público é um requisito do KubePeep.
 > `pkg/response` será reutilizado nos casos comuns; cursores, agregações
 > parciais, health e streams usam DTOs próprios compatíveis com este contrato.
 
@@ -382,7 +382,7 @@ HTTP:
 
 O mux externo dá precedência a este handler sobre o `/health` registrado por
 `app.New`. `pkg/health.Checker` permanece como contrato dos checks; deadline,
-sanitização e semântica de dependência degradada pertencem ao Kube Peep,
+sanitização e semântica de dependência degradada pertencem ao KubePeep,
 conforme ADR 0002. Tanto `/health` quanto `/api/v1/status` retornam
 `Cache-Control: no-store`.
 
@@ -1853,7 +1853,7 @@ Regras:
 - troca de geração encerra com razão segura.
 
 O transporte browser-backend usa `github.com/coder/websocket v1.8.15`, que
-implementa masking e fragmentação; o Kube Peep impõe os tipos, limites,
+implementa masking e fragmentação; o KubePeep impõe os tipos, limites,
 heartbeat, backpressure e encerramento descritos no ADR 0003. `pkg/ws` do
 Ginger não é usado no caminho de `exec`.
 

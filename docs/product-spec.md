@@ -2,23 +2,23 @@
 
 > **Status:** revisado com as evidências/ADRs da Fase 1 e com os requisitos de experiência operacional da Fase 9
 >
-> **Fontes:** [prompt inicial](../plan/initial_prompt.md), [plano geral](../plan/README.md), [Fase 2](../plan/02-especificacao.md), [matriz do MVP](../plan/matriz-aceite-mvp.md), [benchmark Aptakube](research/aptakube-ux-benchmark.md) e [matriz UX](../plan/matriz-aceite-ux.md).
+> **Fontes:** [benchmark Aptakube](research/aptakube-ux-benchmark.md), ADRs em [decisions/](decisions/) e especificação de UI/UX em [../plan/reference/](../plan/reference/). Plano original (prompt inicial, fases 1–9, matrizes MVP/UX) no histórico Git (`plan/` arquivado no commit `5ac7320^`).
 
 ## 1. Propósito
 
-O Kube Peep é uma interface web local, compacta e orientada a problemas para pessoas desenvolvedoras que usam Kubernetes com permissões restritas. O produto deve reduzir o tempo entre “há algo errado” e “sei qual recurso investigar”, sem representar capacidades que a identidade atual não possui.
+O KubePeep é uma interface web local, compacta e orientada a problemas para pessoas desenvolvedoras que usam Kubernetes com permissões restritas. O produto deve reduzir o tempo entre “há algo errado” e “sei qual recurso investigar”, sem representar capacidades que a identidade atual não possui.
 
 Princípio invariável:
 
 > Mostrar somente o que o usuário pode acessar e habilitar somente o que ele pode executar.
 
-O Kube Peep complementa `kubectl` e ferramentas administrativas. Ele não tenta substituir uma console de administração de clusters.
+O KubePeep complementa `kubectl` e ferramentas administrativas. Ele não tenta substituir uma console de administração de clusters.
 
 ### 1.1 Convenção de nomes
 
 | Uso | Forma canônica |
 | --- | --- |
-| Produto e textos de marca | **Kube Peep** |
+| Produto e textos de marca | **KubePeep** |
 | Executável e comando | `kubePeep` |
 | Diretório Unix | `~/.kubePeep/` |
 | Diretório Windows | `%LOCALAPPDATA%\kubePeep\` |
@@ -111,7 +111,7 @@ Uma pessoa administradora buscando governança global, edição arbitrária de r
 ### 4.3 Objetivos da experiência operacional
 
 A Fase 9 acrescenta conveniências inspiradas em comportamentos documentados
-oficialmente pelo Aptakube, sem copiar identidade ou transformar o Kube Peep em
+oficialmente pelo Aptakube, sem copiar identidade ou transformar o KubePeep em
 uma console administrativa:
 
 - navegar por paleta, atalhos e teclado, sem disparar mutações pela paleta;
@@ -131,8 +131,8 @@ uma console administrativa:
 
 Esses objetivos não retiram nenhum não objetivo do MVP: edição/aplicação
 genérica de YAML, mutação em massa e expansão de Secret continuam fora do gate.
-O catálogo completo e a ordem de implementação estão na
-[Fase 9](../plan/09-experiencia-operacional.md).
+O catálogo completo e a ordem de implementação estão no plano histórico
+(Fase 9) e na execução atual em [../plan/](../plan/README.md).
 
 ## 5. Fronteira funcional do MVP
 
@@ -342,7 +342,7 @@ uma opção separada (`--purge-data`/`-PurgeData`) com segunda confirmação que
 exibe o path canônico; modo não interativo exige também confirmação explícita.
 Antes de apagar, o script prova que a instância não mantém o lock, resolve o
 root exato por plataforma e recusa symlink/reparse/path amplo. Nunca remove
-kubeconfig ou arquivo externo ao root do Kube Peep.
+kubeconfig ou arquivo externo ao root do KubePeep.
 
 ## 8. Estados de interface
 
@@ -477,8 +477,8 @@ Os testes futuros e seus níveis estão detalhados em [implementation-plan.md](i
 | Multi-contexto | agregação é somente leitura, com origem/autorização/falha isoladas | UX-M12–13 |
 | Estados e privacidade | degradação é honesta e nenhuma facilidade publica/persiste dado proibido | UX-M14–15 |
 
-A [matriz UX](../plan/matriz-aceite-ux.md) é a autoridade para evidência e
-mantém os requisitos futuros separados do gate atual.
+A matriz UX (histórico Git) é a autoridade para evidência e mantém os
+requisitos futuros separados do gate atual.
 
 ## 13. Decisões incorporadas da Fase 1
 

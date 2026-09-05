@@ -1,89 +1,48 @@
-# Plano de Melhorias — Revisão Completa do KubePeep
+# Plano KubePeep v1 — Design System, Recursos Kubernetes e Experiência Operacional
 
-> **Status:** revisão técnica, funcional e visual concluída em 2026-08-31.
-> **Base:** HEAD `c7e291d` (`feat: desktop support and security hardening`).
-> **Objetivo:** transformar os achados da revisão em um plano executável de melhorias, preservando a identidade minimalista do KubePeep e aproximando a experiência de referência do Aptakube sem copiá-la.
->
-> **Execução (2026-09-01):** Fases 0–6 concluídas e publicadas no `main`.
-> Commits: F0 `deb4d02` · F1 `41a2adf`+`6681f70` · F2 `17e53fe` · F3 `6e142bd` · F4 `e010dcb` · F5 `f8dd8a6` · F6 `02d008e`.
-> **Follow-ups (2026-09-01):** F4-02 `c0ab25b` · Observabilidade `86b285f` · G-09 `968ff1e` · G-08 via harness ✅ · F7-01 `3b10615` · F7-04 `07de7e7` · F7-05 `e77258b` · F7-02 `df3be10` · Consolidação E2E/docs `3fb08cb`.
-> **G-10 fechado:** build desktop via contêiner (`docs/desktop-build.md`) + RC artifacts (`dist/RC-checksums.txt`).
-> Restante: apenas F7-03 (multi-contexto, backlog XL permanente).
+> **Estado:** UI/UX, Design System, shell de navegação e resource framework **entregues** (`5ac7320`, 2026-09-04).
+> **Objetivo da v1:** expandir os recursos Kubernetes suportados (backend + páginas), fechar a experiência operacional (Fase 9) e cortar a release 1.0.0.
+> **Base:** [reference/KubePeep_UI_UX_Design_System_e_Recursos_Kubernetes.md](reference/KubePeep_UI_UX_Design_System_e_Recursos_Kubernetes.md) — especificação original da reorganização.
+> **Histórico:** o plano de desenvolvimento original (`01-descoberta`…`09-experiencia-operacional`) e a revisão de 2026-08 (`00-current-state`…`10-acceptance-checklist`) permanecem no histórico Git (commit `5ac7320^`); foram arquivados por estarem ≥99% executados.
 
-## 1. Propósito deste plano
+## Regras de execução (inegociáveis)
 
-Este diretório contém o resultado de uma revisão profunda do KubePeep, cobrindo:
+1. **Apenas commit; nunca push.** O push é sempre decisão explícita do usuário.
+2. Antes de **todo** commit: `scripts/security_check.sh HEAD` (gitleaks, identidades noreply, paths, mensagens).
+3. Nenhum dado sensível no repositório: kubeconfig, credenciais, tokens, chaves, conteúdo de Secret, logs de aplicação, paths de máquina, resultados crus de teste.
+4. Funcionalidades existentes não podem regredir: `make verify` (ou os alvos equivalentes) verde antes de cada commit de fase.
+5. Novo recurso Kubernetes = backend (adapter → service → handler → capabilities) **+** página via resource framework **+** nav em `web/src/navigation/tree.tsx` **+** testes. Nunca página avulsa com estilos próprios.
+6. Segurança constante: Secrets metadata-only; RBAC revalidado no backend; geração/abort em toda query; nada de storage de navegador no frontend (`web/src/security.test.ts`).
 
-- funcionamento real da aplicação;
-- arquitetura e qualidade técnica;
-- experiência do usuário e interface;
-- consistência visual e design system;
-- documentação e alinhamento com o código;
-- observabilidade, confiabilidade e desempenho;
-- evolução do produto.
+## Como validar
 
-O plano original de desenvolvimento (`01-descoberta.md` a `09-experiencia-operacional.md`, `matriz-aceite-mvp.md`, `matriz-aceite-ux.md`) continua vigente e deve ser consultado para rastreabilidade das fases de implementação. Este novo plano complementa o anterior com a visão do estado atual e o roteiro de melhorias priorizadas.
-
-## 2. Índice
-
-| Arquivo | Conteúdo |
+| Alvo | Comando |
 | --- | --- |
-| [00-current-state.md](00-current-state.md) | Estado atual do projeto, validações executadas e evidências coletadas. |
-| [01-functional-review.md](01-functional-review.md) | Revisão funcional completa: fluxos, estados, gaps e recomendações. |
-| [02-ui-ux-review.md](02-ui-ux-review.md) | Avaliação de interface, navegação, telas e experiência do usuário. |
-| [03-design-system.md](03-design-system.md) | Proposta de design system, tokens visuais e componentes reutilizáveis. |
-| [04-architecture-review.md](04-architecture-review.md) | Análise da arquitetura Go, qualidade técnica e débitos. |
-| [05-documentation-review.md](05-documentation-review.md) | Revisão da documentação existente e gaps encontrados. |
-| [06-improvement-roadmap.md](06-improvement-roadmap.md) | Roadmap por fases executáveis, com itens priorizados. |
-| [07-testing-strategy.md](07-testing-strategy.md) | Estratégia de testes para as melhorias propostas. |
-| [08-observability-plan.md](08-observability-plan.md) | Plano de logs internos, métricas, traces e OpenTelemetry. |
-| [09-risks-and-migrations.md](09-risks-and-migrations.md) | Riscos, estratégias de migração e rollback. |
-| [10-acceptance-checklist.md](10-acceptance-checklist.md) | Checklist objetivo de aceite por fase. |
+| Unit + integração | `make test` (`go test ./...` + `npm test` no `web/`) |
+| E2E | `make test-e2e` |
+| Qualidade | `make lint typecheck format-check` |
+| Build | `make build` (CLI) · `make build-desktop` (Wails) |
+| Segurança | `scripts/security_check.sh HEAD` |
 
-## 3. Resumo executivo dos achados
+## Fases
 
-### 3.1 O que funciona bem
+| Fase | Documento | Escopo | Estado |
+| --- | --- | --- | --- |
+| 0 | — | UI/UX, Design System, shell, navegação em árvore, resource framework, migração das 10 páginas | ✅ `5ac7320` |
+| 1 | [v1/phase-01-backend-recursos.md](v1/phase-01-backend-recursos.md) | Fundação backend para coleções novas (adapters → services → handlers → capabilities) com Nodes como piloto | ☐ |
+| 2 | [v1/phase-02-cluster-storage.md](v1/phase-02-cluster-storage.md) | Cluster scoped: Nodes, Leases, PV, PVC, StorageClasses, CSI | ☐ |
+| 3 | [v1/phase-03-workloads-configuracao.md](v1/phase-03-workloads-configuracao.md) | ReplicaSets, HPA, PDB, ResourceQuotas, LimitRanges, ServiceAccounts | ☐ |
+| 4 | [v1/phase-04-acesso-administracao.md](v1/phase-04-acesso-administracao.md) | RBAC objects, CRDs, Priority/Runtime Classes, Admission Webhooks, IngressClasses, NetworkPolicies, Endpoints | ☐ |
+| 5 | [v1/phase-05-experiencia-operacional.md](v1/phase-05-experiencia-operacional.md) | Port-forward panel, ações contextuais, colunas, favoritos/recentes, YAML/logs refinements | ☐ |
+| 6 | [v1/phase-06-preferencias-multi-contexto.md](v1/phase-06-preferencias-multi-contexto.md) | Persistência de preferências de shell, ordenação/filtros avançados, multi-contexto readonly | ☐ |
+| 7 | [v1/phase-07-release-v1.md](v1/phase-07-release-v1.md) | Documentação atualizada, RC imutável, gates de distribuição, tag 1.0.0 | ☐ |
 
-- **Base técnica sólida:** Go 1.26, Ginger v1.4.4, Cobra, SQLite sem CGO, client-go v0.35.7, React 19, Vite 8, React Router 8.
-- **Segurança bem fundamentada:** bind loopback, Host/Origin/CSRF, tokens de controle, Secret metadata-only, RBAC revalidado, redaction de logs.
-- **Testes verdes:** 730 testes Go em 36 pacotes, 79 testes Vitest, lint, typecheck, build, `govulncheck` e `npm audit` sem vulnerabilidades.
-- **Arquitetura de cancelamento:** geração monotônica, cancelamento hierárquico, invalidação de caches.
-- **MVP funcional:** dashboard, recursos somente leitura, logs, ações autorizadas, settings e preferências implementados.
-- **Desktop:** suporte inicial Wails v2.15.0 com bridge in-process e loopback interno para streams.
+Itens **fora da v1** (backlog pós-1.0): Helm Releases, Gateway API (Gateways/HTTPRoutes/GRPCRoutes) — a navegação já reserva os grupos; VolumeAttributesClasses e ValidatingAdmissionPolicies quando a versão mínima de cluster suportar.
 
-### 3.2 Principais problemas e oportunidades
+## Definição de pronto (por fase)
 
-1. **Frontend monolítico e sem design system:** CSS global único, componentes gigantes, tokens visuais ausentes, Tailwind importado mas não usado, SVGs da marca não integrados.
-2. **Inconsistência visual entre telas:** tabelas, formulários, estados de erro e espaçamentos variam arbitrariamente.
-3. **Backend com ports dispersos:** `internal/ports` está vazio; interfaces de port espalhadas por handlers e serviços.
-4. **Duplicação dashboard/resources:** classificação de pods/workloads e lógicas de listagem existem em duas camadas.
-5. **Testes flaky e races:** alguns testes falham com `-race`, indicando problemas reais de concorrência.
-6. **Fase 9 incompleta:** favoritos/recentes, diff, gerenciador de port-forward, multi-contexto e parser composto de filtros ainda não implementados.
-7. **Documentação fragmentada:** partes da Fase 9 e detalhes de UI/UX carecem de atualização.
-
-### 3.3 Decisões transversais
-
-- Manter a identidade visual própria; não copiar marca, cores ou layout do Aptakube.
-- Priorizar componentes reutilizáveis e tokens centralizados sobre correções isoladas.
-- Preservar a segurança como premissa inegociável em todas as melhorias.
-- Não introduzir edição/aplicação genérica de YAML durante este plano.
-- Continuar usando Kind canônico para validação de caminhos reais.
-
-## 4. Próximos passos recomendados
-
-1. Executar a **Fase 0** (correções críticas) antes de qualquer refatoração ampla.
-2. Fechar **F4-49** (matriz exaustiva de RBAC) e criar uma **release candidate** para desbloquear F8-42/F8-46/F8-48.
-3. Implementar o **design system** e integrar os SVGs oficiais da marca.
-4. Refatorar componentes monolíticos do frontend em componentes menores e reutilizáveis.
-5. Centralizar ports no backend e consolidar dashboard/resources.
-6. Avançar a **Fase 9** com parser composto de filtros, YAML highlight, terminal profissional e gerenciador de port-forward.
-7. Atualizar a documentação em conjunto com cada mudança.
-
-## 5. Referências
-
-- Plano de desenvolvimento original: `01-descoberta.md` a `09-experiencia-operacional.md`.
-- Matrizes de aceite: `matriz-aceite-mvp.md`, `matriz-aceite-ux.md`.
-- Documentação normativa: `docs/product-spec.md`, `docs/architecture.md`, `docs/api.md`, `docs/security.md`, `docs/data-model.md`, `docs/implementation-plan.md`.
-- Benchmark de experiência: `docs/research/aptakube-ux-benchmark.md`.
-- Evidências de execução: `docs/research/phase1-evidence.md` a `phase9-evidence.md`.
-- Screenshots da revisão: `docs/research/screenshots-review/`.
+- Tarefas do documento marcadas com evidência (commit + teste).
+- `go test ./...`, `npm test`, `test:e2e`, lint, typecheck e build verdes.
+- E2E cobre o fluxo novo nas resoluções 1280×720 e 1920×1080 (screenshots em evidência local, nunca versionados).
+- Documentação afetada (`docs/api.md`, `docs/architecture.md`, `docs/design-system.md`, `docs/rbac-requirements.md`) atualizada no mesmo commit da feature.
+- Sem push; usuário decide quando publicar.

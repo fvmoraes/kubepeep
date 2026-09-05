@@ -17,6 +17,7 @@ Never hardcode machine-specific absolute paths in shared markdown instructions.
 Treat the absence of sensitive data as a non-negotiable project premise: never commit or push credentials, tokens, kubeconfigs, private keys, private PII, machine-specific paths, runtime logs/databases, or generated artifacts.
 Before every commit and push, run `scripts/security_check.sh HEAD`; commit and tag identities must use an approved GitHub noreply address.
 Never print a discovered secret. Report only its type, location, and affected commit; rotate or revoke it before rewriting every affected remote ref.
+Golden rule: only commit, never push — pushing is always an explicit decision of the user; never run `git push` autonomously.
 
 ## Priority Order
 

@@ -1,4 +1,4 @@
-# Arquitetura Desktop (Wails) do Kube Peep
+# Arquitetura Desktop (Wails) do KubePeep
 
 > **Status:** implementação inicial — validação nativa pendente nas plataformas de release.
 >
@@ -66,7 +66,7 @@ flowchart LR
 2. Adquire listener loopback interno (`BindLoopback`; porta do `config.yaml` ou intervalo padrão 2748–2797).
 3. `application.Compose` com o perfil de segurança desktop (`ExtraHosts`/`ExtraOrigins`).
 4. `desktop.NewLoopback` serve o handler do core somente para streams (SSE/WS) com CORS restrito às origins do WebView.
-5. `wails.Run`: janela "Kube Peep" (1360×860, mín. 1024×640, redimensionável), SPA embutida via AssetServer, `Bridge` exposto como binding, single-instance, ícone, tema do sistema.
+5. `wails.Run`: janela "KubePeep" (1360×860, mín. 1024×640, redimensionável), SPA embutida via AssetServer, `Bridge` exposto como binding, single-instance, ícone, tema do sistema.
 6. Fechar a janela → `OnShutdown` → cleanup LIFO (watches, actions, clients, log, SQLite, loopback).
 
 ## 5. Fluxo React ↔ Wails ↔ Go ↔ Kubernetes

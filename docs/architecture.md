@@ -1,10 +1,10 @@
-# Arquitetura do Kube Peep
+# Arquitetura do KubePeep
 
 > **Status:** revisado com as decisões da Fase 1
 >
-> **Regra de uso:** este documento incorpora os ADRs 0001–0004 e as evidências reproduzíveis em `docs/research/`.
+> **Regra de uso:** este documento incorpora os ADRs 0001–0005 e as evidências reproduzíveis em `docs/research/`.
 >
-> **Fontes:** [prompt inicial](../plan/initial_prompt.md), [plano](../plan/README.md), [Fase 1](../plan/01-descoberta.md) e [Fase 2](../plan/02-especificacao.md).
+> **Fontes históricas:** plano de desenvolvimento original e revisão de 2026-08 no histórico Git (`plan/` arquivado no commit `5ac7320^`). Execução atual: [../plan/README.md](../plan/README.md). ADRs em [decisions/](decisions/).
 
 ## 1. Direcionadores
 
@@ -23,7 +23,7 @@
 
 ```text
 ┌──────────────────┐       loopback HTTP/SSE/WS       ┌──────────────────────┐
-│ Browser do       │ <──────────────────────────────> │ Processo Kube Peep   │
+│ Browser do       │ <──────────────────────────────> │ Processo KubePeep   │
 │ usuário          │                                  │ Cobra + Ginger       │
 └──────────────────┘                                  └──────┬───────┬───────┘
                                                                │       │

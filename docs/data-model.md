@@ -414,7 +414,7 @@ Backup contém apenas dados permitidos, mas ainda recebe permissões restritas. 
 - Um processo adquire lock de instância antes de abrir o banco em modo de escrita.
 - PID e porta são estado informativo; PID isolado não prova identidade.
 - Lock obsoleto é recuperado somente após validação específica da plataforma.
-- `stop` não envia sinal a PID sem provar que pertence ao Kube Peep esperado.
+- `stop` não envia sinal a PID sem provar que pertence ao KubePeep esperado.
 - Windows e Unix possuem adapters e testes próprios.
 
 O mecanismo e a identidade foram fixados no ADR 0004. A Fase 3 implementa os

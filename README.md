@@ -1,23 +1,23 @@
-# Kube Peep
+# KubePeep
 
 [![Latest Release](https://img.shields.io/github/v/release/fvmoraes/kubepeep?sort=semver&label=release&logo=github)](https://github.com/fvmoraes/kubepeep/releases/latest)
 [![Release pipeline](https://github.com/fvmoraes/kubepeep/actions/workflows/release.yml/badge.svg)](https://github.com/fvmoraes/kubepeep/actions/workflows/release.yml)
 
-Kube Peep is a local, self-contained Kubernetes dashboard. It uses the current
+KubePeep is a local, self-contained Kubernetes dashboard. It uses the current
 user's kubeconfig and Kubernetes RBAC identity, and embeds its React interface
 in the Go binary. It runs as a native desktop application (Wails) or as a
 loopback web server (`serve`); both modes share the same backend core, and no
 external browser is ever opened by the desktop build.
 
 The governing rule is simple: show only what the current identity may read and
-enable only what it may execute. Kube Peep does not ask for separate cluster
+enable only what it may execute. KubePeep does not ask for separate cluster
 credentials, does not impersonate users, and never displays Secret values.
 
 ## Requirements
 
 - A working kubeconfig and any `exec` credential plugin already referenced by it.
 - Kubernetes permissions for the resources that should be visible or actionable.
-- No Node.js, database server, or other Kube Peep runtime dependency.
+- No Node.js, database server, or other KubePeep runtime dependency.
 
 The Metrics API is optional. Its absence affects only the metrics block.
 
@@ -97,7 +97,7 @@ Local data lives under `~/.kubePeep/` on Linux/macOS and
 operational logs, cache, and short-lived runtime state—not kubeconfig contents,
 Secret values, application logs, or terminal traffic.
 
-Kube Peep does not install a ClusterRole. Grant only the Kubernetes operations
+KubePeep does not install a ClusterRole. Grant only the Kubernetes operations
 the user already needs. Read-only pages use `get`, `list`, and, when live
 updates are enabled, `watch` on their exact resources. Logs require
 `get pods/log`; restart requires `patch apps/deployments`; scale requires
@@ -139,7 +139,7 @@ sh /tmp/kubepeep-install.sh --uninstall --purge-data --confirm-purge
 
 Purging local data is a separate destructive operation and requires the
 installer's explicit purge confirmation flag. Neither path removes kubeconfig
-files or any file outside Kube Peep's canonical data root.
+files or any file outside KubePeep's canonical data root.
 
 ## Development
 
@@ -212,7 +212,7 @@ migrations are embedded. See [the executable plan](plan/README.md),
 - Secret resources are metadata-only and have no YAML endpoint.
 - Log reads and scans are bounded, redacted in memory, and never persisted.
 - A kubeconfig `exec` plugin is an external runtime dependency managed by the
-  user; Kube Peep reports sanitized failures when it is unavailable.
+  user; KubePeep reports sanitized failures when it is unavailable.
 - Windows on ARM64 is published only while the native archive smoke test remains
   green.
 
@@ -237,7 +237,7 @@ migrations are embedded. See [the executable plan](plan/README.md),
   not local application failures. Restore cluster connectivity or install the
   Metrics API only if metrics are required.
 - An unavailable kubeconfig `exec` credential plugin must be repaired in the
-  user's Kubernetes environment; Kube Peep neither installs nor replaces it.
+  user's Kubernetes environment; KubePeep neither installs nor replaces it.
 - A `403` after a page was already open can mean RBAC changed. Refresh the page
   or reselect the context; every mutable operation is checked again server-side.
 - Stop the service before update or uninstall. On Windows, a successful update

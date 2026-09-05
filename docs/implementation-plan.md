@@ -1,6 +1,6 @@
-# Plano de implementação e validação
+# Plano de implementação e validação (MVP)
 
-> **Status:** Fases 1 e 2 concluídas; Fase 3 em execução
+> **Status:** histórico — MVP concluído. A execução corrente vive em [../plan/](../plan/README.md).
 >
 > **Escopo desta entrega:** sequência de produção autorizada pelos contratos
 > fechados e evidências dos gates F1/F2.
@@ -45,7 +45,7 @@ Antes de criar scaffold definitivo:
 - [x] uso/complemento dos pacotes Ginger documentado.
 
 Transcripts, hashes e limites estão na
-[matriz de evidências F1](research/phase1-evidence.md). Casing do artefato,
+[matriz de evidências F1](archive/phase1-evidence.md). Casing do artefato,
 paths da implementação definitiva, macOS e Windows arm64 continuam gates
 próprios de F3/F8, não pendências retroativas de F1.
 
@@ -58,7 +58,7 @@ próprios de F3/F8, não pendências retroativas de F1.
 - [x] threat model revisado antes de qualquer rota mutável;
 - [x] nenhuma dependência nova sem justificativa.
 
-Evidência: [validação e auditorias da Fase 2](research/phase2-validation.md).
+Evidência: [validação e auditorias da Fase 2](archive/phase2-validation.md).
 
 ## 3. Sequência de entrega
 
@@ -174,8 +174,8 @@ multi-contexto é somente leitura; qualquer action exige selecionar uma única
 origem e passa novamente por SAR no backend. Edição/aplicação genérica de YAML
 permanece fora do gate e não é introduzida implicitamente pelo viewer.
 
-Tarefas e critérios completos: [Fase 9](../plan/09-experiencia-operacional.md)
-e [matriz UX](../plan/matriz-aceite-ux.md).
+Tarefas e critérios completos: Fase 9 e matriz UX (histórico Git,
+`plan/` no commit `5ac7320^`).
 
 ## 4. Comandos oficiais futuros
 
