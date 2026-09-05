@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versions follow [Semantic Versioning](https://semver.org/) **without the `v`
 prefix** (official tags: `1.4.2`, `1.4.3`, …), and entries are generated
 automatically from Conventional Commits by `.github/workflows/release.yml`.
+## [0.4.0] - 2026-09-05
+
+## Added
+- feat(release): candidate dry-run mode for reproducible validation (F7/V7-07)
+- feat(release): blocking verification gate and prepared 1.0.0 changelog (F7/V7-14, V7-06)
+- feat(ux): column visibility on the main resource pages and cluster favorites (F5/V5-06, F6/V6-03)
+
+## Changed
+- docs(plan): record v1 execution evidence per task ID (F7/V7-01)
+
+## Download
+
+Permanently-updated links: https://github.com/fvmoraes/kubepeep/blob/main/docs/download.md
+
+## Full Changelog
+**Full Changelog**: https://github.com/fvmoraes/kubepeep/compare/0.3.0...0.4.0
+
 ## [0.3.0] - 2026-09-05
 
 ## Added
@@ -441,3 +458,4 @@ Permanently-updated links: https://github.com/fvmoraes/kubepeep/blob/main/docs/d
 [0.2.1]: https://github.com/fvmoraes/kubepeep/releases/tag/0.2.1
 [0.2.2]: https://github.com/fvmoraes/kubepeep/releases/tag/0.2.2
 [0.3.0]: https://github.com/fvmoraes/kubepeep/releases/tag/0.3.0
+[0.4.0]: https://github.com/fvmoraes/kubepeep/releases/tag/0.4.0
