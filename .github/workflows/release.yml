@@ -27,6 +27,10 @@
 #     seu próprio namespace, e /releases/latest/download/<asset> é permanente.
 #   - Nenhum binário é commitado no Git (dist/ é ignorado).
 #   - PRs nunca publicam releases.
+#   - Candidate (V7-07): dispatch com dry_run=true roda prepare/builds/publish
+#     (gate de verificação incluído, checksums + SBOM validados e salvos como
+#     artifact candidate-<versão>) sem commit de metadados, sem tag, sem
+#     Release e sem mover `latest`.
 #   - IDs dos jobs, nomes de artifacts e os checks bloqueantes do verify são contratos
 #     do pipeline. A numeração dos nomes visíveis indica etapas, não dependências.
 
@@ -44,6 +48,11 @@ on:
         type: choice
         default: auto
         options: [auto, major, minor, patch, skip]
+      dry_run:
+        description: 'Candidate mode: validate everything, publish nothing'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -73,6 +82,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       tag: ${{ steps.version.outputs.tag }}
+      dry_run: ${{ steps.bump.outputs.dry_run }}
       sha: ${{ steps.metadata.outputs.sha }}
       should_release: ${{ steps.bump.outputs.should_release }}
     steps:
@@ -140,6 +150,7 @@ jobs:
             echo "should_release=true"
             echo "bump_type=$type"
             echo "previous_tag=${previous_tag}"
+            echo "dry_run=${{ github.event_name == 'workflow_dispatch' && inputs.dry_run == true && 'true' || 'false' }}"
           } >> "$GITHUB_OUTPUT"
           echo "Bump: ${type} · ${count} commit(s) since ${previous_tag:-beginning}"
 
@@ -192,7 +203,7 @@ jobs:
 
       - name: Commit version files and push (bot)
         id: metadata
-        if: steps.bump.outputs.should_release == 'true'
+        if: steps.bump.outputs.should_release == 'true' && steps.bump.outputs.dry_run != 'true'
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
@@ -205,6 +216,12 @@ jobs:
             git push origin "HEAD:main"
           fi
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      # Candidate mode (dry_run): builds and validations run against the
+      # SOURCE commit; no metadata commit, tag, Release or latest move.
+      - name: Record the source commit for candidate builds
+        if: steps.bump.outputs.should_release == 'true' && steps.bump.outputs.dry_run == 'true'
+        run: echo "sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
 
       - name: Keep release notes for the publish job
         if: steps.bump.outputs.should_release == 'true'
@@ -625,6 +642,7 @@ jobs:
       VERSION: ${{ needs.prepare.outputs.version }}
       TAG: ${{ needs.prepare.outputs.tag }}
       METADATA_SHA: ${{ needs.prepare.outputs.sha }}
+      DRY_RUN: ${{ needs.prepare.outputs.dry_run }}
     steps:
       - name: Require successful verification of the originating commit
         shell: bash
@@ -693,6 +711,7 @@ jobs:
           persist-credentials: false
 
       - name: Create the immutable release tag
+        if: env.DRY_RUN != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -776,6 +795,7 @@ jobs:
             -o spdx-json > "dist/kubepeep-${{ env.VERSION }}.spdx.json"
 
       - name: Create the GitHub Release (Latest) from the immutable tag
+        if: env.DRY_RUN != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -809,13 +829,24 @@ jobs:
             --notes-file dist/release-notes.md
           echo "Release $TAG published and marked as Latest."
 
+      - name: Upload the candidate bundle (dry run only)
+        if: env.DRY_RUN == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: candidate-${{ env.VERSION }}
+          path: |
+            dist/checksums.txt
+            dist/kubepeep-${{ env.VERSION }}.spdx.json
+            dist/release-notes.md
+          if-no-files-found: error
+
   # ------------------------------------------------------------------ #
   # 04 Latest — git tag móvel latest → commit da release                #
   # ------------------------------------------------------------------ #
   update-latest:
     name: 04 · Update latest channel
     needs: [prepare, publish]
-    if: needs.prepare.outputs.should_release == 'true'
+    if: needs.prepare.outputs.should_release == 'true' && needs.prepare.outputs.dry_run != 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
