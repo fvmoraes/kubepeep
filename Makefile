@@ -23,7 +23,14 @@ LDFLAGS := -s -w \
 	build-desktop-windows build-desktop-darwin
 
 WAILS ?= $(shell $(GO) env GOPATH)/bin/wails
+# WebKitGTK: prefer 4.0 (upstream default); fall back to 4.1 via Wails'
+# webkit2_41 build tag where only the newer package is installed.
+WEBKIT41 := $(shell pkg-config --exists webkit2gtk-4.0 2>/dev/null || echo yes)
+ifeq ($(WEBKIT41),yes)
+DESKTOP_TAGS := desktop webkit2_41
+else
 DESKTOP_TAGS := desktop
+endif
 DESKTOP_OUT := $(DIST_DIR)/desktop
 # Keep the reviewed Bridge contract, as the native release workflows do.
 WAILS_BINDING_FLAGS := -skipbindings
