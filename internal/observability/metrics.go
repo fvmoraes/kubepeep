@@ -30,20 +30,30 @@ func NewRegistry() *Registry {
 }
 
 var allowedMetrics = map[string]struct{}{
-	"kubepeep_requests_total": {},
+	"kubepeep_requests_total":                     {},
+	"kubepeep_resource_list_items_received_total": {},
+	"kubepeep_resource_list_items_returned_total": {},
 }
 
 var allowedLabels = map[string]struct{}{
-	"method": {},
-	"route":  {},
-	"status": {},
+	"method":   {},
+	"route":    {},
+	"status":   {},
+	"resource": {},
 }
 
 // IncCounter increments an allowlisted counter by one for the given labels.
 // Unknown metric or label names are ignored so caller mistakes can never
 // grow unbounded cardinality.
 func (registry *Registry) IncCounter(name string, labels map[string]string) {
-	if _, ok := allowedMetrics[name]; !ok {
+	registry.AddCounter(name, labels, 1)
+}
+
+// AddCounter adds delta to an allowlisted counter for the given labels.
+// Unknown metric or label names are ignored so caller mistakes can never
+// grow unbounded cardinality.
+func (registry *Registry) AddCounter(name string, labels map[string]string, delta uint64) {
+	if _, ok := allowedMetrics[name]; !ok || delta == 0 {
 		return
 	}
 	key := labelKey(labels)
@@ -54,7 +64,7 @@ func (registry *Registry) IncCounter(name string, labels map[string]string) {
 		bucket = make(map[string]uint64)
 		registry.counters[name] = bucket
 	}
-	bucket[key]++
+	bucket[key] += delta
 }
 
 // SetGauge is reserved for allowlisted gauges; currently none are exposed, so
@@ -128,3 +138,10 @@ func renderLabels(key string) string {
 
 // RequestsTotalName is the allowlisted counter for local HTTP requests.
 const RequestsTotalName = "kubepeep_requests_total"
+
+// Resource list over-fetch instrumentation: items received from Kubernetes
+// versus items returned to the UI. received/returned is the over-fetch ratio.
+const (
+	ResourceListItemsReceivedTotalName = "kubepeep_resource_list_items_received_total"
+	ResourceListItemsReturnedTotalName = "kubepeep_resource_list_items_returned_total"
+)

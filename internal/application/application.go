@@ -125,6 +125,7 @@ func Compose(ctx context.Context, options Options) (*Platform, error) {
 	if err != nil {
 		return nil, err
 	}
+	cursorStore := api.NewCursorStore(nil)
 	sessions, err := api.NewSessionStore(0)
 	if err != nil {
 		return nil, err
@@ -151,11 +152,18 @@ func Compose(ctx context.Context, options Options) (*Platform, error) {
 	if err != nil {
 		return nil, err
 	}
+	// The optional local metrics registry is created before the resource
+	// backend so the list path can be instrumented from startup.
+	var metricsRegistry *observability.Registry
+	if options.Config.Observability.Metrics.Enabled {
+		metricsRegistry = observability.NewRegistry()
+	}
 	resourceBackend, err := kuberuntime.NewResourceBackendWithOptions(kubernetesRuntime, authorizationService, resourcecore.TextRedactorFunc(func(value string) string {
 		redacted, _ := dashboard.Redact(value)
 		return redacted
 	}), kuberuntime.ResourceBackendOptions{
 		ListWindowTimeout: options.Config.Resources.CollectionTimeout.Duration,
+		Metrics:           metricsRegistry,
 	})
 	if err != nil {
 		return nil, err
@@ -260,10 +268,6 @@ func Compose(ctx context.Context, options Options) (*Platform, error) {
 	namespaceService := namespaces.NewService(namespaceRepository, selectionState, kubernetesRuntime)
 
 	gingerConfig := options.Config.ToGinger(options.Layout.Database)
-	var metricsRegistry *observability.Registry
-	if options.Config.Observability.Metrics.Enabled {
-		metricsRegistry = observability.NewRegistry()
-	}
 	application, err := httpapp.New(httpapp.Options{
 		Config: &gingerConfig,
 		Port:   options.Port,
@@ -287,6 +291,7 @@ func Compose(ctx context.Context, options Options) (*Platform, error) {
 		PortForwards: portForwards,
 		Exec:         execSessions,
 		Cursors:      cursors,
+		CursorStore:  cursorStore,
 		Generation:   generation,
 		Sessions:     sessions,
 		Logger:       logger,

@@ -3,6 +3,7 @@ package resources
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -211,6 +212,179 @@ func TestCollectCapsFanoutConcurrencyAtFour(t *testing.T) {
 	}
 	if got := lister.maximum.Load(); got > MaximumFanout || got < 2 {
 		t.Fatalf("maximum concurrency = %d", got)
+	}
+}
+
+func TestOriginChunkLimitSeparatesPageSizeFromOriginChunk(t *testing.T) {
+	cases := []struct {
+		name      string
+		origins   int
+		pageLimit int
+		expected  int64
+	}{
+		{"single origin keeps the page limit", 1, 100, 100},
+		{"single origin with small page", 1, 5, 5},
+		{"fan-out uses the default chunk", 100, 100, DefaultOriginChunkSize},
+		{"fan-out respects a page smaller than the chunk", 50, 5, 5},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			if got := originChunkLimit(testCase.origins, testCase.pageLimit); got != testCase.expected {
+				t.Fatalf("originChunkLimit(%d, %d) = %d, want %d", testCase.origins, testCase.pageLimit, got, testCase.expected)
+			}
+		})
+	}
+}
+
+func TestCollectFetchesOriginChunksInsteadOfFullPages(t *testing.T) {
+	names := []string{"ns-a", "ns-b", "ns-c", "ns-d"}
+	origins, _ := OriginsFor(CollectionPods, names, nil)
+	lister := &fakeStringLister{pages: map[string]OriginPage[testListItem]{}, errs: map[string]error{}}
+	for _, name := range names {
+		lister.pages[name] = OriginPage[testListItem]{Items: []testListItem{testListItem(name)}}
+	}
+	request := CollectionRequest[testListItem]{Selection: Selection{Generation: "gen", Context: "ctx", Scope: "scope"}, Options: ListOptions{Limit: 100}, Origins: origins, Lister: lister, Authorizer: &fakeAuthorization{decisions: map[string]authorization.Decision{}}, Less: func(a, b testListItem) bool { return a < b }}
+	if _, err := Collect(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+	if len(lister.calls) != len(names) {
+		t.Fatalf("calls = %d, want %d", len(lister.calls), len(names))
+	}
+	for _, call := range lister.calls {
+		if call.Limit != int64(DefaultOriginChunkSize) {
+			t.Fatalf("origin %s fetched limit %d, want chunk %d", call.Origin.Namespace, call.Limit, DefaultOriginChunkSize)
+		}
+	}
+}
+
+func TestCollectSingleOriginFetchesTheFullPageLimit(t *testing.T) {
+	origins, _ := GlobalOriginsFor(CollectionPods, nil)
+	lister := &fakeStringLister{pages: map[string]OriginPage[testListItem]{"": {Items: []testListItem{"a", "b"}}}, errs: map[string]error{}}
+	request := CollectionRequest[testListItem]{Selection: Selection{Generation: "gen", Context: "ctx", Scope: "scope"}, Options: ListOptions{Limit: 100}, Origins: origins, Lister: lister, Authorizer: &fakeAuthorization{decisions: map[string]authorization.Decision{}}, Less: func(a, b testListItem) bool { return a < b }}
+	if _, err := Collect(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+	if len(lister.calls) != 1 || lister.calls[0].Limit != 100 {
+		t.Fatalf("global origin calls = %#v", lister.calls)
+	}
+}
+
+// A zero timeout must fall back to the configured 30s window budget, not the
+// retired 10s constant, so wiring gaps cannot starve large scopes.
+func TestCollectNormalizesZeroTimeoutToWindowBudget(t *testing.T) {
+	origins, _ := OriginsFor(CollectionPods, []string{"allowed"}, nil)
+	var observed time.Duration
+	lister := listerFuncPage(func(ctx context.Context) {
+		if deadline, ok := ctx.Deadline(); ok {
+			observed = time.Until(deadline)
+		}
+	}, testListItem("a"))
+	request := CollectionRequest[testListItem]{Selection: Selection{Generation: "gen", Context: "ctx", Scope: "scope"}, Options: ListOptions{Limit: 10}, Origins: origins, Lister: lister, Authorizer: &fakeAuthorization{decisions: map[string]authorization.Decision{}}, Less: func(a, b testListItem) bool { return a < b }, Timeout: 0}
+	if _, err := Collect(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+	if observed < 29*time.Second {
+		t.Fatalf("window deadline = %v, want the %v budget", observed, DefaultListWindowTimeout)
+	}
+}
+
+// testOriginLister adapts a function to the OriginLister port.
+type testOriginLister func(ctx context.Context, request PageRequest) (OriginPage[testListItem], error)
+
+func (fn testOriginLister) ListPage(ctx context.Context, request PageRequest) (OriginPage[testListItem], error) {
+	return fn(ctx, request)
+}
+
+// listerFuncPage returns an OriginLister that observes the request context and
+// yields a single-item page.
+func listerFuncPage(hook func(context.Context), item testListItem) OriginLister[testListItem] {
+	return testOriginLister(func(ctx context.Context, request PageRequest) (OriginPage[testListItem], error) {
+		hook(ctx)
+		return OriginPage[testListItem]{Origin: request.Origin, Items: []testListItem{item}}, nil
+	})
+}
+
+// pagingOriginLister serves deterministic chunks per origin, emulating the
+// native Kubernetes limit/continue contract across collection windows.
+type pagingOriginLister struct {
+	perOrigin int
+	mu        sync.Mutex
+	served    map[string]int
+}
+
+func (lister *pagingOriginLister) ListPage(_ context.Context, request PageRequest) (OriginPage[testListItem], error) {
+	lister.mu.Lock()
+	defer lister.mu.Unlock()
+	served := lister.served[request.Origin.Namespace]
+	remaining := lister.perOrigin - served
+	take := min(int(request.Limit), remaining)
+	items := make([]testListItem, 0, take)
+	for index := 0; index < take; index++ {
+		items = append(items, testListItem(fmt.Sprintf("%s-%04d", request.Origin.Namespace, served+index)))
+	}
+	lister.served[request.Origin.Namespace] = served + take
+	continueToken := ""
+	if remaining > take {
+		continueToken = "native-" + request.Origin.Namespace
+	}
+	return OriginPage[testListItem]{Origin: request.Origin, Items: items, Continue: continueToken}, nil
+}
+
+// The Logs catalog paginates the Pods collection with limit=500 across every
+// scoped namespace. Pagination must converge with no gaps and no duplicates
+// regardless of the window sizes the backend chooses per origin.
+func TestCollectPaginatesLargeFanoutWithoutGapsOrDuplicates(t *testing.T) {
+	names := make([]string, 40)
+	for index := range names {
+		names[index] = fmt.Sprintf("ns-%02d", index)
+	}
+	origins, _ := OriginsFor(CollectionPods, names, nil)
+	lister := &pagingOriginLister{perOrigin: 37, served: map[string]int{}}
+	var cursor *CompositeCursor[testListItem]
+	collected := make(map[testListItem]int)
+	windowItems := []int{}
+	for window := 0; window < 100; window++ {
+		request := CollectionRequest[testListItem]{
+			Selection: Selection{Generation: "gen", Context: "ctx", Scope: "scope"},
+			Options:   ListOptions{Limit: 500}, Origins: origins, Cursor: cursor, Lister: lister,
+			Authorizer: &fakeAuthorization{decisions: map[string]authorization.Decision{}},
+			Less:       func(a, b testListItem) bool { return a < b },
+		}
+		result, err := Collect(context.Background(), request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		windowItems = append(windowItems, len(result.Items))
+		for _, item := range result.Items {
+			collected[item]++
+		}
+		if result.Cursor.Complete() {
+			if !result.Page.Complete {
+				t.Fatalf("complete cursor reported an incomplete page: %#v", result.Page)
+			}
+			break
+		}
+		cursor = result.Cursor
+	}
+	if len(collected) != 40*37 {
+		t.Fatalf("collected %d distinct items, want %d", len(collected), 40*37)
+	}
+	for item, count := range collected {
+		if count != 1 {
+			t.Fatalf("item %q appeared %d times", item, count)
+		}
+	}
+	for namespace := range lister.served {
+		if lister.served[namespace] != 37 {
+			t.Fatalf("origin %s served %d items, want 37", namespace, lister.served[namespace])
+		}
+	}
+	total := 0
+	for _, count := range windowItems {
+		total += count
+	}
+	if total != 40*37 {
+		t.Fatalf("window sizes %v sum to %d, want %d", windowItems, total, 40*37)
 	}
 }
 

@@ -188,12 +188,19 @@ resposta paginada.
 
 O cursor é JSON canônico opaco autenticado por HMAC-SHA-256 com segredo
 efêmero do processo. Ele inclui versão, expiração, hash da query, contexto,
-escopo, geração e, em fan-out, o estado composto por namespace/kind e merge
-determinístico. Cada token expira exatamente 5 minutos após ser emitido, sem
-sliding TTL; uma página válida emite um novo token com sua própria janela de 5
-minutos. Alteração ou token de uma instância anterior retornam
-`CURSOR_INVALID`; mudança de query/geração retorna `CURSOR_MISMATCH`; expiração
-por TTL retorna `CURSOR_EXPIRED`.
+escopo, geração e, quando o estado composto está ativo, apenas uma referência
+aleatória de 128 bits. O estado por namespace/kind (continuations nativos e
+janela já coletada do merge determinístico) fica em um store local do processo
+(`internal/api.CursorStore`) com TTL próprio, limite de entradas, limite de
+bytes e eviction LRU; nunca é persistido em disco nem trafega no token, cujo
+tamanho fica independente do número de origens. Cada token expira exatamente 5
+minutos após ser emitido, sem sliding TTL; uma página válida emite um novo
+token com sua própria janela de 5 minutos. Alteração ou token de uma instância
+anterior retornam `CURSOR_INVALID`; mudança de query/geração retorna
+`CURSOR_MISMATCH`; expiração por TTL, referência ausente (purge/restart) ou
+entrada expirada retornam `CURSOR_EXPIRED` para recomeço da lista. Tokens
+inline (estado completo no token, modelo anterior ao store) continuam sendo
+aceitos durante a mesma sessão de processo.
 
 Ordenação global só é exposta quando pode ser cumprida dentro de limites. Caso um endpoint só ordene a página atual, seu campo `sort` não é anunciado como global.
 
@@ -248,6 +255,15 @@ mostra. O cursor guarda continuations por namespace/GVR, a janela já coletada
 e a tupla final emitida; a página seguinte nunca reconstrói um snapshot global
 nem mistura geração/resourceVersion incompatível. `410 ResourceExpired`
 descarta a página inteira e retorna 410 para recomeço, sem combinar dados.
+
+Em fan-out multi-origem, cada janela de coleta busca chunks pequenos por
+origem (default 10 itens, `MaxOriginChunkSize` 50) em vez de `limit` itens por
+namespace; a origem única de um LIST global ou coleção cluster-scoped mantém o
+`limit` integral. O resto da janela permanece no estado server-side do cursor
+e é consumido pelas páginas seguintes, o que reduz o over-fetch
+(itens recebidos ÷ itens devolvidos, mensurável via
+`kubepeep_resource_list_items_received_total` ÷
+`kubepeep_resource_list_items_returned_total` em `/metrics`).
 
 Em `SavedFilterSet.query`, somente `namespace`, `search`, `status`, `sort`,
 `order` e os extras da linha correspondente podem ser salvos; `namespace`,

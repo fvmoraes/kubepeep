@@ -106,11 +106,26 @@ type Resources struct {
 	preferences PreferenceService
 	selection   SelectionReader
 	cursors     *api.CursorCodec
+	store       *api.CursorStore
 	now         func() time.Time
 }
 
 func NewResources(service ResourceService, preferences PreferenceService, selection SelectionReader, cursors *api.CursorCodec) *Resources {
 	return &Resources{service: service, preferences: preferences, selection: selection, cursors: cursors, now: time.Now}
+}
+
+// WithCursorStore moves composite cursor state (per-origin continuations and
+// buffered DTOs) into a server-side store. The signed token then carries only
+// a random reference, so its size stays independent of the number of origins.
+func (handler *Resources) WithCursorStore(store *api.CursorStore) *Resources {
+	handler.store = store
+	return handler
+}
+
+// storedCursorRef is the only state serialized into the token when the
+// server-side cursor store is active.
+type storedCursorRef struct {
+	Ref string `json:"ref"`
 }
 
 func (handler *Resources) Workloads(w http.ResponseWriter, r *http.Request) {
@@ -256,7 +271,26 @@ func writeListResult[T resourcecore.ListItem](handler *Resources, w http.Respons
 	var cursor *resourcecore.CompositeCursor[T]
 	if options.Continue != "" {
 		decoded := new(resourcecore.CompositeCursor[T])
-		if err := handler.cursors.Decode(options.Continue, cursorBinding, decoded); err != nil {
+		if handler.store != nil {
+			var reference storedCursorRef
+			if err := handler.cursors.Decode(options.Continue, cursorBinding, &reference); err != nil {
+				// Authentication, expiry and binding are enforced before the
+				// state shape is decoded, so a failed reference decode is
+				// either a legacy inline-state token or an invalid cursor.
+				if legacyErr := handler.cursors.Decode(options.Continue, cursorBinding, decoded); legacyErr != nil {
+					api.WriteError(w, r, err)
+					return
+				}
+			} else if reference.Ref != "" {
+				if err := handler.store.Get(reference.Ref, decoded); err != nil {
+					api.WriteError(w, r, err)
+					return
+				}
+			} else if err := handler.cursors.Decode(options.Continue, cursorBinding, decoded); err != nil {
+				api.WriteError(w, r, err)
+				return
+			}
+		} else if err := handler.cursors.Decode(options.Continue, cursorBinding, decoded); err != nil {
 			api.WriteError(w, r, err)
 			return
 		}
@@ -269,7 +303,7 @@ func writeListResult[T resourcecore.ListItem](handler *Resources, w http.Respons
 	}
 	result.Page.Next = ""
 	if result.Cursor != nil && !result.Cursor.Complete() {
-		token, encodeErr := handler.cursors.Encode(cursorBinding, result.Cursor)
+		token, encodeErr := handler.encodeListCursor(cursorBinding, result.Cursor)
 		if encodeErr != nil {
 			api.WriteError(w, r, api.NewHTTPError(http.StatusTooManyRequests, api.CodeLimitExceeded, "The resource cursor exceeded its safe limit.", nil, encodeErr))
 			return
@@ -278,6 +312,17 @@ func writeListResult[T resourcecore.ListItem](handler *Resources, w http.Respons
 	}
 	envelope := resourceListEnvelope[T]{Data: result.Items, Meta: resourceListMeta{RequestID: api.RequestIDFromContext(r.Context()), Generation: binding.Generation, CollectedAt: result.CollectedAt.UTC().Format(time.RFC3339Nano), Page: result.Page, Coverage: result.Coverage}}
 	handler.writeJSONIfCurrent(w, r, binding, envelope)
+}
+
+func (handler *Resources) encodeListCursor(binding api.CursorBinding, cursor any) (string, error) {
+	if handler.store != nil {
+		reference, err := handler.store.Put(cursor)
+		if err != nil {
+			return "", err
+		}
+		return handler.cursors.Encode(binding, storedCursorRef{Ref: reference})
+	}
+	return handler.cursors.Encode(binding, cursor)
 }
 
 func (handler *Resources) WorkloadDetail(w http.ResponseWriter, r *http.Request) {

@@ -41,8 +41,17 @@ context, namespace, resource, duration, duration_ms, error_code
 | Série | Tipo | Labels |
 | --- | --- | --- |
 | `kubepeep_requests_total` | counter | `method`, `route`, `status` |
+| `kubepeep_resource_list_items_received_total` | counter | `resource` |
+| `kubepeep_resource_list_items_returned_total` | counter | `resource` |
 
 O label `route` usa o padrão de rota do `http.ServeMux` (Go 1.22+), limitado à tabela estática de rotas — caminhos fornecidos pelo usuário nunca viram labels. Requisições não roteadas recebem `route="unmatched"`.
+
+As séries de instrumentação de listas registram, por coleção, quantos itens
+foram recebidos do Kubernetes e quantos foram devolvidos à UI. O quociente
+`received ÷ returned` é a razão de over-fetch: o objetivo da paginação lazy
+(chunks por origem) é mantê-la próxima de 1. Labels usam apenas o nome
+canônico da coleção; namespace, nome de recurso e identidade nunca são
+registrados.
 
 ### 3.3 Endpoint `/metrics`
 

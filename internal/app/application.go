@@ -44,6 +44,7 @@ type Options struct {
 	PortForwards actionservice.PortForwardService
 	Exec         handlers.ExecBridgeService
 	Cursors      *api.CursorCodec
+	CursorStore  *api.CursorStore
 	SessionTTL   time.Duration
 	Frontend     fs.FS
 	Logger       *gingerlogger.Logger
@@ -156,6 +157,7 @@ func New(options Options) (*Application, error) {
 		PortForwards: options.PortForwards,
 		Exec:         options.Exec,
 		Cursors:      options.Cursors,
+		CursorStore:  options.CursorStore,
 		Origin:       origin,
 		Port:         options.Port,
 		Build:        options.Build,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -34,6 +35,7 @@ func (stub *resourceSelectionStub) IfCurrent(binding namespaces.SelectionBinding
 type resourceServiceStub struct {
 	ResourceService
 	podOptions  resourcecore.ListOptions
+	podCursor   *resourcecore.CompositeCursor[resourcecore.PodDTO]
 	nodeOptions resourcecore.ListOptions
 	calls       int
 }
@@ -74,13 +76,24 @@ func (stub *resourceServiceStub) GetNode(context.Context, namespaces.SelectionBi
 	return resourcecore.NodeDetailDTO{}, errors.New("node reader is unavailable in this stub")
 }
 
-func (stub *resourceServiceStub) ListPods(_ context.Context, _ namespaces.SelectionBinding, _ namespaces.ScopeResolution, options resourcecore.ListOptions, _ *resourcecore.CompositeCursor[resourcecore.PodDTO]) (resourcecore.ListResult[resourcecore.PodDTO], error) {
+func (stub *resourceServiceStub) ListPods(_ context.Context, _ namespaces.SelectionBinding, _ namespaces.ScopeResolution, options resourcecore.ListOptions, cursor *resourcecore.CompositeCursor[resourcecore.PodDTO]) (resourcecore.ListResult[resourcecore.PodDTO], error) {
 	stub.calls++
 	stub.podOptions = options
+	stub.podCursor = cursor
 	origin := resourcecore.Origin{Namespace: "default", Version: "v1", Resource: "pods"}
-	cursor := resourcecore.NewCompositeCursor[resourcecore.PodDTO]([]resourcecore.Origin{origin})
-	cursor.Origins[0].Continue = "native-next"
-	return resourcecore.ListResult[resourcecore.PodDTO]{Items: []resourcecore.PodDTO{{Namespace: "default", Name: "api", Status: "Running"}}, Cursor: &cursor, Page: resourcecore.PageDTO{Limit: options.Limit, Truncated: true, FilterScope: resourcecore.FilterScopePage}, Coverage: resourcecore.CoverageDTO{RequestedNamespaces: 1, CompletedNamespaces: 1, DeniedNamespaces: []string{}, Failed: []resourcecore.PartialErrorDTO{}}, CollectedAt: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)}, nil
+	result := resourcecore.ListResult[resourcecore.PodDTO]{Items: []resourcecore.PodDTO{{Namespace: "default", Name: "api", Status: "Running"}}, Page: resourcecore.PageDTO{Limit: options.Limit, Truncated: true, FilterScope: resourcecore.FilterScopePage}, Coverage: resourcecore.CoverageDTO{RequestedNamespaces: 1, CompletedNamespaces: 1, DeniedNamespaces: []string{}, Failed: []resourcecore.PartialErrorDTO{}}, CollectedAt: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)}
+	if cursor != nil {
+		// Continue the stored window so a second page carries the buffered
+		// remainder forward.
+		next := *cursor
+		next.Origins[0].Continue = "native-next"
+		result.Cursor = &next
+		return result, nil
+	}
+	fresh := resourcecore.NewCompositeCursor[resourcecore.PodDTO]([]resourcecore.Origin{origin})
+	fresh.Origins[0].Buffered = []resourcecore.PodDTO{{Namespace: "default", Name: "buffered-1"}}
+	result.Cursor = &fresh
+	return result, nil
 }
 
 func TestResourceListEnvelopeCursorBindingAndNoStore(t *testing.T) {
@@ -348,5 +361,208 @@ func TestNodeDetailAndYAMLRequireOnlyContext(t *testing.T) {
 	}
 	if allow, known := allowedMethods("/api/v1/nodes"); !known || allow != "GET, HEAD" {
 		t.Fatalf("nodes allow=%q known=%v", allow, known)
+	}
+}
+
+func resourceListHandler(t *testing.T, service ResourceService, store *api.CursorStore, codec *api.CursorCodec) *Resources {
+	t.Helper()
+	if codec == nil {
+		var err error
+		codec, err = api.NewCursorCodec()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	selection := &resourceSelectionStub{binding: namespaces.SelectionBinding{ClusterProfileID: 1, Context: "ctx", Generation: "gen"}, resolution: namespaces.ScopeResolution{ScopeName: "scope", ScopeSource: "saved", Namespaces: []string{"default"}}}
+	return NewResources(service, nil, selection, codec).WithCursorStore(store)
+}
+
+const (
+	wideCatalogOrigins           = 40
+	wideCatalogBufferedPerOrigin = 30
+)
+
+// wideCatalogServiceStub returns the cursor state a wide Logs-catalog window
+// produces: one origin per namespace, each holding buffered DTOs plus a native
+// continuation.
+type wideCatalogServiceStub struct {
+	ResourceService
+	continuations     int
+	continuationState *resourcecore.CompositeCursor[resourcecore.PodDTO]
+}
+
+func (stub *wideCatalogServiceStub) ListPods(_ context.Context, _ namespaces.SelectionBinding, _ namespaces.ScopeResolution, options resourcecore.ListOptions, cursor *resourcecore.CompositeCursor[resourcecore.PodDTO]) (resourcecore.ListResult[resourcecore.PodDTO], error) {
+	if cursor != nil {
+		stub.continuations++
+		stub.continuationState = cursor
+		return resourcecore.ListResult[resourcecore.PodDTO]{Items: []resourcecore.PodDTO{}, Page: resourcecore.PageDTO{Limit: options.Limit, FilterScope: resourcecore.FilterScopePage}, Coverage: resourcecore.CoverageDTO{RequestedNamespaces: wideCatalogOrigins, CompletedNamespaces: wideCatalogOrigins, DeniedNamespaces: []string{}, Failed: []resourcecore.PartialErrorDTO{}}, CollectedAt: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)}, nil
+	}
+	origins := make([]resourcecore.Origin, wideCatalogOrigins)
+	for index := range origins {
+		origins[index] = resourcecore.Origin{Namespace: fmt.Sprintf("ns-%02d", index), Version: "v1", Resource: "pods"}
+	}
+	state := resourcecore.NewCompositeCursor[resourcecore.PodDTO](origins)
+	for index := range state.Origins {
+		buffered := make([]resourcecore.PodDTO, wideCatalogBufferedPerOrigin)
+		for item := range buffered {
+			buffered[item] = resourcecore.PodDTO{Namespace: fmt.Sprintf("ns-%02d", index), Name: fmt.Sprintf("pod-%03d", item), Status: "Running"}
+		}
+		state.Origins[index].Buffered = buffered
+		state.Origins[index].Continue = fmt.Sprintf("native-%02d", index)
+	}
+	return resourcecore.ListResult[resourcecore.PodDTO]{Items: []resourcecore.PodDTO{{Namespace: "ns-00", Name: "pod-000", Status: "Running"}}, Cursor: &state, Page: resourcecore.PageDTO{Limit: options.Limit, Truncated: true, FilterScope: resourcecore.FilterScopePage}, Coverage: resourcecore.CoverageDTO{RequestedNamespaces: wideCatalogOrigins, CompletedNamespaces: wideCatalogOrigins, DeniedNamespaces: []string{}, Failed: []resourcecore.PartialErrorDTO{}}, CollectedAt: time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)}, nil
+}
+
+func podsRequest(cursor string) *http.Request {
+	path := "/api/v1/pods?limit=25&status=Running&sort=name"
+	if cursor != "" {
+		path += "&continue=" + cursor
+	}
+	request := httptest.NewRequest(http.MethodGet, path, nil)
+	return request.WithContext(api.WithRequestID(request.Context(), "req_test"))
+}
+
+func requestNextToken(response *httptest.ResponseRecorder) string {
+	var envelope struct {
+		Meta struct {
+			Page resourcecore.PageDTO `json:"page"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &envelope); err != nil {
+		return ""
+	}
+	return envelope.Meta.Page.Next
+}
+
+func TestResourceListCursorStoreKeepsStateServerSide(t *testing.T) {
+	store := api.NewCursorStore(nil)
+	service := &resourceServiceStub{}
+	handler := resourceListHandler(t, service, store, nil)
+
+	first := httptest.NewRecorder()
+	handler.Pods(first, podsRequest(""))
+	if first.Code != http.StatusOK {
+		t.Fatalf("first page status=%d body=%s", first.Code, first.Body.String())
+	}
+	token := requestNextToken(first)
+	if token == "" {
+		t.Fatal("first page did not return a cursor")
+	}
+	if strings.Contains(token, "buffered") || strings.Contains(token, "origins") || len(token) > 512 {
+		t.Fatalf("token still carries state (%d bytes): %.80s", len(token), token)
+	}
+	if store.Len() != 1 {
+		t.Fatalf("store entries=%d, want 1", store.Len())
+	}
+
+	second := httptest.NewRecorder()
+	handler.Pods(second, podsRequest(token))
+	if second.Code != http.StatusOK {
+		t.Fatalf("second page status=%d body=%s", second.Code, second.Body.String())
+	}
+	if service.calls != 2 {
+		t.Fatalf("service calls=%d, want 2", service.calls)
+	}
+	if service.podCursor == nil || len(service.podCursor.Origins) != 1 || len(service.podCursor.Origins[0].Buffered) != 1 {
+		t.Fatalf("stored buffered state did not reach the service: %#v", service.podCursor)
+	}
+}
+
+func TestResourceListCursorStoreMissingReferenceIsExpired(t *testing.T) {
+	codec, err := api.NewCursorCodec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := api.NewCursorStore(nil)
+	service := &resourceServiceStub{}
+	handler := resourceListHandler(t, service, store, codec)
+
+	first := httptest.NewRecorder()
+	handler.Pods(first, podsRequest(""))
+	token := requestNextToken(first)
+	if token == "" {
+		t.Fatal("first page did not return a cursor")
+	}
+
+	// Simulate a restart/purge: the store lost the state while the signed
+	// token is still within its TTL window.
+	replacement := resourceListHandler(t, &resourceServiceStub{}, api.NewCursorStore(nil), codec)
+	recovery := httptest.NewRecorder()
+	replacement.Pods(recovery, podsRequest(token))
+	if recovery.Code != http.StatusGone || !strings.Contains(recovery.Body.String(), api.CodeCursorExpired) {
+		t.Fatalf("missing reference status=%d body=%s", recovery.Code, recovery.Body.String())
+	}
+	if service.calls != 1 {
+		t.Fatalf("expired cursor reached the service: calls=%d", service.calls)
+	}
+}
+
+// The Logs page opens by paginating the Pods collection (limit=500) across
+// every scoped namespace. A wide fan-out produces cursor state with thousands
+// of buffered DTOs; the token must stay a small reference and the stored state
+// must survive a continuation roundtrip intact. Under the inline-state cursor
+// this scenario exceeded the token size limit and failed the catalog load.
+func TestResourceListCursorStoreServesWideFanoutCatalogState(t *testing.T) {
+	codec, err := api.NewCursorCodec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := &wideCatalogServiceStub{}
+	handler := resourceListHandler(t, service, api.NewCursorStore(nil), codec)
+
+	first := httptest.NewRecorder()
+	handler.Pods(first, podsRequest(""))
+	if first.Code != http.StatusOK {
+		t.Fatalf("catalog page status=%d body=%s", first.Code, first.Body.String())
+	}
+	token := requestNextToken(first)
+	if token == "" || len(token) > 512 || strings.Contains(token, "pod-") {
+		t.Fatalf("catalog token is not a small reference (%d bytes): %.80s", len(token), token)
+	}
+
+	second := httptest.NewRecorder()
+	handler.Pods(second, podsRequest(token))
+	if second.Code != http.StatusOK {
+		t.Fatalf("continuation status=%d body=%s", second.Code, second.Body.String())
+	}
+	if service.continuations != 1 {
+		t.Fatalf("continuations=%d", service.continuations)
+	}
+	if service.continuationState == nil || len(service.continuationState.Origins) != wideCatalogOrigins {
+		t.Fatalf("stored state lost origins: %#v", service.continuationState)
+	}
+	for _, origin := range service.continuationState.Origins {
+		if len(origin.Buffered) != wideCatalogBufferedPerOrigin || origin.Continue == "" {
+			t.Fatalf("stored state lost buffered items for %s: %d buffered, continue=%q", origin.Origin.Namespace, len(origin.Buffered), origin.Continue)
+		}
+	}
+}
+
+func TestResourceListCursorStoreStillAcceptsLegacyInlineTokens(t *testing.T) {
+	codec, err := api.NewCursorCodec()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A handler without a store produces the pre-store inline-state token.
+	legacyService := &resourceServiceStub{}
+	legacyHandler := resourceListHandler(t, legacyService, nil, codec)
+	first := httptest.NewRecorder()
+	legacyHandler.Pods(first, podsRequest(""))
+	token := requestNextToken(first)
+	if token == "" || len(token) < 256 {
+		t.Fatalf("expected a legacy inline-state token, got %.80s (%d bytes)", token, len(token))
+	}
+
+	// The store-enabled handler must still serve it until it expires.
+	store := api.NewCursorStore(nil)
+	service := &resourceServiceStub{}
+	handler := resourceListHandler(t, service, store, codec)
+	response := httptest.NewRecorder()
+	handler.Pods(response, podsRequest(token))
+	if response.Code != http.StatusOK {
+		t.Fatalf("legacy token status=%d body=%s", response.Code, response.Body.String())
+	}
+	if service.podCursor == nil || len(service.podCursor.Origins[0].Buffered) != 1 {
+		t.Fatalf("legacy inline state was not decoded: %#v", service.podCursor)
 	}
 }

@@ -1,8 +1,6 @@
 package resources
 
 import (
-	"encoding/json"
-	"fmt"
 	"sort"
 )
 
@@ -78,14 +76,6 @@ func (cursor CompositeCursor[T]) Validate(expected []Origin) error {
 		if state.Exhausted && state.Continue != "" {
 			return validationError("exhausted cursor origin cannot have a continue token")
 		}
-	}
-	encoded, err := json.Marshal(cursor)
-	if err != nil {
-		return fmt.Errorf("resources: marshal cursor state: %w", err)
-	}
-	// Leave room for the authenticated envelope and base64 expansion.
-	if len(encoded) > 12<<10 {
-		return domainError(CodeLimitExceeded, "The composed cursor exceeded its safe size.", nil)
 	}
 	return nil
 }

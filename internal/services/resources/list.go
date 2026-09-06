@@ -20,6 +20,17 @@ const (
 	MaximumListWindowTimeout = 300 * time.Second
 )
 
+// Origin chunk budgets separate the UI page size from the per-origin LIST
+// size. Fan-out windows fetch small chunks so a page request no longer pulls
+// pageLimit items from every namespace; the un-emitted remainder waits in the
+// server-side cursor state instead of growing the HTTP token. A single origin
+// (global LIST or cluster-scoped collection) keeps the full page limit: there
+// is no over-fetch and the native continue token resumes exactly.
+const (
+	DefaultOriginChunkSize = 10
+	MaxOriginChunkSize     = 50
+)
+
 // NormalizeListWindowTimeout clamps a configured collection budget into the
 // supported range, keeping zero/negative values at the default.
 func NormalizeListWindowTimeout(value time.Duration) time.Duration {
@@ -88,10 +99,7 @@ func Collect[T ListItem](ctx context.Context, request CollectionRequest[T]) (Lis
 			return result, err
 		}
 	}
-	timeout := request.Timeout
-	if timeout <= 0 {
-		timeout = 10 * time.Second
-	}
+	timeout := NormalizeListWindowTimeout(request.Timeout)
 	requestContext, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	pages := make([]OriginPage[T], 0, len(origins))
@@ -205,7 +213,7 @@ func collectOrigins[T ListItem](ctx context.Context, request CollectionRequest[T
 				outcomes[index].err = ctx.Err()
 				return
 			}
-			page, err := request.Lister.ListPage(ctx, PageRequest{Origin: state.Origin, Limit: int64(request.Options.Limit), Continue: state.Continue})
+			page, err := request.Lister.ListPage(ctx, PageRequest{Origin: state.Origin, Limit: originChunkLimit(len(cursor.Origins), request.Options.Limit), Continue: state.Continue})
 			if page.Origin.Key() == "///" {
 				page.Origin = state.Origin
 			}
@@ -216,6 +224,21 @@ func collectOrigins[T ListItem](ctx context.Context, request CollectionRequest[T
 	}
 	wait.Wait()
 	return outcomes
+}
+
+// originChunkLimit bounds the per-origin page size for one collection window.
+func originChunkLimit(origins, pageLimit int) int64 {
+	if origins <= 1 {
+		return int64(pageLimit)
+	}
+	chunk := DefaultOriginChunkSize
+	if chunk > MaxOriginChunkSize {
+		chunk = MaxOriginChunkSize
+	}
+	if chunk > pageLimit {
+		chunk = pageLimit
+	}
+	return int64(chunk)
 }
 
 func canonicalOrigins(origins []Origin) []Origin {

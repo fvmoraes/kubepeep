@@ -28,6 +28,7 @@ type Dependencies struct {
 	PortForwards actionservice.PortForwardService
 	Exec         actionservice.ExecService
 	Cursors      *api.CursorCodec
+	CursorStore  *api.CursorStore
 	Origin       string
 	Port         int
 	Build        api.BuildInfo
@@ -83,7 +84,7 @@ func Register(applicationRouter *router.Router, dependencies Dependencies) {
 		apiRouter.GET("/metrics", dashboard.Metrics)
 	}
 	if dependencies.Resources != nil && dependencies.Selection != nil {
-		resourceHandler := NewResources(dependencies.Resources, dependencies.Preferences, dependencies.Selection, dependencies.Cursors)
+		resourceHandler := NewResources(dependencies.Resources, dependencies.Preferences, dependencies.Selection, dependencies.Cursors).WithCursorStore(dependencies.CursorStore)
 		apiRouter.GET("/workloads", resourceHandler.Workloads)
 		apiRouter.GET("/workloads/{kind}/{namespace}/{name}", resourceHandler.WorkloadDetail)
 		apiRouter.GET("/workloads/{kind}/{namespace}/{name}/yaml", resourceHandler.WorkloadYAML)

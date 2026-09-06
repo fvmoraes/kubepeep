@@ -6,8 +6,10 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"github.com/fvmoraes/kubepeep/internal/observability"
 	"github.com/fvmoraes/kubepeep/internal/services/authorization"
 	"github.com/fvmoraes/kubepeep/internal/services/namespaces"
 	"github.com/fvmoraes/kubepeep/internal/services/resources"
@@ -19,6 +21,10 @@ type ResourceBackendOptions struct {
 	// to the resources package default; values are clamped to the supported
 	// ceiling.
 	ListWindowTimeout time.Duration
+	// Metrics optionally receives over-fetch instrumentation (items received
+	// from Kubernetes versus items returned to the UI). A nil registry keeps
+	// collection uninstrumented; this is the default.
+	Metrics *observability.Registry
 }
 
 // ResourceBackend is the Phase 6 application-facing adapter. It owns no
@@ -32,6 +38,7 @@ type ResourceBackend struct {
 	now        func() time.Time
 
 	listWindowTimeout time.Duration
+	metrics           *observability.Registry
 
 	watchMu         sync.Mutex
 	watchManager    *resources.WatchManager
@@ -50,6 +57,7 @@ func NewResourceBackendWithOptions(runtime *Runtime, authorizer resources.Author
 	backend := &ResourceBackend{
 		runtime: runtime, clients: runtimeResourceClientProvider{runtime: runtime}, authorizer: authorizer, redactor: redactor, now: time.Now,
 		listWindowTimeout: resources.NormalizeListWindowTimeout(options.ListWindowTimeout),
+		metrics:           options.Metrics,
 		watchBindings:     make(map[string]namespaces.SelectionBinding),
 	}
 	backend.watchManager = resources.NewWatchManager(&resourceWatchPort{backend: backend})
@@ -142,12 +150,17 @@ func collectResource[T resources.ListItem](
 		if decision == authorization.DecisionAllowed {
 			selection := resourceSelection(binding, resolution)
 			selection.Namespaces = []string{""}
-			return resources.Collect(ctx, resources.CollectionRequest[T]{
+			var received atomic.Int64
+			result, collectErr := resources.Collect(ctx, resources.CollectionRequest[T]{
 				Selection: selection, Options: options, Origins: origins, Cursor: cursor,
-				Lister: list, Authorizer: backend.authorizer, Less: less,
+				Lister: countingLister(list, &received), Authorizer: backend.authorizer, Less: less,
 				Timeout:             backend.listWindowTimeout,
 				RequestedNamespaces: len(resolution.Namespaces),
 			})
+			if collectErr == nil {
+				backend.observeList(collection, int(received.Load()), len(result.Items))
+			}
+			return result, collectErr
 		}
 		if cursorGlobal {
 			if decision == authorization.DecisionDenied {
@@ -169,12 +182,17 @@ func collectResource[T resources.ListItem](
 	if err != nil {
 		return resources.ListResult[T]{}, err
 	}
-	return resources.Collect(ctx, resources.CollectionRequest[T]{
+	var received atomic.Int64
+	result, collectErr := resources.Collect(ctx, resources.CollectionRequest[T]{
 		Selection: selection, Options: options, Origins: origins, Cursor: cursor,
-		Lister: list, Authorizer: backend.authorizer, Less: less,
+		Lister: countingLister(list, &received), Authorizer: backend.authorizer, Less: less,
 		Timeout:             backend.listWindowTimeout,
 		RequestedNamespaces: len(names),
 	})
+	if collectErr == nil {
+		backend.observeList(collection, int(received.Load()), len(result.Items))
+	}
+	return result, collectErr
 }
 
 func listCursorMode[T resources.ListItem](cursor *resources.CompositeCursor[T]) (global, namespaced bool, err error) {
@@ -280,14 +298,16 @@ func clusterCollect[T resources.ListItem](ctx context.Context, backend *Resource
 		// the namespaced selection validation.
 		selection.Scope = "none"
 	}
+	var received atomic.Int64
 	result, collectErr := resources.Collect(ctx, resources.CollectionRequest[T]{
 		Selection: selection, Options: normalized, Origins: []resources.Origin{origin}, Cursor: cursor,
-		Lister: list, Authorizer: backend.authorizer, Less: less,
+		Lister: countingLister(list, &received), Authorizer: backend.authorizer, Less: less,
 		Timeout: backend.listWindowTimeout,
 	})
 	if collectErr != nil {
 		return resources.ListResult[T]{}, collectErr
 	}
+	backend.observeList(collection, int(received.Load()), len(result.Items))
 	// Cluster-scoped lists never simulate namespace fan-out (ADR 0006): the
 	// single empty namespace origin must not surface as fictitious counts.
 	result.Coverage = resources.CoverageDTO{RequestedNamespaces: 0, CompletedNamespaces: 0, DeniedNamespaces: []string{}, Failed: sanitizeClusterFailures(result.Coverage.Failed)}
@@ -302,6 +322,31 @@ func sanitizeClusterFailures(failures []resources.PartialErrorDTO) []resources.P
 		sanitized = append(sanitized, failure)
 	}
 	return sanitized
+}
+
+// countingLister records how many items Kubernetes returned for one window so
+// the over-fetch ratio (received versus returned) can be measured. Concurrency
+// is bounded by the collection fan-out, so an atomic counter is sufficient.
+func countingLister[T resources.ListItem](list originListerFunc[T], received *atomic.Int64) originListerFunc[T] {
+	return func(ctx context.Context, request resources.PageRequest) (resources.OriginPage[T], error) {
+		page, err := list(ctx, request)
+		if err == nil {
+			received.Add(int64(len(page.Items)))
+		}
+		return page, err
+	}
+}
+
+// observeList records the per-collection over-fetch counters. Label values are
+// the bounded collection names; no namespace, resource name, or identity data
+// is ever recorded.
+func (backend *ResourceBackend) observeList(collection resources.Collection, received, returned int) {
+	if backend.metrics == nil {
+		return
+	}
+	labels := map[string]string{"resource": string(collection)}
+	backend.metrics.AddCounter(observability.ResourceListItemsReceivedTotalName, labels, uint64(received))
+	backend.metrics.AddCounter(observability.ResourceListItemsReturnedTotalName, labels, uint64(returned))
 }
 
 func (backend *ResourceBackend) ListNodes(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, options resources.ListOptions, cursor *resources.CompositeCursor[resources.NodeDTO]) (resources.ListResult[resources.NodeDTO], error) {
