@@ -4,6 +4,10 @@ import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { ConfigPage, EventsPage, NetworkPage, PodsPage, WorkloadsPage } from './ResourcePages'
+import { ToastProvider } from './ui/Toast'
+import { ResourceWorkspaceProvider } from './workspace/ResourceWorkspaceProvider'
+import { ResourceWorkspaceOverlay } from './workspace/ResourceWorkspace'
+import { GlobalNamespaceProvider } from '../context/GlobalNamespace'
 
 const generation = 'gen_42'
 
@@ -30,7 +34,21 @@ function preferences() {
 
 function renderPage(component: React.ReactNode) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
-  return { client, ...render(<QueryClientProvider client={client}><MemoryRouter>{component}</MemoryRouter></QueryClientProvider>) }
+  const selection = selectedStatus()
+  return { client, ...render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter>
+        <ToastProvider>
+          <ResourceWorkspaceProvider>
+            <GlobalNamespaceProvider generation={selection.selection.generation} scopeId={selection.selection.scopeId} scopeMode={selection.selection.scopeMode}>
+              {component}
+              <ResourceWorkspaceOverlay />
+            </GlobalNamespaceProvider>
+          </ResourceWorkspaceProvider>
+        </ToastProvider>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  ) }
 }
 
 function sortOptionValues(): string[] {
@@ -75,7 +93,8 @@ describe('read-only resource pages', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Open Deployment api in payments' }))
     expect(await screen.findByText('17')).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Load authorized YAML' }))
+    fireEvent.click(screen.getByRole('tab', { name: 'YAML' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'Load authorized YAML' }))
     expect(await screen.findByLabelText('YAML document')).toHaveTextContent('kind: Deployment')
 
     fireEvent.click(screen.getByRole('button', { name: 'Next page' }))

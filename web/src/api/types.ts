@@ -1059,11 +1059,13 @@ export interface YAMLDiff {
   lines: YAMLDiffLine[]
 }
 
+export type ActionWorkloadKind = 'Deployment' | 'StatefulSet' | 'DaemonSet' | 'Job' | 'CronJob' | 'ReplicaSet'
+
 export interface ActionTarget {
   clusterProfileId: number
   context: string
   namespace: string
-  kind: 'Deployment' | 'StatefulSet' | 'Pod'
+  kind: ActionWorkloadKind | 'Pod'
   name: string
 }
 
@@ -1091,6 +1093,25 @@ export interface PodDeleteActionRequest extends ConfirmedAction {
   consequenceCode: 'DELETE_POD'
   expectedUid: string
   expectedResourceVersion: string
+}
+
+export interface WorkloadDeleteActionRequest extends ConfirmedAction {
+  action: 'deleteWorkload'
+  consequenceCode: 'DELETE_RESOURCE'
+  expectedUid: string
+  expectedResourceVersion: string
+}
+
+export interface CronJobSuspendActionRequest extends ConfirmedAction {
+  suspend: boolean
+  action: 'updateCronJobSuspend'
+  consequenceCode: 'SUSPEND_CRONJOB' | 'RESUME_CRONJOB'
+  expectedResourceVersion: string
+}
+
+export interface CronJobTriggerActionRequest extends ConfirmedAction {
+  action: 'triggerCronJob'
+  consequenceCode: 'CREATE_JOB_FROM_CRONJOB'
 }
 
 export interface PortForwardCreateRequest extends ConfirmedAction {

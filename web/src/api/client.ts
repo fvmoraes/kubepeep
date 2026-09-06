@@ -84,6 +84,9 @@ RoleDetail,
 RuntimeClass,
 ScaleActionRequest,
 ExecInit,
+WorkloadDeleteActionRequest,
+CronJobSuspendActionRequest,
+CronJobTriggerActionRequest,
 Workload,
 WorkloadDetail,
 PriorityClass,
@@ -800,6 +803,23 @@ export function scaleWorkload(kind: string, namespace: string, name: string, bod
 
 export function deletePod(namespace: string, name: string, body: PodDeleteActionRequest, csrfToken: string, signal?: AbortSignal): Promise<import('./types').ActionAccepted> {
   return mutation<import('./types').ActionAccepted>(`/api/v1/pods/${resourcePath(namespace)}/${resourcePath(name)}`, 'DELETE', body, csrfToken, signal)
+}
+
+export function deleteWorkload(kind: string, namespace: string, name: string, body: WorkloadDeleteActionRequest, csrfToken: string, signal?: AbortSignal): Promise<import('./types').ActionAccepted> {
+  return mutation<import('./types').ActionAccepted>(`/api/v1/workloads/${resourcePath(kind)}/${resourcePath(namespace)}/${resourcePath(name)}`, 'DELETE', body, csrfToken, signal)
+}
+
+export function updateCronJobSuspend(namespace: string, name: string, body: CronJobSuspendActionRequest, csrfToken: string, signal?: AbortSignal): Promise<import('./types').ActionAccepted> {
+  return mutation<import('./types').ActionAccepted>(`/api/v1/workloads/cronjobs/${resourcePath(namespace)}/${resourcePath(name)}/suspend`, 'PUT', body, csrfToken, signal)
+}
+
+export function triggerCronJob(namespace: string, name: string, body: CronJobTriggerActionRequest, csrfToken: string, idempotencyKey: string, signal?: AbortSignal): Promise<import('./types').ActionAccepted> {
+  return request<import('./types').ActionAccepted>(`/api/v1/workloads/cronjobs/${resourcePath(namespace)}/${resourcePath(name)}/trigger`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-KubePeep-CSRF': csrfToken, 'Idempotency-Key': idempotencyKey },
+    body: JSON.stringify(body),
+    signal,
+  })
 }
 
 export function createPortForward(namespace: string, name: string, body: PortForwardCreateRequest, csrfToken: string, idempotencyKey: string, signal?: AbortSignal): Promise<PortForward> {

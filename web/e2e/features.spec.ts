@@ -151,6 +151,7 @@ test('yaml diff renders added and removed lines and the absent baseline state (F
   await page.getByRole('button', { name: /Open Pod api-abc in payments/i }).click()
   await expect(page).toHaveURL(/\/pods\/payments\/api-abc$/)
   await expect(page.getByRole('dialog')).toBeVisible()
+  await page.getByRole('tab', { name: 'YAML' }).click()
   await page.getByRole('button', { name: 'Load authorized YAML' }).click()
   await expect(page.getByLabel('YAML document')).toBeVisible()
 
@@ -242,6 +243,7 @@ test('nodes lists and details without namespace scope and honors authorization (
   await expect(page.getByText('control-plane').first()).toBeVisible()
   await expect(page.getByText('Kubelet', { exact: true })).toBeVisible()
   await expect(page.getByText('1.32.0').first()).toBeVisible()
+  await page.getByRole('tab', { name: 'Conditions' }).click()
   await expect(page.getByText('Condition', { exact: true })).toBeVisible()
 })
 

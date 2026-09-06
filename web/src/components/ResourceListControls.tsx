@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { RefreshCw, Search } from 'lucide-react'
 
 import { Button, Input, Select } from './ui'
 
@@ -36,7 +37,12 @@ interface ResourceListControlsProps {
   children?: ReactNode
 }
 
-/** Shared filter toolbar — identical structure across Pods, Workloads, Events, Network and Config. */
+/**
+ * Compact filter toolbar. Filters, search, sort and refresh fit one row of
+ * h-7 controls (plus a thin chips row) so the filter area stays within
+ * ~20-30% of the viewport and the table remains the protagonist.
+ * Child filter fields must render label-less inline inputs/selects.
+ */
 export function ResourceListControls({
   search,
   appliedSearch,
@@ -66,37 +72,42 @@ export function ResourceListControls({
   return (
     <section aria-label="Resource list controls" className="min-w-0">
       <form
-        className="flex flex-wrap items-end gap-2.5 rounded-xl border border-kp-overlay-0 bg-kp-surface-0 p-3"
+        className="list-controls-form flex flex-wrap items-center gap-1.5 rounded-xl border border-kp-overlay-0 bg-kp-surface-0"
         onSubmit={(event) => { event.preventDefault(); onApply() }}
       >
-        <label className="grid flex-1 gap-1 min-w-[220px]">
-          <span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Search this bounded page</span>
-          <Input type="search" data-app-shortcut="search" aria-label="Search this bounded page" aria-keyshortcuts="Control+F Meta+F" value={search} maxLength={256} onChange={(event) => onSearchChange(event.target.value)} />
-        </label>
+        <div className="relative min-w-[170px] flex-1">
+          <Search size={13} aria-hidden="true" className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-kp-overlay-text" />
+          <Input
+            type="search"
+            data-app-shortcut="search"
+            aria-label="Search this bounded page"
+            aria-keyshortcuts="Control+F Meta+F"
+            placeholder="Search (Ctrl+F)"
+            maxLength={256}
+            className="!h-7 !pl-7 text-sm"
+            value={search}
+            onChange={(event) => onSearchChange(event.target.value)}
+          />
+        </div>
         {children}
-        <label className="grid gap-1 min-w-[160px]">
-          <span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Sort this bounded page</span>
-          <Select aria-label="Sort this bounded page" value={sort} onChange={(event) => onSortChange(event.target.value)}>{sortOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</Select>
-        </label>
-        <label className="grid gap-1 w-[9.5rem]">
-          <span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Order</span>
-          <Select aria-label="Order" value={order} onChange={(event) => onOrderChange(event.target.value as ListSortOrder)}><option value="asc">Ascending</option><option value="desc">Descending</option></Select>
-        </label>
-        <div className="flex gap-2">
-          <Button type="submit">Apply filters</Button>
-          <Button variant="secondary" aria-keyshortcuts="Control+R Meta+R" onClick={onRefresh}>Refresh</Button>
-          <Button variant="secondary" disabled={!canClear} onClick={onClear}>Clear filters</Button>
+        <Select aria-label="Sort this bounded page" className="!h-7 !w-auto max-w-[11rem] pr-6 text-sm" value={sort} onChange={(event) => onSortChange(event.target.value)}>{sortOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</Select>
+        <Select aria-label="Order" className="!h-7 !w-[6.5rem] pr-6 text-sm" value={order} onChange={(event) => onOrderChange(event.target.value as ListSortOrder)}><option value="asc">Ascending</option><option value="desc">Descending</option></Select>
+        <div className="flex items-center gap-1.5">
+          <Button type="submit" size="sm">Apply filters</Button>
+          <Button variant="secondary" size="sm" aria-keyshortcuts="Control+R Meta+R" onClick={onRefresh} data-tip="Refresh this page"><RefreshCw size={12} aria-hidden="true" /> Refresh</Button>
+          <Button variant="ghost" size="sm" disabled={!canClear} onClick={onClear}>Clear filters</Button>
         </div>
       </form>
-      <div className="flex flex-wrap items-start gap-x-4 gap-y-1.5 px-1 py-1.5 text-xs text-kp-overlay-text" aria-label="Applied resource list state" aria-live="polite">
+      <div className={`flex flex-wrap items-center gap-x-3 gap-y-1 px-1 text-xs text-kp-overlay-text ${appliedFilters.length > 0 || hasPendingChanges ? 'list-controls-chips py-1' : ''}`} aria-label="Applied resource list state" aria-live="polite">
         <div className="flex flex-wrap items-center gap-1.5">
-          <strong className="text-2xs uppercase tracking-wider text-kp-overlay-text">Active filters</strong>
+          <span className="text-2xs uppercase tracking-wider">Filters</span>
           {appliedFilters.length === 0
             ? <span>None</span>
-            : <ul className="flex flex-wrap gap-1.5">{appliedFilters.map((filter) => <li key={filter.id} className="inline-flex max-w-[280px] items-center gap-1.5 rounded-full border border-kp-overlay-0 bg-kp-surface-1 px-2 py-0.5"><span className="text-kp-overlay-text">{filter.label}</span><strong className="overflow-hidden text-ellipsis whitespace-nowrap font-normal text-kp-subtext">{filter.value}</strong></li>)}</ul>}
+            : <ul className="flex flex-wrap gap-1.5">{appliedFilters.map((filter) => <li key={filter.id} className="inline-flex max-w-[260px] items-center gap-1 rounded-full border border-kp-overlay-0 bg-kp-surface-1 px-2 py-0"><span className="text-kp-overlay-text">{filter.label}</span><strong className="overflow-hidden text-ellipsis whitespace-nowrap font-normal text-kp-subtext">{filter.value}</strong></li>)}</ul>}
         </div>
-        <p className="m-0 flex items-center gap-1.5"><span className="text-2xs uppercase tracking-wider">Order</span><strong className="font-normal text-kp-subtext">{sortLabel} · {appliedOrder === 'asc' ? 'ascending' : 'descending'}</strong></p>
-        {hasPendingChanges ? <p className="pending-filter-change basis-full m-0 text-kp-yellow" role="status">Filter changes pending; apply filters to update the bounded result.</p> : null}
+        <span className="text-2xs uppercase tracking-wider">Order</span>
+        <strong className="font-normal text-kp-subtext">{sortLabel} · {appliedOrder === 'asc' ? 'ascending' : 'descending'}</strong>
+        {hasPendingChanges ? <p className="pending-filter-change m-0 text-kp-yellow" role="status">Filter changes pending; apply filters to update the bounded result.</p> : null}
       </div>
     </section>
   )

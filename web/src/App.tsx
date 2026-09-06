@@ -9,6 +9,7 @@ import { getPreferences, getSession, getStatus, putPreferences, type Preferences
 import { Badge } from './components/ui/Badge'
 import { CommandCenter, type CommandRoute } from './components/CommandCenter'
 import { ContextSelector } from './components/ContextSelector'
+import { GlobalNamespaceSelect } from './components/GlobalNamespaceSelect'
 import { DashboardPage } from './components/Dashboard'
 import { NamespaceScopeEditor } from './components/NamespaceScopeEditor'
 import { PermissionsMatrixPage } from './components/PermissionsMatrix'
@@ -20,8 +21,13 @@ import { AccessControlPage, AdministrationPage } from './components/AccessPages'
 import { SettingsPage } from './components/SettingsPage'
 import { Sidebar } from './components/Sidebar'
 import { StatePanel } from './components/StatePanel'
+import { ResourceWorkspaceOverlay } from './components/workspace/ResourceWorkspace'
+import { ResourceWorkspaceProvider, useResourceWorkspace } from './components/workspace/ResourceWorkspaceProvider'
+import { GlobalNamespaceProvider } from './context/GlobalNamespace'
+import { ToastProvider } from './components/ui/Toast'
 import { useAppVersion } from './hooks/useAppVersion'
 import { navGroups, settingsNavItem } from './navigation/tree'
+import { resourceDetailPath } from './navigation/paths'
 import { desktopPlatform } from './api/desktop'
 
 // Command palette catalog: every enabled navigation destination. Group labels
@@ -52,59 +58,7 @@ const maximumCommandResources = 200
 
 function resourceEntryPath(collection: unknown, item: { name?: string; namespace?: string; kind?: string }): string | null {
   if (typeof collection !== 'string' || !item.name) return null
-  // Cluster-scoped entries (ADR 0006) resolve by name only; no fake namespace.
-  const clusterRoots: Record<string, string> = {
-    nodes: '/nodes',
-    'persistent-volumes': '/storage/persistent-volumes',
-    'storage-classes': '/storage/storage-classes',
-    'csi-nodes': '/storage/csi-nodes',
-    'csi-drivers': '/storage/csi-drivers',
-    'volume-attachments': '/storage/volume-attachments',
-    'cluster-roles': '/access/cluster-roles',
-    'cluster-role-bindings': '/access/cluster-role-bindings',
-    'customresourcedefinitions': '/administration/customresourcedefinitions',
-    'priority-classes': '/administration/priority-classes',
-    'runtime-classes': '/administration/runtime-classes',
-    'mutating-webhook-configurations': '/administration/mutating-webhook-configurations',
-    'validating-webhook-configurations': '/administration/validating-webhook-configurations',
-    'ingress-classes': '/network/ingress-classes',
-  }
-  if (collection in clusterRoots) return `${clusterRoots[collection]}/${encodeURIComponent(item.name)}`
-  if (!item.namespace) return null
-  const namespace = encodeURIComponent(item.namespace)
-  const name = encodeURIComponent(item.name)
-  switch (collection) {
-    case 'pods':
-      return `/pods/${namespace}/${name}`
-    case 'workloads': {
-      const kind = ({ Deployment: 'deployments', StatefulSet: 'statefulsets', DaemonSet: 'daemonsets', Job: 'jobs', CronJob: 'cronjobs', ReplicaSet: 'replicasets' } as Record<string, string>)[item.kind ?? '']
-      return kind ? `/workloads/${kind}/${namespace}/${name}` : null
-    }
-    case 'services':
-      return `/network/services/${namespace}/${name}`
-    case 'ingresses':
-      return `/network/ingresses/${namespace}/${name}`
-    case 'endpoint-slices':
-      return `/network/endpoint-slices/${namespace}/${name}`
-    case 'configmaps':
-      return `/config/configmaps/${namespace}/${name}`
-    case 'secrets':
-      return `/config/secrets/${namespace}/${name}`
-    case 'leases':
-      return `/leases/${namespace}/${name}`
-    case 'persistent-volume-claims':
-      return `/storage/persistent-volume-claims/${namespace}/${name}`
-    case 'roles':
-      return `/access/roles/${namespace}/${name}`
-    case 'role-bindings':
-      return `/access/role-bindings/${namespace}/${name}`
-    case 'network-policies':
-      return `/network/network-policies/${namespace}/${name}`
-    case 'endpoints':
-      return `/network/endpoints/${namespace}/${name}`
-    default:
-      return null
-  }
+  return resourceDetailPath({ collection, kind: item.kind ?? null, namespace: item.namespace ?? null, name: item.name })
 }
 
 function resourceEntryKeywords(collection: string, item: { kind?: string; namespace?: string }): string[] {
@@ -113,43 +67,28 @@ function resourceEntryKeywords(collection: string, item: { kind?: string; namesp
 
 function favoriteEntryPath(kind: string, namespace: string | undefined, name: string): string | null {
   // Cluster-scoped favorites (V6-03) resolve by name only.
-  const clusterRoots: Record<string, string> = {
-    node: '/nodes',
-    persistentvolume: '/storage/persistent-volumes',
-    storageclass: '/storage/storage-classes',
-    ingressclass: '/network/ingress-classes',
-    priorityclass: '/administration/priority-classes',
-    runtimeclass: '/administration/runtime-classes',
-    customresourcedefinition: '/administration/customresourcedefinitions',
+  if (kind === 'deployment' || kind === 'statefulset' || kind === 'daemonset' || kind === 'job' || kind === 'cronjob') {
+    const titleKind = { deployment: 'Deployment', statefulset: 'StatefulSet', daemonset: 'DaemonSet', job: 'Job', cronjob: 'CronJob' }[kind]
+    return resourceDetailPath({ collection: 'workloads', kind: titleKind, namespace: namespace ?? null, name })
   }
-  if (kind in clusterRoots) return `${clusterRoots[kind]}/${encodeURIComponent(name)}`
-  if (!namespace) return null
-  switch (kind) {
-    case 'pod':
-      return `/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`
-    case 'deployment':
-      return `/workloads/deployments/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`
-    case 'statefulset':
-      return `/workloads/statefulsets/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`
-    case 'daemonset':
-      return `/workloads/daemonsets/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`
-    case 'job':
-      return `/workloads/jobs/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`
-    case 'cronjob':
-      return `/workloads/cronjobs/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`
-    case 'service':
-      return `/network/services/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`
-    case 'ingress':
-      return `/network/ingresses/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`
-    case 'endpointslice':
-      return `/network/endpoint-slices/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`
-    case 'configmap':
-      return `/config/configmaps/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`
-    case 'secret':
-      return `/config/secrets/${encodeURIComponent(namespace)}/${encodeURIComponent(name)}`
-    default:
-      return null
+  const favoriteCollections: Record<string, string> = {
+    pod: 'pods',
+    service: 'services',
+    ingress: 'ingresses',
+    endpointslice: 'endpoint-slices',
+    configmap: 'configmaps',
+    secret: 'secrets',
+    node: 'nodes',
+    persistentvolume: 'persistent-volumes',
+    storageclass: 'storage-classes',
+    ingressclass: 'ingress-classes',
+    priorityclass: 'priority-classes',
+    runtimeclass: 'runtime-classes',
+    customresourcedefinition: 'customresourcedefinitions',
   }
+  const collection = favoriteCollections[kind]
+  if (!collection) return null
+  return resourceDetailPath({ collection, namespace: namespace ?? null, name })
 }
 
 function favoriteEntries(preferences: Preferences | undefined) {
@@ -203,6 +142,8 @@ const safeGlobalRefreshRoots = new Set([
   'port-forwards',
   'preferences',
   'resources',
+  'workspace-detail',
+  'workspace-events',
 ])
 
 function isSafeGlobalRefreshQuery(query: { queryKey: readonly unknown[] }) {
@@ -282,6 +223,7 @@ function Shell() {
   })
   const preferencesData = preferences.data
   const [, setHydrationError] = useState(false)
+  const workspace = useResourceWorkspace()
 
   // Hydration (V6-05): initial state comes from the backend document; local
   // state only diverges after an explicit user action and is persisted by
@@ -370,9 +312,11 @@ function Shell() {
       // The session nonce rotates with the generation: drop the cached token
       // so every consumer refetches a fresh one instead of CSRF_REJECTED.
       queryClient.removeQueries({ queryKey: ['session'] })
+      // Workspace history points at resources of the previous selection.
+      workspace.reset()
     }
     previousGeneration.current = current
-  }, [queryClient, selection?.generation])
+  }, [queryClient, selection?.generation, workspace])
 
   return (
     <div className={`app-shell ${compact ? 'app-shell--compact' : ''}`}>
@@ -382,6 +326,7 @@ function Shell() {
         <header className="topbar">
           <div className="topbar-controls">
             <ContextSelector selection={selection} />
+            <GlobalNamespaceSelect />
             <button
               type="button"
               onClick={() => navigate('/namespaces')}
@@ -404,50 +349,74 @@ function Shell() {
         </header>
         <main id="main-content"><Outlet /></main>
       </div>
+      <ResourceWorkspaceOverlay />
     </div>
+  )
+}
+
+function ShellProviders() {
+  const status = useQuery({
+    queryKey: ['local-status'],
+    queryFn: ({ signal }) => getStatus(signal),
+    staleTime: 15_000,
+    refetchOnWindowFocus: false,
+  })
+  const selection = status.data?.selection ?? null
+  return (
+    <ResourceWorkspaceProvider>
+      <GlobalNamespaceProvider generation={selection?.generation} scopeId={selection?.scopeId ?? null} scopeMode={selection?.scopeMode ?? null}>
+        <Shell />
+      </GlobalNamespaceProvider>
+    </ResourceWorkspaceProvider>
   )
 }
 
 export function App() {
   return (
-    <Routes>
-      <Route element={<Shell />}>
-        <Route index element={<DashboardPage />} />
-        <Route path="events" element={<EventsPage />} />
-        <Route path="nodes" element={<NodesPage />} />
-        <Route path="nodes/:name" element={<NodesPage />} />
-        <Route path="leases" element={<LeasesPage />} />
-        <Route path="leases/:namespace/:name" element={<LeasesPage />} />
-        <Route path="namespaces" element={<NamespaceScopeEditor />} />
-        <Route path="namespaces/:name" element={<NamespaceObjectPage />} />
-        <Route path="storage" element={<StoragePage />} />
-        <Route path="storage/:tab" element={<StoragePage />} />
-        <Route path="storage/:tab/:namespace/:name" element={<StoragePage />} />
-        <Route path="configuration" element={<ConfigurationPage />} />
-        <Route path="configuration/:tab" element={<ConfigurationPage />} />
-        <Route path="configuration/:tab/:namespace/:name" element={<ConfigurationPage />} />
-        <Route path="service-accounts" element={<ServiceAccountsPage />} />
-        <Route path="access/:tab" element={<AccessControlPage />} />
-        <Route path="access/:tab/:namespace/:name" element={<AccessControlPage />} />
-        <Route path="administration" element={<AdministrationPage />} />
-        <Route path="administration/:tab" element={<AdministrationPage />} />
-        <Route path="administration/:tab/:name" element={<AdministrationPage />} />
-        <Route path="permissions" element={<PermissionsMatrixPage />} />
-        <Route path="logs" element={<LogsPage />} />
-        <Route path="pods" element={<PodsPage />} />
-        <Route path="pods/:namespace/:name" element={<PodsPage />} />
-        <Route path="workloads" element={<WorkloadsPage />} />
-        <Route path="workloads/kind/:kind" element={<WorkloadsPage />} />
-        <Route path="workloads/:kind/:namespace/:name" element={<WorkloadsPage />} />
-        <Route path="network" element={<NetworkPage />} />
-        <Route path="network/:tab" element={<NetworkPage />} />
-        <Route path="network/:tab/:namespace/:name" element={<NetworkPage />} />
-        <Route path="config" element={<ConfigPage />} />
-        <Route path="config/:tab" element={<ConfigPage />} />
-        <Route path="config/:tab/:namespace/:name" element={<ConfigPage />} />
-        <Route path="settings" element={<SettingsPage />} />
-        <Route path="*" element={<StatePanel kind="error" title="Page not found">Return to Overview using the navigation.</StatePanel>} />
-      </Route>
-    </Routes>
+    <ToastProvider>
+      <Routes>
+        <Route element={<ShellProviders />}>
+          <Route index element={<DashboardPage />} />
+          <Route path="events" element={<EventsPage />} />
+          <Route path="nodes" element={<NodesPage />} />
+          <Route path="nodes/:name" element={<NodesPage />} />
+          <Route path="leases" element={<LeasesPage />} />
+          <Route path="leases/:namespace/:name" element={<LeasesPage />} />
+          <Route path="namespaces" element={<NamespaceScopeEditor />} />
+          <Route path="namespaces/:name" element={<NamespaceObjectPage />} />
+          <Route path="storage" element={<StoragePage />} />
+          <Route path="storage/:tab" element={<StoragePage />} />
+          <Route path="storage/:tab/:name" element={<StoragePage />} />
+          <Route path="storage/:tab/:namespace/:name" element={<StoragePage />} />
+          <Route path="configuration" element={<ConfigurationPage />} />
+          <Route path="configuration/:tab" element={<ConfigurationPage />} />
+          <Route path="configuration/:tab/:namespace/:name" element={<ConfigurationPage />} />
+          <Route path="service-accounts" element={<ServiceAccountsPage />} />
+          <Route path="service-accounts/:namespace/:name" element={<ServiceAccountsPage />} />
+          <Route path="access/:tab" element={<AccessControlPage />} />
+          <Route path="access/:tab/:name" element={<AccessControlPage />} />
+          <Route path="access/:tab/:namespace/:name" element={<AccessControlPage />} />
+          <Route path="administration" element={<AdministrationPage />} />
+          <Route path="administration/:tab" element={<AdministrationPage />} />
+          <Route path="administration/:tab/:name" element={<AdministrationPage />} />
+          <Route path="permissions" element={<PermissionsMatrixPage />} />
+          <Route path="logs" element={<LogsPage />} />
+          <Route path="pods" element={<PodsPage />} />
+          <Route path="pods/:namespace/:name" element={<PodsPage />} />
+          <Route path="workloads" element={<WorkloadsPage />} />
+          <Route path="workloads/kind/:kind" element={<WorkloadsPage />} />
+          <Route path="workloads/:kind/:namespace/:name" element={<WorkloadsPage />} />
+          <Route path="network" element={<NetworkPage />} />
+          <Route path="network/:tab" element={<NetworkPage />} />
+          <Route path="network/:tab/:name" element={<NetworkPage />} />
+          <Route path="network/:tab/:namespace/:name" element={<NetworkPage />} />
+          <Route path="config" element={<ConfigPage />} />
+          <Route path="config/:tab" element={<ConfigPage />} />
+          <Route path="config/:tab/:namespace/:name" element={<ConfigPage />} />
+          <Route path="settings" element={<SettingsPage />} />
+          <Route path="*" element={<StatePanel kind="error" title="Page not found">Return to Overview using the navigation.</StatePanel>} />
+        </Route>
+      </Routes>
+    </ToastProvider>
   )
 }

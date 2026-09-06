@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { PodDetail, SelectionSummary, WorkloadDetail } from '../api/types'
 import { PodActions, WorkloadActions } from './ResourceActions'
+import { ToastProvider } from './ui/Toast'
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(status < 400 ? { data } : data), { status, headers: { 'Content-Type': 'application/json' } })
@@ -23,7 +24,7 @@ const pod: PodDetail = {
 }
 
 function wrapper(client: QueryClient, child: React.ReactNode) {
-  return <QueryClientProvider client={client}>{child}</QueryClientProvider>
+  return <QueryClientProvider client={client}><ToastProvider>{child}</ToastProvider></QueryClientProvider>
 }
 
 afterEach(() => {
@@ -34,7 +35,7 @@ afterEach(() => {
 })
 
 describe('generation-bound authorized actions', () => {
-  it('keeps unknown or denied workload capabilities disabled even after confirmation', async () => {
+  it('keeps unknown or denied workload capabilities disabled even without confirmation', async () => {
     vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
       const path = String(input)
       if (path.startsWith('/api/v1/permissions?')) return Promise.resolve(json({ generation: 'gen_42', complete: true, truncated: false, errors: [], decisions: [
@@ -47,9 +48,9 @@ describe('generation-bound authorized actions', () => {
     render(wrapper(client, <WorkloadActions detail={workload} selection={selection} />))
 
     expect(await screen.findByText(/denied by Kubernetes/)).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('checkbox'))
     expect(screen.getByRole('button', { name: 'Restart Deployment' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: 'Scale' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Apply replicas' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Delete Deployment' })).toBeDisabled()
   })
 
   it('sends confirmed restart with CSRF and a fresh idempotency key', async () => {
@@ -58,6 +59,7 @@ describe('generation-bound authorized actions', () => {
       const path = String(input)
       if (path.startsWith('/api/v1/permissions?')) return Promise.resolve(json({ generation: 'gen_42', complete: true, truncated: false, errors: [], decisions: [
         { capabilityId: 'deployments.restart', decision: 'allowed' }, { capabilityId: 'deployments.scale', decision: 'allowed' },
+        { capabilityId: 'deployments.delete', decision: 'allowed' },
       ] }))
       if (path === '/api/v1/session') return Promise.resolve(json({ csrfToken: 'csrf-action', origin: 'http://127.0.0.1:2748', generation: 'gen_42', expiresAt: '2026-08-17T18:00:00Z' }))
       if (path === '/api/v1/workloads/deployments/payments/api/restart') {
@@ -70,12 +72,11 @@ describe('generation-bound authorized actions', () => {
     const invalidateQueries = vi.spyOn(client, 'invalidateQueries')
     render(wrapper(client, <WorkloadActions detail={workload} selection={selection} />))
 
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Restart Deployment' })).toBeDisabled())
-    fireEvent.click(screen.getByRole('checkbox'))
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Restart Deployment' })).toBeEnabled())
-    fireEvent.click(screen.getByRole('button', { name: 'Restart Deployment' }))
+    const restartButton = await screen.findByRole('button', { name: 'Restart Deployment' })
+    await waitFor(() => expect(restartButton).toBeEnabled())
+    fireEvent.click(restartButton)
 
-    expect(await screen.findByRole('status')).toHaveTextContent('Restart accepted')
+    expect(await screen.findByRole('status')).toHaveTextContent(/restart accepted/i)
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['action-permissions', 'gen_42'] })
     expect(restartInit?.headers).toEqual(expect.objectContaining({ 'X-KubePeep-CSRF': 'csrf-action', 'Idempotency-Key': expect.stringMatching(/^kp-[0-9a-f]{32}$/) }))
     expect(JSON.parse(String(restartInit?.body))).toEqual(expect.objectContaining({ confirmed: true, expectedGeneration: 'gen_42', expectedResourceVersion: '17', consequenceCode: 'RECREATE_WORKLOAD_PODS' }))
@@ -90,6 +91,7 @@ describe('generation-bound authorized actions', () => {
         const permission = permissionCalls === 1 ? 'allowed' : 'denied'
         return Promise.resolve(json({ generation: 'gen_42', complete: true, truncated: false, errors: [], decisions: [
           { capabilityId: 'deployments.restart', decision: permission }, { capabilityId: 'deployments.scale', decision: permission },
+          { capabilityId: 'deployments.delete', decision: permission },
         ] }))
       }
       if (path === '/api/v1/session') return Promise.resolve(json({ csrfToken: 'csrf-action', origin: 'http://127.0.0.1:2748', generation: 'gen_42', expiresAt: '2026-08-17T18:00:00Z' }))
@@ -102,11 +104,11 @@ describe('generation-bound authorized actions', () => {
     const invalidateQueries = vi.spyOn(client, 'invalidateQueries')
     render(wrapper(client, <WorkloadActions detail={workload} selection={selection} />))
 
-    fireEvent.click(screen.getByRole('checkbox'))
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Restart Deployment' })).toBeEnabled())
-    fireEvent.click(screen.getByRole('button', { name: 'Restart Deployment' }))
+    const restartButton = await screen.findByRole('button', { name: 'Restart Deployment' })
+    await waitFor(() => expect(restartButton).toBeEnabled())
+    fireEvent.click(restartButton)
 
-    expect(await screen.findByText(/ACTION_FORBIDDEN/)).toBeInTheDocument()
+    expect(await screen.findByRole('alert')).toHaveTextContent(/ACTION_FORBIDDEN/)
     await waitFor(() => expect(permissionCalls).toBeGreaterThan(1))
     expect(screen.getByRole('button', { name: 'Restart Deployment' })).toBeDisabled()
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['action-permissions', 'gen_42'] })
@@ -150,9 +152,9 @@ describe('generation-bound authorized actions', () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
     const view = render(wrapper(client, <PodActions detail={pod} selection={selection} />))
 
-    fireEvent.click(screen.getByRole('checkbox'))
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Start port-forward' })).toBeEnabled())
-    fireEvent.click(screen.getByRole('button', { name: 'Start port-forward' }))
+    const portForwardButton = await screen.findByRole('button', { name: 'Start port-forward' })
+    await waitFor(() => expect(portForwardButton).toBeEnabled())
+    fireEvent.click(portForwardButton)
     expect(await screen.findByText(/Loopback listener:/)).toHaveTextContent('127.0.0.1:49152')
     expect(portForwardInit?.headers).toEqual(expect.objectContaining({ 'X-KubePeep-CSRF': 'csrf-pod', 'Idempotency-Key': expect.stringMatching(/^kp-/) }))
 

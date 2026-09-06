@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 
-export type BadgeVariant = 'default' | 'healthy' | 'warning' | 'danger' | 'info' | 'unknown'
+export type BadgeVariant = 'default' | 'healthy' | 'warning' | 'danger' | 'info' | 'unknown' | 'accent'
 
 export interface BadgeProps {
   variant?: BadgeVariant
@@ -15,6 +15,7 @@ const variants: Record<BadgeVariant, string> = {
   danger: 'text-kp-red bg-kp-red-bg border-kp-red-border',
   info: 'text-kp-sky bg-kp-blue-bg border-kp-blue-border',
   unknown: 'text-kp-overlay-text bg-kp-surface-2 border-kp-overlay-0',
+  accent: 'text-kp-mauve bg-kp-accent-bg border-kp-accent-border',
 }
 
 export function Badge({ variant = 'default', children, className = '' }: BadgeProps) {
@@ -32,6 +33,7 @@ const statusDot: Record<BadgeVariant, string> = {
   danger: 'bg-kp-red',
   info: 'bg-kp-sky',
   unknown: 'bg-kp-overlay-text',
+  accent: 'bg-kp-mauve',
 }
 
 /** Badge with a leading status dot — used for Kubernetes resource states. */

@@ -148,10 +148,15 @@
   --z-sidebar-mobile: 10;
   --z-command-backdrop: 140;
   --z-tooltip: 130;
+  --z-workspace: 60;
+  --z-toast: 160;
+  --z-confirm: 170;
 
   /* Layout constants */
   --sidebar-width: 240px;
   --sidebar-width-compact: 56px;
   --header-height: 56px;
-  --content-max-width: 1400px;
+  --content-max-width: 1680px;
+  --workspace-inset: 9vh 9vw;
+  --list-controls-max-height: 30vh;
 }

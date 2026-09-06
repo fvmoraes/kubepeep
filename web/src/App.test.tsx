@@ -126,7 +126,10 @@ describe('application shell', () => {
     renderApp()
 
     fireEvent.click(screen.getByRole('button', { name: 'Open command center' }))
-    expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual([
+    // The topbar global namespace selector contributes one option of its own;
+    // it is not part of the command-center route catalog.
+    const optionTexts = screen.getAllByRole('option').map((option) => option.textContent).filter((text) => text !== 'Namespace: All')
+    expect(optionTexts).toEqual([
       expect.stringContaining('Overview'),
       expect.stringContaining('Nodes'),
       expect.stringContaining('Events'),
