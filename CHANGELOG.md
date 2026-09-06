@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versions follow [Semantic Versioning](https://semver.org/) **without the `v`
 prefix** (official tags: `1.4.2`, `1.4.3`, …), and entries are generated
 automatically from Conventional Commits by `.github/workflows/release.yml`.
+## [0.6.0] - 2026-09-06
+
+## Added
+- feat(ux): global namespace filter, resource workspace and bulk actions
+- feat(actions): extend workload mutations with restart, delete and cronjob control
+
+## Download
+
+Permanently-updated links: https://github.com/fvmoraes/kubepeep/blob/main/docs/download.md
+
+## Full Changelog
+**Full Changelog**: https://github.com/fvmoraes/kubepeep/compare/0.5.0...0.6.0
+
 ## [0.5.0] - 2026-09-05
 
 ## Added
@@ -532,3 +545,4 @@ Permanently-updated links: https://github.com/fvmoraes/kubepeep/blob/main/docs/d
 [0.4.2]: https://github.com/fvmoraes/kubepeep/releases/tag/0.4.2
 [0.4.3]: https://github.com/fvmoraes/kubepeep/releases/tag/0.4.3
 [0.5.0]: https://github.com/fvmoraes/kubepeep/releases/tag/0.5.0
+[0.6.0]: https://github.com/fvmoraes/kubepeep/releases/tag/0.6.0
