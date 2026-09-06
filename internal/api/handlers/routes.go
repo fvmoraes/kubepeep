@@ -174,6 +174,9 @@ func Register(applicationRouter *router.Router, dependencies Dependencies) {
 		if dependencies.Actions != nil {
 			apiRouter.POST("/workloads/{kind}/{namespace}/{name}/restart", actions.Restart)
 			apiRouter.PUT("/workloads/{kind}/{namespace}/{name}/scale", actions.Scale)
+			apiRouter.PUT("/workloads/{kind}/{namespace}/{name}/suspend", actions.UpdateCronJobSuspend)
+			apiRouter.POST("/workloads/{kind}/{namespace}/{name}/trigger", actions.TriggerCronJob)
+			apiRouter.DELETE("/workloads/{kind}/{namespace}/{name}", actions.DeleteWorkload)
 			apiRouter.DELETE("/pods/{namespace}/{name}", actions.DeletePod)
 		}
 		if dependencies.PortForwards != nil {
@@ -351,6 +354,12 @@ func actionAllowedMethods(path string) (string, bool) {
 		return "POST", true
 	case len(parts) == 5 && parts[0] == "workloads" && parts[4] == "scale":
 		return "PUT", true
+	case len(parts) == 5 && parts[0] == "workloads" && parts[4] == "suspend":
+		return "PUT", true
+	case len(parts) == 5 && parts[0] == "workloads" && parts[4] == "trigger":
+		return "POST", true
+	case len(parts) == 4 && parts[0] == "workloads":
+		return "DELETE", true
 	case len(parts) == 3 && parts[0] == "pods":
 		return "DELETE", true
 	case len(parts) == 4 && parts[0] == "pods" && parts[3] == "port-forward":

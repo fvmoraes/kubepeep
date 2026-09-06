@@ -84,8 +84,32 @@ func validateConfirmation(binding namespaces.SelectionBinding, route RouteTarget
 	return nil
 }
 
+// restartableWorkloadKinds maps a canonical workload route kind to the
+// Kubernetes kind accepted as restart target. The restart action is the same
+// pod-template annotation patch for all three controllers.
+var restartableWorkloadKinds = map[string]string{
+	"deployments":  "Deployment",
+	"statefulsets": "StatefulSet",
+	"daemonsets":   "DaemonSet",
+}
+
+// deletableWorkloadKinds maps a canonical workload route kind to the
+// Kubernetes kind accepted as delete target.
+var deletableWorkloadKinds = map[string]string{
+	"deployments":  "Deployment",
+	"statefulsets": "StatefulSet",
+	"daemonsets":   "DaemonSet",
+	"jobs":         "Job",
+	"cronjobs":     "CronJob",
+	"replicasets":  "ReplicaSet",
+}
+
 func validateRestart(binding namespaces.SelectionBinding, route RouteTarget, request RestartRequest) *Error {
-	if err := validateConfirmation(binding, route, request.Confirmation, ActionRestart, ConsequenceRecreateWorkloadPods, "deployments", "Deployment"); err != nil {
+	targetKind, ok := restartableWorkloadKinds[route.Kind]
+	if !ok {
+		return validationError(FieldViolation{Field: "path.kind", Rule: "deployments_statefulsets_or_daemonsets"})
+	}
+	if err := validateConfirmation(binding, route, request.Confirmation, ActionRestart, ConsequenceRecreateWorkloadPods, route.Kind, targetKind); err != nil {
 		return err
 	}
 	return validateOpaquePrecondition("expectedResourceVersion", request.ExpectedResourceVersion)
@@ -133,6 +157,42 @@ func validateDeletePod(binding namespaces.SelectionBinding, route RouteTarget, r
 		return validationError(violations...)
 	}
 	return nil
+}
+
+func validateDeleteWorkload(binding namespaces.SelectionBinding, route RouteTarget, request WorkloadDeleteRequest) *Error {
+	targetKind, ok := deletableWorkloadKinds[route.Kind]
+	if !ok {
+		return validationError(FieldViolation{Field: "path.kind", Rule: "deployments_statefulsets_daemonsets_jobs_cronjobs_or_replicasets"})
+	}
+	if err := validateConfirmation(binding, route, request.Confirmation, ActionDeleteWorkload, ConsequenceDeleteResource, route.Kind, targetKind); err != nil {
+		return err
+	}
+	violations := make([]FieldViolation, 0, 2)
+	if err := validateOpaquePrecondition("expectedUid", request.ExpectedUID); err != nil {
+		violations = append(violations, err.Details...)
+	}
+	if err := validateOpaquePrecondition("expectedResourceVersion", request.ExpectedResourceVersion); err != nil {
+		violations = append(violations, err.Details...)
+	}
+	if len(violations) > 0 {
+		return validationError(violations...)
+	}
+	return nil
+}
+
+func validateCronJobSuspend(binding namespaces.SelectionBinding, route RouteTarget, request CronJobSuspendRequest) *Error {
+	consequence := ConsequenceSuspendCronJob
+	if !request.Suspend {
+		consequence = ConsequenceResumeCronJob
+	}
+	if err := validateConfirmation(binding, route, request.Confirmation, ActionUpdateCronJobSuspend, consequence, "cronjobs", "CronJob"); err != nil {
+		return err
+	}
+	return validateOpaquePrecondition("expectedResourceVersion", request.ExpectedResourceVersion)
+}
+
+func validateCronJobTrigger(binding namespaces.SelectionBinding, route RouteTarget, request CronJobTriggerRequest) *Error {
+	return validateConfirmation(binding, route, request.Confirmation, ActionTriggerCronJob, ConsequenceCreateJobFromCronJob, "cronjobs", "CronJob")
 }
 
 func validatePortForward(binding namespaces.SelectionBinding, route RouteTarget, request PortForwardCreateRequest) *Error {

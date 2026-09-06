@@ -13,6 +13,7 @@ import (
 
 	"github.com/fvmoraes/kubepeep/internal/services/actions"
 	autoscalingv1 "k8s.io/api/autoscaling/v1"
+	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -64,18 +65,7 @@ func (client *ActionClient) RestartDeployment(ctx context.Context, command actio
 	if client == nil || client.unary == nil {
 		return actions.MutationResult{}, errActionsClientUnavailable
 	}
-	patch, err := json.Marshal(map[string]any{
-		"metadata": map[string]string{"resourceVersion": command.ExpectedResourceVersion},
-		"spec": map[string]any{
-			"template": map[string]any{
-				"metadata": map[string]any{
-					"annotations": map[string]string{
-						"kubectl.kubernetes.io/restartedAt": command.RestartedAt.UTC().Format(time.RFC3339),
-					},
-				},
-			},
-		},
-	})
+	patch, err := restartTemplatePatch(command)
 	if err != nil {
 		return actions.MutationResult{}, errActionsClientUnavailable
 	}
@@ -90,6 +80,166 @@ func (client *ActionClient) RestartDeployment(ctx context.Context, command actio
 		return actions.MutationResult{}, err
 	}
 	return actions.MutationResult{ResourceVersion: deployment.ResourceVersion}, nil
+}
+
+// restartTemplatePatch builds the strategic merge patch that stamps the
+// restartedAt annotation on the pod template. The metadata.resourceVersion
+// inside the patch object acts as an optimistic concurrency precondition.
+func restartTemplatePatch(command actions.RestartDeploymentCommand) ([]byte, error) {
+	return json.Marshal(map[string]any{
+		"metadata": map[string]string{"resourceVersion": command.ExpectedResourceVersion},
+		"spec": map[string]any{
+			"template": map[string]any{
+				"metadata": map[string]any{
+					"annotations": map[string]string{
+						"kubectl.kubernetes.io/restartedAt": command.RestartedAt.UTC().Format(time.RFC3339),
+					},
+				},
+			},
+		},
+	})
+}
+
+func (client *ActionClient) RestartStatefulSet(ctx context.Context, command actions.RestartDeploymentCommand) (actions.MutationResult, error) {
+	if client == nil || client.unary == nil {
+		return actions.MutationResult{}, errActionsClientUnavailable
+	}
+	patch, err := restartTemplatePatch(command)
+	if err != nil {
+		return actions.MutationResult{}, errActionsClientUnavailable
+	}
+	set, err := client.unary.AppsV1().StatefulSets(command.Target.Namespace).Patch(
+		ctx,
+		command.Target.Name,
+		types.StrategicMergePatchType,
+		patch,
+		metav1.PatchOptions{},
+	)
+	if err != nil {
+		return actions.MutationResult{}, err
+	}
+	return actions.MutationResult{ResourceVersion: set.ResourceVersion}, nil
+}
+
+func (client *ActionClient) RestartDaemonSet(ctx context.Context, command actions.RestartDeploymentCommand) (actions.MutationResult, error) {
+	if client == nil || client.unary == nil {
+		return actions.MutationResult{}, errActionsClientUnavailable
+	}
+	patch, err := restartTemplatePatch(command)
+	if err != nil {
+		return actions.MutationResult{}, errActionsClientUnavailable
+	}
+	set, err := client.unary.AppsV1().DaemonSets(command.Target.Namespace).Patch(
+		ctx,
+		command.Target.Name,
+		types.StrategicMergePatchType,
+		patch,
+		metav1.PatchOptions{},
+	)
+	if err != nil {
+		return actions.MutationResult{}, err
+	}
+	return actions.MutationResult{ResourceVersion: set.ResourceVersion}, nil
+}
+
+func (client *ActionClient) DeleteWorkload(ctx context.Context, command actions.DeleteWorkloadCommand) (actions.MutationResult, error) {
+	if client == nil || client.unary == nil {
+		return actions.MutationResult{}, errActionsClientUnavailable
+	}
+	uid := types.UID(command.ExpectedUID)
+	resourceVersion := command.ExpectedResourceVersion
+	options := metav1.DeleteOptions{
+		Preconditions: &metav1.Preconditions{UID: &uid, ResourceVersion: &resourceVersion},
+	}
+	switch command.Target.Kind {
+	case "Deployment":
+		err := client.unary.AppsV1().Deployments(command.Target.Namespace).Delete(ctx, command.Target.Name, options)
+		return actions.MutationResult{}, err
+	case "StatefulSet":
+		err := client.unary.AppsV1().StatefulSets(command.Target.Namespace).Delete(ctx, command.Target.Name, options)
+		return actions.MutationResult{}, err
+	case "DaemonSet":
+		err := client.unary.AppsV1().DaemonSets(command.Target.Namespace).Delete(ctx, command.Target.Name, options)
+		return actions.MutationResult{}, err
+	case "ReplicaSet":
+		err := client.unary.AppsV1().ReplicaSets(command.Target.Namespace).Delete(ctx, command.Target.Name, options)
+		return actions.MutationResult{}, err
+	case "Job":
+		err := client.unary.BatchV1().Jobs(command.Target.Namespace).Delete(ctx, command.Target.Name, options)
+		return actions.MutationResult{}, err
+	case "CronJob":
+		err := client.unary.BatchV1().CronJobs(command.Target.Namespace).Delete(ctx, command.Target.Name, options)
+		return actions.MutationResult{}, err
+	default:
+		return actions.MutationResult{}, errActionsClientUnavailable
+	}
+}
+
+func (client *ActionClient) UpdateCronJobSuspend(ctx context.Context, command actions.UpdateCronJobSuspendCommand) (actions.MutationResult, error) {
+	if client == nil || client.unary == nil {
+		return actions.MutationResult{}, errActionsClientUnavailable
+	}
+	patch, err := json.Marshal(map[string]any{
+		"metadata": map[string]string{"resourceVersion": command.ExpectedResourceVersion},
+		"spec":     map[string]any{"suspend": command.Suspend},
+	})
+	if err != nil {
+		return actions.MutationResult{}, errActionsClientUnavailable
+	}
+	cronJob, err := client.unary.BatchV1().CronJobs(command.Target.Namespace).Patch(
+		ctx,
+		command.Target.Name,
+		types.MergePatchType,
+		patch,
+		metav1.PatchOptions{},
+	)
+	if err != nil {
+		return actions.MutationResult{}, err
+	}
+	return actions.MutationResult{ResourceVersion: cronJob.ResourceVersion}, nil
+}
+
+// TriggerCronJob instantiates one manual Job from the CronJob job template,
+// owned by the CronJob so cascade deletion and ownership stay coherent.
+func (client *ActionClient) TriggerCronJob(ctx context.Context, command actions.TriggerCronJobCommand) (actions.TriggerCronJobResult, error) {
+	if client == nil || client.unary == nil {
+		return actions.TriggerCronJobResult{}, errActionsClientUnavailable
+	}
+	cronJob, err := client.unary.BatchV1().CronJobs(command.Target.Namespace).Get(ctx, command.Target.Name, metav1.GetOptions{})
+	if err != nil {
+		return actions.TriggerCronJobResult{}, err
+	}
+	now := metav1.Now()
+	controller := true
+	job := &batchv1.Job{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        command.JobName,
+			Namespace:   command.Target.Namespace,
+			Labels:      cronJob.Spec.JobTemplate.Labels,
+			Annotations: cronJob.Spec.JobTemplate.Annotations,
+			OwnerReferences: []metav1.OwnerReference{{
+				APIVersion:         "batch/v1",
+				Kind:               "CronJob",
+				Name:               cronJob.Name,
+				UID:                cronJob.UID,
+				Controller:         &controller,
+				BlockOwnerDeletion: &controller,
+			}},
+		},
+		Spec: cronJob.Spec.JobTemplate.Spec,
+	}
+	if job.Annotations == nil {
+		job.Annotations = map[string]string{}
+	}
+	job.Annotations["kubepeep.io/manual-trigger"] = now.UTC().Format(time.RFC3339)
+	if cronJob.Spec.TimeZone != nil {
+		job.Annotations["batch.kubernetes.io/cronjob-time-zone"] = *cronJob.Spec.TimeZone
+	}
+	created, err := client.unary.BatchV1().Jobs(command.Target.Namespace).Create(ctx, job, metav1.CreateOptions{})
+	if err != nil {
+		return actions.TriggerCronJobResult{}, err
+	}
+	return actions.TriggerCronJobResult{JobName: created.Name, ResourceVersion: created.ResourceVersion}, nil
 }
 
 func (client *ActionClient) UpdateScale(ctx context.Context, command actions.ScaleCommand) (actions.MutationResult, error) {

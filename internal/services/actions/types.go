@@ -34,11 +34,14 @@ const (
 type Action string
 
 const (
-	ActionRestart     Action = "restart"
-	ActionScale       Action = "scale"
-	ActionDeletePod   Action = "deletePod"
-	ActionPortForward Action = "portForward"
-	ActionExec        Action = "exec"
+	ActionRestart              Action = "restart"
+	ActionScale                Action = "scale"
+	ActionDeletePod            Action = "deletePod"
+	ActionPortForward          Action = "portForward"
+	ActionExec                 Action = "exec"
+	ActionDeleteWorkload       Action = "deleteWorkload"
+	ActionUpdateCronJobSuspend Action = "updateCronJobSuspend"
+	ActionTriggerCronJob       Action = "triggerCronJob"
 )
 
 type ConsequenceCode string
@@ -49,6 +52,10 @@ const (
 	ConsequenceDeletePod              ConsequenceCode = "DELETE_POD"
 	ConsequenceExposePodPortLocally   ConsequenceCode = "EXPOSE_POD_PORT_LOCALLY"
 	ConsequenceOpenInteractiveProcess ConsequenceCode = "OPEN_INTERACTIVE_PROCESS"
+	ConsequenceDeleteResource         ConsequenceCode = "DELETE_RESOURCE"
+	ConsequenceSuspendCronJob         ConsequenceCode = "SUSPEND_CRONJOB"
+	ConsequenceResumeCronJob          ConsequenceCode = "RESUME_CRONJOB"
+	ConsequenceCreateJobFromCronJob   ConsequenceCode = "CREATE_JOB_FROM_CRONJOB"
 )
 
 // ActionTargetDTO is repeated in every action request and must match both the
@@ -93,6 +100,26 @@ type PodDeleteRequest struct {
 	Confirmation
 	ExpectedUID             string `json:"expectedUid"`
 	ExpectedResourceVersion string `json:"expectedResourceVersion"`
+}
+
+// WorkloadDeleteRequest deletes one controller object (Deployment, StatefulSet,
+// DaemonSet, ReplicaSet, Job or CronJob) with optimistic preconditions.
+type WorkloadDeleteRequest struct {
+	Confirmation
+	ExpectedUID             string `json:"expectedUid"`
+	ExpectedResourceVersion string `json:"expectedResourceVersion"`
+}
+
+// CronJobSuspendRequest patches spec.suspend on one CronJob.
+type CronJobSuspendRequest struct {
+	Suspend bool `json:"suspend"`
+	Confirmation
+	ExpectedResourceVersion string `json:"expectedResourceVersion"`
+}
+
+// CronJobTriggerRequest creates a one-off Job from the CronJob job template.
+type CronJobTriggerRequest struct {
+	Confirmation
 }
 
 type PortForwardCreateRequest struct {
@@ -141,6 +168,33 @@ type DeletePodCommand struct {
 	ExpectedResourceVersion string
 }
 
+// DeleteWorkloadCommand deletes one controller object. ExpectedUID and
+// ExpectedResourceVersion become Kubernetes delete preconditions.
+type DeleteWorkloadCommand struct {
+	Target                  MutationTarget
+	ExpectedUID             string
+	ExpectedResourceVersion string
+}
+
+// UpdateCronJobSuspendCommand patches spec.suspend with optimistic concurrency
+// through ExpectedResourceVersion.
+type UpdateCronJobSuspendCommand struct {
+	Target                  MutationTarget
+	Suspend                 bool
+	ExpectedResourceVersion string
+}
+
+// TriggerCronJobCommand creates one manual Job from the CronJob job template.
+type TriggerCronJobCommand struct {
+	Target  MutationTarget
+	JobName string
+}
+
+type TriggerCronJobResult struct {
+	JobName         string
+	ResourceVersion string
+}
+
 type MutationResult struct {
 	ResourceVersion string
 }
@@ -164,11 +218,18 @@ type ScaleResultDTO struct {
 
 // KubernetesActions is intentionally narrower than a generic Kubernetes
 // client: an adapter cannot receive or apply an arbitrary patch from this
-// package.
+// package. RestartDeploymentCommand carries the pod-template annotation patch
+// and is reused for the StatefulSet and DaemonSet restart variants, which are
+// the same strategic merge against their own pod templates.
 type KubernetesActions interface {
 	RestartDeployment(context.Context, RestartDeploymentCommand) (MutationResult, error)
+	RestartStatefulSet(context.Context, RestartDeploymentCommand) (MutationResult, error)
+	RestartDaemonSet(context.Context, RestartDeploymentCommand) (MutationResult, error)
 	UpdateScale(context.Context, ScaleCommand) (MutationResult, error)
 	DeletePod(context.Context, DeletePodCommand) (MutationResult, error)
+	DeleteWorkload(context.Context, DeleteWorkloadCommand) (MutationResult, error)
+	UpdateCronJobSuspend(context.Context, UpdateCronJobSuspendCommand) (MutationResult, error)
+	TriggerCronJob(context.Context, TriggerCronJobCommand) (TriggerCronJobResult, error)
 }
 
 type AuthorizationService interface {
@@ -184,6 +245,9 @@ type ActionService interface {
 	Restart(context.Context, namespaces.SelectionBinding, RouteTarget, string, RestartRequest) (ActionAcceptedDTO, bool, error)
 	Scale(context.Context, namespaces.SelectionBinding, RouteTarget, ScaleRequest) (ScaleResultDTO, error)
 	DeletePod(context.Context, namespaces.SelectionBinding, RouteTarget, PodDeleteRequest) (ActionAcceptedDTO, error)
+	DeleteWorkload(context.Context, namespaces.SelectionBinding, RouteTarget, WorkloadDeleteRequest) (ActionAcceptedDTO, error)
+	UpdateCronJobSuspend(context.Context, namespaces.SelectionBinding, RouteTarget, CronJobSuspendRequest) (ActionAcceptedDTO, error)
+	TriggerCronJob(context.Context, namespaces.SelectionBinding, RouteTarget, CronJobTriggerRequest) (ActionAcceptedDTO, error)
 	OnGeneration(string)
 	Shutdown()
 }

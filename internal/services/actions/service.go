@@ -2,6 +2,7 @@ package actions
 
 import (
 	"context"
+	cryptorand "crypto/rand"
 	"errors"
 	"fmt"
 	"net/http"
@@ -95,26 +96,40 @@ func (s *Service) Restart(ctx context.Context, binding namespaces.SelectionBindi
 		BodyHash:         bodyHash,
 	}
 	return s.restarts.Do(ctx, idempotencyKey, identity, func() (ActionAcceptedDTO, error) {
-		return s.restartOnce(ctx, binding, request)
+		return s.restartOnce(ctx, binding, route, request)
 	})
 }
 
-func (s *Service) restartOnce(ctx context.Context, binding namespaces.SelectionBinding, request RestartRequest) (result ActionAcceptedDTO, returnedErr error) {
+func (s *Service) restartOnce(ctx context.Context, binding namespaces.SelectionBinding, route RouteTarget, request RestartRequest) (result ActionAcceptedDTO, returnedErr error) {
 	target := mutationTarget(binding, request.Target)
 	started := s.clock.Now().UTC()
 	defer func() { recordAudit(ctx, s.audit, s.clock, started, "restart", target, returnedErr) }()
-	key, err := authorization.KeyForCapability(binding.Generation, target.Namespace, "deployments.restart", target.Name)
+	capabilityID, ok := restartCapabilityID(route.Kind)
+	if !ok {
+		return result, validationError(FieldViolation{Field: "target.kind", Rule: "deployments_statefulsets_or_daemonsets"})
+	}
+	key, err := authorization.KeyForCapability(binding.Generation, target.Namespace, capabilityID, target.Name)
 	if err != nil {
 		return result, translateError(err)
 	}
 	var mutation MutationResult
 	err = s.guarded(ctx, binding.Generation, key, authorization.OperationMutation, func(operationContext context.Context) error {
 		var operationErr error
-		mutation, operationErr = s.adapter.RestartDeployment(operationContext, RestartDeploymentCommand{
+		command := RestartDeploymentCommand{
 			Target:                  target,
 			ExpectedResourceVersion: request.ExpectedResourceVersion,
 			RestartedAt:             s.clock.Now().UTC(),
-		})
+		}
+		switch route.Kind {
+		case "deployments":
+			mutation, operationErr = s.adapter.RestartDeployment(operationContext, command)
+		case "statefulsets":
+			mutation, operationErr = s.adapter.RestartStatefulSet(operationContext, command)
+		case "daemonsets":
+			mutation, operationErr = s.adapter.RestartDaemonSet(operationContext, command)
+		default:
+			operationErr = validationError(FieldViolation{Field: "target.kind", Rule: "deployments_statefulsets_or_daemonsets"})
+		}
 		return operationErr
 	})
 	if err != nil {
@@ -225,6 +240,200 @@ func (s *Service) DeletePod(ctx context.Context, binding namespaces.SelectionBin
 		Generation:      binding.Generation,
 		ResourceVersion: resourceVersion,
 	}, nil
+}
+
+// restartCapabilityID resolves the allowlisted mutation capability for a
+// canonical workload route kind.
+func restartCapabilityID(routeKind string) (string, bool) {
+	switch routeKind {
+	case "deployments":
+		return "deployments.restart", true
+	case "statefulsets":
+		return "statefulsets.restart", true
+	case "daemonsets":
+		return "daemonsets.restart", true
+	default:
+		return "", false
+	}
+}
+
+func deleteCapabilityID(routeKind string) (string, bool) {
+	specification, ok := deletableWorkloadKinds[routeKind]
+	if !ok {
+		return "", false
+	}
+	capabilityID := ""
+	switch specification {
+	case "Deployment":
+		capabilityID = "deployments.delete"
+	case "StatefulSet":
+		capabilityID = "statefulsets.delete"
+	case "DaemonSet":
+		capabilityID = "daemonsets.delete"
+	case "Job":
+		capabilityID = "jobs.delete"
+	case "CronJob":
+		capabilityID = "cronjobs.delete"
+	case "ReplicaSet":
+		capabilityID = "replicasets.delete"
+	}
+	if capabilityID == "" {
+		return "", false
+	}
+	return capabilityID, true
+}
+
+func (s *Service) DeleteWorkload(ctx context.Context, binding namespaces.SelectionBinding, route RouteTarget, request WorkloadDeleteRequest) (result ActionAcceptedDTO, returnedErr error) {
+	if err := validateContext(ctx); err != nil {
+		return result, err
+	}
+	if err := validateDeleteWorkload(binding, route, request); err != nil {
+		return result, err
+	}
+	if err := s.requireCurrent(binding.Generation); err != nil {
+		return result, err
+	}
+	target := mutationTarget(binding, request.Target)
+	started := s.clock.Now().UTC()
+	defer func() { recordAudit(ctx, s.audit, s.clock, started, "delete_workload", target, returnedErr) }()
+	capabilityID, ok := deleteCapabilityID(route.Kind)
+	if !ok {
+		return result, validationError(FieldViolation{Field: "path.kind", Rule: "deletable_workload"})
+	}
+	key, err := authorization.KeyForCapability(binding.Generation, target.Namespace, capabilityID, target.Name)
+	if err != nil {
+		return result, translateError(err)
+	}
+	var mutation MutationResult
+	err = s.guarded(ctx, binding.Generation, key, authorization.OperationMutation, func(operationContext context.Context) error {
+		var operationErr error
+		mutation, operationErr = s.adapter.DeleteWorkload(operationContext, DeleteWorkloadCommand{
+			Target:                  target,
+			ExpectedUID:             request.ExpectedUID,
+			ExpectedResourceVersion: request.ExpectedResourceVersion,
+		})
+		return operationErr
+	})
+	if err != nil {
+		return result, err
+	}
+	var resourceVersion *string
+	if mutation.ResourceVersion != "" {
+		value := mutation.ResourceVersion
+		resourceVersion = &value
+	}
+	return ActionAcceptedDTO{
+		Accepted:        true,
+		Action:          ActionDeleteWorkload,
+		Target:          request.Target,
+		Generation:      binding.Generation,
+		ResourceVersion: resourceVersion,
+	}, nil
+}
+
+func (s *Service) UpdateCronJobSuspend(ctx context.Context, binding namespaces.SelectionBinding, route RouteTarget, request CronJobSuspendRequest) (result ActionAcceptedDTO, returnedErr error) {
+	if err := validateContext(ctx); err != nil {
+		return result, err
+	}
+	if err := validateCronJobSuspend(binding, route, request); err != nil {
+		return result, err
+	}
+	if err := s.requireCurrent(binding.Generation); err != nil {
+		return result, err
+	}
+	target := mutationTarget(binding, request.Target)
+	operation := "suspend_cronjob"
+	if !request.Suspend {
+		operation = "resume_cronjob"
+	}
+	started := s.clock.Now().UTC()
+	defer func() { recordAudit(ctx, s.audit, s.clock, started, operation, target, returnedErr) }()
+	key, err := authorization.KeyForCapability(binding.Generation, target.Namespace, "cronjobs.suspend", target.Name)
+	if err != nil {
+		return result, translateError(err)
+	}
+	var mutation MutationResult
+	err = s.guarded(ctx, binding.Generation, key, authorization.OperationMutation, func(operationContext context.Context) error {
+		var operationErr error
+		mutation, operationErr = s.adapter.UpdateCronJobSuspend(operationContext, UpdateCronJobSuspendCommand{
+			Target:                  target,
+			Suspend:                 request.Suspend,
+			ExpectedResourceVersion: request.ExpectedResourceVersion,
+		})
+		return operationErr
+	})
+	if err != nil {
+		return result, err
+	}
+	if mutation.ResourceVersion == "" {
+		return result, publicError(CodeInternal, http.StatusInternalServerError, false, nil)
+	}
+	resourceVersion := mutation.ResourceVersion
+	return ActionAcceptedDTO{
+		Accepted:        true,
+		Action:          ActionUpdateCronJobSuspend,
+		Target:          request.Target,
+		Generation:      binding.Generation,
+		ResourceVersion: &resourceVersion,
+	}, nil
+}
+
+func (s *Service) TriggerCronJob(ctx context.Context, binding namespaces.SelectionBinding, route RouteTarget, request CronJobTriggerRequest) (result ActionAcceptedDTO, returnedErr error) {
+	if err := validateContext(ctx); err != nil {
+		return result, err
+	}
+	if err := validateCronJobTrigger(binding, route, request); err != nil {
+		return result, err
+	}
+	if err := s.requireCurrent(binding.Generation); err != nil {
+		return result, err
+	}
+	target := mutationTarget(binding, request.Target)
+	started := s.clock.Now().UTC()
+	defer func() { recordAudit(ctx, s.audit, s.clock, started, "trigger_cronjob", target, returnedErr) }()
+	// cronjobs.runnow authorizes creating Jobs in the namespace; the resource
+	// name stays empty because the created Job receives a generated name.
+	key, err := authorization.KeyForCapability(binding.Generation, target.Namespace, "cronjobs.runnow", "")
+	if err != nil {
+		return result, translateError(err)
+	}
+	jobName := target.Name + "-manual-" + randomSuffix()
+	var trigger TriggerCronJobResult
+	err = s.guarded(ctx, binding.Generation, key, authorization.OperationMutation, func(operationContext context.Context) error {
+		var operationErr error
+		trigger, operationErr = s.adapter.TriggerCronJob(operationContext, TriggerCronJobCommand{
+			Target:  target,
+			JobName: jobName,
+		})
+		return operationErr
+	})
+	if err != nil {
+		return result, err
+	}
+	if trigger.JobName == "" || trigger.ResourceVersion == "" {
+		return result, publicError(CodeInternal, http.StatusInternalServerError, false, nil)
+	}
+	return ActionAcceptedDTO{
+		Accepted:        true,
+		Action:          ActionTriggerCronJob,
+		Target:          request.Target,
+		Generation:      binding.Generation,
+		ResourceVersion: &trigger.ResourceVersion,
+	}, nil
+}
+
+// randomSuffix produces five lowercase base-32 characters for generated Job
+// names; Job names must remain valid DNS subdomains.
+func randomSuffix() string {
+	buffer := make([]byte, 5)
+	if _, err := cryptorand.Read(buffer); err != nil {
+		return "00000"
+	}
+	const alphabet = "abcdefghijklmnopqrstuvwxyz012345"
+	for index, value := range buffer {
+		buffer[index] = alphabet[int(value)%len(alphabet)]
+	}
+	return string(buffer)
 }
 
 func (s *Service) guarded(ctx context.Context, generation string, key authorization.Key, kind authorization.OperationKind, operation func(context.Context) error) error {

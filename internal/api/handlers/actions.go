@@ -138,6 +138,58 @@ func (handler *ActionHandlers) CreateExecTicket(w http.ResponseWriter, r *http.R
 	response.Created(w, result)
 }
 
+func (handler *ActionHandlers) DeleteWorkload(w http.ResponseWriter, r *http.Request) {
+	var request actionservice.WorkloadDeleteRequest
+	if err := api.DecodeStrict(w, r, &request, actionBodyLimit); err != nil {
+		api.WriteError(w, r, err)
+		return
+	}
+	binding, _ := handler.selection.Snapshot()
+	result, err := handler.actions.DeleteWorkload(r.Context(), binding, workloadRouteTarget(r), request)
+	if err != nil {
+		api.WriteError(w, r, actionHTTPError(err))
+		return
+	}
+	noStore(w)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	_ = writeEnvelope(w, response.Envelope[actionservice.ActionAcceptedDTO]{Data: result})
+}
+
+func (handler *ActionHandlers) UpdateCronJobSuspend(w http.ResponseWriter, r *http.Request) {
+	var request actionservice.CronJobSuspendRequest
+	if err := api.DecodeStrict(w, r, &request, actionBodyLimit); err != nil {
+		api.WriteError(w, r, err)
+		return
+	}
+	binding, _ := handler.selection.Snapshot()
+	result, err := handler.actions.UpdateCronJobSuspend(r.Context(), binding, workloadRouteTarget(r), request)
+	if err != nil {
+		api.WriteError(w, r, actionHTTPError(err))
+		return
+	}
+	noStore(w)
+	response.OK(w, result)
+}
+
+func (handler *ActionHandlers) TriggerCronJob(w http.ResponseWriter, r *http.Request) {
+	var request actionservice.CronJobTriggerRequest
+	if err := api.DecodeStrict(w, r, &request, actionBodyLimit); err != nil {
+		api.WriteError(w, r, err)
+		return
+	}
+	binding, _ := handler.selection.Snapshot()
+	result, err := handler.actions.TriggerCronJob(r.Context(), binding, workloadRouteTarget(r), request)
+	if err != nil {
+		api.WriteError(w, r, actionHTTPError(err))
+		return
+	}
+	noStore(w)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
+	_ = writeEnvelope(w, response.Envelope[actionservice.ActionAcceptedDTO]{Data: result})
+}
+
 func workloadRouteTarget(r *http.Request) actionservice.RouteTarget {
 	return actionservice.RouteTarget{
 		Kind:      r.PathValue("kind"),

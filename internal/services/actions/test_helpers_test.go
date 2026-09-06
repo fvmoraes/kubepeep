@@ -255,6 +255,26 @@ func (s *actionAdapterStub) DeletePod(_ context.Context, command DeletePodComman
 	return MutationResult{}, err
 }
 
+func (s *actionAdapterStub) RestartStatefulSet(ctx context.Context, command RestartDeploymentCommand) (MutationResult, error) {
+	return s.RestartDeployment(ctx, command)
+}
+
+func (s *actionAdapterStub) RestartDaemonSet(ctx context.Context, command RestartDeploymentCommand) (MutationResult, error) {
+	return s.RestartDeployment(ctx, command)
+}
+
+func (s *actionAdapterStub) DeleteWorkload(_ context.Context, command DeleteWorkloadCommand) (MutationResult, error) {
+	return MutationResult{}, nil
+}
+
+func (s *actionAdapterStub) UpdateCronJobSuspend(_ context.Context, command UpdateCronJobSuspendCommand) (MutationResult, error) {
+	return MutationResult{ResourceVersion: "202"}, nil
+}
+
+func (s *actionAdapterStub) TriggerCronJob(_ context.Context, command TriggerCronJobCommand) (TriggerCronJobResult, error) {
+	return TriggerCronJobResult{JobName: command.JobName, ResourceVersion: "203"}, nil
+}
+
 type portForwardHandleStub struct {
 	done chan error
 	once sync.Once

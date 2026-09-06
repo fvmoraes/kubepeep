@@ -42,6 +42,24 @@ func (backend *MutationBackend) RestartDeployment(ctx context.Context, command a
 	return client.RestartDeployment(requestContext, command)
 }
 
+func (backend *MutationBackend) RestartStatefulSet(ctx context.Context, command actions.RestartDeploymentCommand) (actions.MutationResult, error) {
+	requestContext, cancel, client, err := backend.unary(ctx, command.Target)
+	if err != nil {
+		return actions.MutationResult{}, err
+	}
+	defer cancel()
+	return client.RestartStatefulSet(requestContext, command)
+}
+
+func (backend *MutationBackend) RestartDaemonSet(ctx context.Context, command actions.RestartDeploymentCommand) (actions.MutationResult, error) {
+	requestContext, cancel, client, err := backend.unary(ctx, command.Target)
+	if err != nil {
+		return actions.MutationResult{}, err
+	}
+	defer cancel()
+	return client.RestartDaemonSet(requestContext, command)
+}
+
 func (backend *MutationBackend) UpdateScale(ctx context.Context, command actions.ScaleCommand) (actions.MutationResult, error) {
 	requestContext, cancel, client, err := backend.unary(ctx, command.Target)
 	if err != nil {
@@ -58,6 +76,33 @@ func (backend *MutationBackend) DeletePod(ctx context.Context, command actions.D
 	}
 	defer cancel()
 	return client.DeletePod(requestContext, command)
+}
+
+func (backend *MutationBackend) DeleteWorkload(ctx context.Context, command actions.DeleteWorkloadCommand) (actions.MutationResult, error) {
+	requestContext, cancel, client, err := backend.unary(ctx, command.Target)
+	if err != nil {
+		return actions.MutationResult{}, err
+	}
+	defer cancel()
+	return client.DeleteWorkload(requestContext, command)
+}
+
+func (backend *MutationBackend) UpdateCronJobSuspend(ctx context.Context, command actions.UpdateCronJobSuspendCommand) (actions.MutationResult, error) {
+	requestContext, cancel, client, err := backend.unary(ctx, command.Target)
+	if err != nil {
+		return actions.MutationResult{}, err
+	}
+	defer cancel()
+	return client.UpdateCronJobSuspend(requestContext, command)
+}
+
+func (backend *MutationBackend) TriggerCronJob(ctx context.Context, command actions.TriggerCronJobCommand) (actions.TriggerCronJobResult, error) {
+	requestContext, cancel, client, err := backend.unary(ctx, command.Target)
+	if err != nil {
+		return actions.TriggerCronJobResult{}, err
+	}
+	defer cancel()
+	return client.TriggerCronJob(requestContext, command)
 }
 
 func (backend *MutationBackend) InspectExecTarget(ctx context.Context, target actions.MutationTarget, container string) (actions.ExecTargetState, error) {
