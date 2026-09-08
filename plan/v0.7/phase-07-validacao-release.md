@@ -4,11 +4,13 @@
 
 A v0.7 só fecha com a prova comparativa de que a experiência mudou — e com zero regressão funcional, incluindo os bugs corrigidos na F0.
 
+Contratos transversais de execução e aceite: [C01–C06](05-contratos-e-aceite.md).
+
 ## Tarefas
 
-- [ ] **F7-01 — Benchmark comparativo antes/depois.** Rodar a matriz completa da F0 (namespaces 1–200, pods, page sizes 25/50/100, RBAC variado, latência 0–200 ms, erros 429/410/timeout/reset) registrando TTFB, first row, full page, contagem de requests, bytes, over-fetch ratio, memória, goroutines, memória de cursor/cache, 429, cache hit e reconexões. Comparativo publicado em `docs/performance-baseline.md` (seção after).
-- [ ] **F7-02 — Testes de regressão fundamentais.** Paginação com `limit=37` sobre 1000 objetos em 10 namespaces (asc/desc por namespace+name e age; sem duplicatas/gaps); mutações durante a paginação (contrato de snapshot); cursor expirado/TTL (erro recuperável, sem stack trace); memory bound (200 namespaces; goroutines retornam ao baseline); `-race` na suíte.
-- [ ] **F7-03 — Critérios consolidados.** Performance: P0 (cursor sem DTOs; `LIMIT_EXCEEDED` irreproduzível; TTL; memory bound; generation fence; timeout normalizado), P1 (página 1 sem varrer tudo; lazy merge; over-fetch medido; cancelamento; coalescing; 429 sem storm; 410 recuperável), P2 (watch saudável sem polling; cache limitado; virtualização; infinite query; refresh sem flicker; Metrics API não bloqueia lista; progressividade). UX: checklist §30 da referência. Regressão funcional: R01/R02 não reproduzem.
+- [ ] **F7-01 — Benchmark comparativo antes/depois.** Rodar a matriz completa da F0 (namespaces 1–200, pods, page sizes 25/50/100, RBAC variado, latência 0–200 ms, erros 429/410/timeout/reset) registrando TTFB, first row, full page, contagem de requests, bytes, over-fetch ratio, memória, goroutines, memória de cursor/cache, 429, cache hit e reconexões. Comparativo publicado em `docs/performance-baseline.md` (seção after), com cenários de C02 e protocolo comparável de C04.
+- [ ] **F7-02 — Testes de regressão fundamentais.** Paginação com `limit=37` sobre 1000 objetos em 10 namespaces (asc/desc por namespace+name e age conforme C01; sem duplicatas/gaps em dataset estável e ordem de coleção somente quando demonstrada); mutações durante a paginação (contrato de snapshot); cursor expirado/TTL (erro recuperável, sem stack trace); memory bound (cenários de C02; goroutines retornam ao baseline); `-race` na suíte.
+- [ ] **F7-03 — Critérios consolidados.** Performance: P0 (cursor sem DTOs; erro por cursor pesado não reproduz nos cenários suportados de C02; limites legítimos preservados; TTL; memory bound; generation fence; timeout normalizado), P1 (página 1 antecipada nos caminhos elegíveis de C01; lazy merge com escopo de ordenação honesto; over-fetch medido; cancelamento; coalescing; 429 sem storm; 410 recuperável), P2 (watch saudável sem polling; cache limitado; virtualização; infinite query; refresh sem flicker; Metrics API não bloqueia lista; progressividade). UX: checklist §30 da referência. Regressão funcional: R01/R02 não reproduzem. D01/D04 incluem integração real do resource cache em F2; cada item F6 tem resultado final conforme C05, sem pendência de medição.
 - [ ] **F7-04 — Verificação integrada.** `rtk make verify`, `rtk make test`, `rtk make test-e2e`, `rtk make test-race`, `rtk make format-check lint typecheck`, `rtk make build smoke`, `rtk make build-desktop` (dependências nativas instaladas).
 - [ ] **F7-05 — Auditoria UX final.** Percorrida nas 4 resoluções; catálogo de ações por kind; RBAC na UI; cliques reauditados contra o inventário da F0; docs atualizados (`docs/api.md`, `docs/observability.md`, `docs/ui-ux-refinement.md`, baseline).
 - [ ] **F7-06 — Segurança.** `rtk scripts/security_check.sh HEAD` em todos os commits; nenhuma sentinela de dados internos em logs/persistência/artefatos; Secret continua metadata-only; cursor/cache nunca em disco.
@@ -22,7 +24,7 @@ A v0.7 só fecha com a prova comparativa de que a experiência mudou — e com z
 | bug de Pods sem dados (R01) | não reproduz em web/desktop; regressão E2E cobre |
 | varredura de cliques (R02) | zero cliques mortos no inventário final |
 | scope default (R03) | carregamento obrigatório na abertura e troca de contexto comprovado |
-| `LIMIT_EXCEEDED` / cursor pesado | não reproduzível no cenário original de fan-out largo |
+| Cursor pesado e limites legítimos | cenários suportados de C02 sem erro por cursor pesado; excesso de escopo/orçamento continua rejeitado conforme contrato |
 | 429 sustentado / 410 Gone | sem amplificação; recuperação automática com estados honestos |
 | suite completa local | verify/test/test-e2e/test-race/build/smoke verdes |
 

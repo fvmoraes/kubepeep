@@ -4,9 +4,11 @@
 
 Camada que responde "o que está errado no meu cluster?" usando cache e índices locais — sem transformar o KubePeep em suíte pesada de observabilidade. Baixo consumo de CPU/memória, streams limitados e cancelamento imediato.
 
+Contratos transversais de execução e aceite: [C01–C06](05-contratos-e-aceite.md).
+
 ## Tarefas
 
-- [ ] **F5-01 — Índices locais.** No resource cache da F2: Pods por owner/status/label, Services por selector, Events por involvedObject, PVCs por Pod, ConfigMaps por workload. Habilitam investigation, busca e relações sem novas chamadas ao cluster.
+- [ ] **F5-01 — Índices locais.** No resource cache da F2: Pods por owner/status/label, Services por selector, Events por involvedObject, PVCs por Pod, ConfigMaps por workload. Habilitam investigation, busca e relações sem novas chamadas ao cluster; explicitar cobertura ainda não sincronizada e reutilizar diagnósticos existentes (C06).
 - [ ] **F5-02 — Problems Engine.** `internal/problems/` com detectores: CrashLoopBackOff, ImagePullBackOff/ErrImagePull, Pending, OOMKilled, restarts acima de threshold, Jobs failed, replicas unavailable, PVC Pending, Node NotReady, probes falhando, Warning Events. Severidades critical/warning/info conforme a referência (§37). Derivado de estado observado — nunca inventa saúde nem infere permissão.
 - [ ] **F5-03 — Interface de Problems.** Contadores por severidade + lista com recurso, namespace, causa resumida e ações [Inspect]/[Logs]; integrada ao Overview e ao Workspace.
 - [ ] **F5-04 — Investigation View.** Ao abrir um recurso problemático: owner chain (Pod → ReplicaSet → Deployment), Service/EndpointSlice, ConfigMaps, PVCs, Events e Logs navegáveis pelo Resource Workspace, entrando no histórico.
@@ -21,9 +23,9 @@ Camada que responde "o que está errado no meu cluster?" usando cache e índices
 | --- | --- |
 | Pod em CrashLoopBackOff | aparece em Problems (critical); Investigation mostra owner/events/logs em um clique |
 | workload com 5 Pods | logs agregados com streams limitados; trocar de tela cancela tudo; busca/regex funcional |
-| buscar "portal" na paleta | resultados do cache local < 100 ms, sem chamada ao cluster |
+| buscar "portal" na paleta com recursos previamente carregados | resultados locais < 100 ms, sem chamada ao cluster; ausência no cache não é ausência no cluster (C06) |
 | diagnostics aberta | métricas da F0 coerentes com o baseline |
 | RBAC restritivo | seções sem permissão ficam ausentes/unknown — nunca "zero problemas" falso |
-| 200 namespaces sob carga | índices e problems dentro do orçamento de memória |
+| Cenários de 200 namespaces de C02 sob carga | índices e problems dentro do orçamento de memória |
 
 **Saída:** posicionamento problem-oriented consolidado (FAST + SAFE + PROBLEM-ORIENTED + DEVELOPER-FIRST). **Rollback:** cada detector/tela é independente e desligável sem afetar a leitura.

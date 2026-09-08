@@ -2,9 +2,9 @@
 
 ## Resultado
 
-O plano organiza as entregas e preserva as principais premissas do produto, mas ainda tem conflitos de contrato que impedem executá-lo literalmente com segurança. Esta avaliação não declara F0–F7 implementadas. A base examinada é `d71d488`; `origin/main` local está um commit à frente (`598e167`, release 0.6.2). A integração dessa referência deve preceder o baseline funcional, com revisão do diff.
+O plano organiza as entregas e preserva as principais premissas do produto, mas a revisão inicial identificou conflitos de contrato que impediam executá-lo literalmente com segurança. As resoluções documentais estão em [C01–C06](05-contratos-e-aceite.md) e foram incorporadas à matriz e às fases; a validação funcional continua pendente. Esta avaliação não declara F0–F7 implementadas. A base examinada é `d71d488`; `origin/main` local está um commit à frente (`598e167`, release 0.6.2). A integração dessa referência deve preceder o baseline funcional, com revisão do diff.
 
-## Achados e impacto
+## Achados da revisão inicial e impacto
 
 | Prioridade | Evidência | Impacto e resolução necessária |
 | --- | --- | --- |
@@ -33,5 +33,5 @@ O escopo alterado é Markdown: validar destinos relativos e diff, além do gate 
 ## Confronto com o pedido
 
 - **IMPLEMENTADO:** avaliação documental e dos contratos destacados, branch dedicada, correção dos links e identificação de versão, preservação das alterações preexistentes do usuário, sem push.
-- **ALTERADO:** a etapa inicial é avaliação documental; não se confunde com a Fase 0 funcional do plano. Contratos conflitantes ficam explícitos, sem mudança unilateral de comportamento.
-- **PENDENTE:** resolução dos contratos acima e execução F0–F7, seus testes, builds, benchmarks e evidências. Impacto: a release não está aprovada. Próxima etapa: resolver os critérios de aceite conflitantes antes de implementar as respectivas fases; avançar somente após autorização do usuário.
+- **ALTERADO:** a etapa inicial é avaliação documental; não se confunde com a Fase 0 funcional do plano. Contratos conflitantes foram resolvidos documentalmente em C01–C06, sem alteração de código ou aceite funcional.
+- **PENDENTE:** execução F0–F7 conforme os contratos resolvidos, seus testes, builds, benchmarks e evidências. Impacto: a release não está aprovada. Próxima etapa: implementar e validar F0; avançar somente após autorização do usuário.

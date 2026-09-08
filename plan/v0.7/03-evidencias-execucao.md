@@ -5,6 +5,11 @@ Registro de fechamento das fases F0–F7. Cada linha segue a regra da [matriz](0
 commit — nenhum dado privado, log cru ou screenshot. Gates externos não executados permanecem
 explicitamente pendentes.
 
+## Revisões documentais (não fecham fases funcionais)
+
+- `f7cd651`: avaliação inicial, cinco links corrigidos; 34 links relativos válidos, diff-check e gate de segurança aprovados.
+- Revisão C01–C06: contratos incorporados à matriz e F0–F7; 47 links relativos válidos, 74 tarefas anteriores e todos os IDs da matriz preservados; F2-11/F2-12 explicitam integrações dos requisitos existentes. Diff-check aprovado. O commit que introduz esta entrada registra a revisão; nenhuma tarefa funcional foi marcada como concluída.
+
 ## Fase 0 — Correção funcional P0, baseline e instrumentação
 
 | ID | Commit | Evidência | Resultado |

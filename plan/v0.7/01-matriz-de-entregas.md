@@ -2,6 +2,8 @@
 
 Fontes: [avaliação e evolução](../v0.7_reference/KUBEPEEP_AVALIACAO_E_PLANO_DE_EVOLUCAO.md), [performance e escalabilidade](../v0.7_reference/KUBEPEEP_PERFORMANCE_SCALABILITY_PLAN.md) e [refinamento UI/UX](../v0.7_reference/KUBEPEEP_UI_UX_REFINEMENT_PLAN.md). Famílias: **R** = correção funcional (P0), **D** = desempenho/escalabilidade, **X** = experiência/UI, **I** = investigação, **T** = transversal. **Todas as linhas são trabalho planejado** de ajuste, melhoria ou revisão — nenhuma é assumida como concluída; cada uma exige execução e evidência da sua fase: `ID | SHA | comando/cenário | resultado | limitação`.
 
+Os [contratos C01–C06](05-contratos-e-aceite.md) definem as pré-condições e os limites destes critérios.
+
 ## R — Correção funcional (P0, bloqueante)
 
 | ID | Entrega | Fase | Aceite |
@@ -14,23 +16,23 @@ Fontes: [avaliação e evolução](../v0.7_reference/KUBEPEEP_AVALIACAO_E_PLANO_
 
 | ID | Entrega | Fase | Aceite |
 | --- | --- | --- | --- |
-| D01 | Instrumentação de leitura completa (requests/duração/itens, estratégia global×fanout, cursor store, watch, cache, 429/throttle) | F0 | métricas documentadas em `docs/observability.md` e consultáveis |
+| D01 | Instrumentação de leitura completa (requests/duração/itens, estratégia global×fanout, cursor store, watch, cache, 429/throttle) | F0 + F2 | F0: leitura/caches existentes e contrato de telemetria; F2: métricas reais do novo resource cache; documentadas e consultáveis (C04) |
 | D02 | Laboratório de benchmark Kind + `docs/performance-baseline.md` | F0 | matriz de cenários executa por script; baseline registrado antes das mudanças |
 | D03 | Budgets de performance por tamanho de cluster + métricas de UX (time_to_first_row etc.) | F0 | budgets definidos e medidos conforme metas do contrato |
-| D04 | Traces OTel (list/merge/cursor/watch/cache) sem atributos sensíveis | F0 | spans documentados; sem pod/UID/token/identidade |
-| D05 | Cursor opaco server-side sem DTOs no transporte: revisão completa do ciclo | F0 | TTL, LRU, budget, generation binding, expiração e 410 testados; 200 namespaces × página 100 sem cursor acima do limite; `LIMIT_EXCEEDED` não reproduzível |
-| D06 | Estratégias de paginação: sequencial namespace+name e lazy k-way merge para sorts globais | F1 | página 1 de namespace+name não consulta todos os namespaces; heap em sorts globais; determinismo/duplicatas/gaps testados |
+| D04 | Traces OTel (list/merge/cursor/watch/cache) sem atributos sensíveis | F0 + F2 | F0: spans dos componentes existentes e contrato do resource cache; F2: integração real do novo cache; sem atributos sensíveis (C04) |
+| D05 | Cursor opaco server-side sem DTOs no transporte: revisão completa do ciclo | F0 | TTL, LRU, budget, generation binding, expiração e 410 testados; cenários globais/restritos/sintéticos de C02 separados; cursor pesado não falha nos cenários suportados e limites legítimos permanecem |
+| D06 | Paginação sequencial elegível, merge limitado e ordem de snapshot completo | F1 + F2 | F1: caminhos antecipados apenas com sequência monotônica; heap preserva `filterScope=page`. F2: ordem de coleção com snapshot completo autorizado e limitado; casos extremos/empates testados (C01) |
 | D07 | Over-fetch ratio mensurado, meta ≤ ~3× nos cenários-alvo | F0/F1 | ratio por cenário no baseline e no comparativo |
 | D08 | Coalescing de consultas idênticas (singleflight) | F1 | refresh/navegação rápida não dispara consultas duplicadas |
 | D09 | Cancelamento ponta a ponta de trabalho obsoleto | F1 | trocar tela/filtro/ordenação cancela; AbortSignal propagado até o cliente Kubernetes |
 | D10 | Debounce de busca e filtros | F1 | digitar "deploy" gera 1–2 consultas, não 6 |
 | D11 | Selectors server-side (label/field) com matriz por recurso e fallback local | F1 | filtro aplicável no servidor não busca tudo para filtrar localmente |
-| D12 | Cache de autorização por generation/namespace/verb com TTL curto | F1 | sem repetição de SAR para a mesma capability na navegação; isolado por contexto/identidade |
+| D12 | Cache de autorização com chave completa existente e TTL curto | F1 | generation/namespace/apiGroup/resource/subresource/verb/resourceName isolados; reutilização durante TTL válido, invalidação em geração/403/revogação (C03) |
 | D13 | Cache de discovery por contexto/generation | F1 | discovery não reexecuta ao abrir cada tela |
 | D14 | 429: Retry-After, backoff+jitter, fan-out reduzido, sem retry storm | F1 | cenário de 429 no benchmark não amplifica carga |
 | D15 | Resource cache demand-driven (ref count, idle timeout, eviction, orçamento de memória) | F2 | cache limitado; fechar telas libera; memória sob teto; nunca em disco |
 | D16 | stale-while-revalidate (FRESH/STALE/REFRESHING/PARTIAL/EXPIRED) | F2 | tela cacheada abre < 100 ms e revalida em paralelo |
-| D17 | Watch compartilhado + bookmarks + reconexão com backoff+jitter | F2 | um watch por (contexto, scope, GVR) compartilhado entre telas; BOOKMARK quando suportado |
+| D17 | Watch compartilhado + bookmarks + reconexão com backoff+jitter | F2 | compartilhamento pela identidade completa generation/context/scope/topic/GVR/namespace/selector e origens efetivas; isolamento/revogação testados; BOOKMARK quando suportado (C03) |
 | D18 | Backpressure level-driven (fila limitada + coalescing por key) | F2 | 10k eventos não geram 10k renders; logs/eventos preservam ordem |
 | D19 | Freshness por tipo (watch; métricas 5–10 s; capabilities 30–60 s; discovery 5–15 min) | F2 | política documentada e aplicada; invalidação por generation |
 | D20 | Overview por tiers (crítico → métricas → caro) | F2/F3 | Tier 1 renderiza sem esperar Tier 3; log scan fora do caminho crítico |
@@ -38,16 +40,16 @@ Fontes: [avaliação e evolução](../v0.7_reference/KUBEPEEP_AVALIACAO_E_PLANO_
 | D22 | `useInfiniteQuery` + `maxPages` + cursor opaco | F3 | paginação incremental sem crescimento ilimitado de memória |
 | D23 | Virtualização de tabelas (`@tanstack/react-virtual`) | F3 | 50k linhas sintéticas: DOM real ≈ viewport; scroll 60 FPS |
 | D24 | Resultados progressivos (primeira linha cedo; contadores por namespace) | F3 | primeira linha < 500 ms em cluster médio; sem spinner global |
-| D25 | `placeholderData`/`previousData` em sort/página/refresh | F3 | tabela não pisca nem apaga durante refresh |
+| D25 | `placeholderData`/`previousData` em sort/página/refresh | F3 | mesma seleção autorizada preserva tabela durante refresh; seleção incompatível ou revogação remove dados anteriores (C03) |
 | D26 | Prefetch da próxima página (máx. 1) | F3 | prefetch não compete com a requisição visível |
 | D27 | Startup instantâneo (shell primeiro, sync assíncrono) | F3 | janela < 500 ms; shell < 800 ms; dados progressivos |
 | D28 | Error boundaries por painel com retry individual | F3 | falha de métricas não derruba o dashboard |
 | D29 | Batching 50–100 ms para atualizações de watch/logs | F3 | sem render por evento |
-| D30 | QPS/Burst medidos e ajustados por evidência | F6 | faixa testada documentada; sem ajuste "no escuro" |
-| D31 | PartialObjectMetadata para catálogos/relações/autocomplete | F6 | ganho de payload comprovado; tabelas de status continuam completas |
-| D32 | Protobuf para built-ins com fallback JSON | F6 | ganho comprovado; CRDs/aggregated continuam JSON |
-| D33 | Compressão avaliada por cenário (local × remoto) | F6 | decisão documentada com medição |
-| D34 | Concorrência adaptativa AIMD opcional (min 2 / default 4 / max 8) | F6 | flag; default só muda com benchmark |
+| D30 | QPS/Burst medidos e ajustados por evidência | F6 | faixa testada documentada; ajustar ou manter default conforme medição (C05) |
+| D31 | PartialObjectMetadata para catálogos/relações/autocomplete | F6 | avaliar payload; aplicar só com ganho comprovado, ou registrar não ativação (C05); tabelas de status continuam completas |
+| D32 | Protobuf para built-ins com fallback JSON | F6 | aplicar só com ganho comprovado, ou registrar não ativação medida (C05); CRDs/aggregated continuam JSON |
+| D33 | Compressão avaliada por cenário (local × remoto) | F6 | decisão de ativar/manter desativado documentada com medição (C05) |
+| D34 | Concorrência adaptativa AIMD opcional (min 2 / default 4 / max 8) | F6 | avaliação medida obrigatória; flag/default só mudam com ganho, ou encerrar não ativado (C05) |
 | D35 | Benchmark comparativo antes/depois + critérios consolidados | F7 | comparativo por cenário em docs; critérios P0/P1/P2 da referência verdes |
 
 ## X — Experiência e UI
@@ -80,7 +82,7 @@ Fontes: [avaliação e evolução](../v0.7_reference/KUBEPEEP_AVALIACAO_E_PLANO_
 | I02 | Problems Engine com detectores e severidades (critical/warning/info) | F5 | contagem e lista coerentes com o estado observado; sem saúde inventada |
 | I03 | Investigation View (owner chain, Service/EndpointSlice, ConfigMaps, PVCs, Events, Logs) | F5 | contexto do problema em um clique; navega pelo Workspace |
 | I04 | Logs agregados por workload (multi-pod/containers, follow/previous, busca/regex, limites e cancelamento) | F5 | estilo stern leve; streams limitados; backpressure e cancelamento imediato |
-| I05 | Command Palette avançada (busca no cache local, ações, navegação) | F5 | "portal" encontra Deployment/Pod/Service/ConfigMap/Ingress sem consultar o cluster |
+| I05 | Command Palette avançada (busca no cache local, ações, navegação) | F5 | "portal" encontra Deployment/Pod/Service/ConfigMap/Ingress previamente carregados, sem consultar o cluster; cobertura incompleta explícita (C06) |
 | I06 | Performance Diagnostics (Settings → Diagnostics → Performance) | F5 | latência, p50/p95/p99, cache hit, watches, 429, sync por recurso/namespace |
 | I07 | Namespace/Cluster Diagnostics | F5 | contagens, problemas por severidade e latências por namespace |
 
@@ -97,4 +99,4 @@ Fontes: [avaliação e evolução](../v0.7_reference/KUBEPEEP_AVALIACAO_E_PLANO_
 
 ## Evidência e regra de conclusão
 
-Ao concluir uma entrega, registrar em [`03-evidencias-execucao.md`](03-evidencias-execucao.md): `ID | SHA | teste/comando | resultado | limitação`. Não marcar teste de mock como teste de cluster real, benchmark local como cluster remoto, nem preparação local como publicação. Todas as linhas R/D/X/I/T são gate da v0.7; o [backlog](02-backlog-pos-v1.md) é explícito e não conta como entregue.
+Ao concluir uma entrega, registrar em [`03-evidencias-execucao.md`](03-evidencias-execucao.md): `ID | SHA | teste/comando | resultado | limitação`. Não marcar teste de mock como teste de cluster real, benchmark local como cluster remoto, nem preparação local como publicação. Todas as linhas R/D/X/I/T são gate da v0.7. D01/D04/D06 têm evidências separadas F0/F1/F2 conforme atribuição; D30–D34 encerram como aplicado ou avaliado/não ativado com medição, nunca por ausência de benchmark (C05); o [backlog](02-backlog-pos-v1.md) é explícito e não conta como entregue.

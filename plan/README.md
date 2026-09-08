@@ -22,7 +22,7 @@ Comece pelo [estado e limites](v0.7/00-estado-e-escopo.md), depois consulte a [m
 | 4 | [Fechamento do refinamento UI/UX e scope default](v0.7/phase-04-refinamento-ui-ux.md) | F0 (inventário); paralelizável com F1–F3 | planejado |
 | 5 | [Investigação: problems, diagnóstico e logs agregados](v0.7/phase-05-investigacao-diagnostico.md) | F2, F4 | planejado |
 | 6 | [Protocolo e tuning avançado (condicional a benchmark)](v0.7/phase-06-protocolo-avancado.md) | F0, F2 | planejado; cada item só ativa com ganho medido |
-| 7 | [Validação comparativa e preparação da release](v0.7/phase-07-validacao-release.md) | F0–F6 | planejado |
+| 7 | [Validação comparativa e preparação da release](v0.7/phase-07-validacao-release.md) | F0–F6 (F6 conforme critérios condicionais de C05) | planejado |
 
 F4 pode avançar em paralelo a F1–F3 coordenando os arquivos compartilhados. A evidência de execução é registrada em [`v0.7/03-evidencias-execucao.md`](v0.7/03-evidencias-execucao.md).
 
@@ -66,4 +66,4 @@ Planos anteriores permanecem no Git (`plan/v0/` executado; `5ac7320^:plan/` hist
 
 ## Avaliação antes da execução
 
-Consulte a [avaliação técnica do plano](v0.7/04-avaliacao-do-plano.md). A revisão documental não fecha F0 nem substitui seus testes e benchmarks. Nesta execução, cada fase termina com validação e commit; a próxima exige autorização explícita do usuário.
+Consulte a [avaliação técnica do plano](v0.7/04-avaliacao-do-plano.md). Os [contratos e critérios de aceite](v0.7/05-contratos-e-aceite.md) resolvem os conflitos identificados. A revisão documental não fecha F0 nem substitui seus testes e benchmarks. Nesta execução, cada fase termina com validação e commit; a próxima exige autorização explícita do usuário.

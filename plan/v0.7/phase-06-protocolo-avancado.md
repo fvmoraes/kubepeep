@@ -2,7 +2,9 @@
 
 **Prioridade:** P2 — cada item só ativa com ganho comprovado na matriz da F0. **Entrada:** F0 (métricas/baseline) e F2. **Matriz:** D30–D34, T02.
 
-Otimizações de protocolo e adaptação dinâmica. Nada aqui altera defaults sem evidência; tudo atrás de flag/configuração, com fallback garantido.
+Otimizações de protocolo e adaptação dinâmica. Nada aqui altera defaults sem evidência; tudo atrás de flag/configuração, com fallback garantido. Cada item encerra como aplicado ou avaliado/não ativado com comparação medida; ausência de medição permanece pendente e bloqueia o fechamento (C05).
+
+Contratos transversais de execução e aceite: [C01–C06](05-contratos-e-aceite.md).
 
 ## Tarefas
 
@@ -17,9 +19,9 @@ Otimizações de protocolo e adaptação dinâmica. Nada aqui altera defaults se
 
 | Cenário | Resultado exigido |
 | --- | --- |
-| cada otimização ativada | comparativo antes/depois na matriz da F0 com ganho real; sem ganho, não ativa |
+| cada otimização avaliada | comparativo antes/depois obrigatório; ganho validado permite aplicação, sem ganho encerra como avaliado/não ativado; sem medição permanece pendente (C05) |
 | CRD/aggregated API | continua JSON; sem quebra de leitura |
-| 429 sob tuning agressivo | AIMD reduz concorrência; sem amplificação; recuperação gradual |
+| 429 no experimento AIMD | medir redução e recuperação gradual sem amplificação; manter desativado se a comparação não demonstrar ganho seguro (C05) |
 | cluster antigo/sem suporte | fallback JSON/LIST+WATCH preserva funcionamento |
 
 **Saída:** protocolo mais enxuto onde medido; nenhum default alterado sem evidência. **Rollback:** tudo atrás de flag/configuração; desligar restaura o comportamento da F2.

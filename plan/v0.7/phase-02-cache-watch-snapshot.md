@@ -1,14 +1,16 @@
 # Fase 2 — Estado orientado a snapshot: cache sob demanda + WATCH
 
-**Prioridade:** P0. **Entrada:** F1. **Desbloqueia:** F3 e F5. **Matriz:** D15–D21, T02, T03.
+**Prioridade:** P0. **Entrada:** F1. **Desbloqueia:** F3 e F5. **Matriz:** D15–D21, D01/D04 (resource cache), D06 (ordem de coleção sobre snapshot completo), T02, T03.
 
 Mudança central da v0.7: de LIST repetitivo para **LIST → snapshot → watch → cache local**, servindo a UI a partir do estado local. O `WatchManager` atual (`internal/services/resources/watch.go`, com backoff+jitter, tratamento de `ResourceExpired` e fences de geração) é revisado e preservado; a evolução adiciona compartilhamento, cache e política de ciclo de vida. **Demand-driven:** KubePeep é dashboard desktop, não controller — nenhum informer permanente de todos os GVRs.
 
+Contratos transversais de execução e aceite: [C01–C06](05-contratos-e-aceite.md).
+
 ## Tarefas
 
-- [ ] **F2-01 — Resource cache demand-driven.** Nova camada (ex.: `internal/services/resources/cache/`): Manager, Subscription, Store, RefCounter, Eviction. Chave: (generation, contexto, scope, GVR, selector). Orçamento de memória (128–256 MiB inicial) e eviction (watches inativos → cursores expirados → cache de tela não usada → LRU por scope). Apenas em memória; Secret values **nunca** entram no cache (somente metadata autorizada).
-- [ ] **F2-02 — stale-while-revalidate.** Estados FRESH/STALE/REFRESHING/PARTIAL/EXPIRED por entrada; abrir tela cacheada renderiza imediatamente e revalida em paralelo; invalidação explícita por generation/contexto.
-- [ ] **F2-03 — Watches compartilhados.** Um watch por (contexto, scope, GVR) com ref count + idle timeout (30–60 s) para encerrar; navegar entre telas que consomem o mesmo recurso não derruba nem reabre watch a cada troca.
+- [ ] **F2-01 — Resource cache demand-driven.** Nova camada (ex.: `internal/services/resources/cache/`): Manager, Subscription, Store, RefCounter, Eviction. Chave base: (generation, contexto, scope, topic, GVR, namespace, selector), com resolução efetiva de origens idêntica; páginas/consultas incluem filtros, sort, ordem e paginação (C03). Orçamento de memória (128–256 MiB inicial) e eviction (watches inativos → cursores expirados → cache de tela não usada → LRU por scope). Apenas em memória; Secret values **nunca** entram no cache (somente metadata autorizada).
+- [ ] **F2-02 — stale-while-revalidate.** Estados FRESH/STALE/REFRESHING/PARTIAL/EXPIRED por entrada; abrir tela cacheada renderiza imediatamente e revalida em paralelo; invalidação explícita por generation/contexto e 403/revogação detectada, impedindo repopulação por resposta antiga (C03).
+- [ ] **F2-03 — Watches compartilhados.** Um watch por identidade completa de C03, sem misturar selectors, namespaces ou gerações, com ref count + idle timeout (30–60 s) para encerrar; navegar entre telas que consomem o mesmo recurso não derruba nem reabre watch a cada troca.
 - [ ] **F2-04 — Bookmarks.** `allowWatchBookmarks=true` quando suportado, sem depender de intervalo fixo; bookmarks servem de checkpoint para reconexão e reduzir risco de RV antigo.
 - [ ] **F2-05 — Backpressure level-driven.** Fila limitada + coalescing por resource key para a UI principal (entregar o estado atual, não toda transição intermediária). Events, logs e streams cronológicos preservam semântica própria — sem coalescing indiscriminado.
 - [ ] **F2-06 — Freshness por tipo.** Watch para recursos core; CPU/memória com refresh 5–10 s; capabilities/RBAC 30–60 s; discovery/versão do Kubernetes 5–15 min; tudo invalidado por generation/contexto. Política documentada.
@@ -16,6 +18,8 @@ Mudança central da v0.7: de LIST repetitivo para **LIST → snapshot → watch 
 - [ ] **F2-08 — Streaming lists (fast path opcional).** `sendInitialEvents=true` + bookmarks + `resourceVersionMatch=NotOlderThan` atrás de feature flag com capability detection; fallback LIST+WATCH clássico para clusters antigos. Nunca dependência exclusiva.
 - [ ] **F2-09 — Scheduler adaptativo (base).** Prioridades visible/likely-next/unrelated com budget global (concorrência, QPS, retry/backoff); observação de latência, timeouts, 429 e congestionamento. Prefetch nunca compete com a requisição visível. AIMD completo permanece na F6.
 - [ ] **F2-10 — Recuperação de 410 Gone.** Continue token/RV expirado: invalidar cursor local, reiniciar LIST consistente, reconstruir página/cache; a UI mostra aviso discreto de snapshot renovado — nunca erro fatal. Consistência de paginação por origem (RV/continue preservados por sequência).
+- [ ] **F2-11 — Instrumentação real do resource cache.** Integrar métricas/spans definidos na F0 e validar hit/miss, bytes, eviction e invalidação reais, sem atributos sensíveis; fecha a parte de D01/D04 atribuída à F2 (C04).
+- [ ] **F2-12 — Ordenação do snapshot.** Servir ordem de coleção apenas sobre snapshot completo, autorizado e dentro do orçamento; estados parciais mantêm escopo honesto. Integrar metadados e consumidores sem prometer snapshot atômico entre origens independentes; testar os cenários de C01.
 
 ## Cenários obrigatórios de aceite
 
@@ -26,8 +30,8 @@ Mudança central da v0.7: de LIST repetitivo para **LIST → snapshot → watch 
 | watch proibido por RBAC | snapshot paginado + refresh manual/polling controlado; nunca polling de 1–2 s |
 | 10k eventos em rajada | fila limitada; coalescing por key; UI estável; memória sob teto |
 | 410 Gone / RV expirado | recuperação automática com aviso discreto; sem erro fatal |
-| trocar contexto/geração | cancela goroutines, para watches, invalida cursores e caches associados |
+| selectors/namespaces distintos, troca de geração e revogação | compartilhamento só com identidade completa; cancela trabalho antigo, invalida dados afetados e impede repopulação por resposta atrasada (C03) |
 | cluster antigo sem streaming lists | fallback clássico funciona; flag desligada |
-| memória sob carga (200 namespaces) | cache e cursor dentro do orçamento; eviction observável; goroutines retornam ao baseline |
+| memória sob carga (cenários de 200 namespaces separados por C02) | cache e cursor dentro do orçamento; eviction observável; goroutines retornam ao baseline |
 
 **Saída:** UI orientada a estado; primeira sincronização 1–3 s em cluster médio; troca de tela cacheada < 100 ms. **Rollback:** cache por trás de flag interna; o caminho de listagem atual continua funcional durante a fase.
