@@ -175,7 +175,11 @@ func (c Config) Validate() error {
 		return fmt.Errorf("config: resources.collectionTimeout must be between 5s and 300s")
 	}
 
-	otel := c.Observability.OTel
+	return ValidateOTel(c.Observability.OTel)
+}
+
+// ValidateOTel applies the same endpoint policy at configuration and exporter construction.
+func ValidateOTel(otel OTelConfig) error {
 	if otel.Protocol != OTelHTTPProtobuf {
 		return fmt.Errorf("config: observability.otel.protocol is unsupported")
 	}

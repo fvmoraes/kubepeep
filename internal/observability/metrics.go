@@ -33,6 +33,22 @@ var allowedMetrics = map[string]struct{}{
 	"kubepeep_requests_total":                     {},
 	"kubepeep_resource_list_items_received_total": {},
 	"kubepeep_resource_list_items_returned_total": {},
+	ResourceListsTotalName:                        {},
+	CursorHitsTotalName:                           {},
+	CursorMissesTotalName:                         {},
+	CursorExpiredTotalName:                        {},
+	CursorEvictedTotalName:                        {},
+	WatchReconnectsTotalName:                      {},
+	WatchExpiredTotalName:                         {},
+	WatchEventsTotalName:                          {},
+	KubernetesRequestsTotalName:                   {},
+	ClientThrottleTotalName:                       {},
+	ClientThrottleNanosecondsTotalName:            {},
+	TraceExportErrorsTotalName:                    {},
+}
+
+var allowedGauges = map[string]struct{}{
+	CursorEntriesName: {}, CursorBytesName: {}, WatchActiveName: {}, WatchLagMillisecondsName: {},
 }
 
 var allowedLabels = map[string]struct{}{
@@ -40,6 +56,8 @@ var allowedLabels = map[string]struct{}{
 	"route":    {},
 	"status":   {},
 	"resource": {},
+	"strategy": {},
+	"traffic":  {},
 }
 
 // IncCounter increments an allowlisted counter by one for the given labels.
@@ -53,6 +71,9 @@ func (registry *Registry) IncCounter(name string, labels map[string]string) {
 // Unknown metric or label names are ignored so caller mistakes can never
 // grow unbounded cardinality.
 func (registry *Registry) AddCounter(name string, labels map[string]string, delta uint64) {
+	if registry == nil {
+		return
+	}
 	if _, ok := allowedMetrics[name]; !ok || delta == 0 {
 		return
 	}
@@ -64,15 +85,44 @@ func (registry *Registry) AddCounter(name string, labels map[string]string, delt
 		bucket = make(map[string]uint64)
 		registry.counters[name] = bucket
 	}
-	bucket[key] += delta
+	if _, exists := bucket[key]; exists || len(bucket) < 1024 {
+		bucket[key] += delta
+	}
 }
 
-// SetGauge is reserved for allowlisted gauges; currently none are exposed, so
-// unknown names are ignored.
+// SetGauge stores the latest observation for an allowlisted gauge.
 func (registry *Registry) SetGauge(name string, labels map[string]string, value int64) {
-	_ = name
-	_ = labels
-	_ = value
+	registry.updateGauge(name, labels, value, false)
+}
+
+// AddGauge adjusts a concurrent activity gauge without losing updates.
+func (registry *Registry) AddGauge(name string, labels map[string]string, delta int64) {
+	registry.updateGauge(name, labels, delta, true)
+}
+
+func (registry *Registry) updateGauge(name string, labels map[string]string, value int64, add bool) {
+	if registry == nil {
+		return
+	}
+	if _, ok := allowedGauges[name]; !ok {
+		return
+	}
+	key := labelKey(labels)
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	bucket := registry.gauges[name]
+	if bucket == nil {
+		bucket = make(map[string]int64)
+		registry.gauges[name] = bucket
+	}
+	if _, exists := bucket[key]; !exists && len(bucket) >= 1024 {
+		return
+	}
+	if add {
+		bucket[key] += value
+	} else {
+		bucket[key] = value
+	}
 }
 
 func labelKey(labels map[string]string) string {
@@ -101,6 +151,9 @@ func (registry *Registry) Render() string {
 	for name := range registry.counters {
 		names = append(names, name)
 	}
+	for name := range registry.gauges {
+		names = append(names, name)
+	}
 	sort.Strings(names)
 	for _, name := range names {
 		bucket := registry.counters[name]
@@ -108,8 +161,15 @@ func (registry *Registry) Render() string {
 		for key := range bucket {
 			labelTuples = append(labelTuples, [2]string{key, strconv.FormatUint(bucket[key], 10)})
 		}
+		kind := "counter"
+		if gauges, ok := registry.gauges[name]; ok {
+			kind = "gauge"
+			for key, value := range gauges {
+				labelTuples = append(labelTuples, [2]string{key, strconv.FormatInt(value, 10)})
+			}
+		}
 		sort.Slice(labelTuples, func(left, right int) bool { return labelTuples[left][0] < labelTuples[right][0] })
-		builder.WriteString("# TYPE " + name + " counter\n")
+		builder.WriteString("# TYPE " + name + " " + kind + "\n")
 		for _, tuple := range labelTuples {
 			builder.WriteString(name)
 			builder.WriteString(renderLabels(tuple[0]))
@@ -144,4 +204,20 @@ const RequestsTotalName = "kubepeep_requests_total"
 const (
 	ResourceListItemsReceivedTotalName = "kubepeep_resource_list_items_received_total"
 	ResourceListItemsReturnedTotalName = "kubepeep_resource_list_items_returned_total"
+	ResourceListsTotalName             = "kubepeep_resource_lists_total"
+	CursorEntriesName                  = "kubepeep_cursor_entries"
+	CursorBytesName                    = "kubepeep_cursor_bytes"
+	CursorHitsTotalName                = "kubepeep_cursor_hits_total"
+	CursorMissesTotalName              = "kubepeep_cursor_misses_total"
+	CursorExpiredTotalName             = "kubepeep_cursor_expired_total"
+	CursorEvictedTotalName             = "kubepeep_cursor_evicted_total"
+	WatchActiveName                    = "kubepeep_watch_active"
+	WatchReconnectsTotalName           = "kubepeep_watch_reconnects_total"
+	WatchExpiredTotalName              = "kubepeep_watch_expired_total"
+	WatchEventsTotalName               = "kubepeep_watch_events_total"
+	WatchLagMillisecondsName           = "kubepeep_watch_lag_milliseconds"
+	KubernetesRequestsTotalName        = "kubepeep_kubernetes_requests_total"
+	ClientThrottleTotalName            = "kubepeep_client_throttle_total"
+	ClientThrottleNanosecondsTotalName = "kubepeep_client_throttle_nanoseconds_total"
+	TraceExportErrorsTotalName         = "kubepeep_trace_export_errors_total"
 )

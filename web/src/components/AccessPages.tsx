@@ -1,3 +1,4 @@
+import { useGenerationCursor } from './resource/useListCursor'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
@@ -111,8 +112,8 @@ export function AccessControlPage() {
   const tab = useMemo(() => accessTabFromParams(tabParam ?? '') ?? 'roles', [tabParam])
   const [draft, setDraft] = useState<ListState>(initialListState)
   const [applied, setApplied] = useState<ListState>(initialListState)
-  const [cursor, setCursor] = useState('')
   const namespacedTab = tab === 'roles' || tab === 'role-bindings'
+  const [cursor, setCursor] = useGenerationCursor(generation, JSON.stringify([tab, namespacedTab ? globalNamespace.value : '']))
   const options = { limit: 100, search: applied.search || undefined, continueToken: cursor || undefined, namespaces: namespacedTab ? effectiveNamespaces(globalNamespace.value, []) : undefined, sort: applied.sort === 'identity' ? undefined : applied.sort, order: applied.sort === 'identity' && applied.order === 'asc' ? undefined : applied.order }
 
   // Deep links open the Resource Workspace (cluster tabs use 3 segments,
@@ -123,8 +124,8 @@ export function AccessControlPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only react to route param changes
   }, [tab, namespace, name, generation])
 
-  const roles = useQuery({ queryKey: ['resources', 'roles', generation, applied, cursor], queryFn: ({ signal }) => getRoles(options, signal, generation), enabled: Boolean(selection && tab === 'roles') })
-  const roleBindings = useQuery({ queryKey: ['resources', 'role-bindings', generation, applied, cursor], queryFn: ({ signal }) => getRoleBindings(options, signal, generation), enabled: Boolean(selection && tab === 'role-bindings') })
+  const roles = useQuery({ queryKey: ['resources', 'roles', generation, globalNamespace.value, applied, cursor], queryFn: ({ signal }) => getRoles(options, signal, generation), enabled: Boolean(selection && tab === 'roles') })
+  const roleBindings = useQuery({ queryKey: ['resources', 'role-bindings', generation, globalNamespace.value, applied, cursor], queryFn: ({ signal }) => getRoleBindings(options, signal, generation), enabled: Boolean(selection && tab === 'role-bindings') })
   const clusterRoles = useQuery({ queryKey: ['resources', 'cluster-roles', generation, applied, cursor], queryFn: ({ signal }) => getClusterRoles(options, signal, generation), enabled: Boolean(selection && tab === 'cluster-roles') })
   const clusterRoleBindings = useQuery({ queryKey: ['resources', 'cluster-role-bindings', generation, applied, cursor], queryFn: ({ signal }) => getClusterRoleBindings(options, signal, generation), enabled: Boolean(selection && tab === 'cluster-role-bindings') })
 
@@ -172,7 +173,7 @@ export function AdministrationPage() {
   const tab = useMemo(() => administrationTabFromParams(tabParam ?? '') ?? 'customresourcedefinitions', [tabParam])
   const [draft, setDraft] = useState<ListState>(initialListState)
   const [applied, setApplied] = useState<ListState>(initialListState)
-  const [cursor, setCursor] = useState('')
+  const [cursor, setCursor] = useGenerationCursor(generation, tab)
   const options = { limit: 100, search: applied.search || undefined, continueToken: cursor || undefined, sort: applied.sort === 'identity' ? undefined : applied.sort, order: applied.sort === 'identity' && applied.order === 'asc' ? undefined : applied.order }
 
   useEffect(() => {

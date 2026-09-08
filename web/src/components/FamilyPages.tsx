@@ -1,3 +1,5 @@
+import { effectiveNamespaces, useGlobalNamespace } from '../context/GlobalNamespace'
+import { useGenerationCursor, useGenerationCursorMap } from './resource/useListCursor'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
@@ -42,22 +44,7 @@ function useActiveSelection() {
   return { status, selection: status.data?.selection ?? null }
 }
 
-function useGenerationCursor(generation: string | undefined): [string, (value: string) => void] {
-  const [state, setState] = useState<{ generation: string | undefined; value: string }>({ generation, value: '' })
-  const value = state.generation === generation ? state.value : ''
-  const setValue = (next: string) => setState({ generation, value: next })
-  return [value, setValue]
-}
 
-function useGenerationCursorMap<K extends string>(generation: string | undefined, empty: Record<K, string>): [Record<K, string>, (key: K, value: string) => void] {
-  const [state, setState] = useState<{ generation: string | undefined; values: Record<K, string> }>(() => ({ generation, values: { ...empty } }))
-  const values = state.generation === generation ? state.values : empty
-  const setValue = (key: K, value: string) => setState((current) => ({
-    generation,
-    values: { ...(current.generation === generation ? current.values : empty), [key]: value },
-  }))
-  return [values, setValue]
-}
 
 interface SimpleListState {
   search: string
@@ -152,6 +139,7 @@ const leaseSortOptions: readonly ListSortOption[] = [
 ]
 
 export function LeasesPage() {
+  const globalNamespace = useGlobalNamespace()
   const { status, selection } = useActiveSelection()
   const workspace = useResourceWorkspace()
   const { namespace, name } = useParams<{ namespace?: string; name?: string }>()
@@ -159,7 +147,7 @@ export function LeasesPage() {
   const generation = selection?.generation
   const [draft, setDraft] = useState<SimpleListState>(() => listStateFromParams(params, ['']))
   const [applied, setApplied] = useState<SimpleListState>(() => listStateFromParams(params, ['']))
-  const [cursor, setCursor] = useGenerationCursor(generation)
+  const [cursor, setCursor] = useGenerationCursor(generation, globalNamespace.value)
   const queryClient = useQueryClient()
 
   useEffect(() => {
@@ -169,8 +157,8 @@ export function LeasesPage() {
   }, [namespace, name, generation])
 
   const list = useQuery({
-    queryKey: ['resources', 'leases', generation, applied, cursor],
-    queryFn: ({ signal }) => getLeases({ limit: 100, search: applied.search || undefined, ...sortParams(applied), continueToken: cursor || undefined }, signal, generation),
+    queryKey: ['resources', 'leases', generation, globalNamespace.value, applied, cursor],
+    queryFn: ({ signal }) => getLeases({ limit: 100, namespaces: effectiveNamespaces(globalNamespace.value, []), search: applied.search || undefined, ...sortParams(applied), continueToken: cursor || undefined }, signal, generation),
     enabled: Boolean(selection),
   })
 
@@ -243,6 +231,7 @@ function storageTabFromParams(tab: string): StorageTab | null {
 }
 
 export function StoragePage() {
+  const globalNamespace = useGlobalNamespace()
   const { status, selection } = useActiveSelection()
   const workspace = useResourceWorkspace()
   const navigate = useNavigate()
@@ -252,6 +241,7 @@ export function StoragePage() {
   const [drafts, setDrafts] = useState<Record<StorageTab, SimpleListState>>(() => structuredClone(Object.fromEntries(storageTabs.map((key) => [key, { ...defaultSimpleList }])) as Record<StorageTab, SimpleListState>))
   const [appliedLists, setAppliedLists] = useState<Record<StorageTab, SimpleListState>>(() => structuredClone(Object.fromEntries(storageTabs.map((key) => [key, { ...defaultSimpleList }])) as Record<StorageTab, SimpleListState>))
   const [cursors, setCursorValue] = useGenerationCursorMap(generation, Object.fromEntries(storageTabs.map((key) => [key, ''])) as Record<StorageTab, string>)
+  const [claimCursor, setClaimCursor] = useGenerationCursor(generation, globalNamespace.value)
   const queryClient = useQueryClient()
   const statuses = tab === 'persistent-volumes' ? volumeStatuses : tab === 'persistent-volume-claims' ? claimStatuses : ['']
   const draft = drafts[tab]
@@ -266,7 +256,7 @@ export function StoragePage() {
 
   const options = (value: StorageTab) => ({ limit: 100, search: appliedLists[value].search || undefined, statuses: appliedLists[value].status ? [appliedLists[value].status] : undefined, continueToken: cursors[value] || undefined, ...sortParams(appliedLists[value]) })
   const persistentVolumes = useQuery({ queryKey: ['resources', 'persistent-volumes', generation, appliedLists['persistent-volumes'], cursors['persistent-volumes']], queryFn: ({ signal }) => getPersistentVolumes(options('persistent-volumes'), signal, generation), enabled: Boolean(selection && tab === 'persistent-volumes') })
-  const claims = useQuery({ queryKey: ['resources', 'persistent-volume-claims', generation, appliedLists['persistent-volume-claims'], cursors['persistent-volume-claims']], queryFn: ({ signal }) => getPersistentVolumeClaims(options('persistent-volume-claims'), signal, generation), enabled: Boolean(selection && tab === 'persistent-volume-claims') })
+  const claims = useQuery({ queryKey: ['resources', 'persistent-volume-claims', generation, globalNamespace.value, appliedLists['persistent-volume-claims'], claimCursor], queryFn: ({ signal }) => getPersistentVolumeClaims({ ...options('persistent-volume-claims'), namespaces: effectiveNamespaces(globalNamespace.value, []), continueToken: claimCursor || undefined }, signal, generation), enabled: Boolean(selection && tab === 'persistent-volume-claims') })
   const volumeAttachments = useQuery({ queryKey: ['resources', 'volume-attachments', generation, appliedLists['volume-attachments'], cursors['volume-attachments']], queryFn: ({ signal }) => getVolumeAttachments(options('volume-attachments'), signal, generation), enabled: Boolean(selection && tab === 'volume-attachments') })
   const storageClasses = useQuery({ queryKey: ['resources', 'storage-classes', generation, appliedLists['storage-classes'], cursors['storage-classes']], queryFn: ({ signal }) => getStorageClasses(options('storage-classes'), signal, generation), enabled: Boolean(selection && tab === 'storage-classes') })
   const csiNodes = useQuery({ queryKey: ['resources', 'csi-nodes', generation, appliedLists['csi-nodes'], cursors['csi-nodes']], queryFn: ({ signal }) => getCSINodes(options('csi-nodes'), signal, generation), enabled: Boolean(selection && tab === 'csi-nodes') })
@@ -284,7 +274,8 @@ export function StoragePage() {
     setDrafts((current) => ({ ...current, [tab]: next }))
   }
   function setCursor(value: string) {
-    setCursorValue(tab, value)
+    if (tab === 'persistent-volume-claims') setClaimCursor(value)
+    else setCursorValue(tab, value)
   }
   const openDetail = useCallback((item: { namespace?: string; name: string }) => {
     workspace.openResource({ collection: tab, namespace: item.namespace ?? null, name: item.name })

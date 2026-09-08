@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fvmoraes/kubepeep/internal/observability"
 	"github.com/fvmoraes/kubepeep/internal/services/authorization"
 )
 
@@ -67,7 +68,7 @@ type originOutcome[T ListItem] struct {
 // Collect executes one bounded fan-out window. It performs authorization
 // before each real LIST, keeps allowed results when another namespace is
 // denied/unavailable, and discards the whole window on ResourceExpired.
-func Collect[T ListItem](ctx context.Context, request CollectionRequest[T]) (ListResult[T], error) {
+func Collect[T ListItem](ctx context.Context, request CollectionRequest[T]) (_ ListResult[T], resultErr error) {
 	result := ListResult[T]{
 		Items:    []T{},
 		Page:     PageDTO{Limit: request.Options.Limit, FilterScope: FilterScopePage},
@@ -83,6 +84,12 @@ func Collect[T ListItem](ctx context.Context, request CollectionRequest[T]) (Lis
 		return result, validationError("list options must be normalized before collection")
 	}
 	origins := canonicalOrigins(request.Origins)
+	spanName := "resources.list.fanout"
+	if globalOrigins(origins) {
+		spanName = "resources.list.global"
+	}
+	ctx, end := observability.StartSpan(ctx, spanName)
+	defer func() { end(resultErr) }()
 	if len(origins) == 0 {
 		result.Page.Complete = true
 		result.CollectedAt = time.Now().UTC()
@@ -166,7 +173,9 @@ func Collect[T ListItem](ctx context.Context, request CollectionRequest[T]) (Lis
 	if globalOrigins(origins) && authoritativeSuccesses > 0 && request.RequestedNamespaces > 0 {
 		result.Coverage.CompletedNamespaces = request.RequestedNamespaces
 	}
+	_, endMerge := observability.StartSpan(ctx, "resources.merge")
 	items, next, err := MergeOriginPages(cursor, pages, request.Options.Limit, request.Less)
+	endMerge(err)
 	if err != nil {
 		return result, err
 	}

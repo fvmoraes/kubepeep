@@ -18,6 +18,24 @@ type fakeWatchStream struct {
 	once    sync.Once
 }
 
+func TestOldWatchWorkerRemovalPreservesReplacement(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	manager := &WatchManager{workers: map[string]*watchWorker{}}
+	key := WatchKey{Generation: "gen", Topic: TopicPods}
+	subscription := newSubscription(ctx)
+	old := &watchWorker{manager: manager, key: key, ctx: ctx, cancel: cancel, subscribers: map[*Subscription]struct{}{subscription: {}}}
+	replacement := &watchWorker{manager: manager, key: key}
+	manager.workers[key.identity()] = replacement
+	old.remove(subscription)
+	if manager.workers[key.identity()] != replacement {
+		t.Fatal("closing an old subscription removed its replacement worker")
+	}
+	if ctx.Err() == nil {
+		t.Fatal("old worker was not cancelled")
+	}
+}
+
 func (stream *fakeWatchStream) ResultChan() <-chan WatchChange { return stream.channel }
 func (stream *fakeWatchStream) Stop()                          { stream.once.Do(func() {}) }
 

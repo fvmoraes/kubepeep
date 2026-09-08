@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/fvmoraes/kubepeep/internal/api"
+	"github.com/fvmoraes/kubepeep/internal/observability"
 	"github.com/fvmoraes/kubepeep/internal/services/namespaces"
 	resourcecore "github.com/fvmoraes/kubepeep/internal/services/resources"
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -264,6 +265,9 @@ func handleClusterList[T resourcecore.ListItem](handler *Resources, w http.Respo
 }
 
 func writeListResult[T resourcecore.ListItem](handler *Resources, w http.ResponseWriter, r *http.Request, collection resourcecore.Collection, options resourcecore.ListOptions, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, call listCall[T]) {
+	ctx, end := observability.StartSpan(r.Context(), "resources.list")
+	defer end(nil)
+	r = r.WithContext(ctx)
 	queryOptions := options
 	queryOptions.Continue = ""
 	queryJSON, _ := json.Marshal(queryOptions)
@@ -282,7 +286,7 @@ func writeListResult[T resourcecore.ListItem](handler *Resources, w http.Respons
 					return
 				}
 			} else if reference.Ref != "" {
-				if err := handler.store.Get(reference.Ref, decoded); err != nil {
+				if err := handler.store.GetContext(r.Context(), reference.Ref, decoded); err != nil {
 					api.WriteError(w, r, err)
 					return
 				}
@@ -303,7 +307,7 @@ func writeListResult[T resourcecore.ListItem](handler *Resources, w http.Respons
 	}
 	result.Page.Next = ""
 	if result.Cursor != nil && !result.Cursor.Complete() {
-		token, encodeErr := handler.encodeListCursor(cursorBinding, result.Cursor)
+		token, encodeErr := handler.encodeListCursor(r.Context(), cursorBinding, result.Cursor)
 		if encodeErr != nil {
 			api.WriteError(w, r, api.NewHTTPError(http.StatusTooManyRequests, api.CodeLimitExceeded, "The resource cursor exceeded its safe limit.", nil, encodeErr))
 			return
@@ -314,9 +318,9 @@ func writeListResult[T resourcecore.ListItem](handler *Resources, w http.Respons
 	handler.writeJSONIfCurrent(w, r, binding, envelope)
 }
 
-func (handler *Resources) encodeListCursor(binding api.CursorBinding, cursor any) (string, error) {
+func (handler *Resources) encodeListCursor(ctx context.Context, binding api.CursorBinding, cursor any) (string, error) {
 	if handler.store != nil {
-		reference, err := handler.store.Put(cursor)
+		reference, err := handler.store.PutContext(ctx, cursor)
 		if err != nil {
 			return "", err
 		}

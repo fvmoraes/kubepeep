@@ -60,7 +60,7 @@ func NewResourceBackendWithOptions(runtime *Runtime, authorizer resources.Author
 		metrics:           options.Metrics,
 		watchBindings:     make(map[string]namespaces.SelectionBinding),
 	}
-	backend.watchManager = resources.NewWatchManager(&resourceWatchPort{backend: backend})
+	backend.watchManager = resources.NewWatchManagerWithMetrics(&resourceWatchPort{backend: backend}, options.Metrics)
 	return backend, nil
 }
 
@@ -148,6 +148,7 @@ func collectResource[T resources.ListItem](
 		}
 		decision := globalListDecision(ctx, backend.authorizer, binding.Generation, origins)
 		if decision == authorization.DecisionAllowed {
+			backend.metrics.IncCounter(observability.ResourceListsTotalName, map[string]string{"resource": string(collection), "strategy": "global"})
 			selection := resourceSelection(binding, resolution)
 			selection.Namespaces = []string{""}
 			var received atomic.Int64
@@ -183,6 +184,7 @@ func collectResource[T resources.ListItem](
 		return resources.ListResult[T]{}, err
 	}
 	var received atomic.Int64
+	backend.metrics.IncCounter(observability.ResourceListsTotalName, map[string]string{"resource": string(collection), "strategy": "fanout"})
 	result, collectErr := resources.Collect(ctx, resources.CollectionRequest[T]{
 		Selection: selection, Options: options, Origins: origins, Cursor: cursor,
 		Lister: countingLister(list, &received), Authorizer: backend.authorizer, Less: less,
@@ -299,6 +301,7 @@ func clusterCollect[T resources.ListItem](ctx context.Context, backend *Resource
 		selection.Scope = "none"
 	}
 	var received atomic.Int64
+	backend.metrics.IncCounter(observability.ResourceListsTotalName, map[string]string{"resource": string(collection), "strategy": "global"})
 	result, collectErr := resources.Collect(ctx, resources.CollectionRequest[T]{
 		Selection: selection, Options: normalized, Origins: []resources.Origin{origin}, Cursor: cursor,
 		Lister: countingLister(list, &received), Authorizer: backend.authorizer, Less: less,
@@ -329,7 +332,9 @@ func sanitizeClusterFailures(failures []resources.PartialErrorDTO) []resources.P
 // is bounded by the collection fan-out, so an atomic counter is sufficient.
 func countingLister[T resources.ListItem](list originListerFunc[T], received *atomic.Int64) originListerFunc[T] {
 	return func(ctx context.Context, request resources.PageRequest) (resources.OriginPage[T], error) {
+		ctx, end := observability.StartSpan(ctx, "resources.list.origin")
 		page, err := list(ctx, request)
+		end(err)
 		if err == nil {
 			received.Add(int64(len(page.Items)))
 		}

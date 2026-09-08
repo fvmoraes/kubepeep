@@ -951,7 +951,12 @@ def check_allowed(client: Client, status: dict[str, Any], args: argparse.Namespa
         f"/api/v1/endpoint-slices/{namespace}/kp-service-v1",
     )
     for path in detail_paths:
-        metadata(client.data("GET", path))
+        detail = client.data("GET", path)
+        metadata(detail)
+        if path.startswith("/api/v1/pods/"):
+            for field in ("conditions", "containers", "initContainers", "ephemeralContainers", "relatedEvents"):
+                if not isinstance(detail.get(field), list):
+                    raise E2EFailure("Pod detail returned a non-array collection")
         client.request("GET", path + "/yaml", accept="application/yaml, text/yaml")
     config_path = f"/api/v1/configmaps/{namespace}/kp-config"
     config = client.data("GET", config_path)

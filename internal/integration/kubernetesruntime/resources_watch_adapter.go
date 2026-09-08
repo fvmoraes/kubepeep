@@ -208,14 +208,33 @@ type resourceWatchStream struct {
 
 func (stream *resourceWatchStream) ResultChan() <-chan resources.WatchChange { return stream.results }
 func (stream *resourceWatchStream) Stop() {
-	stream.once.Do(func() { stream.source.Stop(); stream.cancel() })
+	stream.once.Do(func() { stream.cancel(); stream.source.Stop() })
+}
+
+func (stream *resourceWatchStream) send(change resources.WatchChange) bool {
+	select {
+	case <-stream.ctx.Done():
+		return false
+	case stream.results <- change:
+		return true
+	}
 }
 
 func (stream *resourceWatchStream) run(key resources.WatchKey, port *resourceWatchPort) {
 	defer close(stream.results)
 	defer stream.Stop()
-	for event := range stream.source.ResultChan() {
-		change := resources.WatchChange{Type: string(event.Type)}
+	for {
+		var event kwatch.Event
+		select {
+		case <-stream.ctx.Done():
+			return
+		case next, ok := <-stream.source.ResultChan():
+			if !ok {
+				return
+			}
+			event = next
+		}
+		change := resources.WatchChange{Type: string(event.Type), ReceivedAt: time.Now()}
 		if event.Type == kwatch.Bookmark {
 			continue
 		}
@@ -225,13 +244,13 @@ func (stream *resourceWatchStream) run(key resources.WatchKey, port *resourceWat
 			} else {
 				change.Err = mapResourceError(apierrors.FromObject(event.Object))
 			}
-			stream.results <- change
+			stream.send(change)
 			return
 		}
 		accessor, err := meta.Accessor(event.Object)
 		if err != nil {
 			change.Err = resourceDomain(resources.CodeClusterUnavailable, "The Kubernetes watch returned an invalid object.", err)
-			stream.results <- change
+			stream.send(change)
 			return
 		}
 		change.ResourceVersion = accessor.GetResourceVersion()
@@ -241,12 +260,14 @@ func (stream *resourceWatchStream) run(key resources.WatchKey, port *resourceWat
 			object, convertErr := port.convertRuntime(stream.ctx, key, event.Object)
 			if convertErr != nil {
 				change.Err = convertErr
-				stream.results <- change
+				stream.send(change)
 				return
 			}
 			change.Object = object
 		}
-		stream.results <- change
+		if !stream.send(change) {
+			return
+		}
 	}
 }
 

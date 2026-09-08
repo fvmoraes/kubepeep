@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/fvmoraes/kubepeep/internal/observability"
 )
 
 var errGenerationChanged = &SafeError{
@@ -76,10 +78,13 @@ func NewClientCache(parent context.Context, builder ClientBuilder, unaryTimeout 
 // Activate returns a current-generation lease, deduplicating concurrent builds.
 // A stale Resolution is rejected instead of mixing credentials from two file
 // generations.
-func (cache *ClientCache) Activate(ctx context.Context, resolution *Resolution) (*Lease, error) {
+func (cache *ClientCache) Activate(ctx context.Context, resolution *Resolution) (_ *Lease, resultErr error) {
 	if ctx == nil || resolution == nil {
 		return nil, safeError(CodeClientUnavailable, "A Kubernetes client resolution is required.", false)
 	}
+	ctx, end := observability.StartSpan(ctx, "cache.clients")
+	defer func() { end(resultErr) }()
+	observability.CacheOutcome(ctx, "miss")
 	descriptor := resolution.Descriptor()
 	key := descriptor.CacheKey()
 	currentFingerprint, err := resolution.CurrentFingerprint(ctx)
@@ -98,6 +103,7 @@ func (cache *ClientCache) Activate(ctx context.Context, resolution *Resolution) 
 		return nil, safeError(CodeClientUnavailable, "The Kubernetes client cache is closed.", false)
 	}
 	if cache.active != nil && cache.active.Descriptor.CacheKey() == key && cache.active.fingerprint == currentFingerprint && cache.active.Generation.Context().Err() == nil {
+		observability.CacheOutcome(ctx, "hit")
 		lease := cache.active
 		cache.mu.Unlock()
 		return lease, nil
@@ -114,6 +120,7 @@ func (cache *ClientCache) Activate(ctx context.Context, resolution *Resolution) 
 		cache.active = nil
 	}
 	if entry := cache.entries[key]; entry != nil && entry.fingerprint == currentFingerprint {
+		observability.CacheOutcome(ctx, "hit")
 		lease := cache.activateLocked(descriptor, currentFingerprint, entry.clients)
 		cache.mu.Unlock()
 		return lease, nil
@@ -165,6 +172,7 @@ func (cache *ClientCache) Activate(ctx context.Context, resolution *Resolution) 
 	}
 	cache.mu.Unlock()
 
+	observability.CacheOutcome(ctx, "coalesced")
 	select {
 	case <-ctx.Done():
 		return nil, SanitizeError(ctx.Err())

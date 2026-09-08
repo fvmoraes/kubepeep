@@ -189,6 +189,41 @@ func collectWatchChanges(t *testing.T, stream *resourceWatchStream) []resources.
 	return changes
 }
 
+func TestWatchStreamCancellationWithFullResults(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		event kwatch.Event
+	}{
+		{name: "deleted", event: kwatch.Event{Type: kwatch.Deleted, Object: unstructuredPod("api", "uid-1")}},
+		{name: "expired", event: kwatch.Event{Type: kwatch.Error, Object: &metav1.Status{Status: metav1.StatusFailure, Code: 410, Reason: metav1.StatusReasonExpired}}},
+		{name: "invalid metadata", event: kwatch.Event{Type: kwatch.Added, Object: &runtime.Unknown{}}},
+		{name: "invalid conversion", event: kwatch.Event{Type: kwatch.Added, Object: &metav1.PartialObjectMetadata{}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			source := kwatch.NewFake()
+			stream := &resourceWatchStream{ctx: ctx, source: source, cancel: cancel, results: make(chan resources.WatchChange, 1)}
+			stream.results <- resources.WatchChange{}
+			done := make(chan struct{})
+			go func() {
+				stream.run(resources.WatchKey{Topic: resources.TopicPods}, &resourceWatchPort{})
+				close(done)
+			}()
+			source.Action(test.event.Type, test.event.Object)
+			stream.Stop()
+			select {
+			case <-done:
+			case <-time.After(time.Second):
+				// Release the blocked producer even when testing the regression.
+				for range stream.results {
+				}
+				t.Fatal("watch producer did not stop with a full result queue")
+			}
+		})
+	}
+}
+
 func TestWatchStreamRunProcessesAddsDeletesAndBookmarks(t *testing.T) {
 	t.Parallel()
 	backend := &ResourceBackend{authorizer: &allowResourceAuthorization{}, now: time.Now}

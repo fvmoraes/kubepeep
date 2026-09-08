@@ -339,3 +339,42 @@ test('cluster namespaces are listed for picking when the identity may list (U12 
   await expect.poll(() => savedScopes.length).toBe(1)
   expect(savedScopes[0].namespaces).toEqual(['alpha', 'beta'])
 })
+
+for (const transport of ['web', 'desktop-bridge'] as const) {
+  test(`Pod without related events stays visible via ${transport}`, async ({ page }) => {
+    const errors: string[] = []
+    page.on('pageerror', (error) => errors.push(error.message))
+    if (transport === 'desktop-bridge') {
+      // Exercises the frontend Wails transport; native runtime is a separate gate.
+      await page.addInitScript(() => {
+        Object.assign(window, { go: { desktop: { Bridge: {
+          PlatformInfo: async () => ({ mode: 'desktop', streamBase: location.origin, version: 'test', commit: 'test', buildDate: 'test' }),
+          Invoke: async (method: string, path: string, headers: Record<string, string>, body: string) => {
+            const response = await fetch(path, { method, headers, body: body || undefined })
+            return { status: response.status, headers: { 'Content-Type': [response.headers.get('Content-Type') ?? 'application/json'] }, body: await response.text() }
+          },
+        } } } })
+      })
+    }
+    await page.route('**/api/v1/pods/payments/api-abc', async (route) => {
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: {
+        metadata: { namespace: 'payments', name: 'api-abc', uid: 'uid-no-events', resourceVersion: '17', labels: {} },
+        summary: pod, conditions: [], containers: [], initContainers: [], ephemeralContainers: [], relatedEvents: null,
+      }, meta }) })
+    })
+    await page.goto(transport === 'desktop-bridge' ? '/' : '/pods')
+    if (transport === 'desktop-bridge') {
+      await expect(page.getByRole('heading', { name: 'Cluster overview' })).toBeVisible()
+      await page.getByRole('button', { name: 'Workloads', exact: true }).click()
+      await page.getByRole('link', { name: 'Pods', exact: true }).click()
+    }
+    await page.getByRole('button', { name: 'Open Pod api-abc in payments' }).click()
+    await expect(page.getByRole('dialog')).toContainText('uid-no-events')
+    await expect(page.getByRole('heading', { name: 'Pods', exact: true })).toBeVisible()
+    if (transport === 'web') {
+      await page.reload()
+      await expect(page.getByRole('dialog')).toContainText('uid-no-events')
+    }
+    expect(errors).toEqual([])
+  })
+}

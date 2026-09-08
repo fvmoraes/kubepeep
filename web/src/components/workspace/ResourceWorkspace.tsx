@@ -68,7 +68,7 @@ import { errorMessage } from '../resource/errors'
 import { dateTime } from '../resource/format'
 import { eventBadgeVariant, statusBadgeVariant } from '../resource/status'
 import { ResourceTabStrip, type ResourceTab } from '../resource/ResourceTabStrip'
-import { resourceKindLabel, workloadKindPath } from '../../navigation/paths'
+import { resourceDetailPath, resourceKindLabel, workloadKindPath } from '../../navigation/paths'
 import { useResourceWorkspace, type WorkspaceEntry } from './ResourceWorkspaceProvider'
 
 const yamlCollections = new Set([
@@ -104,7 +104,10 @@ const kindToTarget: Record<string, { collection: string; kind?: string }> = {
 function refToWorkspaceRef(ref: ResourceRef): { collection: string; kind: string | null; namespace: string | null; name: string } | null {
   if (!ref.name) return null
   const mapped = kindToTarget[ref.kind]
-  if (mapped) return { collection: mapped.collection, kind: mapped.kind ?? ref.kind, namespace: ref.namespace ?? null, name: ref.name }
+  if (mapped) {
+    const target = { collection: mapped.collection, kind: mapped.kind ?? ref.kind, namespace: ref.namespace ?? null, name: ref.name }
+    return resourceDetailPath(target) ? target : null
+  }
   return null
 }
 
@@ -281,7 +284,7 @@ function RelatedRefList({ refs, onOpen, emptyNote }: { refs: ResourceRef[]; onOp
     <ul className="m-0 grid list-none gap-1 p-0">
       {refs.map((ref) => (
         <li key={`${ref.kind}/${ref.namespace ?? ''}/${ref.name}`}>
-          <TableLink aria-label={`Open ${ref.kind} ${ref.name}`} onClick={() => onOpen(ref)} primary={ref.name} secondary={ref.kind} />
+          <TableLink aria-label={`Open ${ref.kind} ${ref.name}`} onClick={() => onOpen(ref)} primary={ref.name} secondary={ref.kind} disabledReason={refToWorkspaceRef(ref) ? undefined : 'Detail navigation is unavailable for this reference.'} />
         </li>
       ))}
     </ul>
@@ -569,11 +572,12 @@ export function ResourceWorkspaceOverlay() {
     if (tab === 'overview') {
       if (detail.isPending || detail.isError || !detail.data) return detailFallback()
       const data = detail.data
-      const related = data.type === 'workload' ? data.data.related : []
+      const related = data.type === 'workload' ? (data.data.related ?? []) : []
       const owner = data.type === 'pod' && data.data.summary.owner
-        ? [{ kind: data.data.summary.owner.kind, name: data.data.summary.owner.name } as ResourceRef]
+        ? [{ kind: data.data.summary.owner.kind, name: data.data.summary.owner.name, namespace: data.data.metadata.namespace } as ResourceRef]
         : []
-      const podRefs = data.type === 'pod' ? data.data.relatedEvents : []
+      // Older backends encode an empty related-event slice as null.
+      const podRefs = data.type === 'pod' ? (data.data.relatedEvents ?? []) : []
       return (
         <div className="grid content-start gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(260px,0.7fr)]">
           <div className="grid content-start gap-3 min-w-0">
@@ -611,7 +615,7 @@ export function ResourceWorkspaceOverlay() {
     if (tab === 'events') return <WorkspaceEvents entry={activeEntry} generation={generation} />
     if (tab === 'logs') {
       if (detail.data?.type === 'pod') return <PodLogsLink detail={detail.data.data} />
-      return <p className="text-sm text-kp-overlay-text" role="status">Loading…</p>
+      return detailFallback()
     }
     if (tab === 'actions') {
       if (!detail.data || detail.isPending || detail.isError || !selection) return detailFallback()

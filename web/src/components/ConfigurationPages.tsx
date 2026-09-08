@@ -1,3 +1,4 @@
+import { useGenerationCursor } from './resource/useListCursor'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
@@ -69,7 +70,7 @@ export function ConfigurationPage() {
   const [draft, setDraft] = useState<ListState>(initialListState)
   const [applied, setApplied] = useState<ListState>(initialListState)
   const tab = useMemo(() => configurationTabFromParams(tabParam ?? '') ?? 'resource-quotas', [tabParam])
-  const [cursor, setCursor] = useState('')
+  const [cursor, setCursor] = useGenerationCursor(generation, JSON.stringify([tab, globalNamespace.value]))
   const options = { limit: 100, search: applied.search || undefined, continueToken: cursor || undefined, namespaces: effectiveNamespaces(globalNamespace.value, []), sort: applied.sort === 'identity' ? undefined : applied.sort, order: applied.sort === 'identity' && applied.order === 'asc' ? undefined : applied.order }
 
   // Deep links (/configuration/:tab/:ns/:name) open the Resource Workspace.
@@ -79,10 +80,10 @@ export function ConfigurationPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only react to route param changes
   }, [tab, namespace, name, generation])
 
-  const quotas = useQuery({ queryKey: ['resources', 'resource-quotas', generation, applied, cursor], queryFn: ({ signal }) => getResourceQuotas(options, signal, generation), enabled: Boolean(selection && tab === 'resource-quotas') })
-  const limitRanges = useQuery({ queryKey: ['resources', 'limit-ranges', generation, applied, cursor], queryFn: ({ signal }) => getLimitRanges(options, signal, generation), enabled: Boolean(selection && tab === 'limit-ranges') })
-  const hpas = useQuery({ queryKey: ['resources', 'hpas', generation, applied, cursor], queryFn: ({ signal }) => getHPAs(options, signal, generation), enabled: Boolean(selection && tab === 'hpas') })
-  const pdbs = useQuery({ queryKey: ['resources', 'pdbs', generation, applied, cursor], queryFn: ({ signal }) => getPDBs(options, signal, generation), enabled: Boolean(selection && tab === 'pdbs') })
+  const quotas = useQuery({ queryKey: ['resources', 'resource-quotas', generation, globalNamespace.value, applied, cursor], queryFn: ({ signal }) => getResourceQuotas(options, signal, generation), enabled: Boolean(selection && tab === 'resource-quotas') })
+  const limitRanges = useQuery({ queryKey: ['resources', 'limit-ranges', generation, globalNamespace.value, applied, cursor], queryFn: ({ signal }) => getLimitRanges(options, signal, generation), enabled: Boolean(selection && tab === 'limit-ranges') })
+  const hpas = useQuery({ queryKey: ['resources', 'hpas', generation, globalNamespace.value, applied, cursor], queryFn: ({ signal }) => getHPAs(options, signal, generation), enabled: Boolean(selection && tab === 'hpas') })
+  const pdbs = useQuery({ queryKey: ['resources', 'pdbs', generation, globalNamespace.value, applied, cursor], queryFn: ({ signal }) => getPDBs(options, signal, generation), enabled: Boolean(selection && tab === 'pdbs') })
 
   const active: CollectionResult<unknown> | undefined =
     tab === 'resource-quotas' ? quotas.data : tab === 'limit-ranges' ? limitRanges.data : tab === 'hpas' ? hpas.data : pdbs.data
@@ -145,7 +146,7 @@ export function ServiceAccountsPage() {
   const generation = selection?.generation
   const [draft, setDraft] = useState<ListState>(initialListState)
   const [applied, setApplied] = useState<ListState>(initialListState)
-  const [cursor, setCursor] = useState('')
+  const [cursor, setCursor] = useGenerationCursor(generation, globalNamespace.value)
 
   useEffect(() => {
     if (!namespace || !name || !generation) return
@@ -153,7 +154,7 @@ export function ServiceAccountsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only react to route param changes
   }, [namespace, name, generation])
 
-  const list = useQuery({ queryKey: ['resources', 'service-accounts', generation, applied, cursor], queryFn: ({ signal }) => getServiceAccounts({ limit: 100, search: applied.search || undefined, continueToken: cursor || undefined, namespaces: effectiveNamespaces(globalNamespace.value, []), sort: applied.sort === 'identity' ? undefined : applied.sort, order: applied.sort === 'identity' && applied.order === 'asc' ? undefined : applied.order }, signal, generation), enabled: Boolean(selection) })
+  const list = useQuery({ queryKey: ['resources', 'service-accounts', generation, globalNamespace.value, applied, cursor], queryFn: ({ signal }) => getServiceAccounts({ limit: 100, search: applied.search || undefined, continueToken: cursor || undefined, namespaces: effectiveNamespaces(globalNamespace.value, []), sort: applied.sort === 'identity' ? undefined : applied.sort, order: applied.sort === 'identity' && applied.order === 'asc' ? undefined : applied.order }, signal, generation), enabled: Boolean(selection) })
 
   return (
     <ResourcePage title="ServiceAccounts" description="Namespace ServiceAccounts as metadata only: no tokens, no Secret references and no arbitrary annotations.">

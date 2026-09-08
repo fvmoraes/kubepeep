@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fvmoraes/kubepeep/internal/observability"
 	"github.com/fvmoraes/kubepeep/internal/services/authorization"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
@@ -104,6 +105,7 @@ type WatchSnapshot struct {
 	Items           []TopicObject
 }
 type WatchChange struct {
+	ReceivedAt      time.Time
 	Type            string
 	ResourceVersion string
 	Object          TopicObject
@@ -135,6 +137,7 @@ type StreamEvent struct {
 }
 
 type WatchManager struct {
+	metrics *observability.Registry
 	port    WatchPort
 	mu      sync.Mutex
 	workers map[string]*watchWorker
@@ -150,7 +153,11 @@ type watchWorker struct {
 }
 
 func NewWatchManager(port WatchPort) *WatchManager {
-	return &WatchManager{port: port, workers: map[string]*watchWorker{}}
+	return NewWatchManagerWithMetrics(port, nil)
+}
+
+func NewWatchManagerWithMetrics(port WatchPort, metrics *observability.Registry) *WatchManager {
+	return &WatchManager{port: port, workers: map[string]*watchWorker{}, metrics: metrics}
 }
 func (manager *WatchManager) Subscribe(ctx context.Context, key WatchKey) (*Subscription, error) {
 	if ctx == nil {
@@ -175,7 +182,7 @@ func (manager *WatchManager) Subscribe(ctx context.Context, key WatchKey) (*Subs
 	worker := manager.workers[identity]
 	created := false
 	if worker == nil {
-		workerContext, cancel := context.WithCancel(context.Background())
+		workerContext, cancel := context.WithCancel(observability.DetachedTracing(ctx))
 		worker = &watchWorker{manager: manager, key: key, ctx: workerContext, cancel: cancel, subscribers: map[*Subscription]struct{}{}}
 		manager.workers[identity] = worker
 		created = true
@@ -247,6 +254,10 @@ func (manager *WatchManager) SharedWatchCount() int {
 
 func (worker *watchWorker) run() {
 	defer worker.finish()
+	labels := map[string]string{"resource": string(worker.key.Topic)}
+	metrics := worker.manager.metrics
+	metrics.AddGauge(observability.WatchActiveName, labels, 1)
+	defer metrics.AddGauge(observability.WatchActiveName, labels, -1)
 	snapshot, err := worker.manager.port.List(worker.ctx, worker.key)
 	if err != nil {
 		worker.fail(err)
@@ -267,10 +278,20 @@ func (worker *watchWorker) run() {
 	}
 	rv := snapshot.ResourceVersion
 	backoff := 250 * time.Millisecond
+	attempted := false
 	for {
+		spanName := "watch.connect"
+		if attempted {
+			spanName = "watch.reconnect"
+			metrics.IncCounter(observability.WatchReconnectsTotalName, labels)
+		}
+		attempted = true
+		_, endConnect := observability.StartSpan(worker.ctx, spanName)
 		stream, watchErr := worker.manager.port.Watch(worker.ctx, worker.key, rv, WatchTimeoutSeconds, true)
+		endConnect(watchErr)
 		if watchErr != nil {
 			if errors.Is(watchErr, ErrResourceExpired) {
+				metrics.IncCounter(observability.WatchExpiredTotalName, labels)
 				// A 410 at watch creation means this resourceVersion can never
 				// succeed. End with reset so the next connection performs a fresh
 				// LIST instead of backing off around an obsolete RV forever.
@@ -309,6 +330,7 @@ func (worker *watchWorker) run() {
 					goto reconnect
 				}
 				if errors.Is(change.Err, ErrResourceExpired) {
+					metrics.IncCounter(observability.WatchExpiredTotalName, labels)
 					stable.Stop()
 					stream.Stop()
 					worker.terminal("resource_version_expired")
@@ -329,6 +351,10 @@ func (worker *watchWorker) run() {
 				}
 				if change.ResourceVersion != "" {
 					rv = change.ResourceVersion
+				}
+				metrics.IncCounter(observability.WatchEventsTotalName, labels)
+				if !change.ReceivedAt.IsZero() {
+					metrics.SetGauge(observability.WatchLagMillisecondsName, labels, max(0, time.Since(change.ReceivedAt).Milliseconds()))
 				}
 				if !worker.broadcast(event) {
 					stable.Stop()
@@ -379,7 +405,7 @@ func (worker *watchWorker) remove(subscription *Subscription) {
 	worker.manager.mu.Lock()
 	delete(worker.subscribers, subscription)
 	empty := len(worker.subscribers) == 0
-	if empty {
+	if empty && worker.manager.workers[worker.key.identity()] == worker {
 		delete(worker.manager.workers, worker.key.identity())
 	}
 	worker.manager.mu.Unlock()

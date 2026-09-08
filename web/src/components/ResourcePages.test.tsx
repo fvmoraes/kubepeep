@@ -7,7 +7,7 @@ import { ConfigPage, EventsPage, NetworkPage, PodsPage, WorkloadsPage } from './
 import { ToastProvider } from './ui/Toast'
 import { ResourceWorkspaceProvider } from './workspace/ResourceWorkspaceProvider'
 import { ResourceWorkspaceOverlay } from './workspace/ResourceWorkspace'
-import { GlobalNamespaceProvider } from '../context/GlobalNamespace'
+import { GlobalNamespaceProvider, useGlobalNamespace } from '../context/GlobalNamespace'
 
 const generation = 'gen_42'
 
@@ -32,6 +32,11 @@ function preferences() {
   return { version: 1, ui: { language: 'en' }, logs: { wrap: false, timestamps: true, tailLines: 200 }, dashboard: { logScanWindow: '15m', sectionOrder: ['summary'], hiddenSections: [] }, filters: { workloads: empty, pods: empty, events: empty, logs: empty } }
 }
 
+function NamespaceTestControl() {
+  const namespace = useGlobalNamespace()
+  return <button onClick={() => namespace.setValue(namespace.value ? '' : 'payments')}>Change global namespace</button>
+}
+
 function renderPage(component: React.ReactNode) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   const selection = selectedStatus()
@@ -41,6 +46,7 @@ function renderPage(component: React.ReactNode) {
         <ToastProvider>
           <ResourceWorkspaceProvider>
             <GlobalNamespaceProvider generation={selection.selection.generation} scopeId={selection.selection.scopeId} scopeMode={selection.selection.scopeMode}>
+              <NamespaceTestControl />
               {component}
               <ResourceWorkspaceOverlay />
             </GlobalNamespaceProvider>
@@ -63,6 +69,55 @@ afterEach(() => {
 })
 
 describe('read-only resource pages', () => {
+
+  it('reloads Pods and drops the old cursor when the global namespace changes', async () => {
+    const paths: string[] = []
+    const pod = { namespace: 'payments', name: 'all-pods', status: 'Running', ready: { current: 1, desired: 1 }, restarts: 0, ageSeconds: 60, problematic: false }
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const path = String(input)
+      paths.push(path)
+      if (path === '/api/v1/status') return Promise.resolve(json({ ...selectedStatus(), components: { ...selectedStatus().components, metrics: { status: 'unknown' } } }))
+      if (path === '/api/v1/preferences') return Promise.resolve(json(preferences()))
+      if (path === '/api/v1/namespace-scopes/7') return Promise.resolve(json({ namespaces: ['payments'] }))
+      if (path.startsWith('/api/v1/pods?')) {
+        const params = new URL(path, 'http://127.0.0.1').searchParams
+        return Promise.resolve(json([{ ...pod, name: params.has('namespace') ? 'filtered-pod' : params.has('continue') ? 'page-two' : 'all-pods' }], page(params.has('continue') ? '' : 'old-cursor')))
+      }
+      throw new Error(`Unexpected request: ${path}`)
+    }))
+    renderPage(<PodsPage />)
+    await screen.findByRole('button', { name: 'Open Pod all-pods in payments' })
+    fireEvent.click(screen.getByRole('button', { name: 'Next page' }))
+    await screen.findByRole('button', { name: 'Open Pod page-two in payments' })
+    const before = paths.length
+    fireEvent.click(screen.getByRole('button', { name: 'Change global namespace' }))
+    await screen.findByRole('button', { name: 'Open Pod filtered-pod in payments' })
+    expect(paths.slice(before).filter((path) => path.startsWith('/api/v1/pods?')).every((path) => !path.includes('continue='))).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Change global namespace' }))
+    await screen.findByRole('button', { name: 'Open Pod all-pods in payments' })
+  })
+
+
+  it.each([null, []])('opens a Pod whose relatedEvents is %j without blanking the page', async (relatedEvents) => {
+    const pod = { namespace: 'payments', name: 'api-empty-events', status: 'Running', ready: { current: 1, desired: 1 }, restarts: 0, node: 'worker-1', ip: null, owner: null, ageSeconds: 60, problematic: false }
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const path = String(input)
+      if (path === '/api/v1/status') return Promise.resolve(json({ ...selectedStatus(), components: { ...selectedStatus().components, metrics: { status: 'unknown' } } }))
+      if (path === '/api/v1/preferences') return Promise.resolve(json(preferences()))
+      if (path.startsWith('/api/v1/pods?')) return Promise.resolve(json([pod], page()))
+      if (path === '/api/v1/pods/payments/api-empty-events') return Promise.resolve(json({
+        metadata: { namespace: pod.namespace, name: pod.name, uid: 'uid-empty-events', resourceVersion: '1', labels: {} },
+        summary: pod, conditions: [], containers: [], initContainers: [], ephemeralContainers: [], relatedEvents,
+      }))
+      throw new Error(`Unexpected request: ${path}`)
+    }))
+    renderPage(<PodsPage />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Open Pod api-empty-events in payments' }))
+    expect(await screen.findByText('uid-empty-events')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Pods' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog')).toHaveTextContent('This Pod has no controller owner.')
+  })
+
   it('navigates a bounded workload list to generation-fenced detail and explicit YAML', async () => {
     const calls: Array<{ path: string; init?: RequestInit }> = []
     let activeGeneration = generation

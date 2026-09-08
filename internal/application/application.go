@@ -125,12 +125,33 @@ func Compose(ctx context.Context, options Options) (*Platform, error) {
 	if err != nil {
 		return nil, err
 	}
-	cursorStore := api.NewCursorStore(nil)
+	var metricsRegistry *observability.Registry
+	if options.Config.Observability.Metrics.Enabled {
+		metricsRegistry = observability.NewRegistry()
+	}
+	cursorStore := api.NewCursorStoreWithMetrics(nil, metricsRegistry)
+	tracing, err := observability.NewTracing(ctx, options.Config.Observability.OTel, metricsRegistry, func() {
+		logger.Logger.LogAttrs(context.Background(), slog.LevelWarn, "trace export failed", slog.String("component", "observability"))
+	})
+	if err != nil {
+		return nil, err
+	}
+	closeTracingOnError := true
+	defer func() {
+		if closeTracingOnError {
+			shutdownContext, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			if err := tracing.Shutdown(shutdownContext); err != nil {
+				logger.Logger.LogAttrs(context.Background(), slog.LevelWarn, "trace shutdown failed", slog.String("component", "observability"))
+			}
+		}
+	}()
+	ctx = observability.WithTracing(ctx, tracing)
 	sessions, err := api.NewSessionStore(0)
 	if err != nil {
 		return nil, err
 	}
-	clientFactory, err := kubernetes.NewClientFactory(kubernetes.FactoryOptions{})
+	clientFactory, err := kubernetes.NewClientFactory(kubernetes.FactoryOptions{Metrics: metricsRegistry})
 	if err != nil {
 		return nil, err
 	}
@@ -154,10 +175,6 @@ func Compose(ctx context.Context, options Options) (*Platform, error) {
 	}
 	// The optional local metrics registry is created before the resource
 	// backend so the list path can be instrumented from startup.
-	var metricsRegistry *observability.Registry
-	if options.Config.Observability.Metrics.Enabled {
-		metricsRegistry = observability.NewRegistry()
-	}
 	resourceBackend, err := kuberuntime.NewResourceBackendWithOptions(kubernetesRuntime, authorizationService, resourcecore.TextRedactorFunc(func(value string) string {
 		redacted, _ := dashboard.Redact(value)
 		return redacted
@@ -298,6 +315,7 @@ func Compose(ctx context.Context, options Options) (*Platform, error) {
 		ExtraHosts:   options.ExtraHosts,
 		ExtraOrigins: options.ExtraOrigins,
 		Metrics:      metricsRegistry,
+		Tracing:      tracing,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("startup: compose HTTP application: %w", err)
@@ -308,6 +326,7 @@ func Compose(ctx context.Context, options Options) (*Platform, error) {
 	closeRuntimeOnError = false
 	closeCoordinatorOnError = false
 	closeActionsOnError = false
+	closeTracingOnError = false
 	// Structured lifecycle events (O-05/O-02): the log handler emits both the
 	// human "duration" string and the numeric duration_ms for aggregation.
 	logger.Logger.LogAttrs(context.Background(), slog.LevelInfo, "startup",
@@ -329,6 +348,7 @@ func Compose(ctx context.Context, options Options) (*Platform, error) {
 			}},
 			{Name: "selection coordinator", Func: func(context.Context) error { coordinator.Close(); return nil }},
 			{Name: "Kubernetes clients", Func: func(context.Context) error { return kubernetesRuntime.Close() }},
+			{Name: "trace exporter", Func: tracing.Shutdown},
 			{Name: "local log", Func: func(context.Context) error { return logSink.Close() }},
 			{Name: "SQLite", Func: func(context.Context) error { return store.Close() }},
 			// Cleanup registries run LIFO: being last makes this lifecycle

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"crypto/rand"
 	"encoding/base64"
 	"fmt"
@@ -8,6 +9,8 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/fvmoraes/kubepeep/internal/observability"
 )
 
 const (
@@ -51,12 +54,18 @@ type CursorStore struct {
 	entryBytes int64
 	bytes      int64
 	clock      uint64
+	metrics    *observability.Registry
 }
 
 // NewCursorStore creates one store for the lifetime of the current process.
 // A restart therefore invalidates every reference from the previous instance,
 // matching the cursor codec's ephemeral secret.
 func NewCursorStore(now func() time.Time) *CursorStore {
+	return NewCursorStoreWithMetrics(now, nil)
+}
+
+// NewCursorStoreWithMetrics records payload occupancy and lifecycle counters.
+func NewCursorStoreWithMetrics(now func() time.Time, metrics *observability.Registry) *CursorStore {
 	if now == nil {
 		now = time.Now
 	}
@@ -67,6 +76,7 @@ func NewCursorStore(now func() time.Time) *CursorStore {
 		maxEntries: CursorStoreMaxEntries,
 		maxBytes:   CursorStoreMaxBytes,
 		entryBytes: CursorStoreMaxEntryBytes,
+		metrics:    metrics,
 	}
 }
 
@@ -74,6 +84,12 @@ func NewCursorStore(now func() time.Time) *CursorStore {
 // is normalized before storage so equivalent cursors occupy the same bytes
 // regardless of insertion order.
 func (store *CursorStore) Put(state any) (string, error) {
+	return store.PutContext(context.Background(), state)
+}
+
+func (store *CursorStore) PutContext(ctx context.Context, state any) (_ string, resultErr error) {
+	_, end := observability.StartSpan(ctx, "cursor.put")
+	defer func() { end(resultErr) }()
 	payload, err := canonicalCursorJSON(state)
 	if err != nil {
 		return "", fmt.Errorf("api: encode cursor store state: %w", err)
@@ -95,6 +111,7 @@ func (store *CursorStore) Put(state any) (string, error) {
 		usedAt:    store.touchLocked(),
 	}
 	store.bytes += int64(len(payload))
+	store.observeLocked()
 	return reference, nil
 }
 
@@ -102,7 +119,14 @@ func (store *CursorStore) Put(state any) (string, error) {
 // reported as CURSOR_EXPIRED (HTTP 410): the client restarts the list, which
 // is the documented recovery for exhausted pagination state.
 func (store *CursorStore) Get(reference string, destination any) error {
+	return store.GetContext(context.Background(), reference, destination)
+}
+
+func (store *CursorStore) GetContext(ctx context.Context, reference string, destination any) (resultErr error) {
+	_, end := observability.StartSpan(ctx, "cursor.get")
+	defer func() { end(resultErr) }()
 	if reference == "" || destination == nil {
+		store.metrics.IncCounter(observability.CursorMissesTotalName, nil)
 		return cursorStoreExpired()
 	}
 	store.mu.Lock()
@@ -110,14 +134,18 @@ func (store *CursorStore) Get(reference string, destination any) error {
 	if ok && !store.now().Before(entry.expiresAt) {
 		store.bytes -= int64(len(entry.payload))
 		delete(store.entries, reference)
+		store.metrics.IncCounter(observability.CursorExpiredTotalName, nil)
+		store.observeLocked()
 		ok = false
 	}
 	if !ok {
+		store.metrics.IncCounter(observability.CursorMissesTotalName, nil)
 		store.mu.Unlock()
 		return cursorStoreExpired()
 	}
 	payload := append([]byte(nil), entry.payload...)
 	entry.usedAt = store.touchLocked()
+	store.metrics.IncCounter(observability.CursorHitsTotalName, nil)
 	store.mu.Unlock()
 	if err := decodeCursorJSON(payload, destination); err != nil {
 		return invalidCursor(err)
@@ -135,6 +163,7 @@ func (store *CursorStore) Delete(reference string) {
 	if entry, ok := store.entries[reference]; ok {
 		store.bytes -= int64(len(entry.payload))
 		delete(store.entries, reference)
+		store.observeLocked()
 	}
 }
 
@@ -157,12 +186,18 @@ func (store *CursorStore) touchLocked() uint64 {
 	return store.clock
 }
 
+func (store *CursorStore) observeLocked() {
+	store.metrics.SetGauge(observability.CursorEntriesName, nil, int64(len(store.entries)))
+	store.metrics.SetGauge(observability.CursorBytesName, nil, store.bytes)
+}
+
 func (store *CursorStore) purgeLocked() {
 	now := store.now()
 	for reference, entry := range store.entries {
 		if !now.Before(entry.expiresAt) {
 			store.bytes -= int64(len(entry.payload))
 			delete(store.entries, reference)
+			store.metrics.IncCounter(observability.CursorExpiredTotalName, nil)
 		}
 	}
 }
@@ -182,6 +217,7 @@ func (store *CursorStore) evictLocked(incoming int64) {
 		}
 		store.bytes -= int64(len(store.entries[victim].payload))
 		delete(store.entries, victim)
+		store.metrics.IncCounter(observability.CursorEvictedTotalName, nil)
 	}
 }
 

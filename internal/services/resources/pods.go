@@ -84,7 +84,7 @@ func PodDetail(value *corev1.Pod, relatedEvents []ResourceRef, now time.Time) Po
 		Containers:          regularContainerDTOs(value.Spec.Containers, value.Status.ContainerStatuses, "regular"),
 		InitContainers:      regularContainerDTOs(value.Spec.InitContainers, value.Status.InitContainerStatuses, "init"),
 		EphemeralContainers: ephemeralContainerDTOs(value.Spec.EphemeralContainers, value.Status.EphemeralContainerStatuses),
-		RelatedEvents:       append([]ResourceRef(nil), relatedEvents...),
+		RelatedEvents:       append([]ResourceRef{}, relatedEvents...),
 	}
 }
 

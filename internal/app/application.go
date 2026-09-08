@@ -53,6 +53,7 @@ type Options struct {
 	// Metrics optionally enables the local process metrics endpoint. A nil
 	// registry keeps /metrics unregistered; this is the default.
 	Metrics *observability.Registry
+	Tracing *observability.Tracing
 }
 
 type Application struct {
@@ -222,6 +223,9 @@ func New(options Options) (*Application, error) {
 		outerMiddlewares = append(outerMiddlewares, observability.RequestsMiddleware(options.Metrics))
 	}
 	outerMiddlewares = append(outerMiddlewares, apiMiddleware.Host(host, options.ExtraHosts...))
+	if options.Tracing != nil {
+		outerMiddlewares = append(outerMiddlewares, options.Tracing.Middleware)
+	}
 
 	handler := gingermiddleware.Chain(outerMiddlewares...)(mux)
 
