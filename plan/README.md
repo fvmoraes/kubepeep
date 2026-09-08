@@ -1,30 +1,30 @@
-# Plano de execução — KubePeep v1 (estado, performance e investigação)
+# Plano de execução — KubePeep v0.7 (estado, performance e investigação)
 
-Este plano transforma os três documentos de [`v1_reference/`](v1_reference/) — [avaliação e evolução](v1_reference/KUBEPEEP_AVALIACAO_E_PLANO_DE_EVOLUCAO.md), [performance e escalabilidade](v1_reference/KUBEPEEP_PERFORMANCE_SCALABILITY_PLAN.md) e [refinamento UI/UX](v1_reference/KUBEPEEP_UI_UX_REFINEMENT_PLAN.md) — em entregas faseadas executáveis. **Todo o conteúdo é tratado como trabalho de ajuste, melhoria e revisão a executar nas fases**, independentemente do que já exista na base: nada é assumido como pronto, e cada entrega exige evidência própria.
+Este plano transforma os três documentos de [`v0.7_reference/`](v0.7_reference/) — [avaliação e evolução](v0.7_reference/KUBEPEEP_AVALIACAO_E_PLANO_DE_EVOLUCAO.md), [performance e escalabilidade](v0.7_reference/KUBEPEEP_PERFORMANCE_SCALABILITY_PLAN.md) e [refinamento UI/UX](v0.7_reference/KUBEPEEP_UI_UX_REFINEMENT_PLAN.md) — em entregas faseadas executáveis. **Todo o conteúdo é tratado como trabalho de ajuste, melhoria e revisão a executar nas fases**, independentemente do que já exista na base: nada é assumido como pronto, e cada entrega exige evidência própria.
 
-Comece pelo [estado e limites](v1/00-estado-e-escopo.md), depois consulte a [matriz de entregas e aceite](v1/01-matriz-de-entregas.md). O plano anterior (expansão de recursos) está executado e arquivado em [`v0/`](v0/), com evidências em [`v0/03-evidencias-execucao.md`](v0/03-evidencias-execucao.md).
+Comece pelo [estado e limites](v0.7/00-estado-e-escopo.md), depois consulte a [matriz de entregas e aceite](v0.7/01-matriz-de-entregas.md). O plano anterior (expansão de recursos) está executado e arquivado em [`v0/`](v0/), com evidências em [`v0/03-evidencias-execucao.md`](v0/03-evidencias-execucao.md).
 
 **Direção central:** transformar o KubePeep de aplicação orientada a consultas em aplicação **orientada a estado** — `LIST → snapshot → cache → watch → UI incremental` — com performance percebida de IDE Kubernetes local, refinamento UI/UX sem redesign e experiência de investigação (FAST + SAFE + PROBLEM-ORIENTED + DEVELOPER-FIRST).
 
 **Regras obrigatórias do produto:**
 
 1. **Revisão funcional total (P0, bloqueante, Fase 0):** corrigir o bug de visualizar dados de **Pods e a tela ficar sem nada** e revisar **todos os cliques que não funcionam** na interface. Nenhum clique morto sobrevive à release.
-2. **Scope default obrigatório por contexto:** todo contexto com namespaces cadastrados tem um scope marcado como **default**, carregado **obrigatoriamente** ao abrir o KubePeep e ao selecionar/alternar contexto. Sem default definido, a UI conduz à marcação. Nunca amplia RBAC nem exige `list/get namespaces`. ([Fase 4](v1/phase-04-refinamento-ui-ux.md), R03)
+2. **Scope default obrigatório por contexto:** todo contexto com namespaces cadastrados tem um scope marcado como **default**, carregado **obrigatoriamente** ao abrir o KubePeep e ao selecionar/alternar contexto. Sem default definido, a UI conduz à marcação. Nunca amplia RBAC nem exige `list/get namespaces`. ([Fase 4](v0.7/phase-04-refinamento-ui-ux.md), R03)
 
 ## Ordem de execução
 
 | Fase | Entrega | Dependências | Estado |
 | --- | --- | --- | --- |
-| 0 | [Correção funcional P0, baseline e instrumentação](v1/phase-00-baseline-instrumentacao.md) | base | planejado; R01/R02 bloqueantes |
-| 1 | [Paginação estratégica e uso responsável do API Server](v1/phase-01-paginacao-e-api-server.md) | F0 | planejado |
-| 2 | [Estado orientado a snapshot: cache sob demanda + WATCH](v1/phase-02-cache-watch-snapshot.md) | F1 | planejado |
-| 3 | [Frontend progressivo, virtualizado e inicialização instantânea](v1/phase-03-frontend-instantaneo.md) | F1; efeito completo com F2 | planejado |
-| 4 | [Fechamento do refinamento UI/UX e scope default](v1/phase-04-refinamento-ui-ux.md) | F0 (inventário); paralelizável com F1–F3 | planejado |
-| 5 | [Investigação: problems, diagnóstico e logs agregados](v1/phase-05-investigacao-diagnostico.md) | F2, F4 | planejado |
-| 6 | [Protocolo e tuning avançado (condicional a benchmark)](v1/phase-06-protocolo-avancado.md) | F0, F2 | planejado; cada item só ativa com ganho medido |
-| 7 | [Validação comparativa e preparação da release](v1/phase-07-validacao-release.md) | F0–F6 | planejado |
+| 0 | [Correção funcional P0, baseline e instrumentação](v0.7/phase-00-baseline-instrumentacao.md) | base | planejado; R01/R02 bloqueantes |
+| 1 | [Paginação estratégica e uso responsável do API Server](v0.7/phase-01-paginacao-e-api-server.md) | F0 | planejado |
+| 2 | [Estado orientado a snapshot: cache sob demanda + WATCH](v0.7/phase-02-cache-watch-snapshot.md) | F1 | planejado |
+| 3 | [Frontend progressivo, virtualizado e inicialização instantânea](v0.7/phase-03-frontend-instantaneo.md) | F1; efeito completo com F2 | planejado |
+| 4 | [Fechamento do refinamento UI/UX e scope default](v0.7/phase-04-refinamento-ui-ux.md) | F0 (inventário); paralelizável com F1–F3 | planejado |
+| 5 | [Investigação: problems, diagnóstico e logs agregados](v0.7/phase-05-investigacao-diagnostico.md) | F2, F4 | planejado |
+| 6 | [Protocolo e tuning avançado (condicional a benchmark)](v0.7/phase-06-protocolo-avancado.md) | F0, F2 | planejado; cada item só ativa com ganho medido |
+| 7 | [Validação comparativa e preparação da release](v0.7/phase-07-validacao-release.md) | F0–F6 | planejado |
 
-F4 pode avançar em paralelo a F1–F3 coordenando os arquivos compartilhados. A evidência de execução é registrada em [`v1/03-evidencias-execucao.md`](v1/03-evidencias-execucao.md).
+F4 pode avançar em paralelo a F1–F3 coordenando os arquivos compartilhados. A evidência de execução é registrada em [`v0.7/03-evidencias-execucao.md`](v0.7/03-evidencias-execucao.md).
 
 ## Regras de trabalho
 
@@ -54,12 +54,12 @@ F4 pode avançar em paralelo a F1–F3 coordenando os arquivos compartilhados. A
 | CLI embutida e smoke | `rtk make build smoke` |
 | Desktop Wails, dependências nativas instaladas | `rtk make build-desktop` |
 | Segurança pré-commit | `rtk scripts/security_check.sh HEAD` |
-| Benchmark de performance | laboratório da [Fase 0](v1/phase-00-baseline-instrumentacao.md) sobre `test/kind/` |
+| Benchmark de performance | laboratório da [Fase 0](v0.7/phase-00-baseline-instrumentacao.md) sobre `test/kind/` |
 
 Os alvos podem repetir etapas; na execução diária, validar cada requisito uma única vez. Build nativo e execução nas demais plataformas são gates da F7, não inferências a partir do cross-build.
 
 ## Escopo e histórico
 
-A v1 entrega: correção funcional P0, arquitetura de leitura orientada a estado (cursor opaco, estratégias de paginação, cache+watch), frontend progressivo/virtualizado/instantâneo, refinamento UI/UX fechado com scope default obrigatório, camada de investigação e otimizações de protocolo condicionais a benchmark. Multi-contexto simultâneo, Prometheus, Resource Diff entre origens, Helm, Gateway API, CR genérico, plugins e supply chain extra ficam no [backlog pós-v1](v1/02-backlog-pos-v1.md).
+A v0.7 entrega: correção funcional P0, arquitetura de leitura orientada a estado (cursor opaco, estratégias de paginação, cache+watch), frontend progressivo/virtualizado/instantâneo, refinamento UI/UX fechado com scope default obrigatório, camada de investigação e otimizações de protocolo condicionais a benchmark. Multi-contexto simultâneo, Prometheus, Resource Diff entre origens, Helm, Gateway API, CR genérico, plugins e supply chain extra ficam no [backlog pós-v0.7](v0.7/02-backlog-pos-v0.7.md).
 
-Planos anteriores permanecem no Git (`plan/v0/` executado; `5ac7320^:plan/` histórico). As referências em `v1_reference/` são preservadas como fonte; decisões de recorte ficam neste plano.
+Planos anteriores permanecem no Git (`plan/v0/` executado; `5ac7320^:plan/` histórico). As referências em `v0.7_reference/` são preservadas como fonte; decisões de recorte ficam neste plano.
