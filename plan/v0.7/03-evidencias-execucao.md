@@ -1,4 +1,4 @@
-# Evidências de execução — plano v1
+# Evidências de execução — plano v0.7
 
 Registro de fechamento das fases F0–F7. Cada linha segue a regra da [matriz](01-matriz-de-entregas.md):
 `ID → commit → comando/cenário → resultado`. Evidências contêm apenas comando, resultado resumido e

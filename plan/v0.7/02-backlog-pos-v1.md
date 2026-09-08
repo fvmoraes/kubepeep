@@ -1,12 +1,12 @@
-# Backlog após a v1
+# Backlog após a v0.7
 
 Este recorte preserva os objetivos das referências sem transformar recursos condicionais, multi-contexto ou ecossistema em requisitos implícitos da release. Itens abaixo não podem aparecer como disponíveis até sua própria entrega.
 
 ## Itens em continuidade do plano anterior
 
-Os itens **B01–B09** do plano anterior permanecem em vigor com os mesmos pré-requisitos (ver `plan/v0/02-backlog-pos-v1.md`): Helm Releases (B01); Gateway API — Gateways, GatewayClasses, HTTPRoutes, GRPCRoutes (B02); VolumeAttributesClasses (B03); ValidatingAdmissionPolicies/Bindings (B04); multi-contexto somente leitura (B05); diff entre contextos/revisões (B06); logs agregados multi-contexto (B07); instâncias de Custom Resources (B08); novas mutações gerais como edit/apply (B09). Nenhum deles é desbloqueado implicitamente pelo trabalho da v1.
+Os itens **B01–B09** do plano anterior permanecem em vigor com os mesmos pré-requisitos (ver `plan/v0/02-backlog-pos-v1.md`): Helm Releases (B01); Gateway API — Gateways, GatewayClasses, HTTPRoutes, GRPCRoutes (B02); VolumeAttributesClasses (B03); ValidatingAdmissionPolicies/Bindings (B04); multi-contexto somente leitura (B05); diff entre contextos/revisões (B06); logs agregados multi-contexto (B07); instâncias de Custom Resources (B08); novas mutações gerais como edit/apply (B09). Nenhum deles é desbloqueado implicitamente pelo trabalho da v0.7.
 
-## Novos itens das referências v1
+## Novos itens das referências v0.7
 
 | ID | Item | Motivo do recorte | Pré-requisito para executar |
 | --- | --- | --- | --- |

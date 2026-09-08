@@ -60,6 +60,10 @@ Os alvos podem repetir etapas; na execução diária, validar cada requisito uma
 
 ## Escopo e histórico
 
-A v0.7 entrega: correção funcional P0, arquitetura de leitura orientada a estado (cursor opaco, estratégias de paginação, cache+watch), frontend progressivo/virtualizado/instantâneo, refinamento UI/UX fechado com scope default obrigatório, camada de investigação e otimizações de protocolo condicionais a benchmark. Multi-contexto simultâneo, Prometheus, Resource Diff entre origens, Helm, Gateway API, CR genérico, plugins e supply chain extra ficam no [backlog pós-v0.7](v0.7/02-backlog-pos-v0.7.md).
+A v0.7 entrega: correção funcional P0, arquitetura de leitura orientada a estado (cursor opaco, estratégias de paginação, cache+watch), frontend progressivo/virtualizado/instantâneo, refinamento UI/UX fechado com scope default obrigatório, camada de investigação e otimizações de protocolo condicionais a benchmark. Multi-contexto simultâneo, Prometheus, Resource Diff entre origens, Helm, Gateway API, CR genérico, plugins e supply chain extra ficam no [backlog pós-v0.7](v0.7/02-backlog-pos-v1.md).
 
 Planos anteriores permanecem no Git (`plan/v0/` executado; `5ac7320^:plan/` histórico). As referências em `v0.7_reference/` são preservadas como fonte; decisões de recorte ficam neste plano.
+
+## Avaliação antes da execução
+
+Consulte a [avaliação técnica do plano](v0.7/04-avaliacao-do-plano.md). A revisão documental não fecha F0 nem substitui seus testes e benchmarks. Nesta execução, cada fase termina com validação e commit; a próxima exige autorização explícita do usuário.

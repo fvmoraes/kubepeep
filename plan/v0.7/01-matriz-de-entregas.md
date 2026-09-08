@@ -1,6 +1,6 @@
-# Matriz de entregas e aceite da v1
+# Matriz de entregas e aceite da v0.7
 
-Fontes: [avaliação e evolução](../v1_reference/KUBEPEEP_AVALIACAO_E_PLANO_DE_EVOLUCAO.md), [performance e escalabilidade](../v1_reference/KUBEPEEP_PERFORMANCE_SCALABILITY_PLAN.md) e [refinamento UI/UX](../v1_reference/KUBEPEEP_UI_UX_REFINEMENT_PLAN.md). Famílias: **R** = correção funcional (P0), **D** = desempenho/escalabilidade, **X** = experiência/UI, **I** = investigação, **T** = transversal. **Todas as linhas são trabalho planejado** de ajuste, melhoria ou revisão — nenhuma é assumida como concluída; cada uma exige execução e evidência da sua fase: `ID | SHA | comando/cenário | resultado | limitação`.
+Fontes: [avaliação e evolução](../v0.7_reference/KUBEPEEP_AVALIACAO_E_PLANO_DE_EVOLUCAO.md), [performance e escalabilidade](../v0.7_reference/KUBEPEEP_PERFORMANCE_SCALABILITY_PLAN.md) e [refinamento UI/UX](../v0.7_reference/KUBEPEEP_UI_UX_REFINEMENT_PLAN.md). Famílias: **R** = correção funcional (P0), **D** = desempenho/escalabilidade, **X** = experiência/UI, **I** = investigação, **T** = transversal. **Todas as linhas são trabalho planejado** de ajuste, melhoria ou revisão — nenhuma é assumida como concluída; cada uma exige execução e evidência da sua fase: `ID | SHA | comando/cenário | resultado | limitação`.
 
 ## R — Correção funcional (P0, bloqueante)
 
@@ -97,4 +97,4 @@ Fontes: [avaliação e evolução](../v1_reference/KUBEPEEP_AVALIACAO_E_PLANO_DE
 
 ## Evidência e regra de conclusão
 
-Ao concluir uma entrega, registrar em [`03-evidencias-execucao.md`](03-evidencias-execucao.md): `ID | SHA | teste/comando | resultado | limitação`. Não marcar teste de mock como teste de cluster real, benchmark local como cluster remoto, nem preparação local como publicação. Todas as linhas R/D/X/I/T são gate da v1; o [backlog](02-backlog-pos-v1.md) é explícito e não conta como entregue.
+Ao concluir uma entrega, registrar em [`03-evidencias-execucao.md`](03-evidencias-execucao.md): `ID | SHA | teste/comando | resultado | limitação`. Não marcar teste de mock como teste de cluster real, benchmark local como cluster remoto, nem preparação local como publicação. Todas as linhas R/D/X/I/T são gate da v0.7; o [backlog](02-backlog-pos-v1.md) é explícito e não conta como entregue.

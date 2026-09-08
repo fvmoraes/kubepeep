@@ -1,6 +1,6 @@
 # Fase 4 — Fechamento do refinamento UI/UX e scope default
 
-**Prioridade:** P1 (contrato de experiência da v1). **Entrada:** F0 (inventário de cliques/UX); pode avançar em paralelo a F1–F3 coordenando arquivos compartilhados. **Matriz:** R03, X01–X17, T04.
+**Prioridade:** P1 (contrato de experiência da v0.7). **Entrada:** F0 (inventário de cliques/UX); pode avançar em paralelo a F1–F3 coordenando arquivos compartilhados. **Matriz:** R03, X01–X17, T04.
 
 O estilo atual é aprovado e **não será redesenhado** — REFINAR, PADRONIZAR, COMPACTAR, CORRIGIR, TORNAR FUNCIONAL. Esta fase audita item a item contra o inventário da F0 e fecha lacunas, incluindo a **regra obrigatória do scope default por contexto**.
 

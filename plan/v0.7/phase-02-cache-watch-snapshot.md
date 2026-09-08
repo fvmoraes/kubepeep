@@ -2,7 +2,7 @@
 
 **Prioridade:** P0. **Entrada:** F1. **Desbloqueia:** F3 e F5. **Matriz:** D15–D21, T02, T03.
 
-Mudança central da v1: de LIST repetitivo para **LIST → snapshot → watch → cache local**, servindo a UI a partir do estado local. O `WatchManager` atual (`internal/services/resources/watch.go`, com backoff+jitter, tratamento de `ResourceExpired` e fences de geração) é revisado e preservado; a evolução adiciona compartilhamento, cache e política de ciclo de vida. **Demand-driven:** KubePeep é dashboard desktop, não controller — nenhum informer permanente de todos os GVRs.
+Mudança central da v0.7: de LIST repetitivo para **LIST → snapshot → watch → cache local**, servindo a UI a partir do estado local. O `WatchManager` atual (`internal/services/resources/watch.go`, com backoff+jitter, tratamento de `ResourceExpired` e fences de geração) é revisado e preservado; a evolução adiciona compartilhamento, cache e política de ciclo de vida. **Demand-driven:** KubePeep é dashboard desktop, não controller — nenhum informer permanente de todos os GVRs.
 
 ## Tarefas
 

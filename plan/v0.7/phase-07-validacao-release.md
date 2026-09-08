@@ -2,7 +2,7 @@
 
 **Prioridade:** gate final. **Entrada:** F0–F6. **Matriz:** D35, R01–R03 (regressão), X15/X16, T01–T06; critérios consolidados das referências (§77–79 de performance, §30 de UI/UX).
 
-A v1 só fecha com a prova comparativa de que a experiência mudou — e com zero regressão funcional, incluindo os bugs corrigidos na F0.
+A v0.7 só fecha com a prova comparativa de que a experiência mudou — e com zero regressão funcional, incluindo os bugs corrigidos na F0.
 
 ## Tarefas
 
@@ -26,4 +26,4 @@ A v1 só fecha com a prova comparativa de que a experiência mudou — e com zer
 | 429 sustentado / 410 Gone | sem amplificação; recuperação automática com estados honestos |
 | suite completa local | verify/test/test-e2e/test-race/build/smoke verdes |
 
-**Saída:** v1 pronta com evidência comparativa e sem defeitos funcionais conhecidos. **Rollback:** candidato descartável; publicação só por decisão explícita do usuário.
+**Saída:** v0.7 pronta com evidência comparativa e sem defeitos funcionais conhecidos. **Rollback:** candidato descartável; publicação só por decisão explícita do usuário.

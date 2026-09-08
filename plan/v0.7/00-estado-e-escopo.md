@@ -1,12 +1,12 @@
-# Estado atual e limites da v1
+# Estado atual e limites da v0.7
 
-Base de código: linha de release `0.6.0` (HEAD `e48627a`), com o plano de expansão de recursos registrado em [`plan/v0/03-evidencias-execucao.md`](../v0/03-evidencias-execucao.md). Inventário revisado por Codebase MCP e leitura da fonte em setembro de 2026.
+Base de código: HEAD local `d71d488` (com release `0.6.1` no histórico); a referência local `origin/main` aponta para `598e167` (release `0.6.2`), ainda não integrada nesta branch, com o plano de expansão de recursos registrado em [`plan/v0/03-evidencias-execucao.md`](../v0/03-evidencias-execucao.md). Inventário revisado por Codebase MCP e leitura da fonte em setembro de 2026.
 
-**Enquadramento desta v1:** todo o conteúdo dos três documentos em [`../v1_reference/`](../v1_reference/) é tratado como **trabalho de ajuste, melhoria e revisão a executar nas fases** — independentemente do que já exista na base. Nada é assumido como pronto: cada entrega passa pelo aceite da sua fase, com evidência própria. Os caminhos abaixo apenas localizam onde cada tema toca o código hoje; eles não substituem a execução nem o aceite.
+**Enquadramento desta v0.7:** todo o conteúdo dos três documentos em [`../v0.7_reference/`](../v0.7_reference/) é tratado como **trabalho de ajuste, melhoria e revisão a executar nas fases** — independentemente do que já exista na base. Nada é assumido como pronto: cada entrega passa pelo aceite da sua fase, com evidência própria. Os caminhos abaixo apenas localizam onde cada tema toca o código hoje; eles não substituem a execução nem o aceite.
 
 ## Onde as referências tocam a base (mapa de trabalho, não lista de concluído)
 
-| Tema | Caminhos envolvidos | Trabalho da v1 |
+| Tema | Caminhos envolvidos | Trabalho da v0.7 |
 | --- | --- | --- |
 | Cursor/paginação | `internal/api/cursor_store.go`, `internal/services/resources/cursor.go`, `list.go` | revisar ciclo completo (TTL, LRU, budget, 410, expiração) e evoluir para estratégias de paginação (F0/F1) |
 | Instrumentação | `internal/observability/metrics.go`, `docs/observability.md` | completar métricas, traces, baseline e budgets (F0) |
@@ -19,7 +19,7 @@ Base de código: linha de release `0.6.0` (HEAD `e48627a`), com o plano de expan
 
 Infinite query, virtualização, coalescing de consultas, resource cache de snapshot, índices locais e Problems Engine **não existem** nesta base e serão construídos nas fases correspondentes. Usar os caminhos reais acima, sem criar duplicatas.
 
-## Contrato da v1
+## Contrato da v0.7
 
 - **Revisão funcional total (P0, bloqueante):** corrigir o bug de **visualizar dados de Pods e a tela ficar sem nada** e fazer uma **revisão completa de todos os cliques que não funcionam na interface** (sidebar, abas horizontais, ações, links, filtros, colunas, paleta). Nenhum clique morto sobrevive à release; a correção é gate da F0 e reauditada na F4/F7. [Fase 0](phase-00-baseline-instrumentacao.md).
 - **Scope default obrigatório por contexto (regra do projeto):** todo contexto com namespaces cadastrados tem **um de seus scopes marcado como default**; ao abrir o KubePeep e ao selecionar/alternar contexto, esse scope default é carregado **obrigatoriamente** como universo ativo da sessão. Sem scope default definido, a UI conduz à marcação em vez de assumir All namespaces. Detalhe na [Fase 4](phase-04-refinamento-ui-ux.md).
@@ -27,7 +27,7 @@ Infinite query, virtualização, coalescing de consultas, resource cache de snap
 - **Metas** (referência de performance §43/§53, cluster médio): primeira linha < 500 ms; página completa < 1,5 s; tela cacheada < 100 ms; watch → UI < 250 ms; scroll a 60 FPS; janela aberta < 500 ms e shell < 800 ms. Crescimento de tempo **sublinear** em relação ao total do cluster.
 - **UX:** refinamento, não redesign. Tokens globais, proporção filtros/conteúdo, workspace por recurso, ações contextuais, RBAC visível na UI. O estilo atual (dark, roxo, sidebar + navegação horizontal) é aprovado e preservado.
 - **Investigação:** Problems Engine, Investigation View, logs agregados por workload, paleta com busca local e diagnostics — posicionamento FAST + SAFE + PROBLEM-ORIENTED + DEVELOPER-FIRST.
-- **Não é escopo da v1:** multi-contexto simultâneo, Prometheus, diff entre origens, Helm/Gateway/CR genérico, plugins — tudo no [backlog](02-backlog-pos-v1.md).
+- **Não é escopo da v0.7:** multi-contexto simultâneo, Prometheus, diff entre origens, Helm/Gateway/CR genérico, plugins — tudo no [backlog](02-backlog-pos-v1.md).
 
 ## Premissas de segurança preservadas (não negociáveis)
 
