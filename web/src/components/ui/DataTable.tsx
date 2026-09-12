@@ -1,4 +1,6 @@
-import type { ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
+
+import { recordFirstRowRendered, recordRenderedRowCount } from '../../observability/uxMetrics'
 import { Checkbox } from './Checkbox'
 
 export interface DataTableColumn<T> {
@@ -43,6 +45,11 @@ export function DataTable<T>({
   onToggleAll,
   stickyHeader = false,
 }: DataTableProps<T>) {
+  useEffect(() => {
+    recordRenderedRowCount(rows.length)
+    recordFirstRowRendered(rows)
+  }, [rows])
+
   const cellPadding = compact ? 'px-2.5 py-1.5' : 'px-3 py-2'
   const headerBase = `${cellPadding} border-b border-kp-overlay-0 text-left text-2xs font-medium text-kp-overlay-text uppercase tracking-wider whitespace-nowrap ${stickyHeader ? 'sticky top-0 z-10 bg-kp-surface-0' : ''}`
   const selectedCount = selectedKeys ? rows.filter((row, index) => selectedKeys.has(getRowKey ? getRowKey(row, index) : String(index))).length : 0

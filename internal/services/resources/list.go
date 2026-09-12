@@ -84,11 +84,19 @@ func Collect[T ListItem](ctx context.Context, request CollectionRequest[T]) (_ L
 		return result, validationError("list options must be normalized before collection")
 	}
 	origins := canonicalOrigins(request.Origins)
+	strategy := "fanout"
 	spanName := "resources.list.fanout"
 	if globalOrigins(origins) {
+		strategy = "global"
 		spanName = "resources.list.global"
 	}
-	ctx, end := observability.StartSpan(ctx, spanName)
+	ctx, end := observability.StartSpanWithAttributes(ctx, spanName, observability.SafeSpanAttributes{
+		Strategy:        strategy,
+		NamespaceCount:  countNamespaces(origins),
+		PageSize:        request.Options.Limit,
+		OriginChunkSize: int(originChunkLimit(len(origins), request.Options.Limit)),
+		Fanout:          min(len(origins), MaximumFanout),
+	})
 	defer func() { end(resultErr) }()
 	if len(origins) == 0 {
 		result.Page.Complete = true

@@ -58,7 +58,7 @@ import type {
   EventResource,
   PersistentVolumeClaim,
 } from '../../api/types'
-import { Badge, StatusBadge } from '../ui'
+import { Badge, Button, StatusBadge } from '../ui'
 import { FavoriteButton } from '../FavoriteButton'
 import { PodActions, WorkloadActions } from '../ResourceActions'
 import { YamlViewer } from '../YamlViewer'
@@ -682,12 +682,12 @@ export function ResourceWorkspaceOverlay() {
       <div className="workspace-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) workspace.close() }} aria-hidden="true" />
       <div className="workspace-panel" role="dialog" aria-modal="true" aria-label={`${kindLabel} ${activeEntry.name}`}>
         <header className="workspace-header">
-          <button type="button" className="workspace-nav-btn h-7 w-7 grid place-items-center rounded-md text-kp-overlay-text hover:text-kp-text hover:bg-kp-surface-3 disabled:opacity-35 disabled:cursor-not-allowed" onClick={workspace.back} disabled={!workspace.canBack} aria-label="Go to previous resource">
+          <Button variant="icon" className="workspace-nav-btn" onClick={workspace.back} disabled={!workspace.canBack} disabledReason="There is no previous resource in this workspace history." aria-label="Go to previous resource">
             <ChevronLeft size={16} aria-hidden="true" />
-          </button>
-          <button type="button" className="workspace-nav-btn h-7 w-7 grid place-items-center rounded-md text-kp-overlay-text hover:text-kp-text hover:bg-kp-surface-3 disabled:opacity-35 disabled:cursor-not-allowed" onClick={workspace.forward} disabled={!workspace.canForward} aria-label="Go to next resource">
+          </Button>
+          <Button variant="icon" className="workspace-nav-btn" onClick={workspace.forward} disabled={!workspace.canForward} disabledReason="There is no next resource in this workspace history." aria-label="Go to next resource">
             <ChevronRight size={16} aria-hidden="true" />
-          </button>
+          </Button>
           <Badge variant="accent">{kindLabel}</Badge>
           <strong className="mono min-w-0 truncate text-sm text-kp-text">{activeEntry.name}</strong>
           {activeEntry.namespace ? <span className="shrink-0 text-xs text-kp-overlay-text">ns: {activeEntry.namespace}</span> : <span className="shrink-0 text-xs text-kp-overlay-text">cluster-scoped</span>}

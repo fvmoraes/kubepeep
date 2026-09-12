@@ -3,6 +3,7 @@ package kubernetes
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,8 +13,11 @@ import (
 	"k8s.io/client-go/rest"
 )
 
-func TestClientMetricsCounts429WithoutSensitiveLabels(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(429) }))
+func TestClientMetricsCounts429DurationAndBytesWithoutSensitiveLabels(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte("retry"))
+	}))
 	defer server.Close()
 	registry := observability.NewRegistry()
 	config := &rest.Config{Host: server.URL, QPS: 10, Burst: 20}
@@ -27,10 +31,20 @@ func TestClientMetricsCounts429WithoutSensitiveLabels(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := io.Copy(io.Discard, response.Body); err != nil {
+		t.Fatal(err)
+	}
 	response.Body.Close()
 	rendered := registry.Render()
-	if !strings.Contains(rendered, `kubepeep_kubernetes_requests_total{status="429",traffic="unary"} 1`) {
-		t.Fatalf("missing 429: %s", rendered)
+	for _, want := range []string{
+		`kubepeep_kubernetes_requests_total{status="429",traffic="unary"} 1`,
+		`kubepeep_kubernetes_429_total{traffic="unary"} 1`,
+		`kubepeep_kubernetes_response_bytes_total{status="429",traffic="unary"} 5`,
+		`kubepeep_kubernetes_request_duration_nanoseconds_total{status="429",traffic="unary"}`,
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("missing %q: %s", want, rendered)
+		}
 	}
 	if strings.Contains(rendered, "sensitive") || strings.Contains(rendered, "private") || strings.Contains(rendered, server.URL) {
 		t.Fatal("sensitive transport attributes were recorded")

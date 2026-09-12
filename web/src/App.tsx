@@ -5,7 +5,8 @@ import { Outlet, Route, Routes, useLocation, useNavigate } from 'react-router'
 
 import { clearRecentTargets, recordPath, recentTargets, subscribeRecentTargets } from './recent/recent'
 
-import { getPreferences, getSession, getStatus, putPreferences, type Preferences } from './api/client'
+import { getPreferences, getStatus, type Preferences } from './api/client'
+import { mutatePreferences } from './api/preferences'
 import { Badge } from './components/ui/Badge'
 import { CommandCenter, type CommandRoute } from './components/CommandCenter'
 import { ContextSelector } from './components/ContextSelector'
@@ -182,21 +183,20 @@ function StatusBadge() {
   return <Badge variant={variant}>{local}</Badge>
 }
 
-// persistShellPrefs merges the shell change into the current preferences
-// document so concurrent updates (filters, favorites, recent) are never lost
-// (V6-05). A failed save keeps the UI usable and shows a recoverable error.
-function useShellPreferencePersistence(preferences: Preferences | undefined, onSaved: () => void) {
+// persistShellPrefs delegates every shell/recent update to the shared
+// preferences coordinator. The mutator receives a fresh backend document, so
+// concurrent filters, favorites, columns and future sections are preserved.
+function useShellPreferencePersistence(preferencesAvailable: boolean, onSaveError: () => void) {
   const queryClient = useQueryClient()
   return useCallback(async (change: (current: Preferences) => Preferences) => {
-    if (!preferences) return
+    if (!preferencesAvailable) return
     try {
-      const session = await getSession()
-      const saved = await putPreferences(change(structuredClone(preferences)), session.csrfToken)
+      const saved = await mutatePreferences(change)
       queryClient.setQueryData(['preferences'], saved)
     } catch {
-      onSaved()
+      onSaveError()
     }
-  }, [onSaved, preferences, queryClient])
+  }, [onSaveError, preferencesAvailable, queryClient])
 }
 
 function Shell() {
@@ -251,7 +251,7 @@ function Shell() {
     })
   }, [location.pathname, navigate])
 
-  const persistShellPrefs = useShellPreferencePersistence(preferencesData, () => setHydrationError(true))
+  const persistShellPrefs = useShellPreferencePersistence(Boolean(preferencesData), () => setHydrationError(true))
 
   const persistRecent = useCallback(() => {
     void persistShellPrefs((currentPrefs) => {

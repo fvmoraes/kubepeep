@@ -2,6 +2,7 @@ package kubernetes
 
 import (
 	"context"
+	"io"
 	"net/http"
 	"strconv"
 	"time"
@@ -23,14 +24,41 @@ func (transport measuredTransport) CloseIdleConnections() {
 	utilnet.CloseIdleConnectionsFor(transport.next)
 }
 
+type measuredReadCloser struct {
+	io.ReadCloser
+	registry *observability.Registry
+	labels   map[string]string
+}
+
+func (body measuredReadCloser) Read(buffer []byte) (int, error) {
+	read, err := body.ReadCloser.Read(buffer)
+	if read > 0 {
+		body.registry.AddCounter(observability.KubernetesResponseBytesTotalName, body.labels, uint64(read))
+	}
+	return read, err
+}
+
 func (transport measuredTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	started := time.Now()
 	response, err := transport.next.RoundTrip(request)
 	status := "transport_error"
 	if response != nil {
 		status = strconv.Itoa(response.StatusCode)
 	}
+	labels := map[string]string{"traffic": transport.traffic, "status": status}
 	// Never retain URL, query, request headers, credentials or response bodies.
-	transport.registry.IncCounter(observability.KubernetesRequestsTotalName, map[string]string{"traffic": transport.traffic, "status": status})
+	transport.registry.IncCounter(observability.KubernetesRequestsTotalName, labels)
+	duration := time.Since(started).Nanoseconds()
+	if duration < 1 {
+		duration = 1
+	}
+	transport.registry.AddCounter(observability.KubernetesRequestDurationNanosecondsTotalName, labels, uint64(duration))
+	if response != nil && response.StatusCode == http.StatusTooManyRequests {
+		transport.registry.IncCounter(observability.Kubernetes429TotalName, map[string]string{"traffic": transport.traffic})
+	}
+	if response != nil && response.Body != nil {
+		response.Body = measuredReadCloser{ReadCloser: response.Body, registry: transport.registry, labels: labels}
+	}
 	return response, err
 }
 
@@ -50,11 +78,11 @@ type measuredRateLimiter struct {
 }
 
 func (limiter measuredRateLimiter) Wait(ctx context.Context) error {
-	start := time.Now()
+	started := time.Now()
 	err := limiter.RateLimiter.Wait(ctx)
 	labels := map[string]string{"traffic": limiter.traffic}
 	limiter.registry.IncCounter(observability.ClientThrottleTotalName, labels)
-	limiter.registry.AddCounter(observability.ClientThrottleNanosecondsTotalName, labels, uint64(time.Since(start).Nanoseconds()))
+	limiter.registry.AddCounter(observability.ClientThrottleNanosecondsTotalName, labels, uint64(time.Since(started).Nanoseconds()))
 	return err
 }
 

@@ -1,8 +1,9 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { MemoryRouter } from 'react-router'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { StoragePage } from './FamilyPages'
 import { ConfigPage, EventsPage, NetworkPage, PodsPage, WorkloadsPage } from './ResourcePages'
 import { ToastProvider } from './ui/Toast'
 import { ResourceWorkspaceProvider } from './workspace/ResourceWorkspaceProvider'
@@ -37,12 +38,16 @@ function NamespaceTestControl() {
   return <button onClick={() => namespace.setValue(namespace.value ? '' : 'payments')}>Change global namespace</button>
 }
 
-function renderPage(component: React.ReactNode) {
+function LocationProbe() {
+  return <output aria-label="Current route">{useLocation().pathname}</output>
+}
+
+function renderPage(component: React.ReactNode, initialEntries: string[] = ['/']) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
   const selection = selectedStatus()
   return { client, ...render(
     <QueryClientProvider client={client}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={initialEntries}>
         <ToastProvider>
           <ResourceWorkspaceProvider>
             <GlobalNamespaceProvider generation={selection.selection.generation} scopeId={selection.selection.scopeId} scopeMode={selection.selection.scopeMode}>
@@ -70,6 +75,36 @@ afterEach(() => {
 
 describe('read-only resource pages', () => {
 
+  it('keeps hidden Storage columns in the chooser so they can be restored', async () => {
+    const storedPreferences = {
+      ...preferences(),
+      columns: { hidden: { 'storage/persistent-volumes': ['status'] } },
+    }
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      const path = String(input)
+      if (path === '/api/v1/status') return Promise.resolve(json(selectedStatus()))
+      if (path === '/api/v1/preferences' && init?.method !== 'PUT') return Promise.resolve(json(storedPreferences))
+      if (path === '/api/v1/session') return Promise.resolve(json({ csrfToken: 'csrf', generation, origin: 'http://127.0.0.1:2748', expiresAt: '2026-09-12T12:00:00Z' }))
+      if (path === '/api/v1/preferences' && init?.method === 'PUT') return Promise.resolve(json({ ...storedPreferences, columns: { hidden: { 'storage/persistent-volumes': [] } } }))
+      if (path === '/api/v1/persistent-volumes?limit=100') return Promise.resolve(json([{
+        name: 'pv-data', status: 'Bound', capacity: '10Gi', storageClass: 'fast', claim: null, ageSeconds: 60,
+      }], page()))
+      throw new Error(`Unexpected request: ${path}`)
+    }))
+    renderPage(
+      <Routes><Route path="/storage/:tab" element={<StoragePage />} /></Routes>,
+      ['/storage/persistent-volumes'],
+    )
+
+    await screen.findByRole('button', { name: 'Open pv-data' })
+    expect(screen.queryByRole('columnheader', { name: 'Phase' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Choose visible columns' }))
+    const statusColumn = screen.getByRole('checkbox', { name: 'status' })
+    expect(statusColumn).not.toBeChecked()
+    fireEvent.click(statusColumn)
+    expect(await screen.findByRole('columnheader', { name: 'Phase' })).toBeInTheDocument()
+  })
+
   it('reloads Pods and drops the old cursor when the global namespace changes', async () => {
     const paths: string[] = []
     const pod = { namespace: 'payments', name: 'all-pods', status: 'Running', ready: { current: 1, desired: 1 }, restarts: 0, ageSeconds: 60, problematic: false }
@@ -87,8 +122,13 @@ describe('read-only resource pages', () => {
     }))
     renderPage(<PodsPage />)
     await screen.findByRole('button', { name: 'Open Pod all-pods in payments' })
+    expect(screen.getByRole('button', { name: 'First page' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'First page' })).toHaveAttribute('title', 'Already on the first page.')
     fireEvent.click(screen.getByRole('button', { name: 'Next page' }))
     await screen.findByRole('button', { name: 'Open Pod page-two in payments' })
+    expect(screen.getByRole('button', { name: 'First page' })).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', { name: 'First page' }))
+    await screen.findByRole('button', { name: 'Open Pod all-pods in payments' })
     const before = paths.length
     fireEvent.click(screen.getByRole('button', { name: 'Change global namespace' }))
     await screen.findByRole('button', { name: 'Open Pod filtered-pod in payments' })
@@ -116,6 +156,8 @@ describe('read-only resource pages', () => {
     expect(await screen.findByText('uid-empty-events')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Pods' })).toBeInTheDocument()
     expect(screen.getByRole('dialog')).toHaveTextContent('This Pod has no controller owner.')
+    expect(screen.getByRole('button', { name: 'Go to previous resource' })).toHaveAttribute('title', 'There is no previous resource in this workspace history.')
+    expect(screen.getByRole('button', { name: 'Go to next resource' })).toHaveAttribute('title', 'There is no next resource in this workspace history.')
   })
 
   it('navigates a bounded workload list to generation-fenced detail and explicit YAML', async () => {
@@ -260,6 +302,42 @@ describe('read-only resource pages', () => {
     expect(screen.queryByText(/super-secret|annotation-secret|raw-token/)).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Load authorized YAML' })).not.toBeInTheDocument()
     expect(paths.some((path) => path.includes('/secrets/') && path.endsWith('/yaml'))).toBe(false)
+  })
+
+  it('navigates Network tabs from the canonical sidebar route and changes the active query', async () => {
+    const paths: string[] = []
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const path = String(input)
+      paths.push(path)
+      if (path === '/api/v1/status') return Promise.resolve(json(selectedStatus()))
+      if (path === '/api/v1/preferences') return Promise.resolve(json(preferences()))
+      if (path.startsWith('/api/v1/services?') || path.startsWith('/api/v1/ingresses?')) return Promise.resolve(json([], page()))
+      throw new Error(`Unexpected request: ${path}`)
+    }))
+
+    renderPage(<><Routes><Route path="/network/:tab" element={<NetworkPage />} /></Routes><LocationProbe /></>, ['/network/services'])
+    await waitFor(() => expect(paths.some((path) => path.startsWith('/api/v1/services?'))).toBe(true))
+    fireEvent.click(screen.getByRole('tab', { name: 'ingresses' }))
+    expect(await screen.findByLabelText('Current route')).toHaveTextContent('/network/ingresses')
+    await waitFor(() => expect(paths.some((path) => path.startsWith('/api/v1/ingresses?'))).toBe(true))
+  })
+
+  it('navigates Config tabs from the canonical sidebar route and changes the active query', async () => {
+    const paths: string[] = []
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const path = String(input)
+      paths.push(path)
+      if (path === '/api/v1/status') return Promise.resolve(json(selectedStatus()))
+      if (path === '/api/v1/preferences') return Promise.resolve(json(preferences()))
+      if (path.startsWith('/api/v1/configmaps?') || path.startsWith('/api/v1/secrets?')) return Promise.resolve(json([], page()))
+      throw new Error(`Unexpected request: ${path}`)
+    }))
+
+    renderPage(<><Routes><Route path="/config/:tab" element={<ConfigPage />} /></Routes><LocationProbe /></>, ['/config/configmaps'])
+    await waitFor(() => expect(paths.some((path) => path.startsWith('/api/v1/configmaps?'))).toBe(true))
+    fireEvent.click(screen.getByRole('tab', { name: 'secrets' }))
+    expect(await screen.findByLabelText('Current route')).toHaveTextContent('/config/secrets')
+    await waitFor(() => expect(paths.some((path) => path.startsWith('/api/v1/secrets?'))).toBe(true))
   })
 
   it('keeps draft search and allowlisted ordering independent across Network tabs', async () => {

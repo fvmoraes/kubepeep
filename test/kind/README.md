@@ -1,4 +1,4 @@
-# Harness Kind canônico — Fases 4 a 8
+# Harness Kind canônico — Fase 0 e Fases 4 a 8
 
 Este harness cria ou reutiliza o cluster Kind dedicado `kubepeep-f4`, instala
 fixtures do MVP e prova RBAC e operações contra a API Kubernetes real. Ele não
@@ -88,6 +88,68 @@ O refresh da Fase 4 continua disponível:
 ./test/kind/harness.sh refresh-grant
 ./test/kind/harness.sh refresh-revoke
 ```
+
+## Laboratório de performance da Fase 0
+
+O laboratório mantém três evidências separadas; nenhuma delas é apresentada
+como se fosse outra:
+
+1. **Sintética:** `resources.Collect` e `api.CursorStore` reais, com lister,
+   autorização, latência, falhas e watch sintéticos e identificados como tal no
+   JSON.
+2. **Kind real:** `create`, `validate` e `app-e2e` acima, opcionalmente com um
+   dataset gerado explicitamente.
+3. **Desktop nativo:** smoke manual Wails, registrado separadamente; o runner
+   sintético não mede WebView, pintura ou startup de janela.
+
+A suíte curta reproduz a baseline representativa e a matriz cobre
+1/10/25/50/100/200 namespaces, 10/50/100/250/500 Pods por namespace, páginas
+25/50/100, latências 0/20/50/100/200 ms, falhas 429/410/timeout/reset, perfis
+`global`, `namespace-only`, `mixed`, `authorization-unavailable` e watch
+on/off:
+
+```sh
+make benchmark
+make benchmark-matrix
+# ou diretamente, escolhendo o arquivo de saída:
+./test/kind/harness.sh benchmark /tmp/kubepeep-representative.json
+./test/kind/harness.sh benchmark-matrix /tmp/kubepeep-matrix.json
+```
+
+Os defaults ficam em `test/kind/.state/` (ignorado pelo Git), são gravados de
+forma atômica com modo `0600` e só substituem artefatos que carregam o schema
+do laboratório. O JSON registra SHA, estado clean/dirty, ambiente, aquecimento,
+repetições, p50/p95, TTFB, primeira linha, página completa, requests, bytes,
+over-fetch, alocações, goroutines, cursor, dimensão de watch e o histograma
+fechado de outcomes de cada cenário. Todas as repetições precisam concordar
+com o outcome esperado: divergência vira `unstable`, outcome unânime inesperado
+vira `unexpected_error` e ambos encerram runner/harness com status não zero. O
+relatório é preservado para diagnóstico mesmo quando esse gate falha. Ele não
+contém nomes de recursos, namespace, UID, token ou payload.
+
+O contrato C02 é explícito nos cenários: 200 namespaces com LIST global usam
+uma única origem autorizada; fan-out público restrito continua limitado a 100
+e o pedido acima desse teto é uma rejeição esperada; 200 origens diretas só
+existem no perfil `internal-synthetic-origins` para stress de merge/store.
+
+A geração de manifesto é deliberadamente separada e **nunca aplica nada**:
+
+```sh
+make benchmark-dataset \
+  BENCHMARK_NAMESPACES=10 \
+  BENCHMARK_PODS_PER_NAMESPACE=100
+# equivalente:
+./test/kind/harness.sh benchmark-dataset /tmp/kubepeep-10x100.yaml 10 100
+```
+
+Os tamanhos aceitos são 1/10/25/50/100/200 namespaces e 10/50/100/250/500
+Pods por namespace. O manifesto determinístico usa imagem `pause` pinada e
+inclui identidades RBAC distintas para LIST global, leitura por namespace,
+misto e leitura sem watch. Indisponibilidade de autorização e falhas de rede
+são somente sintéticas: RBAC sem binding significa “sem opinião”, não simula
+um apiserver/SAR indisponível. Aplicar, dimensionar recursos do cluster e
+remover o dataset são ações manuais; em especial, 200 × 500 gera 100.000 Pods
+e não participa de `create`, `validate`, `verify` nem de qualquer gate padrão.
 
 ## Kubeconfigs restritos
 

@@ -1,170 +1,201 @@
-# UI/UX Refinamento — Navegação, Contexto Global, Ações e Resource Workspace
+# UI/UX — refinamento e baseline auditável
 
-Implementação do plano `KUBEPEEP_UI_UX_REFINEMENT_PLAN.md`. O dark theme, o roxo
-KubePeep, sidebar, navegação horizontal, chips, inputs e selects foram
-preservados — o objetivo foi refinar, padronizar, compactar, corrigir e tornar
-funcional, sem redesign.
+Este documento é o inventário funcional e visual da Fase 0 do plano v0.7 e a
+entrada da F4/F7. O dark theme, roxo KubePeep, sidebar e navegação horizontal
+são preservados; a meta é correção e consistência, não redesign.
 
-## 1. Tipografia e Design System
+**Baseline:** 2026-09-12, branch `review/plan-v0.7`. Evidência automatizada e
+SHA de fechamento ficam em `plan/v0.7/03-evidencias-execucao.md`.
 
-- Escala tipográfica única já existente em `web/src/tokens.css`
-  (10/11/12/13/14/16/20/26/32 px) permanece a fonte de verdade.
-- Referência visual dos menus/filtros (`text-sm` 12 px em itens de menu,
-  `text-base` 13 px em controles) é o tamanho-base de toda a UI; tabelas,
-  facts, detalhes e formulários usam `text-base`/`text-sm`; `text-2xs` (10 px)
-  fica reservado a labels uppercase, cabeçalhos de tabela e badges.
-- Tokens novos: `--z-workspace`, `--z-toast`, `--z-confirm`,
-  `--workspace-inset`, `--content-max-width` ampliado para 1680 px.
-- `web/src/styles.css` ganhou blocos de estilos do Resource Workspace,
-  viewport de toasts e da barra de filtros compacta.
+## 1. Tokens, tipografia e desvios conhecidos
 
-## 2. Proporção de filtros e conteúdo
+`web/src/tokens.css` é a fonte de verdade:
 
-- `ResourceListControls` foi compactado: uma linha de controles `h-7`
-  (busca, filtros inline, sort, order, Apply/Refresh/Clear) + uma linha fina
-  de chips com filtros aplicados. Sem labels empilhados; cada controle usa
-  `aria-label`. A área de filtros fica em ~1 linha (~60-80 px) e o restante
-  da página é conteúdo — bem dentro da meta 20-30% / 70-80%.
-- Tabelas: `DataTable` agora é full-width (o grid de 2 colunas com drawer foi
-  removido), com `stickyHeader` opcional.
+- tipografia: 10/11/12/13/14/16/20/26/32 px (`text-2xs`…`text-4xl`);
+- controles: 28/32/36 px (`h-7`/`h-8`/`h-9`);
+- spacing, radius, cores, sombras e z-index também são tokens;
+- monospace fica reservado a logs, YAML/JSON e valores técnicos.
 
-## 3. Navegação (correções)
+Busca estática por `font-size`, `fontSize` e classes arbitrárias encontrou
+somente estas exceções intencionais:
 
-- **BUG A (corrigido)**: `AccessPages` lia o segmento `:namespace` como tab —
-  ClusterRoles/ClusterRoleBindings/RoleBindings eram inalcançáveis pela
-  sidebar. Agora a tab vem de `:tab`.
-- **BUG B (corrigido)**: rotas de detalhe inexistentes que produziam 404:
-  `/access/:tab/:name`, `/storage/:tab/:name`, `/network/:tab/:name` e
-  `/service-accounts/:namespace/:name` registradas em `App.tsx`.
-- `web/src/navigation/paths.ts` centraliza o path canônico de detalhe/lista de
-  cada coleção (usado por tabelas, command palette, favoritos e recents —
-  antes havia três mapas divergentes).
-- Query keys de Access/Administration agora incluem `generation` e as chamadas
-  enviam `expectedGeneration` (antes ficavam stale entre contextos).
+| Local | Valor | Classificação / ação F4 |
+| --- | ---: | --- |
+| `styles.css` `.mono` e `code` | `0.92em` | relativo ao contexto técnico; avaliar token mono dedicado |
+| `styles.css` `kbd` | `10px` | coincide com `text-2xs`, mas deve migrar para o token |
+| `ExecTerminal.tsx` xterm | `12px` | API JS não usa classe Tailwind; coincide com `text-sm` |
 
-## 4. Contexto global: Kubeconfig → Context → Scope → Namespace
+Não há classe `text-[…]` na aplicação. Cores semânticas de ações continuam:
+azul normal, verde positivo, vermelho destrutivo e âmbar disruptivo.
 
-- Nova barra superior: `ContextSelector` + `GlobalNamespaceSelect` + escopo.
-  A hierarquia kubeconfig/context/scope/namespace fica explícita no topo.
-- `web/src/context/GlobalNamespace.tsx`:
-  - universo de opções = namespaces do Scope ativo
-    (`GET /namespace-scopes/{id}` para single/list) ou o catálogo do cluster
-    (`GET /namespaces`, RBAC-governado) quando o scope é `all`;
-  - `All` = todos os namespaces permitidos pelo Scope atual, nunca além do
-    RBAC;
-  - troca de contexto/scope recarrega as opções e reseta para `All`
-    (render-time adjustment, sem efeitos com setState).
-- O namespace global é aplicado a todas as coleções namespaced
-  (pods, workloads, events, services, ingresses, endpoint-slices, endpoints,
-  network-policies, configmaps, secrets, leases, PVCs, quotas, limit ranges,
-  HPAs, PDBs, roles, bindings, service accounts). Coleções cluster-scoped
-  (nodes, PVs, StorageClasses, CSI, CRDs, classes, webhooks, ingress classes)
-  o ignoram.
+## 2. Proporção filtros × conteúdo
 
-## 5. Ações contextuais por tipo de recurso (backend + frontend)
+### Método
 
-Novas ações no backend (`internal/services/actions`, allowlist de
-capabilities, handlers e rotas), todas com confirmação, fence de geração,
-idempotência quando aplicável, audit allowlisted e **revalidação SSAR
-fail-closed imediatamente antes da execução** (`Guard`/`Revalidate`):
+A medição geométrica usa o header de 56 px e a altura CSS real dos controles:
+28 px de controle + 16 px de padding + borda = aproximadamente 46 px; a linha
+de chips acrescenta aproximadamente 22 px. Em 1366 px de largura, toolbars
+com muitos campos podem quebrar para duas linhas (~96–108 px). A proporção é
+`altura dos filtros ÷ (altura da viewport − 56 px)`; título/descrição não são
+contados como filtro nem conteúdo da tabela.
 
-| Ação | Recursos | Rota | Capability |
-|---|---|---|---|
-| Restart (rollout) | Deployments, StatefulSets, DaemonSets | `POST /api/v1/workloads/{kind}/{ns}/{name}/restart` | `{kind}.restart` (patch) |
-| Scale | Deployments, StatefulSets | `PUT .../scale` | `{kind}.scale` |
-| Delete workload | Deployments, StatefulSets, DaemonSets, Jobs, CronJobs, ReplicaSets | `DELETE /api/v1/workloads/{kind}/{ns}/{name}` | `{kind}.delete` |
-| Suspend/Resume | CronJobs | `PUT .../suspend` | `cronjobs.suspend` |
-| Run now | CronJobs (cria Job com owner ref) | `POST .../trigger` | `cronjobs.runnow` (create jobs) |
-| Delete Pod (existente) | Pods | `DELETE /api/v1/pods/{ns}/{name}` | `pods.delete` |
-| Restart Pod | Pods (delete controlado; o controller recria) | idem delete | `pods.delete` |
+| Tela(s) | Bloco de filtro | 768 px | 900 px | 1080 px | Conteúdo restante |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Pods, Workloads, Events | 68–108 px | 9,6–15,2% | 8,1–12,8% | 6,6–10,5% | 84,8–93,4% |
+| Network, Configuration, Storage | 68–108 px | 9,6–15,2% | 8,1–12,8% | 6,6–10,5% | 84,8–93,4% |
+| Nodes, Leases, Service Accounts | 46–68 px | 6,5–9,6% | 5,5–8,1% | 4,5–6,6% | 90,4–95,5% |
+| Access e Administration | 46–68 px | 6,5–9,6% | 5,5–8,1% | 4,5–6,6% | 90,4–95,5% |
+| Dashboard (consulta de logs) | 72–96 px | 10,1–13,5% | 8,5–11,4% | 7,0–9,4% | 86,5–93,0% |
+| Logs | 96–132 px | 13,5–18,5% | 11,4–15,6% | 9,4–12,9% | 81,5–90,6% |
+| Settings, Contexts/Scopes, About | n/a | n/a | n/a | n/a | formulário/conteúdo próprio |
 
-Delete de workload/pod usa preconditions UID + ResourceVersion. Run-now gera
-Job `<cronjob>-manual-<sufixo>` com OwnerReference do CronJob.
+A afirmação anterior de “20–30%” não era uma medição. O baseline real fica
+abaixo de 20% nos viewports de referência 1366×768, 1440×900, 1920×1080 e
+2560×1440; isso é aceitável porque amplia o conteúdo. O risco residual é
+quebra de linha em largura menor que 1100 px, a ser validado visualmente na F4.
 
-No frontend, `ResourceActions.tsx` expõe por kind:
+## 3. Semântica dos filtros
 
-- **Pod**: Delete, Restart (com explicação do controller responsável),
-  Port-forward, Exec, copy name/namespace, logs deep-link.
-- **Deployment**: Restart, Scale com `[-] n [+]`/Apply, Delete, HPA warning.
-- **StatefulSet**: Restart, Scale, Delete.
-- **DaemonSet**: Restart, Delete (sem Scale — não se aplica).
-- **Job**: Delete.
-- **CronJob**: Suspend/Resume, Run now, Delete.
-- Todos os botões são habilitados por decisão da matriz de permissões
-  (`GET /permissions`) com badges explicativos; negado → desabilitado.
-- Rollout status é observável na aba **Rollout** (conditions + contadores).
+| Controle | Onde executa | Efeito real |
+| --- | --- | --- |
+| Search/status/sort/order das listas | request ao backend | altera query key e parâmetros; resultado continua `filterScope=page` (C01) |
+| Namespace global | resolução de seleção + backend | altera origens autorizadas; nunca amplia RBAC |
+| Tabs Network/Configuration/Storage/Access/Admin | router | atualiza URL canônica e a coleção consultada |
+| Colunas | apresentação local + Preferences PUT | não refaz LIST; primeira coluna permanece visível |
+| Saved filters | Preferences + toolbar | persiste somente campos allowlisted; Apply muda a query ativa |
+| Logs: target/previous/since/tail | backend | abre leitura/stream autorizado para o alvo escolhido |
+| Logs: busca/nível/wrap/pausa | browser | filtra/apresenta apenas o buffer já recebido |
+| Command center | browser | busca páginas, favoritos, recentes e recursos já visíveis; não varre cluster |
+| Dashboard log scan | backend | inicia scan limitado; filtros da lista resultante são locais |
 
-## 6. Ações em massa
+Após a Fase 0 não há filtro conhecido cujo **Apply** não altere query/estado.
+Access/Admin agora promovem `draft → applied`; chips Search duplicados foram
+removidos em Configuration, Service Accounts, Access e Administration.
 
-- Checkbox por linha no `DataTable` (Pods e Workloads) com select-all.
-- Toolbar contextual: "N selected" + View logs (1 Pod) + Delete selected +
-  Clear selection.
-- Bulk delete executa N deletes autorizados sequencialmente (cada um com
-  fetch de UID/RV + `confirmed: true`), com `ConfirmDialog` listando os
-  recursos, consequência e resultado por toast (`deleted N · failed list`).
+## 4. Inventário funcional de cliques
 
-## 7. Resource Workspace
+Resultado da auditoria: cada controle abaixo executa sua função ou fica
+desabilitado com `title`/tooltip. `Button` fornece fallback central e os casos
+condicionais críticos usam `disabledReason` específico.
 
-- `components/workspace/ResourceWorkspaceProvider.tsx`: histórico global com
-  voltar/avançar (botões + Alt/⌘+←/→ + Esc fecha), aba ativa preservada por
-  entrada, reset na troca de geração.
-- `components/workspace/ResourceWorkspace.tsx`: overlay central com
-  `inset: 9vh 9vw` (~82% da viewport), backdrop escurecido/desfocado,
-  header (navegação, kind, nome, namespace, favorito, fechar) e abas por tipo:
-  - Pod: Overview | Logs | YAML | Events | Actions
-  - Deployment: Overview | Pods | ReplicaSets | YAML | Events | Rollout | Actions
-  - StatefulSet: Overview | Pods | PVCs | YAML | Events | Actions
-  - DaemonSet/Job/ReplicaSet: Overview | Pods | YAML | Events | Actions
-  - CronJob: Overview | Jobs | YAML | Events | Actions
-  - Service: Overview | Endpoints | YAML | Events
-  - Ingress: Overview | Rules | YAML | Events
-  - Node: Overview | Conditions | YAML | Events
-  - ConfigMap: Overview | Data | YAML · Secret: Overview (sem YAML)
-  - demais: Overview (+ YAML quando disponível) (+ Events para namespaced)
-- Relacionados clicáveis dentro do workspace: Pods/ReplicaSets de Deployment
-  (via `related` do backend), Pods de ReplicaSet/Job, Jobs de CronJob, owner
-  de Pod, PVCs de StatefulSet (por nome), Endpoints de Service — cada clique
-  entra no histórico. Deep links de URL abrem o workspace.
-- O drawer estreito de 25-30% foi removido de todas as páginas de recursos.
+| Tela | Elementos auditados | Resultado F0 |
+| --- | --- | --- |
+| Shell/sidebar | grupos, páginas, Settings, compact mode, Context/Scope/Namespace | navegação funcional; itens sem implementação permanecem indisponíveis e identificados |
+| Command center | abrir, pesquisar, opções, recentes, limpar, ajuda, fechar | funcional por mouse/teclado; opções ocultas/desabilitadas não recebem atalho |
+| Dashboard | cards/links, Refresh, scan de logs e parâmetros | funcional; Refresh/scan desabilitados durante requisito pendente |
+| Pods | busca/filtros/sort, tabela, detalhes, Logs, paginação, colunas, ações | funcional; tela vazia distingue vazio, parcial, proibido e indisponível |
+| Workloads | tabs/kinds, filtros, detalhes, relacionados, rollout e ações | funcional |
+| Events | filtros, sort, refresh, paginação e detalhe | funcional |
+| Network | tabs Services/Ingress/EndpointSlice/Endpoints/Policies, filtros e detalhe | tabs atualizam rota canônica; zero tab “visual-only” |
+| Configuration | tabs ConfigMaps/Secrets/Quotas/Limits, filtros e detalhe | tabs atualizam rota; Secret continua metadata-only |
+| Storage | seis tabs, filtros aplicáveis, colunas e detalhe | catálogo completo permanece no chooser; tabs sem status não exibem Select vazio |
+| Nodes e Leases | filtros, links, colunas, paginação | funcional |
+| Service Accounts | busca, detalhe, colunas, paginação | funcional; chip Search único |
+| Access | Roles/Bindings/Cluster*, filtros, detalhes, colunas | Apply/Clear funcionais; query cercada por geração |
+| Administration | CRDs/classes/webhooks/IngressClasses, filtros e detalhe | Apply/Clear funcionais; query cercada por geração |
+| Workspace | Back/Forward, tabs, favorito, relacionados, YAML e Close | histórico funcional; Back/Forward explicam ausência de entrada anterior/próxima |
+| Logs | Read/Follow/Stop/Pause, Copy/Download/Clear, filtros locais | funcional e limitado; estados inválidos ficam explicados/visíveis |
+| Settings | edição, remoção, Reset e Save | Reset/Save desabilitados sem dirty state; Reset restaura o snapshot salvo |
+| Ações em massa | seleção, select-all, logs, delete e clear | delete exige confirmação e reporta sucesso/falhas por toast |
 
-## 8. Feedback e confirmação
+Defeitos fechados pela varredura F0:
 
-- `ui/Toast.tsx`: toasts semânticos (success/error/info/warning) com
-  aria-live, auto-dismiss e dismiss manual.
-- `ui/ConfirmDialog.tsx`: alertdialog para ações destrutivas com lista de
-  recursos, nota de consequência, checkbox "cannot be undone" e option de
-  digitar o nome (para operações especialmente perigosas).
-- Cores semânticas de botão padronizadas: azul (primário), verde (Resume),
-  vermelho (Delete), âmbar (Restart/Suspend) — via variantes já existentes do
-  `Button`.
+1. Apply de Access/Admin não aplicava o draft;
+2. tabs Network/Configuration alteravam estado, mas a URL prevalecia;
+3. First page podia parecer clicável sem executar transição;
+4. coluna Storage oculta desaparecia do próprio chooser;
+5. tabs Storage sem campo de status exibiam Select vazio;
+6. Reset/Save de Settings não representavam dirty state;
+7. falha de persistência de coluna era silenciosa;
+8. chips Search apareciam duplicados em quatro superfícies.
 
-## 9. Segurança mantida
+## 5. Estado desabilitado e feedback
 
-- Nenhuma ação bypassa o backend: CSRF por geração, `expectedGeneration`,
-  preconditions, SSAR fail-closed revalidado no momento da execução,
-  audit events allowlisted, Secret continuam sem valores/YAML, port-forward
-  só loopback.
-- `scripts/security_check.sh HEAD` segue sendo obrigatório antes de commit.
+- `Button.disabledReason` vira `title`; se o consumidor não especificar texto,
+  o fallback informa que os requisitos atuais não foram satisfeitos.
+- First page: “Already on the first page.”; Next: “The current result has no
+  next page.”
+- links de relacionados sem rota suportada: “Detail navigation is unavailable
+  for this reference.”
+- Back/Forward do workspace explicam ausência de histórico;
+- decisões RBAC denied/unknown aparecem ao lado das ações e não são convertidas
+  em lista vazia;
+- falha ao salvar colunas mantém a mudança otimista, mas mostra alerta e sugere
+  retry/reload;
+- toasts possuem `aria-live`; confirmações destrutivas usam `alertdialog`.
 
-## 10. Testes
+## 6. Ações, confirmação e segurança
 
-- Go: `go test ./...` → 1017 testes, `go vet ./...` limpo, `gofmt` limpo.
-  Novos testes: `internal/services/actions/workload_actions_test.go`
-  (restart sts/ds, delete workload, suspend/resume, run-now, random suffix) e
-  allowlist atualizada (97 → 107 capabilities documentadas).
-- Web: `npm run test` → 86 testes; `npm run lint` → 0 erros; `tsc -b` limpo;
-  `npm run build` ok; Playwright e2e → 12 testes.
-- Ajustes de testes existentes refletem a nova UX (workspace em vez de
-  drawer, confirmação por dialog em vez de checkbox, filtro global).
+Todas as mutações enviam o envelope backend `confirmed: true`, CSRF,
+`expectedGeneration`, consequência allowlisted e revalidação SSAR fail-closed.
+Esse campo de protocolo **não significa** que toda ação abre um diálogo visual.
+Inventário real:
 
-## 11. Pendências / próximos passos
+| Ação | Confirmação visual | Observação |
+| --- | --- | --- |
+| Delete workload / Pod | `ConfirmDialog` | UID/RV quando aplicável; consequência explícita |
+| Restart Pod | `ConfirmDialog` | delete controlado; controller pode recriar |
+| Bulk delete | `ConfirmDialog` | lista alvos e resultado parcial |
+| Restart Deployment/StatefulSet/DaemonSet | direta | botão âmbar + toast; não abre dialog |
+| Scale | direta | input validado, HPA warning e Apply explícito |
+| Suspend/Resume CronJob | direta | botão semântico + toast |
+| Run now CronJob | direta | cria Job e mostra toast |
+| Port-forward | direta | valida portas, bind somente loopback |
+| Exec | direta | valida container/comando e usa ticket efêmero |
 
-- YAML continua **somente leitura**: editar/aplicar manifesto exigiria novo
-  contrato de backend (update/patch arbitrário) e política própria para
-  Secrets — ficou fora do escopo por decisão.
-- CPU/Memória nas linhas de Pods dependem do health do Metrics API; sem
-  métricas as colunas ficam vazias (honesto, não mock).
-- Helm releases e Gateway API continuam desabilitados no menu (como antes).
-- Validação visual em 1366/1440/1920/2560 feita via breakpoints CSS
-  (1100 px/760 px) e inset responsivo do workspace; recomenda-se um smoke
-  manual no desktop Wails.
+Portanto, a frase antiga “todas com confirmação” foi removida. A F4 pode
+decidir se Restart/Scale/Suspend/Run now exigem novo UX de confirmação; a Fase
+0 apenas registra o comportamento verdadeiro e garante que o clique funciona.
+
+## 7. Resource Workspace e relacionados
+
+O workspace ocupa aproximadamente 82% da viewport, tem histórico global,
+fecha por Esc/backdrop e preserva aba por entrada. Deep links abrem o mesmo
+workspace. Relacionados clicáveis hoje:
+
+- Pods/ReplicaSets de Deployment;
+- Pods de ReplicaSet/Job e Jobs de CronJob;
+- owner de Pod quando há rota suportada;
+- PVCs de StatefulSet.
+
+A aba **Endpoints** de Service mostra facts agregados (endereços prontos/não
+prontos, portas e truncamento); ela **não contém links de Endpoint**. A afirmação
+anterior de “Endpoints de Service clicáveis” era falsa e foi corrigida aqui.
+Referências desconhecidas são renderizadas desabilitadas com motivo, sem rota
+inventada.
+
+## 8. Navegação e contexto global
+
+- paths canônicos de lista/detalhe ficam em `web/src/navigation/paths.ts`;
+- Access lê `:tab`, não `:namespace`;
+- rotas de detalhe de Access, Storage, Network e Service Accounts existem;
+- query keys de Access/Admin incluem `generation`;
+- a barra superior explicita Kubeconfig → Context → Scope → Namespace;
+- `All` significa somente namespaces do scope/RBAC atual;
+- troca incompatível de contexto/scope/geração remove dados anteriores.
+
+## 9. Segurança e limites preservados
+
+- nenhum clique bypassa backend, CSRF, fence, SSAR ou preconditions;
+- Secret segue sem valores e sem YAML;
+- `filterScope=page` permanece honesto;
+- paginação recebe cursor explícito; não infere primeira página de `next`;
+- nenhuma preferência, métrica UX ou estado de navegação usa local/session
+  storage para dados de cluster;
+- `scripts/security_check.sh HEAD` permanece gate obrigatório.
+
+## 10. Validação e próximos passos
+
+A regressão automatizada cobre Pods, rotas/tabs, Apply/Clear, paginação,
+Settings, persistência e reativação de coluna Storage. Contagens e comandos do
+fechamento ficam no registro de evidências para não congelar números obsoletos
+neste documento.
+
+Pendências deliberadas para fases seguintes, não cliques mortos da F0:
+
+- edição/aplicação arbitrária de YAML requer contrato e política próprios;
+- CPU/memória de Pods dependem de Metrics API real;
+- Helm releases e Gateway API continuam fora da implementação atual;
+- F4 executará smoke visual comparativo e decidirá tokens relativos/UX de
+  confirmação adicional;
+- F3 fará virtualização; na F0 a página pública continua limitada a 100 linhas.

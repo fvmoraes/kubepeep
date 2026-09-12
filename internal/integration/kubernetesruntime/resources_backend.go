@@ -152,12 +152,14 @@ func collectResource[T resources.ListItem](
 			selection := resourceSelection(binding, resolution)
 			selection.Namespaces = []string{""}
 			var received atomic.Int64
+			started := time.Now()
 			result, collectErr := resources.Collect(ctx, resources.CollectionRequest[T]{
 				Selection: selection, Options: options, Origins: origins, Cursor: cursor,
 				Lister: countingLister(list, &received), Authorizer: backend.authorizer, Less: less,
 				Timeout:             backend.listWindowTimeout,
 				RequestedNamespaces: len(resolution.Namespaces),
 			})
+			observeListDuration(backend.metrics, collection, "global", started)
 			if collectErr == nil {
 				backend.observeList(collection, int(received.Load()), len(result.Items))
 			}
@@ -185,12 +187,14 @@ func collectResource[T resources.ListItem](
 	}
 	var received atomic.Int64
 	backend.metrics.IncCounter(observability.ResourceListsTotalName, map[string]string{"resource": string(collection), "strategy": "fanout"})
+	started := time.Now()
 	result, collectErr := resources.Collect(ctx, resources.CollectionRequest[T]{
 		Selection: selection, Options: options, Origins: origins, Cursor: cursor,
 		Lister: countingLister(list, &received), Authorizer: backend.authorizer, Less: less,
 		Timeout:             backend.listWindowTimeout,
 		RequestedNamespaces: len(names),
 	})
+	observeListDuration(backend.metrics, collection, "fanout", started)
 	if collectErr == nil {
 		backend.observeList(collection, int(received.Load()), len(result.Items))
 	}
@@ -302,11 +306,13 @@ func clusterCollect[T resources.ListItem](ctx context.Context, backend *Resource
 	}
 	var received atomic.Int64
 	backend.metrics.IncCounter(observability.ResourceListsTotalName, map[string]string{"resource": string(collection), "strategy": "global"})
+	started := time.Now()
 	result, collectErr := resources.Collect(ctx, resources.CollectionRequest[T]{
 		Selection: selection, Options: normalized, Origins: []resources.Origin{origin}, Cursor: cursor,
 		Lister: countingLister(list, &received), Authorizer: backend.authorizer, Less: less,
 		Timeout: backend.listWindowTimeout,
 	})
+	observeListDuration(backend.metrics, collection, "global", started)
 	if collectErr != nil {
 		return resources.ListResult[T]{}, collectErr
 	}
@@ -332,7 +338,7 @@ func sanitizeClusterFailures(failures []resources.PartialErrorDTO) []resources.P
 // is bounded by the collection fan-out, so an atomic counter is sufficient.
 func countingLister[T resources.ListItem](list originListerFunc[T], received *atomic.Int64) originListerFunc[T] {
 	return func(ctx context.Context, request resources.PageRequest) (resources.OriginPage[T], error) {
-		ctx, end := observability.StartSpan(ctx, "resources.list.origin")
+		ctx, end := observability.StartSpanWithAttributes(ctx, "resources.list.origin", observability.SafeSpanAttributes{PageSize: int(request.Limit), Fanout: 1})
 		page, err := list(ctx, request)
 		end(err)
 		if err == nil {
@@ -340,6 +346,14 @@ func countingLister[T resources.ListItem](list originListerFunc[T], received *at
 		}
 		return page, err
 	}
+}
+
+func observeListDuration(registry *observability.Registry, collection resources.Collection, strategy string, started time.Time) {
+	nanoseconds := time.Since(started).Nanoseconds()
+	if nanoseconds < 1 {
+		nanoseconds = 1
+	}
+	registry.AddCounter(observability.ResourceListDurationNanosecondsTotalName, map[string]string{"resource": string(collection), "strategy": strategy}, uint64(nanoseconds))
 }
 
 // observeList records the per-collection over-fetch counters. Label values are

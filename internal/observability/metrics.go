@@ -29,11 +29,19 @@ func NewRegistry() *Registry {
 	}
 }
 
+const (
+	ResourceListDurationNanosecondsTotalName      = "kubepeep_resource_list_duration_nanoseconds_total"
+	KubernetesRequestDurationNanosecondsTotalName = "kubepeep_kubernetes_request_duration_nanoseconds_total"
+	KubernetesResponseBytesTotalName              = "kubepeep_kubernetes_response_bytes_total"
+	Kubernetes429TotalName                        = "kubepeep_kubernetes_429_total"
+)
+
 var allowedMetrics = map[string]struct{}{
 	"kubepeep_requests_total":                     {},
 	"kubepeep_resource_list_items_received_total": {},
 	"kubepeep_resource_list_items_returned_total": {},
 	ResourceListsTotalName:                        {},
+	ResourceListDurationNanosecondsTotalName:      {},
 	CursorHitsTotalName:                           {},
 	CursorMissesTotalName:                         {},
 	CursorExpiredTotalName:                        {},
@@ -42,6 +50,9 @@ var allowedMetrics = map[string]struct{}{
 	WatchExpiredTotalName:                         {},
 	WatchEventsTotalName:                          {},
 	KubernetesRequestsTotalName:                   {},
+	KubernetesRequestDurationNanosecondsTotalName: {},
+	KubernetesResponseBytesTotalName:              {},
+	Kubernetes429TotalName:                        {},
 	ClientThrottleTotalName:                       {},
 	ClientThrottleNanosecondsTotalName:            {},
 	TraceExportErrorsTotalName:                    {},

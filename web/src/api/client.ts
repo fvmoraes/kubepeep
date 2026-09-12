@@ -91,6 +91,7 @@ Workload,
 WorkloadDetail,
 PriorityClass,
 } from './types'
+import { cancelListRequest, associateListRequestRows, beginListRequest, completeListRequest } from '../observability/uxMetrics'
 import { desktopRequest } from './desktop'
 
 export type * from './types'
@@ -261,25 +262,33 @@ function resourceQuery(options: ResourceListQuery = {}): string {
 }
 
 async function collectionRequest<T>(path: string, options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<T>> {
-  const response = await requestEnvelope<T[]>(`${path}${resourceQuery(options)}`, { method: 'GET', signal })
-  if (!Array.isArray(response.data)) {
-    throw new APIError(502, { code: 'INVALID_RESPONSE', message: 'The resource collection returned an invalid response.' })
-  }
-  if (expectedGeneration && response.meta?.generation !== expectedGeneration) {
-    throw new APIError(409, { code: 'GENERATION_CHANGED', message: 'The resource response belongs to another selection generation.' })
-  }
-  return {
-    items: response.data,
-    page: response.meta?.page ?? {
-      limit: options.limit ?? response.data.length,
-      next: '',
-      complete: false,
-      truncated: true,
-      filterScope: 'page',
-    },
-    coverage: response.meta?.coverage ?? null,
-    generation: response.meta?.generation,
-    collectedAt: response.meta?.collectedAt,
+  const uxRequestId = beginListRequest({ interactionId: options.uxInteractionId })
+  try {
+    const response = await requestEnvelope<T[]>(`${path}${resourceQuery(options)}`, { method: 'GET', signal })
+    if (!Array.isArray(response.data)) {
+      throw new APIError(502, { code: 'INVALID_RESPONSE', message: 'The resource collection returned an invalid response.' })
+    }
+    if (expectedGeneration && response.meta?.generation !== expectedGeneration) {
+      throw new APIError(409, { code: 'GENERATION_CHANGED', message: 'The resource response belongs to another selection generation.' })
+    }
+    associateListRequestRows(uxRequestId, response.data)
+    completeListRequest(uxRequestId, response.data.length > 0)
+    return {
+      items: response.data,
+      page: response.meta?.page ?? {
+        limit: options.limit ?? response.data.length,
+        next: '',
+        complete: false,
+        truncated: true,
+        filterScope: 'page',
+      },
+      coverage: response.meta?.coverage ?? null,
+      generation: response.meta?.generation,
+      collectedAt: response.meta?.collectedAt,
+    }
+  } catch (error) {
+    cancelListRequest(uxRequestId)
+    throw error
   }
 }
 

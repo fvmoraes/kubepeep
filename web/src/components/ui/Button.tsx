@@ -15,6 +15,7 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant
   size?: ButtonSize
   children?: ReactNode
+  disabledReason?: string
 }
 
 const sizes: Record<ButtonSize, string> = {
@@ -40,11 +41,16 @@ const variants: Record<ButtonVariant, string> = {
     'h-7 w-7 gap-0 p-0 justify-center text-kp-overlay-text bg-transparent border border-transparent rounded-md hover:not-disabled:bg-kp-surface-3 hover:not-disabled:text-kp-text',
 }
 
-export function Button({ variant = 'primary', size = 'md', className = '', type, children, ...props }: ButtonProps) {
+export function Button({ variant = 'primary', size = 'md', className = '', type, children, disabled, disabledReason, title, ...props }: ButtonProps) {
   const sizeClass = variant === 'icon' ? '' : sizes[size]
+  const tooltip = disabled
+    ? disabledReason ?? title ?? 'This action is unavailable until its current requirements are satisfied.'
+    : title
   return (
     <button
       type={type ?? 'button'}
+      disabled={disabled}
+      title={tooltip}
       className={`inline-flex items-center justify-center font-medium whitespace-nowrap cursor-pointer transition-colors duration-100 disabled:cursor-not-allowed disabled:opacity-45 focus-visible:outline-2 focus-visible:outline-kp-mauve focus-visible:outline-offset-1 ${sizeClass} ${variants[variant]} ${className}`}
       {...props}
     >

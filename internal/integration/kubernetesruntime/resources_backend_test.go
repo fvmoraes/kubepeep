@@ -150,18 +150,18 @@ func TestWatchFanoutFallsBackToHTTPBeforeAuthorization(t *testing.T) {
 	}
 }
 
-func TestAllScopeUsesAuthorizedClusterWideListBeyondFanoutLimit(t *testing.T) {
+func TestAllScopeUsesAuthorizedClusterWideListAcrossTwoHundredNamespacesAtPageOneHundred(t *testing.T) {
 	client := kubefake.NewSimpleClientset(
 		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "alpha", Name: "api"}},
 		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "omega", Name: "worker"}},
 	)
 	authorizer := &allowResourceAuthorization{}
 	backend := &ResourceBackend{clients: fixedResourceClientProvider{set: resourceClientSet{kubernetes: client}}, authorizer: authorizer, now: time.Now}
-	names := make([]string, resources.MaximumNamespaces+25)
+	names := make([]string, 200)
 	for index := range names {
 		names[index] = "namespace-" + string(rune('a'+index%26)) + string(rune('a'+index/26))
 	}
-	result, err := backend.ListPods(context.Background(), namespaces.SelectionBinding{ClusterProfileID: 1, Context: "ctx", Generation: "gen"}, namespaces.ScopeResolution{ScopeName: "all", Namespaces: names, PreferGlobal: true}, resources.ListOptions{Limit: 10}, nil)
+	result, err := backend.ListPods(context.Background(), namespaces.SelectionBinding{ClusterProfileID: 1, Context: "ctx", Generation: "gen"}, namespaces.ScopeResolution{ScopeName: "all", Namespaces: names, PreferGlobal: true}, resources.ListOptions{Limit: 100}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

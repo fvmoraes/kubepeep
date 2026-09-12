@@ -1,4 +1,5 @@
 import { effectiveNamespaces, useGlobalNamespace } from '../context/GlobalNamespace'
+import { bindListInteraction, listInteractionFor } from '../observability/uxMetrics'
 import { useGenerationCursor, useGenerationCursorMap } from './resource/useListCursor'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -86,11 +87,12 @@ interface FamilyListProps<T> {
   defaultSort: string
   defaultOrder: ListSortOrder
   onDraft: (next: SimpleListState) => void
-  onApply: () => void
+  onApply: (interactionId: string) => void
   onRefresh: () => void
   onClear: () => void
   onSort: (value: string) => void
   onOrder: (value: ListSortOrder) => void
+  currentCursor: string
   onNext: (cursor: string) => void
   onRestart: () => void
 }
@@ -124,7 +126,7 @@ function FamilyList<T>(props: FamilyListProps<T>) {
         <QueryState pending={props.queryPending} error={props.queryError} empty={props.result?.items.length === 0}>
           <div className="min-w-0 overflow-x-auto rounded-xl border border-kp-overlay-0 bg-kp-surface-0">
             <DataTable caption={props.caption} rows={props.rows} getRowKey={props.rowKey} columns={props.columns} stickyHeader />
-            {props.result ? <CollectionFooter result={props.result} onNext={props.onNext} onRestart={props.onRestart} /> : null}
+            {props.result ? <CollectionFooter result={props.result} currentCursor={props.currentCursor} onNext={props.onNext} onRestart={props.onRestart} /> : null}
           </div>
         </QueryState>
       </SelectionGate>
@@ -145,8 +147,8 @@ export function LeasesPage() {
   const { namespace, name } = useParams<{ namespace?: string; name?: string }>()
   const [params] = useSearchParamsShim()
   const generation = selection?.generation
-  const [draft, setDraft] = useState<SimpleListState>(() => listStateFromParams(params, ['']))
-  const [applied, setApplied] = useState<SimpleListState>(() => listStateFromParams(params, ['']))
+  const [draft, setDraft] = useState<SimpleListState>(() => listStateFromParams(params, []))
+  const [applied, setApplied] = useState<SimpleListState>(() => listStateFromParams(params, []))
   const [cursor, setCursor] = useGenerationCursor(generation, globalNamespace.value)
   const queryClient = useQueryClient()
 
@@ -158,7 +160,7 @@ export function LeasesPage() {
 
   const list = useQuery({
     queryKey: ['resources', 'leases', generation, globalNamespace.value, applied, cursor],
-    queryFn: ({ signal }) => getLeases({ limit: 100, namespaces: effectiveNamespaces(globalNamespace.value, []), search: applied.search || undefined, ...sortParams(applied), continueToken: cursor || undefined }, signal, generation),
+    queryFn: ({ signal }) => getLeases({ limit: 100, uxInteractionId: listInteractionFor(applied), namespaces: effectiveNamespaces(globalNamespace.value, []), search: applied.search || undefined, ...sortParams(applied), continueToken: cursor || undefined }, signal, generation),
     enabled: Boolean(selection),
   })
 
@@ -185,11 +187,12 @@ export function LeasesPage() {
         draft={draft} applied={applied} statuses={[]}
         sortOptions={leaseSortOptions} defaultSort="identity" defaultOrder="asc"
         onDraft={setDraft}
-        onApply={() => { setApplied(draft); setCursor('') }}
+        onApply={(interactionId) => { setApplied(bindListInteraction({ ...draft }, interactionId)); setCursor('') }}
         onRefresh={() => queryClient.invalidateQueries({ queryKey: ['resources', 'leases'] })}
         onClear={() => { setDraft({ ...defaultSimpleList }); setApplied({ ...defaultSimpleList }); setCursor('') }}
         onSort={(value) => setDraft((current) => ({ ...current, sort: value }))}
         onOrder={(value) => setDraft((current) => ({ ...current, order: value }))}
+        currentCursor={cursor}
         onNext={setCursor}
         onRestart={() => setCursor('')}
       />
@@ -243,7 +246,7 @@ export function StoragePage() {
   const [cursors, setCursorValue] = useGenerationCursorMap(generation, Object.fromEntries(storageTabs.map((key) => [key, ''])) as Record<StorageTab, string>)
   const [claimCursor, setClaimCursor] = useGenerationCursor(generation, globalNamespace.value)
   const queryClient = useQueryClient()
-  const statuses = tab === 'persistent-volumes' ? volumeStatuses : tab === 'persistent-volume-claims' ? claimStatuses : ['']
+  const statuses = tab === 'persistent-volumes' ? volumeStatuses : tab === 'persistent-volume-claims' ? claimStatuses : []
   const draft = drafts[tab]
   const applied = appliedLists[tab]
 
@@ -254,7 +257,7 @@ export function StoragePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only react to route param changes
   }, [tab, namespace, name, generation])
 
-  const options = (value: StorageTab) => ({ limit: 100, search: appliedLists[value].search || undefined, statuses: appliedLists[value].status ? [appliedLists[value].status] : undefined, continueToken: cursors[value] || undefined, ...sortParams(appliedLists[value]) })
+  const options = (value: StorageTab) => ({ limit: 100, uxInteractionId: listInteractionFor(appliedLists[value]), search: appliedLists[value].search || undefined, statuses: appliedLists[value].status ? [appliedLists[value].status] : undefined, continueToken: cursors[value] || undefined, ...sortParams(appliedLists[value]) })
   const persistentVolumes = useQuery({ queryKey: ['resources', 'persistent-volumes', generation, appliedLists['persistent-volumes'], cursors['persistent-volumes']], queryFn: ({ signal }) => getPersistentVolumes(options('persistent-volumes'), signal, generation), enabled: Boolean(selection && tab === 'persistent-volumes') })
   const claims = useQuery({ queryKey: ['resources', 'persistent-volume-claims', generation, globalNamespace.value, appliedLists['persistent-volume-claims'], claimCursor], queryFn: ({ signal }) => getPersistentVolumeClaims({ ...options('persistent-volume-claims'), namespaces: effectiveNamespaces(globalNamespace.value, []), continueToken: claimCursor || undefined }, signal, generation), enabled: Boolean(selection && tab === 'persistent-volume-claims') })
   const volumeAttachments = useQuery({ queryKey: ['resources', 'volume-attachments', generation, appliedLists['volume-attachments'], cursors['volume-attachments']], queryFn: ({ signal }) => getVolumeAttachments(options('volume-attachments'), signal, generation), enabled: Boolean(selection && tab === 'volume-attachments') })
@@ -282,11 +285,12 @@ export function StoragePage() {
   }, [tab, workspace])
 
   const storageColumnState = usePreferenceColumnVisibility(`storage/${tab}`)
-  const columns = applyColumnVisibility(buildStorageColumns(tab, openDetail), storageColumnState)
+  const allColumns = buildStorageColumns(tab, openDetail)
+  const columns = applyColumnVisibility(allColumns, storageColumnState)
 
   return (
     <ResourcePage title="Storage" description="PersistentVolumes, claims, attachments, classes and CSI objects; claim inspection respects the active scope.">
-      <ColumnVisibilityControl state={storageColumnState} columns={columns} />
+      <ColumnVisibilityControl state={storageColumnState} columns={allColumns} />
       <ResourceTabStrip ariaLabel="Storage resource type" panelId="storage-panel" active={tab} onChange={(value) => navigate(`/storage/${value}`)} tabs={storageTabs.map((id) => ({ id, label: id }))} />
       <FamilyList<StorageRow>
         caption={`Authorized ${tab} page`}
@@ -299,11 +303,12 @@ export function StoragePage() {
         sortOptions={tab === 'persistent-volumes' || tab === 'persistent-volume-claims' ? volumeSortOptions : storageSortOptions}
         defaultSort="identity" defaultOrder="asc"
         onDraft={setDraft}
-        onApply={() => { setAppliedLists((current) => ({ ...current, [tab]: draft })); setCursor('') }}
+        onApply={(interactionId) => { setAppliedLists((current) => ({ ...current, [tab]: bindListInteraction({ ...draft }, interactionId) })); setCursor('') }}
         onRefresh={() => queryClient.invalidateQueries({ queryKey: ['resources', tab] })}
         onClear={() => { setDraft({ ...defaultSimpleList }); setAppliedLists((current) => ({ ...current, [tab]: { ...defaultSimpleList } })); setCursor('') }}
         onSort={(value) => setDraft({ ...draft, sort: value })}
         onOrder={(value) => setDraft({ ...draft, order: value })}
+        currentCursor={tab === 'persistent-volume-claims' ? claimCursor : cursors[tab]}
         onNext={setCursor}
         onRestart={() => setCursor('')}
       />

@@ -373,6 +373,8 @@ export interface CollectionResult<T> {
 }
 
 export interface ResourceListQuery extends PageQuery {
+  /** Ephemeral client-only UX correlation; never serialized into the request. */
+  uxInteractionId?: string
   namespaces?: string[]
   kinds?: string[]
   statuses?: string[]

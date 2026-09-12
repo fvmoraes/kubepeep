@@ -28,6 +28,7 @@ import type { ListSortOption } from './ResourceListControls'
 import { TableLink } from './resource/TableLink'
 import { age } from './resource/format'
 import { effectiveNamespaces, useGlobalNamespace } from '../context/GlobalNamespace'
+import { bindListInteraction, listInteractionFor } from '../observability/uxMetrics'
 import { useResourceWorkspace } from './workspace/ResourceWorkspaceProvider'
 
 function useActiveSelection() {
@@ -71,7 +72,7 @@ export function ConfigurationPage() {
   const [applied, setApplied] = useState<ListState>(initialListState)
   const tab = useMemo(() => configurationTabFromParams(tabParam ?? '') ?? 'resource-quotas', [tabParam])
   const [cursor, setCursor] = useGenerationCursor(generation, JSON.stringify([tab, globalNamespace.value]))
-  const options = { limit: 100, search: applied.search || undefined, continueToken: cursor || undefined, namespaces: effectiveNamespaces(globalNamespace.value, []), sort: applied.sort === 'identity' ? undefined : applied.sort, order: applied.sort === 'identity' && applied.order === 'asc' ? undefined : applied.order }
+  const options = { limit: 100, uxInteractionId: listInteractionFor(applied), search: applied.search || undefined, continueToken: cursor || undefined, namespaces: effectiveNamespaces(globalNamespace.value, []), sort: applied.sort === 'identity' ? undefined : applied.sort, order: applied.sort === 'identity' && applied.order === 'asc' ? undefined : applied.order }
 
   // Deep links (/configuration/:tab/:ns/:name) open the Resource Workspace.
   useEffect(() => {
@@ -124,12 +125,12 @@ export function ConfigurationPage() {
   return (
     <ResourcePage title="Configuration" description="Quotas, limits, autoscalers and disruption budgets in the active scope; absence and unknown stay distinct from zero.">
       <ResourceTabStrip ariaLabel="Configuration resource type" panelId="configuration-panel" active={tab} onChange={(value) => { setDraft(initialListState); setApplied(initialListState); setCursor(''); navigate(`/configuration/${value}`) }} tabs={configurationTabs.map((id) => ({ id, label: id }))} />
-      <ResourceListControls search={draft.search} appliedSearch={applied.search} onSearchChange={(value) => setDraft({ ...draft, search: value })} onApply={() => { setApplied(draft); setCursor('') }} onRefresh={() => queryClient.invalidateQueries({ queryKey: ['resources', tab] })} onClear={() => { setDraft(initialListState); setApplied(initialListState); setCursor('') }} activeFilters={applied.search ? [{ id: 'search', label: 'Search', value: applied.search }] : []} sort={draft.sort} order={draft.order} appliedSort={applied.sort} appliedOrder={applied.order} defaultSort="identity" defaultOrder="asc" hasPendingChanges={draft.search !== applied.search || draft.sort !== applied.sort || draft.order !== applied.order} sortOptions={configurationSortOptions} onSortChange={(value) => setDraft({ ...draft, sort: value })} onOrderChange={(value) => setDraft({ ...draft, order: value })} />
+      <ResourceListControls search={draft.search} appliedSearch={applied.search} onSearchChange={(value) => setDraft({ ...draft, search: value })} onApply={(interactionId) => { setApplied(bindListInteraction({ ...draft }, interactionId)); setCursor('') }} onRefresh={() => queryClient.invalidateQueries({ queryKey: ['resources', tab] })} onClear={() => { setDraft(initialListState); setApplied(initialListState); setCursor('') }} sort={draft.sort} order={draft.order} appliedSort={applied.sort} appliedOrder={applied.order} defaultSort="identity" defaultOrder="asc" hasPendingChanges={draft.search !== applied.search || draft.sort !== applied.sort || draft.order !== applied.order} sortOptions={configurationSortOptions} onSortChange={(value) => setDraft({ ...draft, sort: value })} onOrderChange={(value) => setDraft({ ...draft, order: value })} />
       <SelectionGate pending={status.isPending} error={status.error} selected={Boolean(selection)}>
         <QueryState pending={activeQuery.isPending} error={activeQuery.error} empty={active?.items.length === 0}>
           <div className="min-w-0 overflow-x-auto rounded-xl border border-kp-overlay-0 bg-kp-surface-0">
             <DataTable caption={`Authorized ${tab} page`} rows={active?.items ?? []} getRowKey={(item: unknown) => { const value = item as { namespace: string; name: string }; return `${value.namespace}/${value.name}` }} columns={columns} stickyHeader />
-            {active ? <CollectionFooter result={active} onNext={setCursor} onRestart={() => setCursor('')} /> : null}
+            {active ? <CollectionFooter result={active} currentCursor={cursor} onNext={setCursor} onRestart={() => setCursor('')} /> : null}
           </div>
         </QueryState>
       </SelectionGate>
@@ -154,11 +155,11 @@ export function ServiceAccountsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only react to route param changes
   }, [namespace, name, generation])
 
-  const list = useQuery({ queryKey: ['resources', 'service-accounts', generation, globalNamespace.value, applied, cursor], queryFn: ({ signal }) => getServiceAccounts({ limit: 100, search: applied.search || undefined, continueToken: cursor || undefined, namespaces: effectiveNamespaces(globalNamespace.value, []), sort: applied.sort === 'identity' ? undefined : applied.sort, order: applied.sort === 'identity' && applied.order === 'asc' ? undefined : applied.order }, signal, generation), enabled: Boolean(selection) })
+  const list = useQuery({ queryKey: ['resources', 'service-accounts', generation, globalNamespace.value, applied, cursor], queryFn: ({ signal }) => getServiceAccounts({ limit: 100, uxInteractionId: listInteractionFor(applied), search: applied.search || undefined, continueToken: cursor || undefined, namespaces: effectiveNamespaces(globalNamespace.value, []), sort: applied.sort === 'identity' ? undefined : applied.sort, order: applied.sort === 'identity' && applied.order === 'asc' ? undefined : applied.order }, signal, generation), enabled: Boolean(selection) })
 
   return (
     <ResourcePage title="ServiceAccounts" description="Namespace ServiceAccounts as metadata only: no tokens, no Secret references and no arbitrary annotations.">
-      <ResourceListControls search={draft.search} appliedSearch={applied.search} onSearchChange={(value) => setDraft({ ...draft, search: value })} onApply={() => { setApplied(draft); setCursor('') }} onRefresh={() => queryClient.invalidateQueries({ queryKey: ['resources', 'service-accounts'] })} onClear={() => { setDraft(initialListState); setApplied(initialListState); setCursor('') }} activeFilters={applied.search ? [{ id: 'search', label: 'Search', value: applied.search }] : []} sort={draft.sort} order={draft.order} appliedSort={applied.sort} appliedOrder={applied.order} defaultSort="identity" defaultOrder="asc" hasPendingChanges={draft.search !== applied.search || draft.sort !== applied.sort || draft.order !== applied.order} sortOptions={configurationSortOptions} onSortChange={(value) => setDraft({ ...draft, sort: value })} onOrderChange={(value) => setDraft({ ...draft, order: value })} />
+      <ResourceListControls search={draft.search} appliedSearch={applied.search} onSearchChange={(value) => setDraft({ ...draft, search: value })} onApply={(interactionId) => { setApplied(bindListInteraction({ ...draft }, interactionId)); setCursor('') }} onRefresh={() => queryClient.invalidateQueries({ queryKey: ['resources', 'service-accounts'] })} onClear={() => { setDraft(initialListState); setApplied(initialListState); setCursor('') }} sort={draft.sort} order={draft.order} appliedSort={applied.sort} appliedOrder={applied.order} defaultSort="identity" defaultOrder="asc" hasPendingChanges={draft.search !== applied.search || draft.sort !== applied.sort || draft.order !== applied.order} sortOptions={configurationSortOptions} onSortChange={(value) => setDraft({ ...draft, sort: value })} onOrderChange={(value) => setDraft({ ...draft, order: value })} />
       <SelectionGate pending={status.isPending} error={status.error} selected={Boolean(selection)}>
         <QueryState pending={list.isPending} error={list.error} empty={list.data?.items.length === 0}>
           <div className="min-w-0 overflow-x-auto rounded-xl border border-kp-overlay-0 bg-kp-surface-0">
@@ -173,7 +174,7 @@ export function ServiceAccountsPage() {
               ] as DataTableColumn<ServiceAccount>[]}
               stickyHeader
             />
-            {list.data ? <CollectionFooter result={list.data} onNext={setCursor} onRestart={() => setCursor('')} /> : null}
+            {list.data ? <CollectionFooter result={list.data} currentCursor={cursor} onNext={setCursor} onRestart={() => setCursor('')} /> : null}
           </div>
         </QueryState>
       </SelectionGate>

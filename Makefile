@@ -7,11 +7,16 @@ GINGER ?= $(shell $(GO) env GOPATH)/bin/ginger
 WEB_DIR := web
 DIST_DIR := dist
 BINARY := $(DIST_DIR)/$(APP)
-GO_FILES := $(shell find cmd internal -type f -name '*.go' 2>/dev/null)
+GO_FILES := $(shell find cmd internal test/kind/benchmark -type f -name '*.go' 2>/dev/null)
 GO_PACKAGES := $(shell $(GO) list ./... 2>/dev/null | grep -v '/web/node_modules/')
 VERSION ?= 0.1.0-dev
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+BENCHMARK_OUTPUT ?= test/kind/.state/performance-representative.json
+BENCHMARK_MATRIX_OUTPUT ?= test/kind/.state/performance-matrix.json
+BENCHMARK_NAMESPACES ?= 10
+BENCHMARK_PODS_PER_NAMESPACE ?= 100
+BENCHMARK_DATASET_OUTPUT ?= test/kind/.state/dataset-$(BENCHMARK_NAMESPACES)x$(BENCHMARK_PODS_PER_NAMESPACE).yaml
 LDFLAGS := -s -w \
 	-X github.com/fvmoraes/kubepeep/internal/buildinfo.Version=$(VERSION) \
 	-X github.com/fvmoraes/kubepeep/internal/buildinfo.Commit=$(COMMIT) \
@@ -19,7 +24,7 @@ LDFLAGS := -s -w \
 
 .PHONY: format format-check lint typecheck test-unit test-integration test-race \
 	test-e2e test web-install web-build build smoke cross-build verify-ginger \
-	verify clean dev-desktop build-desktop build-desktop-linux \
+	verify clean benchmark benchmark-matrix benchmark-dataset dev-desktop build-desktop build-desktop-linux \
 	build-desktop-windows build-desktop-darwin
 
 WAILS ?= $(shell $(GO) env GOPATH)/bin/wails
@@ -62,6 +67,16 @@ test-race: web-build
 
 test-e2e: web-build
 	cd $(WEB_DIR) && $(NPM) run test:e2e
+
+benchmark:
+	./test/kind/harness.sh benchmark "$(BENCHMARK_OUTPUT)"
+
+benchmark-matrix:
+	./test/kind/harness.sh benchmark-matrix "$(BENCHMARK_MATRIX_OUTPUT)"
+
+benchmark-dataset:
+	./test/kind/harness.sh benchmark-dataset "$(BENCHMARK_DATASET_OUTPUT)" \
+		"$(BENCHMARK_NAMESPACES)" "$(BENCHMARK_PODS_PER_NAMESPACE)"
 
 test: test-unit test-integration
 

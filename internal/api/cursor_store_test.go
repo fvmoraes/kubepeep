@@ -259,25 +259,52 @@ func TestCursorStoreNormalizesEquivalentState(t *testing.T) {
 	}
 }
 
-// BenchmarkCursorStorePutGet measures the server-side cursor parking cost that
-// replaced serializing buffered DTOs into the signed token.
-func BenchmarkCursorStorePutGet(b *testing.B) {
+func TestCursorStoreRoundTripsTwoHundredSyntheticOriginsWithinEntryBudget(t *testing.T) {
 	store := NewCursorStore(nil)
-	state := storedCursorStateFixture{Version: 1, Origins: make([]storedFixtureOrigin, 100)}
+	state := storedCursorStateFixture{Version: 1, Origins: make([]storedFixtureOrigin, 200)}
 	for index := range state.Origins {
 		state.Origins[index] = storedFixtureOrigin{Namespace: fmt.Sprintf("ns-%04d", index), Buffered: []string{"buffered-item"}}
 	}
-	b.ReportAllocs()
-	b.ResetTimer()
-	for iteration := 0; iteration < b.N; iteration++ {
-		reference, err := store.Put(state)
-		if err != nil {
-			b.Fatal(err)
-		}
-		var decoded storedCursorStateFixture
-		if err := store.Get(reference, &decoded); err != nil {
-			b.Fatal(err)
-		}
-		store.Delete(reference)
+	reference, err := store.Put(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store.Bytes() <= 0 || store.Bytes() > CursorStoreMaxEntryBytes {
+		t.Fatalf("cursor bytes = %d, budget = %d", store.Bytes(), CursorStoreMaxEntryBytes)
+	}
+	var decoded storedCursorStateFixture
+	if err := store.Get(reference, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if len(decoded.Origins) != 200 {
+		t.Fatalf("decoded origins = %d, want 200", len(decoded.Origins))
+	}
+}
+
+// BenchmarkCursorStorePutGet measures the server-side cursor parking cost that
+// replaced serializing buffered DTOs into the signed token. Two hundred
+// origins are an internal stress case, not public restricted fan-out support.
+func BenchmarkCursorStorePutGet(b *testing.B) {
+	for _, originCount := range []int{10, 50, 100, 200} {
+		b.Run(fmt.Sprintf("origins=%d", originCount), func(b *testing.B) {
+			store := NewCursorStore(nil)
+			state := storedCursorStateFixture{Version: 1, Origins: make([]storedFixtureOrigin, originCount)}
+			for index := range state.Origins {
+				state.Origins[index] = storedFixtureOrigin{Namespace: fmt.Sprintf("ns-%04d", index), Buffered: []string{"buffered-item"}}
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				reference, err := store.Put(state)
+				if err != nil {
+					b.Fatal(err)
+				}
+				var decoded storedCursorStateFixture
+				if err := store.Get(reference, &decoded); err != nil {
+					b.Fatal(err)
+				}
+				store.Delete(reference)
+			}
+		})
 	}
 }

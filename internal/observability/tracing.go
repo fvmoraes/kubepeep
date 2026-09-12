@@ -107,7 +107,37 @@ func (tracing *Tracing) Middleware(next http.Handler) http.Handler {
 var spanNames = map[string]struct{}{
 	"resources.list": {}, "resources.list.global": {}, "resources.list.fanout": {}, "resources.list.origin": {},
 	"resources.merge": {}, "cursor.get": {}, "cursor.put": {}, "watch.connect": {}, "watch.reconnect": {},
-	"cache.authorization": {}, "cache.clients": {},
+	"cache.authorization": {}, "cache.clients": {}, "cache.snapshot": {}, "cache.apply_event": {},
+}
+
+// SafeSpanAttributes is deliberately numeric except for the closed strategy
+// vocabulary. It cannot carry names, UIDs, selectors, tokens, or identities.
+type SafeSpanAttributes struct {
+	Strategy        string
+	NamespaceCount  int
+	PageSize        int
+	OriginChunkSize int
+	Fanout          int
+	ItemsCount      int
+}
+
+func safeSpanAttributes(values SafeSpanAttributes) []attribute.KeyValue {
+	attributes := make([]attribute.KeyValue, 0, 6)
+	if values.Strategy == "global" || values.Strategy == "fanout" {
+		attributes = append(attributes, attribute.String("strategy", values.Strategy))
+	}
+	for key, value := range map[string]int{
+		"namespace_count":   values.NamespaceCount,
+		"page_size":         values.PageSize,
+		"origin_chunk_size": values.OriginChunkSize,
+		"fanout":            values.Fanout,
+		"items_count":       values.ItemsCount,
+	} {
+		if value > 0 {
+			attributes = append(attributes, attribute.Int(key, value))
+		}
+	}
+	return attributes
 }
 
 // CacheOutcome records a closed vocabulary, never the cache key or its value.
@@ -119,6 +149,10 @@ func CacheOutcome(ctx context.Context, outcome string) {
 }
 
 func StartSpan(ctx context.Context, name string) (context.Context, func(error)) {
+	return StartSpanWithAttributes(ctx, name, SafeSpanAttributes{})
+}
+
+func StartSpanWithAttributes(ctx context.Context, name string, values SafeSpanAttributes) (context.Context, func(error)) {
 	tracing, _ := ctx.Value(tracingKey{}).(*Tracing)
 	if tracing == nil {
 		return ctx, func(error) {}
@@ -126,7 +160,11 @@ func StartSpan(ctx context.Context, name string) (context.Context, func(error)) 
 	if _, ok := spanNames[name]; !ok {
 		return ctx, func(error) {}
 	}
-	ctx, span := tracing.provider.Tracer("kubepeep").Start(ctx, name, trace.WithSpanKind(trace.SpanKindInternal))
+	options := []trace.SpanStartOption{trace.WithSpanKind(trace.SpanKindInternal)}
+	if attributes := safeSpanAttributes(values); len(attributes) > 0 {
+		options = append(options, trace.WithAttributes(attributes...))
+	}
+	ctx, span := tracing.provider.Tracer("kubepeep").Start(ctx, name, options...)
 	return ctx, func(err error) {
 		if err != nil {
 			span.SetStatus(codes.Error, "operation failed")

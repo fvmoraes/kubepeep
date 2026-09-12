@@ -45,7 +45,7 @@ func TestTracingExportsRealSafeOTLPSpans(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, end := StartSpan(WithTracing(context.Background(), tracing), "resources.list")
+	ctx, end := StartSpanWithAttributes(WithTracing(context.Background(), tracing), "resources.list", SafeSpanAttributes{Strategy: "fanout", NamespaceCount: 25, PageSize: 100, OriginChunkSize: 10, Fanout: 4})
 	_, endChild := StartSpan(ctx, "cursor.get")
 	endChild(errors.New("sensitive-pod secret-token"))
 	end(nil)

@@ -55,6 +55,7 @@ describe('ResourceListControls', () => {
     expect(onSortChange).toHaveBeenCalledWith('identity')
     expect(onOrderChange).toHaveBeenCalledWith('asc')
     expect(onApply).toHaveBeenCalledOnce()
+    expect(onApply).toHaveBeenCalledWith(expect.stringMatching(/^interaction-\d+$/))
     expect(onClear).toHaveBeenCalledOnce()
   })
 

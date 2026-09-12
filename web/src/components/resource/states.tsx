@@ -20,6 +20,8 @@ export function SelectionGate({ pending, error, selected, children }: { pending:
   return children
 }
 
+// Request timing is owned by the transport and DataTable commit so cache hits,
+// background refetches and retries do not depend on isPending transitions.
 export function QueryState({ pending, error, empty, children }: { pending: boolean; error: unknown; empty: boolean; children: ReactNode }) {
   if (pending) return <StatePanel kind="loading" title="Loading resources">The request is tied to the active selection generation.</StatePanel>
   if (error) return <StatePanel kind="error" title="Resource request failed" details={errorCode(error)}>{errorMessage(error)}</StatePanel>
@@ -34,8 +36,10 @@ export function QueryState({ pending, error, empty, children }: { pending: boole
   return children
 }
 
-export function CollectionFooter<T>({ result, onNext, onRestart }: { result: CollectionResult<T>; onNext: (cursor: string) => void; onRestart: () => void }) {
+export function CollectionFooter<T>({ result, currentCursor, onNext, onRestart }: { result: CollectionResult<T>; currentCursor: string; onNext: (cursor: string) => void; onRestart: () => void }) {
   const coverage = result.coverage
+  const firstPage = currentCursor === ''
+  const hasNextPage = result.page.next !== ''
   return (
     <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-kp-overlay-0 px-3 py-2.5">
       <div className="min-w-0 text-xs text-kp-overlay-text">
@@ -53,8 +57,8 @@ export function CollectionFooter<T>({ result, onNext, onRestart }: { result: Col
         ) : null}
       </div>
       <div className="flex gap-2">
-        <Button variant="secondary" size="sm" onClick={onRestart}>First page</Button>
-        <Button size="sm" disabled={!result.page.next} onClick={() => onNext(result.page.next)}>Next page</Button>
+        <Button variant="secondary" size="sm" disabled={firstPage} disabledReason="Already on the first page." onClick={onRestart}>First page</Button>
+        <Button size="sm" disabled={!hasNextPage} disabledReason="The current result has no next page." onClick={() => onNext(result.page.next)}>Next page</Button>
       </div>
     </footer>
   )
