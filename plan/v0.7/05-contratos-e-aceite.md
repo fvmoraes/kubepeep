@@ -2,6 +2,13 @@
 
 Estas decisões resolvem os conflitos da [avaliação](04-avaliacao-do-plano.md). Complementam as fases e a matriz; as referências originais permanecem preservadas. São especificação aprovada para execução, não evidência de implementação.
 
+> **Decisão de sequenciamento — 2026-09-12:** a F0 foi encerrada por decisão
+> explícita do usuário com a correção funcional, instrumentação e baseline já
+> evidenciadas. A execução Wails nativa de R01, a medição UX real de D03 e o
+> cenário Kind real de 200 namespaces de D05/C02 foram transferidos para
+> F1-11–F1-13. O aceite técnico e os limites abaixo não foram reduzidos; mudou
+> apenas a fase responsável pela evidência complementar.
+
 ## C01 — Paginação e ordenação
 
 `GlobalNative` descreve o alcance autorizado da chamada LIST, não uma garantia de ordenação global. Preservar `meta.page.filterScope=page` nas consultas que ordenam apenas a janela coletada. Usar `collection` somente quando filtro e ordenação abrangem comprovadamente toda a coleção correspondente à consulta.

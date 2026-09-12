@@ -8,7 +8,7 @@ Os [contratos C01–C06](05-contratos-e-aceite.md) definem as pré-condições e
 
 | ID | Entrega | Fase | Aceite |
 | --- | --- | --- | --- |
-| R01 | Corrigir o bug de visualizar dados de Pods: a tela fica sem nada | F0 | Pods exibe dados em web e desktop, com contextos/scopes/permissões variados; causa raiz identificada na cadeia query → transporte → handler → autorização → render; regressão E2E cobre o cenário |
+| R01 | Corrigir o bug de visualizar dados de Pods: a tela fica sem nada | F0 (correção) + F1 (validação Wails nativa) | Pods exibe dados em web e desktop, com contextos/scopes/permissões variados; causa raiz identificada na cadeia query → transporte → handler → autorização → render; regressão E2E web/bridge fecha F0 e Wails nativo complementa em F1-11 |
 | R02 | Revisão total dos cliques da interface: nenhum clique morto | F0 (varredura) + F4 (fechamento) | inventário item a item (sidebar, abas horizontais, ações, links de detalhe, filtros, colunas, paleta, confirmações); cada clique executa sua função ou está explicitamente desabilitado com motivo; regressão E2E por família |
 | R03 | Scope default obrigatório por contexto (regra do projeto) | F4 | um dos scopes cadastrados de cada contexto é marcado como default; abrir o KubePeep e selecionar/alternar contexto carrega esse scope **obrigatoriamente** como universo ativo; sem default definido, a UI conduz à marcação; nunca amplia RBAC nem exige `list/get namespaces` |
 
@@ -18,9 +18,9 @@ Os [contratos C01–C06](05-contratos-e-aceite.md) definem as pré-condições e
 | --- | --- | --- | --- |
 | D01 | Instrumentação de leitura completa (requests/duração/itens, estratégia global×fanout, cursor store, watch, cache, 429/throttle) | F0 + F2 | F0: leitura/caches existentes e contrato de telemetria; F2: métricas reais do novo resource cache; documentadas e consultáveis (C04) |
 | D02 | Laboratório de benchmark Kind + `docs/performance-baseline.md` | F0 | matriz de cenários executa por script; baseline registrado antes das mudanças |
-| D03 | Budgets de performance por tamanho de cluster + métricas de UX (time_to_first_row etc.) | F0 | budgets definidos e medidos conforme metas do contrato |
+| D03 | Budgets de performance por tamanho de cluster + métricas de UX (time_to_first_row etc.) | F0 (instrumentação/budgets) + F1 (medição real) | budgets e métricas definidos/testados na F0; browser/desktop real medido em F1-12 conforme metas do contrato |
 | D04 | Traces OTel (list/merge/cursor/watch/cache) sem atributos sensíveis | F0 + F2 | F0: spans dos componentes existentes e contrato do resource cache; F2: integração real do novo cache; sem atributos sensíveis (C04) |
-| D05 | Cursor opaco server-side sem DTOs no transporte: revisão completa do ciclo | F0 | TTL, LRU, budget, generation binding, expiração e 410 testados; cenários globais/restritos/sintéticos de C02 separados; cursor pesado não falha nos cenários suportados e limites legítimos permanecem |
+| D05 | Cursor opaco server-side sem DTOs no transporte: revisão completa do ciclo | F0 (ciclo/testes) + F1 (Kind real C02) | TTL, LRU, budget, generation binding, expiração e 410 testados na F0; cenários sintéticos separados; cenário Kind real de 200 namespaces executado em F1-13 sem remover limites legítimos |
 | D06 | Paginação sequencial elegível, merge limitado e ordem de snapshot completo | F1 + F2 | F1: caminhos antecipados apenas com sequência monotônica; heap preserva `filterScope=page`. F2: ordem de coleção com snapshot completo autorizado e limitado; casos extremos/empates testados (C01) |
 | D07 | Over-fetch ratio mensurado, meta ≤ ~3× nos cenários-alvo | F0/F1 | ratio por cenário no baseline e no comparativo |
 | D08 | Coalescing de consultas idênticas (singleflight) | F1 | refresh/navegação rápida não dispara consultas duplicadas |

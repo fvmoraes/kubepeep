@@ -18,6 +18,9 @@ Contratos transversais de execução e aceite: [C01–C06](05-contratos-e-aceite
 - [ ] **F1-08 — Pushdown de selectors.** Matriz por recurso de suporte a `labelSelector`/`fieldSelector`; aplicar no servidor quando suportado, com fallback local documentado. Filtro aplicável no servidor não baixa tudo para filtrar localmente.
 - [ ] **F1-09 — Cache de autorização e discovery.** Reutilizar autorização por (generation, namespace, apiGroup, resource, subresource, verb, resourceName) com TTL curto e invalidação por generation e 403/revogação detectada (C03) — nunca compartilhada entre contextos/identidades. Discovery de API por contexto/generation, invalidada em troca de contexto/geração ou erro de recurso.
 - [ ] **F1-10 — 429 e pressão do API Server.** Respeitar `Retry-After`, backoff exponencial + jitter, reduzir fan-out após 429 repetidos, cancelar retries quando a geração mudou. `AUTHORIZATION_UNAVAILABLE` continua distinto de `Forbidden` (sem retry agressivo; refresh manual e diagnóstico).
+- [ ] **F1-11 — Validação Wails nativa transferida da F0.** Executar o cenário de Pods dentro do runtime Wails/WebView real, com dados, vazio, parcial, forbidden e authorization unavailable; não substituir por `window.go` simulado. Registrar ambiente e resultado sem reabrir a F0.
+- [ ] **F1-12 — Medição UX real transferida da F0.** Coletar `time_to_first_row`, página completa, filtro/sort e linhas renderizadas em browser e/ou desktop real nos portes pequeno/médio/grande; confrontar os budgets de `docs/observability.md` e separar backend sintético de pintura/interação real.
+- [ ] **F1-13 — Cenário Kind real C02 transferido da F0.** Aplicar deliberadamente dataset controlado, provar 200 namespaces com LIST global autorizado e página 100, provar seleção restrita dentro do teto e rejeição acima de 100; medir over-fetch/cursor/memória e não confundir com stress sintético. Aplicação e limpeza exigem comando explícito.
 
 ## Cenários obrigatórios de aceite
 
@@ -30,5 +33,8 @@ Contratos transversais de execução e aceite: [C01–C06](05-contratos-e-aceite
 | digitar "deploy" na busca | 1–2 consultas backend, não uma por tecla |
 | 429 sustentado | backoff com jitter; fan-out reduzido; sem amplificação de carga |
 | RBAC misto + authorization unavailable | resultados autorizados + coverage honesto; sem degradar para vazio; SAR não repetido para a mesma capability na navegação |
+| Pods no runtime Wails nativo | dados/erros honestos no WebView real; transporte simulado continua apenas regressão complementar (F1-11) |
+| budgets UX em runtime real | amostras por porte comparadas aos budgets, com backend e pintura/interação separados (F1-12) |
+| Kind real com 200 namespaces | global autorizado, restrito dentro do teto e rejeição acima do teto comprovados separadamente (F1-13/C02) |
 
-**Saída:** página 1 sublinear nos caminhos elegíveis de C01; over-fetch ratio ≤ ~3× nos cenários-alvo do benchmark. **Rollback:** estratégias selecionáveis por configuração interna; `GlobalNative` permanece o caminho preferencial quando autorizado.
+**Saída:** página 1 sublinear nos caminhos elegíveis de C01; over-fetch ratio ≤ ~3× nos cenários-alvo do benchmark; validações transferidas F1-11–F1-13 registradas. **Rollback:** estratégias selecionáveis por configuração interna; `GlobalNative` permanece o caminho preferencial quando autorizado.
