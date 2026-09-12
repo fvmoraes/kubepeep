@@ -100,3 +100,8 @@ Thumbs.db
 .codebase-memory/
 # Optional installed agent dependencies; sources are recorded in skills-lock.json
 .agents/skills/
+
+# dwyt start
+*mcp.json
+*opencode.json
+# dwyt end
