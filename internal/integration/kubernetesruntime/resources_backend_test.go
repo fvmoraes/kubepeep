@@ -135,6 +135,56 @@ func TestResourceErrorMappingKeepsPublicClassification(t *testing.T) {
 	if err := mapResourceError(forbidden); !errors.As(err, &domain) || domain.Code != resources.CodeForbidden || domain.Message != "Access to this resource was denied." {
 		t.Fatalf("forbidden mapping: %#v", err)
 	}
+	rateLimited := apierrors.NewTooManyRequests("sensitive upstream detail", 3)
+	if err := mapResourceError(rateLimited); !errors.As(err, &domain) || domain.Code != resources.CodeRateLimited || domain.RetryAfter() != 3*time.Second {
+		t.Fatalf("rate limit mapping: %#v", err)
+	}
+}
+
+func TestCollectionRequestKeyIncludesSelectionQueryAndPageIdentity(t *testing.T) {
+	binding := namespaces.SelectionBinding{ClusterProfileID: 1, Context: "dev", Cluster: "cluster-a", ActiveScopeID: 7, Generation: "gen-1"}
+	resolution := namespaces.ScopeResolution{ScopeName: "payments", Namespaces: []string{"payments"}}
+	options := resources.ListOptions{Limit: 50, Search: "api", Sort: "identity", Order: resources.OrderAscending, LabelSelector: "app=api"}
+	cursor := &resources.CompositeCursor[resources.PodDTO]{Version: 1, Origins: []resources.OriginCursor[resources.PodDTO]{{Origin: resources.Origin{Namespace: "payments", Version: "v1", Resource: "pods"}}}}
+	base, err := collectionRequestKey(binding, resolution, resources.CollectionPods, options, cursor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	same, err := collectionRequestKey(binding, resolution, resources.CollectionPods, options, cursor)
+	if err != nil || same != base {
+		t.Fatalf("stable key = %q, err = %v", same, err)
+	}
+
+	changedBinding := binding
+	changedBinding.Context = "prod"
+	changedOptions := options
+	changedOptions.FieldSelector = "spec.nodeName=worker-1"
+	changedCursor := *cursor
+	changedCursor.Origins = append([]resources.OriginCursor[resources.PodDTO](nil), cursor.Origins...)
+	changedCursor.Origins[0].Continue = "next"
+	variants := []string{}
+	for _, candidate := range []struct {
+		binding    namespaces.SelectionBinding
+		resolution namespaces.ScopeResolution
+		options    resources.ListOptions
+		cursor     *resources.CompositeCursor[resources.PodDTO]
+	}{
+		{changedBinding, resolution, options, cursor},
+		{binding, namespaces.ScopeResolution{ScopeName: "ops", Namespaces: []string{"ops"}}, options, cursor},
+		{binding, resolution, changedOptions, cursor},
+		{binding, resolution, options, &changedCursor},
+	} {
+		key, keyErr := collectionRequestKey(candidate.binding, candidate.resolution, resources.CollectionPods, candidate.options, candidate.cursor)
+		if keyErr != nil {
+			t.Fatal(keyErr)
+		}
+		variants = append(variants, key)
+	}
+	for _, variant := range variants {
+		if variant == base {
+			t.Fatalf("distinct request shared key %q", base)
+		}
+	}
 }
 
 func TestWatchFanoutFallsBackToHTTPBeforeAuthorization(t *testing.T) {

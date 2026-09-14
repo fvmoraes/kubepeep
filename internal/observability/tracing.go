@@ -123,7 +123,8 @@ type SafeSpanAttributes struct {
 
 func safeSpanAttributes(values SafeSpanAttributes) []attribute.KeyValue {
 	attributes := make([]attribute.KeyValue, 0, 6)
-	if values.Strategy == "global" || values.Strategy == "fanout" {
+	switch values.Strategy {
+	case "global", "fanout", "global-native", "namespace-sequential", "lazy-merge":
 		attributes = append(attributes, attribute.String("strategy", values.Strategy))
 	}
 	for key, value := range map[string]int{

@@ -2,7 +2,10 @@ package kubernetesruntime
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -25,6 +28,9 @@ type ResourceBackendOptions struct {
 	// from Kubernetes versus items returned to the UI). A nil registry keeps
 	// collection uninstrumented; this is the default.
 	Metrics *observability.Registry
+	// ListFanout is an internal benchmark/rollback knob. Four remains the safe
+	// default; values above eight are clamped.
+	ListFanout int
 }
 
 // ResourceBackend is the Phase 6 application-facing adapter. It owns no
@@ -39,6 +45,9 @@ type ResourceBackend struct {
 
 	listWindowTimeout time.Duration
 	metrics           *observability.Registry
+	listFanout        int
+	listCoalescerOnce sync.Once
+	listCoalescer     *resources.RequestCoalescer
 
 	watchMu         sync.Mutex
 	watchManager    *resources.WatchManager
@@ -58,6 +67,7 @@ func NewResourceBackendWithOptions(runtime *Runtime, authorizer resources.Author
 		runtime: runtime, clients: runtimeResourceClientProvider{runtime: runtime}, authorizer: authorizer, redactor: redactor, now: time.Now,
 		listWindowTimeout: resources.NormalizeListWindowTimeout(options.ListWindowTimeout),
 		metrics:           options.Metrics,
+		listFanout:        resources.NormalizeFanout(options.ListFanout),
 		watchBindings:     make(map[string]namespaces.SelectionBinding),
 	}
 	backend.watchManager = resources.NewWatchManagerWithMetrics(&resourceWatchPort{backend: backend}, options.Metrics)
@@ -86,6 +96,7 @@ func (backend *ResourceBackend) Close() {
 	if manager != nil {
 		manager.Close()
 	}
+	backend.requestCoalescer().Close()
 }
 
 func resourceSelection(binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution) resources.Selection {
@@ -118,11 +129,45 @@ func collectFilteredResource[T resources.ListItem](
 	if err != nil {
 		return resources.ListResult[T]{}, err
 	}
-	result, err := collectResource(ctx, backend, binding, resolution, collection, normalized, cursor, less, list)
-	if err == nil {
-		result.Items = filterSort(result.Items, normalized)
+	key, err := collectionRequestKey(binding, resolution, collection, normalized, cursor)
+	if err != nil {
+		return resources.ListResult[T]{}, err
+	}
+	value, err := backend.requestCoalescer().Do(ctx, key, func(shared context.Context) (any, error) {
+		result, collectErr := collectResource(shared, backend, binding, resolution, collection, normalized, cursor, less, list)
+		if collectErr == nil {
+			result.Items = filterSort(result.Items, normalized)
+		}
+		return result, collectErr
+	})
+	result, ok := value.(resources.ListResult[T])
+	if err == nil && !ok {
+		return resources.ListResult[T]{}, resourceDomain(resources.CodeClusterUnavailable, "The resource request could not be completed.", nil)
 	}
 	return result, err
+}
+
+func (backend *ResourceBackend) requestCoalescer() *resources.RequestCoalescer {
+	backend.listCoalescerOnce.Do(func() {
+		backend.listCoalescer = resources.NewRequestCoalescer()
+	})
+	return backend.listCoalescer
+}
+
+func collectionRequestKey[T resources.ListItem](binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, collection resources.Collection, options resources.ListOptions, cursor *resources.CompositeCursor[T]) (string, error) {
+	material := struct {
+		Binding    namespaces.SelectionBinding
+		Resolution namespaces.ScopeResolution
+		Collection resources.Collection
+		Options    resources.ListOptions
+		Cursor     *resources.CompositeCursor[T]
+	}{binding, resolution, collection, options, cursor}
+	encoded, err := json.Marshal(material)
+	if err != nil {
+		return "", fmt.Errorf("encode collection request identity: %w", err)
+	}
+	digest := sha256.Sum256(encoded)
+	return fmt.Sprintf("%x", digest), nil
 }
 
 func collectResource[T resources.ListItem](
@@ -158,6 +203,8 @@ func collectResource[T resources.ListItem](
 				Lister: countingLister(list, &received), Authorizer: backend.authorizer, Less: less,
 				Timeout:             backend.listWindowTimeout,
 				RequestedNamespaces: len(resolution.Namespaces),
+				Fanout:              backend.listFanout,
+				NativeIdentityOrder: true,
 			})
 			observeListDuration(backend.metrics, collection, "global", started)
 			if collectErr == nil {
@@ -193,6 +240,8 @@ func collectResource[T resources.ListItem](
 		Lister: countingLister(list, &received), Authorizer: backend.authorizer, Less: less,
 		Timeout:             backend.listWindowTimeout,
 		RequestedNamespaces: len(names),
+		Fanout:              backend.listFanout,
+		NativeIdentityOrder: true,
 	})
 	observeListDuration(backend.metrics, collection, "fanout", started)
 	if collectErr == nil {
@@ -293,6 +342,28 @@ func clusterCollect[T resources.ListItem](ctx context.Context, backend *Resource
 	if err != nil {
 		return resources.ListResult[T]{}, err
 	}
+	key, err := collectionRequestKey(binding, resolution, collection, normalized, cursor)
+	if err != nil {
+		return resources.ListResult[T]{}, err
+	}
+	value, err := backend.requestCoalescer().Do(ctx, key, func(shared context.Context) (any, error) {
+		return clusterCollectUncoalesced(shared, backend, binding, resolution, collection, normalized, cursor, less, list, filterSort)
+	})
+	if err != nil {
+		return resources.ListResult[T]{}, err
+	}
+	result, ok := value.(resources.ListResult[T])
+	if !ok {
+		return resources.ListResult[T]{}, resourceDomain(resources.CodeClusterUnavailable, "The resource request could not be completed.", nil)
+	}
+	return result, nil
+}
+
+func clusterCollectUncoalesced[T resources.ListItem](ctx context.Context, backend *ResourceBackend, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, collection resources.Collection, options resources.ListOptions, cursor *resources.CompositeCursor[T], less func(T, T) bool, list originListerFunc[T], filterSort func([]T, resources.ListOptions) []T) (resources.ListResult[T], error) {
+	normalized, err := resources.NormalizeListOptions(collection, options)
+	if err != nil {
+		return resources.ListResult[T]{}, err
+	}
 	origin, err := resources.ClusterOriginFor(collection)
 	if err != nil {
 		return resources.ListResult[T]{}, err
@@ -310,7 +381,9 @@ func clusterCollect[T resources.ListItem](ctx context.Context, backend *Resource
 	result, collectErr := resources.Collect(ctx, resources.CollectionRequest[T]{
 		Selection: selection, Options: normalized, Origins: []resources.Origin{origin}, Cursor: cursor,
 		Lister: countingLister(list, &received), Authorizer: backend.authorizer, Less: less,
-		Timeout: backend.listWindowTimeout,
+		Timeout:             backend.listWindowTimeout,
+		Fanout:              backend.listFanout,
+		NativeIdentityOrder: true,
 	})
 	observeListDuration(backend.metrics, collection, "global", started)
 	if collectErr != nil {

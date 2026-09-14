@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"sort"
-	"sync"
 	"time"
 
 	"github.com/fvmoraes/kubepeep/internal/observability"
@@ -56,13 +55,20 @@ type CollectionRequest[T ListItem] struct {
 	Less                func(T, T) bool
 	Timeout             time.Duration
 	RequestedNamespaces int
+	Fanout              int
+	Retry               RetryPolicy
+	// NativeIdentityOrder is set only by adapters whose LIST continuation is
+	// monotonic for the same namespace/name comparator used by Less.
+	NativeIdentityOrder bool
+	pressure            *apiPressure
 }
 
 type originOutcome[T ListItem] struct {
-	page       OriginPage[T]
-	capability authorization.Capability
-	err        error
-	queried    bool
+	page          OriginPage[T]
+	capability    authorization.Capability
+	err           error
+	queried       bool
+	authoritative bool
 }
 
 // Collect executes one bounded fan-out window. It performs authorization
@@ -84,10 +90,10 @@ func Collect[T ListItem](ctx context.Context, request CollectionRequest[T]) (_ L
 		return result, validationError("list options must be normalized before collection")
 	}
 	origins := canonicalOrigins(request.Origins)
-	strategy := "fanout"
+	pagination := selectPaginationStrategy(request, origins)
+	strategy := pagination.Name()
 	spanName := "resources.list.fanout"
 	if globalOrigins(origins) {
-		strategy = "global"
 		spanName = "resources.list.global"
 	}
 	ctx, end := observability.StartSpanWithAttributes(ctx, spanName, observability.SafeSpanAttributes{
@@ -95,7 +101,7 @@ func Collect[T ListItem](ctx context.Context, request CollectionRequest[T]) (_ L
 		NamespaceCount:  countNamespaces(origins),
 		PageSize:        request.Options.Limit,
 		OriginChunkSize: int(originChunkLimit(len(origins), request.Options.Limit)),
-		Fanout:          min(len(origins), MaximumFanout),
+		Fanout:          min(len(origins), NormalizeFanout(request.Fanout)),
 	})
 	defer func() { end(resultErr) }()
 	if len(origins) == 0 {
@@ -117,18 +123,56 @@ func Collect[T ListItem](ctx context.Context, request CollectionRequest[T]) (_ L
 	timeout := NormalizeListWindowTimeout(request.Timeout)
 	requestContext, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	pages := make([]OriginPage[T], 0, len(origins))
-	outcomes := collectOrigins(requestContext, request, cursor)
-	allowed := 0
-	known := 0
-	unknown := 0
-	authoritativeSuccesses := 0
+	if request.pressure == nil {
+		request.pressure = &apiPressure{}
+	}
+	page, paginationState, err := pagination.Next(requestContext, PaginationState[T]{Request: request, Cursor: cursor})
+	if err != nil {
+		return result, err
+	}
+	cursor = paginationState.Cursor
+	outcomes := page.outcomes
+	type aggregate struct {
+		origin        Origin
+		capability    authorization.Capability
+		authoritative bool
+		failure       *PartialErrorDTO
+	}
+	aggregates := make(map[string]*aggregate, len(outcomes))
 	var firstReadFailure *PartialErrorDTO
 	completedNamespaces := make(map[string]struct{})
 	deniedNamespaces := make(map[string]struct{})
 	for _, outcome := range outcomes {
-		namespace := outcome.page.Origin.Namespace
-		switch outcome.capability.Decision {
+		key := outcome.page.Origin.Key()
+		current := aggregates[key]
+		if current == nil {
+			current = &aggregate{origin: outcome.page.Origin}
+			aggregates[key] = current
+		}
+		current.capability = outcome.capability
+		if errors.Is(outcome.err, ErrResourceExpired) {
+			return result, domainError(CodeCursorExpired, "The Kubernetes list snapshot expired; start a new list.", ErrResourceExpired)
+		}
+		if outcome.err != nil && current.failure == nil {
+			code, message := classifyReadError(outcome.err)
+			current.failure = &PartialErrorDTO{Namespace: outcome.page.Origin.Namespace, Code: code, Message: message}
+		}
+		if outcome.err == nil && outcome.authoritative {
+			current.authoritative = true
+		}
+	}
+	allowed := 0
+	known := 0
+	unknown := 0
+	authoritativeSuccesses := 0
+	allowedOrigins := make(map[string]bool, len(aggregates))
+	for _, origin := range origins {
+		current := aggregates[origin.Key()]
+		if current == nil {
+			continue
+		}
+		namespace := current.origin.Namespace
+		switch current.capability.Decision {
 		case authorization.DecisionDenied:
 			known++
 			deniedNamespaces[namespace] = struct{}{}
@@ -141,25 +185,20 @@ func Collect[T ListItem](ctx context.Context, request CollectionRequest[T]) (_ L
 		case authorization.DecisionAllowed:
 			known++
 			allowed++
+			allowedOrigins[origin.Key()] = true
 		}
-		if errors.Is(outcome.err, ErrResourceExpired) {
-			return result, domainError(CodeCursorExpired, "The Kubernetes list snapshot expired; start a new list.", ErrResourceExpired)
-		}
-		if outcome.err != nil {
-			code, message := classifyReadError(outcome.err)
-			failure := PartialErrorDTO{Namespace: namespace, Code: code, Message: message}
+		if current.failure != nil {
+			failure := *current.failure
 			result.Coverage.Failed = append(result.Coverage.Failed, failure)
 			if firstReadFailure == nil {
 				copy := failure
 				firstReadFailure = &copy
 			}
-			continue
 		}
-		authoritativeSuccesses++
-		if outcome.queried {
-			pages = append(pages, outcome.page)
+		if current.authoritative {
+			authoritativeSuccesses++
+			completedNamespaces[namespace] = struct{}{}
 		}
-		completedNamespaces[namespace] = struct{}{}
 	}
 	if allowed == 0 {
 		if known > 0 && len(deniedNamespaces) > 0 && unknown == 0 {
@@ -182,7 +221,7 @@ func Collect[T ListItem](ctx context.Context, request CollectionRequest[T]) (_ L
 		result.Coverage.CompletedNamespaces = request.RequestedNamespaces
 	}
 	_, endMerge := observability.StartSpan(ctx, "resources.merge")
-	items, next, err := MergeOriginPages(cursor, pages, request.Options.Limit, request.Less)
+	items, next, err := mergeAuthorizedOriginPages(cursor, nil, request.Options.Limit, request.Less, allowedOrigins)
 	endMerge(err)
 	if err != nil {
 		return result, err
@@ -196,51 +235,6 @@ func Collect[T ListItem](ctx context.Context, request CollectionRequest[T]) (_ L
 	result.Page.Truncated = !next.Complete() || len(result.Coverage.Failed) > 0
 	result.CollectedAt = time.Now().UTC()
 	return result, nil
-}
-
-func collectOrigins[T ListItem](ctx context.Context, request CollectionRequest[T], cursor CompositeCursor[T]) []originOutcome[T] {
-	outcomes := make([]originOutcome[T], len(cursor.Origins))
-	semaphore := make(chan struct{}, MaximumFanout)
-	var wait sync.WaitGroup
-	for index := range cursor.Origins {
-		state := cursor.Origins[index]
-		outcomes[index].page.Origin = state.Origin
-		wait.Add(1)
-		go func(index int, state OriginCursor[T]) {
-			defer wait.Done()
-			key := authorization.Key{
-				Generation: request.Selection.Generation,
-				Namespace:  state.Origin.Namespace,
-				APIGroup:   state.Origin.APIGroup,
-				Resource:   state.Origin.Resource,
-				Verb:       "list",
-			}
-			capability := request.Authorizer.Check(ctx, key)
-			outcomes[index].capability = capability
-			if capability.Decision != authorization.DecisionAllowed {
-				return
-			}
-			if state.Exhausted || len(state.Buffered) > 0 {
-				return
-			}
-			select {
-			case semaphore <- struct{}{}:
-				defer func() { <-semaphore }()
-			case <-ctx.Done():
-				outcomes[index].err = ctx.Err()
-				return
-			}
-			page, err := request.Lister.ListPage(ctx, PageRequest{Origin: state.Origin, Limit: originChunkLimit(len(cursor.Origins), request.Options.Limit), Continue: state.Continue})
-			if page.Origin.Key() == "///" {
-				page.Origin = state.Origin
-			}
-			outcomes[index].page = page
-			outcomes[index].err = err
-			outcomes[index].queried = true
-		}(index, state)
-	}
-	wait.Wait()
-	return outcomes
 }
 
 // originChunkLimit bounds the per-origin page size for one collection window.

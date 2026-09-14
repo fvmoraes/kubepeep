@@ -11,7 +11,40 @@ const sortOptions = [
 afterEach(cleanup)
 
 describe('ResourceListControls', () => {
-  it('distinguishes applied filters from a pending search and exposes server ordering', () => {
+	it('keeps typing local until the explicit apply action', () => {
+		const onSearchChange = vi.fn()
+		const onApply = vi.fn()
+		render(<ResourceListControls
+			search=""
+			appliedSearch=""
+			onSearchChange={onSearchChange}
+			onApply={onApply}
+			onRefresh={vi.fn()}
+			onClear={vi.fn()}
+			sort="identity"
+			order="asc"
+			appliedSort="identity"
+			appliedOrder="asc"
+			defaultSort="identity"
+			defaultOrder="asc"
+			hasPendingChanges
+			sortOptions={sortOptions}
+			onSortChange={vi.fn()}
+			onOrderChange={vi.fn()}
+		/>)
+
+		const search = screen.getByLabelText('Search this bounded page')
+		for (const value of ['d', 'de', 'dep', 'depl', 'deplo', 'deploy']) {
+			fireEvent.change(search, { target: { value } })
+		}
+		expect(onSearchChange).toHaveBeenCalledTimes(6)
+		expect(onApply).not.toHaveBeenCalled()
+
+		fireEvent.click(screen.getByRole('button', { name: 'Apply filters' }))
+		expect(onApply).toHaveBeenCalledOnce()
+	})
+
+	it('distinguishes applied filters from a pending search and exposes server ordering', () => {
     const onApply = vi.fn()
     const onClear = vi.fn()
     const onSortChange = vi.fn()

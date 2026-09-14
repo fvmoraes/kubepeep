@@ -1,4 +1,4 @@
-import { Invoke, PlatformInfo, type InvokeResult } from '../wailsjs/go/desktop/Bridge'
+import { Cancel, Invoke, InvokeCancelable, PlatformInfo, type InvokeResult } from '../wailsjs/go/desktop/Bridge'
 
 declare global {
   interface Window {
@@ -7,6 +7,8 @@ declare global {
         Bridge?: {
           PlatformInfo(): Promise<DesktopPlatformInfo>
           Invoke(method: string, path: string, headers: Record<string, string>, body: string): Promise<InvokeResult>
+          InvokeCancelable(requestID: string, method: string, path: string, headers: Record<string, string>, body: string): Promise<InvokeResult>
+          Cancel(requestID: string): Promise<void>
         }
       }
     }
@@ -87,9 +89,19 @@ export class DesktopResponse {
 
 // desktopRequest runs the request through the Wails binding when the desktop
 // runtime is present, returning null so callers can fall back to fetch.
-export async function desktopRequest(method: string, path: string, headers: Record<string, string>, body?: string): Promise<DesktopResponse | null> {
+export async function desktopRequest(method: string, path: string, headers: Record<string, string>, body?: string, signal?: AbortSignal | null): Promise<DesktopResponse | null> {
   const info = await desktopPlatform()
   if (!info) return null
-  const result = await Invoke(method, path, headers, body ?? '')
-  return new DesktopResponse(result)
+  if (!signal) return new DesktopResponse(await Invoke(method, path, headers, body ?? ''))
+  if (signal.aborted) throw new DOMException('The operation was aborted.', 'AbortError')
+  const requestID = crypto.randomUUID()
+	const abort = () => { void Cancel(requestID).catch(() => undefined) }
+	signal.addEventListener('abort', abort, { once: true })
+	try {
+		const result = await InvokeCancelable(requestID, method, path, headers, body ?? '')
+		if (signal.aborted) throw new DOMException('The operation was aborted.', 'AbortError')
+		return new DesktopResponse(result)
+  } finally {
+    signal.removeEventListener('abort', abort)
+  }
 }

@@ -1,6 +1,7 @@
 package resources
 
 import (
+	"container/heap"
 	"sort"
 )
 
@@ -84,6 +85,10 @@ func (cursor CompositeCursor[T]) Validate(expected []Origin) error {
 // state containing the un-emitted DTOs and the native token for each source.
 // Callers must supply pages sorted by less using the same identity contract.
 func MergeOriginPages[T ListItem](current CompositeCursor[T], pages []OriginPage[T], limit int, less func(T, T) bool) ([]T, CompositeCursor[T], error) {
+	return mergeAuthorizedOriginPages(current, pages, limit, less, nil)
+}
+
+func mergeAuthorizedOriginPages[T ListItem](current CompositeCursor[T], pages []OriginPage[T], limit int, less func(T, T) bool, allowed map[string]bool) ([]T, CompositeCursor[T], error) {
 	if limit < 1 || limit > MaximumListLimit || less == nil {
 		return nil, CompositeCursor[T]{}, validationError("merge arguments are invalid")
 	}
@@ -109,23 +114,53 @@ func MergeOriginPages[T ListItem](current CompositeCursor[T], pages []OriginPage
 		next.Origins[index] = state
 	}
 	items := make([]T, 0, limit)
-	for len(items) < limit {
-		selected := -1
-		for index := range next.Origins {
-			if len(next.Origins[index].Buffered) == 0 {
-				continue
-			}
-			if selected < 0 || less(next.Origins[index].Buffered[0], next.Origins[selected].Buffered[0]) {
-				selected = index
-			}
+	candidates := &originMergeHeap[T]{cursor: &next, less: less}
+	for index := range next.Origins {
+		if len(next.Origins[index].Buffered) == 0 || allowed != nil && !allowed[next.Origins[index].Origin.Key()] {
+			continue
 		}
-		if selected < 0 {
-			break
-		}
+		heap.Push(candidates, index)
+	}
+	for len(items) < limit && candidates.Len() > 0 {
+		selected := heap.Pop(candidates).(int)
 		items = append(items, next.Origins[selected].Buffered[0])
+		var zero T
+		next.Origins[selected].Buffered[0] = zero
 		next.Origins[selected].Buffered = next.Origins[selected].Buffered[1:]
+		if len(next.Origins[selected].Buffered) > 0 {
+			heap.Push(candidates, selected)
+		}
 	}
 	return items, next, nil
+}
+
+type originMergeHeap[T ListItem] struct {
+	cursor  *CompositeCursor[T]
+	less    func(T, T) bool
+	origins []int
+}
+
+func (value originMergeHeap[T]) Len() int { return len(value.origins) }
+func (value originMergeHeap[T]) Less(left, right int) bool {
+	l, r := value.origins[left], value.origins[right]
+	lItem, rItem := value.cursor.Origins[l].Buffered[0], value.cursor.Origins[r].Buffered[0]
+	if value.less(lItem, rItem) {
+		return true
+	}
+	if value.less(rItem, lItem) {
+		return false
+	}
+	return l < r
+}
+func (value originMergeHeap[T]) Swap(left, right int) {
+	value.origins[left], value.origins[right] = value.origins[right], value.origins[left]
+}
+func (value *originMergeHeap[T]) Push(item any) { value.origins = append(value.origins, item.(int)) }
+func (value *originMergeHeap[T]) Pop() any {
+	last := len(value.origins) - 1
+	item := value.origins[last]
+	value.origins = value.origins[:last]
+	return item
 }
 
 func (cursor CompositeCursor[T]) Complete() bool {

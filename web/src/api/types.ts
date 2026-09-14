@@ -387,6 +387,8 @@ export interface ResourceListQuery extends PageQuery {
   objectKind?: string
   reason?: string
   addressType?: string
+  labelSelector?: string
+  fieldSelector?: string
 }
 
 export interface ResourceMetadata {

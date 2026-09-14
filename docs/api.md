@@ -144,6 +144,8 @@ Se o cliente fechar a conexão, pode não existir resposta. O servidor registra 
 | `status` | todos | enum por recurso |
 | `sort` | chave estável do endpoint | allowlist |
 | `order` | `asc` | `asc` ou `desc` |
+| `labelSelector` | vazio | listas de recursos da §5.4; sintaxe Kubernetes; até 1 KiB |
+| `fieldSelector` | vazio | listas de recursos da §5.4; campos allowlisted; até 1 KiB |
 
 Parâmetros são case-sensitive, URL-decoded uma vez e únicos, exceto
 `namespace`, `status` e `kind` quando a tabela abaixo os declara repetíveis.
@@ -256,14 +258,43 @@ e a tupla final emitida; a página seguinte nunca reconstrói um snapshot global
 nem mistura geração/resourceVersion incompatível. `410 ResourceExpired`
 descarta a página inteira e retorna 410 para recomeço, sem combinar dados.
 
-Em fan-out multi-origem, cada janela de coleta busca chunks pequenos por
-origem (default 10 itens, `MaxOriginChunkSize` 50) em vez de `limit` itens por
-namespace; a origem única de um LIST global ou coleção cluster-scoped mantém o
-`limit` integral. O resto da janela permanece no estado server-side do cursor
-e é consumido pelas páginas seguintes, o que reduz o over-fetch
+O backend escolhe a estratégia sem expô-la no contrato da UI. Uma origem usa
+`GlobalNative` e preserva o continuation nativo. Ordenação `identity asc` usa
+`NamespaceSequential` somente quando o adapter declara a sequência nativa
+namespace/nome monotônica; ele para assim que completa a página. Os demais
+sorts usam `LazyMerge`: chunks de aproximadamente 10 itens, heap e janela
+limitada, mantendo `filterScope=page` sem prometer ordenação global. O worker
+pool tem default 4 e teto interno 8. O resto da janela permanece no cursor
+server-side e é consumido pelas páginas seguintes, o que reduz o over-fetch
 (itens recebidos ÷ itens devolvidos, mensurável via
 `kubepeep_resource_list_items_received_total` ÷
 `kubepeep_resource_list_items_returned_total` em `/metrics`).
+
+Consultas simultâneas idênticas são coalescidas pela identidade completa
+(generation, contexto, scope resolvido, coleção/GVR, filtros, sort e cursor).
+O resultado concluído não vira cache. Cada consumidor mantém seu próprio
+cancelamento; quando o último sai, o trabalho Kubernetes compartilhado é
+cancelado. Em 429, somente LIST é repetido, no máximo três tentativas, honrando
+`Retry-After`, backoff exponencial com jitter e teto de 5 s; 429 repetido reduz
+o fan-out da janela pela metade.
+
+### 5.4 Selectors enviados ao API Server
+
+`labelSelector` e `fieldSelector` aceitam no máximo 1 KiB, são validados e
+normalizados antes de compor cursor/coalescing. `labelSelector` é enviado em
+todas as coleções. O allowlist conservador de `fieldSelector` é:
+
+| Coleção | Campos aceitos |
+| --- | --- |
+| todas | `metadata.name`; `metadata.namespace` apenas em recursos namespaced |
+| Pods | campos comuns + `spec.nodeName`, `status.phase` |
+| Events | campos comuns + `involvedObject.kind`, `involvedObject.name`, `involvedObject.namespace`, `involvedObject.uid`, `reason`, `reportingComponent`, `source`, `type` |
+
+Os filtros de produto `node` em Pods e `objectKind`/`reason` em Events geram
+field selectors equivalentes e continuam verificados localmente. Filtros sem
+semântica nativa equivalente (`search`, workload, restarts, problematic e
+sorts arbitrários) continuam limitados à página. Um `fieldSelector` explícito
+fora da matriz retorna validação 400; ele nunca é silenciosamente ignorado.
 
 Em `SavedFilterSet.query`, somente `namespace`, `search`, `status`, `sort`,
 `order` e os extras da linha correspondente podem ser salvos; `namespace`,

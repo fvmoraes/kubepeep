@@ -46,7 +46,8 @@ method, route, status, resource, strategy, traffic
 
 - `route`: padrão estático do `http.ServeMux`, ou `unmatched`;
 - `resource`: coleção canônica do produto, nunca nome/GVR fornecido pelo usuário;
-- `strategy`: somente `global` ou `fanout` nos pontos de LIST;
+- `strategy`: nas métricas de LIST, somente `global` ou `fanout`; spans também
+  aceitam `global-native`, `namespace-sequential` e `lazy-merge`;
 - `traffic`: somente `unary` ou `streaming` no client-go;
 - `status`: status HTTP decimal ou `transport_error`.
 
@@ -155,8 +156,10 @@ watch.connect | watch.reconnect
 cache.authorization | cache.clients
 ```
 
-Atributos aceitos são somente `strategy` (`global|fanout`) e inteiros positivos
-`namespace_count`, `page_size`, `origin_chunk_size`, `fanout`, `items_count`.
+Atributos aceitos são somente `strategy`
+(`global|fanout|global-native|namespace-sequential|lazy-merge`) e inteiros
+positivos `namespace_count`, `page_size`, `origin_chunk_size`, `fanout`,
+`items_count`.
 Caches podem acrescentar apenas `cache.outcome` em
 `hit|miss|coalesced|refresh`; a chave/valor do cache nunca é exportada. Erros
 marcam status genérico `operation failed`, sem copiar mensagem upstream.

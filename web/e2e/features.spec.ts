@@ -345,16 +345,28 @@ for (const transport of ['web', 'desktop-bridge'] as const) {
     const errors: string[] = []
     page.on('pageerror', (error) => errors.push(error.message))
     if (transport === 'desktop-bridge') {
-      // Exercises the frontend Wails transport; native runtime is a separate gate.
-      await page.addInitScript(() => {
-        Object.assign(window, { go: { desktop: { Bridge: {
-          PlatformInfo: async () => ({ mode: 'desktop', streamBase: location.origin, version: 'test', commit: 'test', buildDate: 'test' }),
-          Invoke: async (method: string, path: string, headers: Record<string, string>, body: string) => {
-            const response = await fetch(path, { method, headers, body: body || undefined })
-            return { status: response.status, headers: { 'Content-Type': [response.headers.get('Content-Type') ?? 'application/json'] }, body: await response.text() }
-          },
-        } } } })
-      })
+		// Exercises the frontend Wails transport; native runtime is a separate gate.
+		await page.addInitScript(() => {
+			const requests = new Map<string, AbortController>()
+			const invoke = async (method: string, path: string, headers: Record<string, string>, body: string, signal?: AbortSignal) => {
+				const response = await fetch(path, { method, headers, body: body || undefined, signal })
+				return { status: response.status, headers: { 'Content-Type': [response.headers.get('Content-Type') ?? 'application/json'] }, body: await response.text() }
+			}
+			Object.assign(window, { go: { desktop: { Bridge: {
+				PlatformInfo: async () => ({ mode: 'desktop', streamBase: location.origin, version: 'test', commit: 'test', buildDate: 'test' }),
+				Invoke: invoke,
+				InvokeCancelable: async (requestID: string, method: string, path: string, headers: Record<string, string>, body: string) => {
+					const controller = new AbortController()
+					requests.set(requestID, controller)
+					try {
+						return await invoke(method, path, headers, body, controller.signal)
+					} finally {
+						requests.delete(requestID)
+					}
+				},
+				Cancel: async (requestID: string) => { requests.get(requestID)?.abort() },
+			} } } })
+		})
     }
     await page.route('**/api/v1/pods/payments/api-abc', async (route) => {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: {

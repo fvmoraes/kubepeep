@@ -24,6 +24,15 @@ import (
 	"github.com/fvmoraes/kubepeep/internal/services/resources"
 )
 
+func listOptionsForPage(page resources.PageRequest) metav1.ListOptions {
+	return metav1.ListOptions{
+		Limit:         page.Limit,
+		Continue:      page.Continue,
+		LabelSelector: page.LabelSelector,
+		FieldSelector: page.FieldSelector,
+	}
+}
+
 type resourceClientSet struct {
 	kubernetes       kubeclient.Interface
 	streaming        kubeclient.Interface
@@ -76,7 +85,7 @@ func (backend *ResourceBackend) listWorkloadPage(ctx context.Context, binding na
 		return result, err
 	}
 	defer cancel()
-	options := metav1.ListOptions{Limit: page.Limit, Continue: page.Continue}
+	options := listOptionsForPage(page)
 	now := backend.now().UTC()
 	switch page.Origin.Resource {
 	case "deployments":
@@ -148,7 +157,7 @@ func (backend *ResourceBackend) listPodPage(ctx context.Context, binding namespa
 		return result, err
 	}
 	defer cancel()
-	list, err := clients.kubernetes.CoreV1().Pods(page.Origin.Namespace).List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	list, err := clients.kubernetes.CoreV1().Pods(page.Origin.Namespace).List(requestContext, listOptionsForPage(page))
 	if err != nil {
 		return result, mapResourceError(err)
 	}
@@ -167,7 +176,7 @@ func (backend *ResourceBackend) listEventPage(ctx context.Context, binding names
 		return result, err
 	}
 	defer cancel()
-	list, err := clients.kubernetes.CoreV1().Events(page.Origin.Namespace).List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	list, err := clients.kubernetes.CoreV1().Events(page.Origin.Namespace).List(requestContext, listOptionsForPage(page))
 	if err != nil {
 		return result, mapResourceError(err)
 	}
@@ -185,7 +194,7 @@ func (backend *ResourceBackend) listServicePage(ctx context.Context, binding nam
 		return result, err
 	}
 	defer cancel()
-	list, err := clients.kubernetes.CoreV1().Services(page.Origin.Namespace).List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	list, err := clients.kubernetes.CoreV1().Services(page.Origin.Namespace).List(requestContext, listOptionsForPage(page))
 	if err != nil {
 		return result, mapResourceError(err)
 	}
@@ -202,7 +211,7 @@ func (backend *ResourceBackend) listIngressPage(ctx context.Context, binding nam
 		return result, err
 	}
 	defer cancel()
-	list, err := clients.kubernetes.NetworkingV1().Ingresses(page.Origin.Namespace).List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	list, err := clients.kubernetes.NetworkingV1().Ingresses(page.Origin.Namespace).List(requestContext, listOptionsForPage(page))
 	if err != nil {
 		return result, mapResourceError(err)
 	}
@@ -223,7 +232,7 @@ func (backend *ResourceBackend) listNodePage(ctx context.Context, binding namesp
 		return result, err
 	}
 	defer cancel()
-	list, err := clients.kubernetes.CoreV1().Nodes().List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	list, err := clients.kubernetes.CoreV1().Nodes().List(requestContext, listOptionsForPage(page))
 	if err != nil {
 		return result, mapResourceError(err)
 	}
@@ -242,7 +251,7 @@ func (backend *ResourceBackend) listLeasePage(ctx context.Context, binding names
 		return result, err
 	}
 	defer cancel()
-	list, err := clients.kubernetes.CoordinationV1().Leases(page.Origin.Namespace).List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	list, err := clients.kubernetes.CoordinationV1().Leases(page.Origin.Namespace).List(requestContext, listOptionsForPage(page))
 	if err != nil {
 		return result, mapResourceError(err)
 	}
@@ -261,7 +270,7 @@ func (backend *ResourceBackend) listRolePage(ctx context.Context, binding namesp
 		return result, err
 	}
 	defer cancel()
-	list, err := clients.kubernetes.RbacV1().Roles(page.Origin.Namespace).List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	list, err := clients.kubernetes.RbacV1().Roles(page.Origin.Namespace).List(requestContext, listOptionsForPage(page))
 	if err != nil {
 		return result, mapResourceError(err)
 	}
@@ -280,7 +289,7 @@ func (backend *ResourceBackend) listRoleBindingPage(ctx context.Context, binding
 		return result, err
 	}
 	defer cancel()
-	list, err := clients.kubernetes.RbacV1().RoleBindings(page.Origin.Namespace).List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	list, err := clients.kubernetes.RbacV1().RoleBindings(page.Origin.Namespace).List(requestContext, listOptionsForPage(page))
 	if err != nil {
 		return result, mapResourceError(err)
 	}
@@ -299,7 +308,7 @@ func (backend *ResourceBackend) listNetworkPolicyPage(ctx context.Context, bindi
 		return result, err
 	}
 	defer cancel()
-	list, err := clients.kubernetes.NetworkingV1().NetworkPolicies(page.Origin.Namespace).List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	list, err := clients.kubernetes.NetworkingV1().NetworkPolicies(page.Origin.Namespace).List(requestContext, listOptionsForPage(page))
 	if err != nil {
 		return result, mapResourceError(err)
 	}
@@ -318,7 +327,7 @@ func (backend *ResourceBackend) listEndpointsPage(ctx context.Context, binding n
 		return result, err
 	}
 	defer cancel()
-	list, err := clients.kubernetes.CoreV1().Endpoints(page.Origin.Namespace).List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	list, err := clients.kubernetes.CoreV1().Endpoints(page.Origin.Namespace).List(requestContext, listOptionsForPage(page))
 	if err != nil {
 		return result, mapResourceError(err)
 	}
@@ -337,7 +346,7 @@ func (backend *ResourceBackend) listClusterRolePage(ctx context.Context, binding
 		return result, err
 	}
 	defer cancel()
-	list, err := clients.kubernetes.RbacV1().ClusterRoles().List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	list, err := clients.kubernetes.RbacV1().ClusterRoles().List(requestContext, listOptionsForPage(page))
 	if err != nil {
 		return result, mapResourceError(err)
 	}
@@ -356,7 +365,7 @@ func (backend *ResourceBackend) listClusterRoleBindingPage(ctx context.Context, 
 		return result, err
 	}
 	defer cancel()
-	list, err := clients.kubernetes.RbacV1().ClusterRoleBindings().List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	list, err := clients.kubernetes.RbacV1().ClusterRoleBindings().List(requestContext, listOptionsForPage(page))
 	if err != nil {
 		return result, mapResourceError(err)
 	}
@@ -375,7 +384,7 @@ func (backend *ResourceBackend) listIngressClassPage(ctx context.Context, bindin
 		return result, err
 	}
 	defer cancel()
-	list, err := clients.kubernetes.NetworkingV1().IngressClasses().List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	list, err := clients.kubernetes.NetworkingV1().IngressClasses().List(requestContext, listOptionsForPage(page))
 	if err != nil {
 		return result, mapResourceError(err)
 	}
@@ -394,7 +403,7 @@ func (backend *ResourceBackend) listPriorityClassPage(ctx context.Context, bindi
 		return result, err
 	}
 	defer cancel()
-	list, err := clients.kubernetes.SchedulingV1().PriorityClasses().List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	list, err := clients.kubernetes.SchedulingV1().PriorityClasses().List(requestContext, listOptionsForPage(page))
 	if err != nil {
 		return result, mapResourceError(err)
 	}
@@ -413,7 +422,7 @@ func (backend *ResourceBackend) listRuntimeClassPage(ctx context.Context, bindin
 		return result, err
 	}
 	defer cancel()
-	list, err := clients.kubernetes.NodeV1().RuntimeClasses().List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	list, err := clients.kubernetes.NodeV1().RuntimeClasses().List(requestContext, listOptionsForPage(page))
 	if err != nil {
 		return result, mapResourceError(err)
 	}
@@ -432,7 +441,7 @@ func (backend *ResourceBackend) listMutatingWebhookConfigurationPage(ctx context
 		return result, err
 	}
 	defer cancel()
-	list, err := clients.kubernetes.AdmissionregistrationV1().MutatingWebhookConfigurations().List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	list, err := clients.kubernetes.AdmissionregistrationV1().MutatingWebhookConfigurations().List(requestContext, listOptionsForPage(page))
 	if err != nil {
 		return result, mapResourceError(err)
 	}
@@ -451,7 +460,7 @@ func (backend *ResourceBackend) listValidatingWebhookConfigurationPage(ctx conte
 		return result, err
 	}
 	defer cancel()
-	list, err := clients.kubernetes.AdmissionregistrationV1().ValidatingWebhookConfigurations().List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	list, err := clients.kubernetes.AdmissionregistrationV1().ValidatingWebhookConfigurations().List(requestContext, listOptionsForPage(page))
 	if err != nil {
 		return result, mapResourceError(err)
 	}
@@ -471,7 +480,7 @@ func (backend *ResourceBackend) listCRDPage(ctx context.Context, binding namespa
 	}
 	defer cancel()
 	gvr := schema.GroupVersionResource{Group: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions"}
-	list, listErr := clients.dynamic.Resource(gvr).List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	list, listErr := clients.dynamic.Resource(gvr).List(requestContext, listOptionsForPage(page))
 	if listErr != nil {
 		return result, mapResourceError(listErr)
 	}
@@ -495,7 +504,7 @@ func (backend *ResourceBackend) listServiceAccountPage(ctx context.Context, bind
 	}
 	defer cancel()
 	gvr := schema.GroupVersionResource{Version: "v1", Resource: "serviceaccounts"}
-	list, err := clients.metadata.Resource(gvr).Namespace(page.Origin.Namespace).List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	list, err := clients.metadata.Resource(gvr).Namespace(page.Origin.Namespace).List(requestContext, listOptionsForPage(page))
 	if err != nil {
 		return result, mapMetadataError(err, "ServiceAccount metadata is unavailable.")
 	}
@@ -515,7 +524,7 @@ func (backend *ResourceBackend) listResourceQuotaPage(ctx context.Context, bindi
 		return result, err
 	}
 	defer cancel()
-	list, err := clients.kubernetes.CoreV1().ResourceQuotas(page.Origin.Namespace).List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	list, err := clients.kubernetes.CoreV1().ResourceQuotas(page.Origin.Namespace).List(requestContext, listOptionsForPage(page))
 	if err != nil {
 		return result, mapResourceError(err)
 	}
@@ -533,7 +542,7 @@ func (backend *ResourceBackend) listLimitRangePage(ctx context.Context, binding 
 		return result, err
 	}
 	defer cancel()
-	list, err := clients.kubernetes.CoreV1().LimitRanges(page.Origin.Namespace).List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	list, err := clients.kubernetes.CoreV1().LimitRanges(page.Origin.Namespace).List(requestContext, listOptionsForPage(page))
 	if err != nil {
 		return result, mapResourceError(err)
 	}
@@ -551,7 +560,7 @@ func (backend *ResourceBackend) listHPAPage(ctx context.Context, binding namespa
 		return result, err
 	}
 	defer cancel()
-	list, err := clients.kubernetes.AutoscalingV2().HorizontalPodAutoscalers(page.Origin.Namespace).List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	list, err := clients.kubernetes.AutoscalingV2().HorizontalPodAutoscalers(page.Origin.Namespace).List(requestContext, listOptionsForPage(page))
 	if err != nil {
 		return result, mapHPAError(err)
 	}
@@ -570,7 +579,7 @@ func (backend *ResourceBackend) listPDBPage(ctx context.Context, binding namespa
 		return result, err
 	}
 	defer cancel()
-	list, err := clients.kubernetes.PolicyV1().PodDisruptionBudgets(page.Origin.Namespace).List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	list, err := clients.kubernetes.PolicyV1().PodDisruptionBudgets(page.Origin.Namespace).List(requestContext, listOptionsForPage(page))
 	if err != nil {
 		return result, mapResourceError(err)
 	}
@@ -749,7 +758,7 @@ func (backend *ResourceBackend) listPersistentVolumeClaimPage(ctx context.Contex
 		return result, err
 	}
 	defer cancel()
-	list, err := clients.kubernetes.CoreV1().PersistentVolumeClaims(page.Origin.Namespace).List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	list, err := clients.kubernetes.CoreV1().PersistentVolumeClaims(page.Origin.Namespace).List(requestContext, listOptionsForPage(page))
 	if err != nil {
 		return result, mapResourceError(err)
 	}
@@ -768,7 +777,7 @@ func (backend *ResourceBackend) listPersistentVolumePage(ctx context.Context, bi
 		return result, err
 	}
 	defer cancel()
-	list, err := clients.kubernetes.CoreV1().PersistentVolumes().List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	list, err := clients.kubernetes.CoreV1().PersistentVolumes().List(requestContext, listOptionsForPage(page))
 	if err != nil {
 		return result, mapResourceError(err)
 	}
@@ -787,7 +796,7 @@ func (backend *ResourceBackend) listStorageClassPage(ctx context.Context, bindin
 		return result, err
 	}
 	defer cancel()
-	list, err := clients.kubernetes.StorageV1().StorageClasses().List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	list, err := clients.kubernetes.StorageV1().StorageClasses().List(requestContext, listOptionsForPage(page))
 	if err != nil {
 		return result, mapResourceError(err)
 	}
@@ -806,7 +815,7 @@ func (backend *ResourceBackend) listCSIDriverPage(ctx context.Context, binding n
 		return result, err
 	}
 	defer cancel()
-	list, err := clients.kubernetes.StorageV1().CSIDrivers().List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	list, err := clients.kubernetes.StorageV1().CSIDrivers().List(requestContext, listOptionsForPage(page))
 	if err != nil {
 		return result, mapResourceError(err)
 	}
@@ -825,7 +834,7 @@ func (backend *ResourceBackend) listCSINodePage(ctx context.Context, binding nam
 		return result, err
 	}
 	defer cancel()
-	list, err := clients.kubernetes.StorageV1().CSINodes().List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	list, err := clients.kubernetes.StorageV1().CSINodes().List(requestContext, listOptionsForPage(page))
 	if err != nil {
 		return result, mapResourceError(err)
 	}
@@ -844,7 +853,7 @@ func (backend *ResourceBackend) listVolumeAttachmentPage(ctx context.Context, bi
 		return result, err
 	}
 	defer cancel()
-	list, err := clients.kubernetes.StorageV1().VolumeAttachments().List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	list, err := clients.kubernetes.StorageV1().VolumeAttachments().List(requestContext, listOptionsForPage(page))
 	if err != nil {
 		return result, mapResourceError(err)
 	}
@@ -1268,7 +1277,7 @@ func (backend *ResourceBackend) listEndpointSlicePage(ctx context.Context, bindi
 		return result, err
 	}
 	defer cancel()
-	list, err := clients.kubernetes.DiscoveryV1().EndpointSlices(page.Origin.Namespace).List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	list, err := clients.kubernetes.DiscoveryV1().EndpointSlices(page.Origin.Namespace).List(requestContext, listOptionsForPage(page))
 	if err != nil {
 		return result, mapOptionalResourceError(err)
 	}
@@ -1287,7 +1296,7 @@ func (backend *ResourceBackend) listConfigMapPage(ctx context.Context, binding n
 	}
 	defer cancel()
 	gvr := schema.GroupVersionResource{Version: "v1", Resource: "configmaps"}
-	list, err := clients.metadata.Resource(gvr).Namespace(page.Origin.Namespace).List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	list, err := clients.metadata.Resource(gvr).Namespace(page.Origin.Namespace).List(requestContext, listOptionsForPage(page))
 	if err != nil {
 		return result, mapMetadataError(err, "ConfigMap metadata is unavailable.")
 	}
@@ -1305,7 +1314,7 @@ func (backend *ResourceBackend) listSecretPage(ctx context.Context, binding name
 	}
 	defer cancel()
 	gvr := schema.GroupVersionResource{Version: "v1", Resource: "secrets"}
-	list, err := clients.metadata.Resource(gvr).Namespace(page.Origin.Namespace).List(requestContext, metav1.ListOptions{Limit: page.Limit, Continue: page.Continue})
+	list, err := clients.metadata.Resource(gvr).Namespace(page.Origin.Namespace).List(requestContext, listOptionsForPage(page))
 	if err != nil {
 		return result, mapMetadataError(err, "Secret metadata is unavailable.")
 	}
@@ -1772,6 +1781,10 @@ func mapResourceError(err error) error {
 	}
 	if apierrors.IsResourceExpired(err) || apierrors.IsGone(err) {
 		return resources.ErrResourceExpired
+	}
+	if apierrors.IsTooManyRequests(err) {
+		seconds, _ := apierrors.SuggestsClientDelay(err)
+		return resources.NewRateLimitedError(time.Duration(seconds)*time.Second, err)
 	}
 	if apierrors.IsNotFound(err) {
 		return resourceDomain(resources.CodeNotFound, "The Kubernetes resource was not found.", err)

@@ -31,9 +31,11 @@ func authorizationCapability(ctx context.Context, checker AuthorizationChecker, 
 }
 
 type PageRequest struct {
-	Origin   Origin
-	Limit    int64
-	Continue string
+	Origin        Origin
+	Limit         int64
+	Continue      string
+	LabelSelector string
+	FieldSelector string
 }
 
 // OriginLister is implemented by adapters using native Kubernetes LIST

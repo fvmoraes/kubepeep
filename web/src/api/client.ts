@@ -171,7 +171,7 @@ async function transport(path: string, init: RequestInit): Promise<ResponseLike>
       headers[name] = value
     }
   }
-  const desktop = await desktopRequest(method, path, headers, init.body ? String(init.body) : undefined)
+  const desktop = await desktopRequest(method, path, headers, init.body ? String(init.body) : undefined, init.signal)
   if (desktop) return desktop
   return fetch(path, {
     ...init,
@@ -254,6 +254,8 @@ function resourceQuery(options: ResourceListQuery = {}): string {
     ['objectKind', options.objectKind],
     ['reason', options.reason],
     ['addressType', options.addressType],
+    ['labelSelector', options.labelSelector],
+    ['fieldSelector', options.fieldSelector],
   ]
   for (const namespace of options.namespaces ?? []) entries.push(['namespace', namespace])
   for (const kind of options.kinds ?? []) entries.push(['kind', kind])

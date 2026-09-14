@@ -147,7 +147,18 @@ func TestResourceQueryGrammarIsClosedAndNormalized(t *testing.T) {
 		query      string
 		collection resourcecore.Collection
 		valid      bool
-	}{{"namespace=a&namespace=b&status=Running&status=Failed", resourcecore.CollectionPods, true}, {"kind=deployments&kind=jobs", resourcecore.CollectionWorkloads, true}, {"limit=01", resourcecore.CollectionPods, true}, {"search=", resourcecore.CollectionPods, false}, {"sort=name&sort=age", resourcecore.CollectionPods, false}, {"unknown=x", resourcecore.CollectionPods, false}, {"problematic=1", resourcecore.CollectionPods, false}, {"addressType=IPv4", resourcecore.CollectionServices, false}}
+	}{
+		{"namespace=a&namespace=b&status=Running&status=Failed", resourcecore.CollectionPods, true},
+		{"kind=deployments&kind=jobs", resourcecore.CollectionWorkloads, true},
+		{"limit=01", resourcecore.CollectionPods, true},
+		{"labelSelector=app%3Dapi&fieldSelector=spec.nodeName%3Dworker-1", resourcecore.CollectionPods, true},
+		{"fieldSelector=spec.nodeName%3Dworker-1", resourcecore.CollectionServices, false},
+		{"search=", resourcecore.CollectionPods, false},
+		{"sort=name&sort=age", resourcecore.CollectionPods, false},
+		{"unknown=x", resourcecore.CollectionPods, false},
+		{"problematic=1", resourcecore.CollectionPods, false},
+		{"addressType=IPv4", resourcecore.CollectionServices, false},
+	}
 	for _, test := range tests {
 		t.Run(test.query, func(t *testing.T) {
 			request := httptest.NewRequest(http.MethodGet, "/api/v1/resources?"+test.query, nil)

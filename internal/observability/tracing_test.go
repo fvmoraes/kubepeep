@@ -45,7 +45,7 @@ func TestTracingExportsRealSafeOTLPSpans(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, end := StartSpanWithAttributes(WithTracing(context.Background(), tracing), "resources.list", SafeSpanAttributes{Strategy: "fanout", NamespaceCount: 25, PageSize: 100, OriginChunkSize: 10, Fanout: 4})
+	ctx, end := StartSpanWithAttributes(WithTracing(context.Background(), tracing), "resources.list", SafeSpanAttributes{Strategy: "lazy-merge", NamespaceCount: 25, PageSize: 100, OriginChunkSize: 10, Fanout: 4})
 	_, endChild := StartSpan(ctx, "cursor.get")
 	endChild(errors.New("sensitive-pod secret-token"))
 	end(nil)
@@ -68,6 +68,15 @@ func TestTracingExportsRealSafeOTLPSpans(t *testing.T) {
 	}
 	if spans[0].Name != "cursor.get" || spans[1].Name != "resources.list" || string(spans[0].ParentSpanId) != string(spans[1].SpanId) {
 		t.Fatal("span names or parent relationship changed")
+	}
+	strategyFound := false
+	for _, attribute := range spans[1].Attributes {
+		if attribute.Key == "strategy" && attribute.Value.GetStringValue() == "lazy-merge" {
+			strategyFound = true
+		}
+	}
+	if !strategyFound {
+		t.Fatal("pagination strategy attribute was not exported")
 	}
 	for _, forbidden := range []string{"sensitive-pod", "secret-token", "private-name", "host.name", "process.command"} {
 		if strings.Contains(received.String(), forbidden) {

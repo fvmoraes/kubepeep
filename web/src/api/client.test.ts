@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { getContexts, getDashboardRestarts, getDashboardSummary, getPermissions, scanDashboardLogs, selectContext } from './client'
+import { getContexts, getDashboardRestarts, getDashboardSummary, getPermissions, getPods, scanDashboardLogs, selectContext } from './client'
 
 function json(data: unknown): Response {
   return new Response(JSON.stringify({ data }), { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8' } })
@@ -9,6 +9,16 @@ function json(data: unknown): Response {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('local API client security boundary', () => {
+	it('encodes normalized resource selectors without dropping cancellation', async () => {
+		const controller = new AbortController()
+		const fetch = vi.fn().mockResolvedValue(json([]))
+		vi.stubGlobal('fetch', fetch)
+
+		await getPods({ limit: 25, labelSelector: 'app=api', fieldSelector: 'spec.nodeName=worker-1' }, controller.signal)
+
+		expect(fetch).toHaveBeenCalledWith('/api/v1/pods?limit=25&labelSelector=app%3Dapi&fieldSelector=spec.nodeName%3Dworker-1', expect.objectContaining({ signal: controller.signal }))
+	})
+
   it('uses no-store, same-origin credentials, and forwards cancellation', async () => {
     const controller = new AbortController()
     const fetch = vi.fn().mockResolvedValue(json([]))

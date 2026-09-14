@@ -23,6 +23,7 @@ type DashboardBackend struct {
 	queryBudget   dashboard.QueryBudget
 	logBudget     dashboard.LogBudget
 	now           func() time.Time
+	discovery     *metricsDiscoveryCache
 
 	scanMu         sync.Mutex
 	scanSequence   uint64
@@ -42,6 +43,7 @@ func newDashboardBackend(clients dashboardClientProvider, authorizer authorizati
 	return &DashboardBackend{
 		clients: clients, authorization: authorizer,
 		queryBudget: queryBudget.Normalized(), logBudget: dashboard.DefaultLogBudget(), now: time.Now,
+		discovery:   newMetricsDiscoveryCache(defaultDiscoveryCacheTTL, time.Now),
 		scanCounter: dashboard.EmptyCounter(dashboard.CounterNotCollected),
 	}
 }
@@ -54,6 +56,7 @@ func (backend *DashboardBackend) OnGeneration(generation string) {
 	if backend == nil {
 		return
 	}
+	backend.discovery.InvalidateAll()
 	backend.scanMu.Lock()
 	defer backend.scanMu.Unlock()
 	if backend.scanCancel != nil {
@@ -168,7 +171,7 @@ func resolveLogTargetOwners(ctx context.Context, resolver dashboard.OwnerResolve
 }
 
 func (backend *DashboardBackend) service(binding namespaces.SelectionBinding) (*dashboard.DashboardService, *dashboardAdapter) {
-	adapter := &dashboardAdapter{clients: backend.clients, authorization: backend.authorization, binding: binding}
+	adapter := &dashboardAdapter{clients: backend.clients, authorization: backend.authorization, binding: binding, discovery: backend.discovery}
 	pods := dashboard.NewPodService(adapter, adapter, adapter, nil, backend.queryBudget)
 	return &dashboard.DashboardService{
 		Pods:      pods,

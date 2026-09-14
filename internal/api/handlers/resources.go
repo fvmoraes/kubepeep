@@ -924,7 +924,7 @@ func decodeResourceListQuery(r *http.Request, collection resourcecore.Collection
 	if err != nil {
 		return resourcecore.ListOptions{}, validationHTTPError("The resource query is invalid.", nil)
 	}
-	allowed := map[string]bool{"limit": true, "continue": true, "search": true, "namespace": true, "status": true, "sort": true, "order": true}
+	allowed := map[string]bool{"limit": true, "continue": true, "search": true, "namespace": true, "status": true, "sort": true, "order": true, "labelSelector": true, "fieldSelector": true}
 	switch collection {
 	case resourcecore.CollectionWorkloads:
 		allowed["kind"] = true
@@ -953,7 +953,7 @@ func decodeResourceListQuery(r *http.Request, collection resourcecore.Collection
 			}
 		}
 	}
-	options := resourcecore.ListOptions{Continue: first(values, "continue"), Search: first(values, "search"), Namespaces: values["namespace"], Statuses: values["status"], Sort: first(values, "sort"), Order: resourcecore.SortOrder(first(values, "order")), Workload: first(values, "workload"), Node: first(values, "node"), Restarts: resourcecore.RestartFilter(first(values, "restarts")), ObjectKind: first(values, "objectKind"), Reason: first(values, "reason"), AddressType: first(values, "addressType")}
+	options := resourcecore.ListOptions{Continue: first(values, "continue"), Search: first(values, "search"), Namespaces: values["namespace"], Statuses: values["status"], Sort: first(values, "sort"), Order: resourcecore.SortOrder(first(values, "order")), Workload: first(values, "workload"), Node: first(values, "node"), Restarts: resourcecore.RestartFilter(first(values, "restarts")), ObjectKind: first(values, "objectKind"), Reason: first(values, "reason"), AddressType: first(values, "addressType"), LabelSelector: first(values, "labelSelector"), FieldSelector: first(values, "fieldSelector")}
 	for _, kind := range values["kind"] {
 		options.Kinds = append(options.Kinds, resourcecore.WorkloadKind(kind))
 	}
@@ -1085,6 +1085,8 @@ func resourceHTTPError(err error) error {
 		return api.NewHTTPError(http.StatusConflict, api.CodeGenerationChanged, message, nil, err)
 	case resourcecore.CodeLimitExceeded:
 		return api.NewHTTPError(http.StatusTooManyRequests, api.CodeLimitExceeded, message, nil, err)
+	case resourcecore.CodeRateLimited:
+		return api.NewHTTPError(http.StatusTooManyRequests, api.CodeRateLimited, message, nil, err)
 	case resourcecore.CodePreferenceSensitive:
 		return api.NewHTTPError(http.StatusBadRequest, api.CodePreferenceSensitive, message, nil, err)
 	case resourcecore.CodeFeatureUnavailable:
