@@ -266,7 +266,17 @@ function resourceQuery(options: ResourceListQuery = {}): string {
 async function collectionRequest<T>(path: string, options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<T>> {
   const uxRequestId = beginListRequest({ interactionId: options.uxInteractionId })
   try {
-    const response = await requestEnvelope<T[]>(`${path}${resourceQuery(options)}`, { method: 'GET', signal })
+    let response: Envelope<T[]>
+    let snapshotRenewed = false
+    try {
+      response = await requestEnvelope<T[]>(`${path}${resourceQuery(options)}`, { method: 'GET', signal })
+    } catch (error) {
+      if (!options.continueToken || !(error instanceof APIError) || (error.status !== 410 && error.code !== 'CURSOR_EXPIRED') || signal?.aborted) throw error
+      // Kubernetes expired the paginated LIST checkpoint. Restart at the
+      // first page with the same filters instead of surfacing a fatal error.
+      response = await requestEnvelope<T[]>(`${path}${resourceQuery({ ...options, continueToken: undefined })}`, { method: 'GET', signal })
+      snapshotRenewed = true
+    }
     if (!Array.isArray(response.data)) {
       throw new APIError(502, { code: 'INVALID_RESPONSE', message: 'The resource collection returned an invalid response.' })
     }
@@ -287,6 +297,7 @@ async function collectionRequest<T>(path: string, options: ResourceListQuery = {
       coverage: response.meta?.coverage ?? null,
       generation: response.meta?.generation,
       collectedAt: response.meta?.collectedAt,
+      snapshotRenewed,
     }
   } catch (error) {
     cancelListRequest(uxRequestId)

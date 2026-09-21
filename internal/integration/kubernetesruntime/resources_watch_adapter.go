@@ -79,7 +79,10 @@ func (backend *ResourceBackend) Subscribe(ctx context.Context, binding namespace
 		return nil, resourceDomain(resources.CodeFeatureUnavailable, "Resource watches are unavailable.", nil)
 	}
 	selection := resourceSelection(binding, resolution)
-	return manager.Subscribe(ctx, resources.WatchKey{Generation: binding.Generation, Context: binding.Context, Scope: selection.Scope, Topic: topic, GVR: gvr, Namespace: namespace})
+	return manager.Subscribe(ctx, resources.WatchKey{
+		Generation: binding.Generation, Context: binding.Context, Scope: selection.Scope,
+		Topic: topic, GVR: gvr, Namespace: namespace, EffectiveOrigins: resolution.Namespaces,
+	})
 }
 
 func (port *resourceWatchPort) binding(generation string) (namespaces.SelectionBinding, error) {
@@ -121,11 +124,17 @@ func (port *resourceWatchPort) listWithClients(ctx context.Context, binding name
 		cronJobs, cronHistoryComplete = port.backend.cronJobHistory(ctx, binding, clients.kubernetes, key.Namespace)
 	}
 	continueToken := ""
+	restarted := false
 	for {
 		options := metav1.ListOptions{Limit: 500, Continue: continueToken}
 		if key.Topic == resources.TopicConfigMaps {
 			list, err := clients.metadata.Resource(key.GVR).Namespace(key.Namespace).List(ctx, options)
 			if err != nil {
+				if continueToken != "" && !restarted && (apierrors.IsResourceExpired(err) || apierrors.IsGone(err)) {
+					snapshot = resources.WatchSnapshot{Items: []resources.TopicObject{}}
+					continueToken, restarted = "", true
+					continue
+				}
 				return resources.WatchSnapshot{}, mapMetadataError(err, "ConfigMap metadata watches are unavailable.")
 			}
 			for index := range list.Items {
@@ -135,6 +144,11 @@ func (port *resourceWatchPort) listWithClients(ctx context.Context, binding name
 		} else {
 			list, err := clients.dynamic.Resource(key.GVR).Namespace(key.Namespace).List(ctx, options)
 			if err != nil {
+				if continueToken != "" && !restarted && (apierrors.IsResourceExpired(err) || apierrors.IsGone(err)) {
+					snapshot = resources.WatchSnapshot{Items: []resources.TopicObject{}}
+					continueToken, restarted = "", true
+					continue
+				}
 				return resources.WatchSnapshot{}, mapResourceError(err)
 			}
 			for index := range list.Items {
@@ -156,6 +170,18 @@ func (port *resourceWatchPort) listWithClients(ctx context.Context, binding name
 }
 
 func (port *resourceWatchPort) Watch(ctx context.Context, key resources.WatchKey, resourceVersion string, timeoutSeconds int64, bookmarks bool) (resources.WatchStream, error) {
+	return port.watchWithOptions(ctx, key, metav1.ListOptions{ResourceVersion: resourceVersion, TimeoutSeconds: &timeoutSeconds, AllowWatchBookmarks: bookmarks})
+}
+
+func (port *resourceWatchPort) WatchInitial(ctx context.Context, key resources.WatchKey, timeoutSeconds int64) (resources.WatchStream, error) {
+	enabled := true
+	return port.watchWithOptions(ctx, key, metav1.ListOptions{
+		ResourceVersion: "", ResourceVersionMatch: metav1.ResourceVersionMatchNotOlderThan,
+		TimeoutSeconds: &timeoutSeconds, AllowWatchBookmarks: true, SendInitialEvents: &enabled,
+	})
+}
+
+func (port *resourceWatchPort) watchWithOptions(ctx context.Context, key resources.WatchKey, options metav1.ListOptions) (resources.WatchStream, error) {
 	binding, err := port.binding(key.Generation)
 	if err != nil {
 		return nil, err
@@ -164,11 +190,10 @@ func (port *resourceWatchPort) Watch(ctx context.Context, key resources.WatchKey
 	if err != nil {
 		return nil, mapResourceError(err)
 	}
-	streamContext, err := lease.Generation.Stream(ctx, time.Duration(timeoutSeconds+30)*time.Second)
+	streamContext, err := lease.Generation.Stream(ctx, time.Duration(*options.TimeoutSeconds+30)*time.Second)
 	if err != nil {
 		return nil, mapResourceError(err)
 	}
-	options := metav1.ListOptions{ResourceVersion: resourceVersion, TimeoutSeconds: &timeoutSeconds, AllowWatchBookmarks: bookmarks}
 	var source kwatch.Interface
 	if key.Topic == resources.TopicConfigMaps {
 		client := lease.Clients.StreamingMetadata()
@@ -179,6 +204,9 @@ func (port *resourceWatchPort) Watch(ctx context.Context, key resources.WatchKey
 		source, err = client.Resource(key.GVR).Namespace(key.Namespace).Watch(streamContext.Context(), options)
 		if err != nil {
 			streamContext.Close()
+			if options.SendInitialEvents != nil && (apierrors.IsBadRequest(err) || apierrors.IsInvalid(err)) {
+				return nil, resources.ErrStreamingListsUnsupported
+			}
 			return nil, mapMetadataError(err, "ConfigMap metadata watches are unavailable.")
 		}
 	} else {
@@ -190,10 +218,13 @@ func (port *resourceWatchPort) Watch(ctx context.Context, key resources.WatchKey
 		source, err = client.Resource(key.GVR).Namespace(key.Namespace).Watch(streamContext.Context(), options)
 		if err != nil {
 			streamContext.Close()
+			if options.SendInitialEvents != nil && (apierrors.IsBadRequest(err) || apierrors.IsInvalid(err)) {
+				return nil, resources.ErrStreamingListsUnsupported
+			}
 			return nil, mapResourceError(err)
 		}
 	}
-	result := &resourceWatchStream{ctx: streamContext.Context(), source: source, cancel: streamContext.Close, results: make(chan resources.WatchChange, 64)}
+	result := &resourceWatchStream{ctx: streamContext.Context(), source: source, cancel: streamContext.Close, results: make(chan resources.WatchChange, 64), initial: options.SendInitialEvents != nil}
 	go result.run(key, port)
 	return result, nil
 }
@@ -204,6 +235,7 @@ type resourceWatchStream struct {
 	cancel  func()
 	results chan resources.WatchChange
 	once    sync.Once
+	initial bool
 }
 
 func (stream *resourceWatchStream) ResultChan() <-chan resources.WatchChange { return stream.results }
@@ -236,11 +268,27 @@ func (stream *resourceWatchStream) run(key resources.WatchKey, port *resourceWat
 		}
 		change := resources.WatchChange{Type: string(event.Type), ReceivedAt: time.Now()}
 		if event.Type == kwatch.Bookmark {
+			accessor, err := meta.Accessor(event.Object)
+			if err != nil {
+				change.Err = resourceDomain(resources.CodeClusterUnavailable, "The Kubernetes bookmark is invalid.", err)
+				stream.send(change)
+				return
+			}
+			change.ResourceVersion = accessor.GetResourceVersion()
+			if stream.initial && accessor.GetAnnotations()["k8s.io/initial-events-end"] == "true" {
+				change.InitialEventsEnd = true
+				stream.initial = false
+			}
+			if change.ResourceVersion != "" && !stream.send(change) {
+				return
+			}
 			continue
 		}
 		if event.Type == kwatch.Error {
 			if apierrors.IsResourceExpired(apierrors.FromObject(event.Object)) || apierrors.IsGone(apierrors.FromObject(event.Object)) {
 				change.Err = resources.ErrResourceExpired
+			} else if stream.initial && (apierrors.IsBadRequest(apierrors.FromObject(event.Object)) || apierrors.IsInvalid(apierrors.FromObject(event.Object))) {
+				change.Err = resources.ErrStreamingListsUnsupported
 			} else {
 				change.Err = mapResourceError(apierrors.FromObject(event.Object))
 			}

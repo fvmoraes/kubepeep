@@ -370,6 +370,7 @@ export interface CollectionResult<T> {
   coverage: DashboardCoverage | null
   generation?: string
   collectedAt?: string
+  snapshotRenewed?: boolean
 }
 
 export interface ResourceListQuery extends PageQuery {
@@ -492,6 +493,7 @@ export interface PodDetail {
 }
 
 export interface EventResource {
+	name?: string
   timestamp: string | null
   namespace: string
   objectKind: string

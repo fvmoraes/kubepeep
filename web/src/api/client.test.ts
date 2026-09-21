@@ -9,6 +9,25 @@ function json(data: unknown): Response {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('local API client security boundary', () => {
+	it('renews an expired list cursor once without changing filters or generation', async () => {
+		const fetch = vi.fn()
+			.mockResolvedValueOnce(new Response(JSON.stringify({ code: 'CURSOR_EXPIRED', message: 'Expired' }), { status: 410, headers: { 'Content-Type': 'application/json' } }))
+			.mockResolvedValueOnce(new Response(JSON.stringify({ data: [], meta: { generation: 'gen', page: { limit: 25, next: '', complete: true, truncated: false, filterScope: 'page' } } }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+		vi.stubGlobal('fetch', fetch)
+
+		const result = await getPods({ limit: 25, search: 'api', continueToken: 'old' }, undefined, 'gen')
+
+		expect(result.snapshotRenewed).toBe(true)
+		expect(fetch.mock.calls.map((call) => call[0])).toEqual(['/api/v1/pods?limit=25&continue=old&search=api', '/api/v1/pods?limit=25&search=api'])
+	})
+
+	it('does not renew a forbidden cursor', async () => {
+		const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ code: 'FORBIDDEN', message: 'Denied' }), { status: 403, headers: { 'Content-Type': 'application/json' } }))
+		vi.stubGlobal('fetch', fetch)
+
+		await expect(getPods({ continueToken: 'old' })).rejects.toMatchObject({ status: 403, code: 'FORBIDDEN' })
+		expect(fetch).toHaveBeenCalledTimes(1)
+	})
 	it('encodes normalized resource selectors without dropping cancellation', async () => {
 		const controller = new AbortController()
 		const fetch = vi.fn().mockResolvedValue(json([]))

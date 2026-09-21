@@ -10,6 +10,7 @@ function json(data: unknown, status = 200): Response {
 
 afterEach(() => {
   cleanup()
+  vi.useRealTimers()
   vi.unstubAllGlobals()
   vi.restoreAllMocks()
 })
@@ -72,5 +73,39 @@ describe('optional resource SSE', () => {
     expect(screen.getByRole('button', { name: 'Retry live updates' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Refresh now' }))
     await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(1))
+  })
+
+  it('coalesces 10k watch deltas into one bounded HTTP refresh', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+    let responseController: ReadableStreamDefaultController<Uint8Array> | undefined
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const path = String(input)
+      if (path === '/api/v1/session') return Promise.resolve(json({ csrfToken: 'csrf-live', origin: 'http://127.0.0.1:2748', generation: 'gen_42', expiresAt: '2026-08-17T18:00:00Z' }))
+      if (path === '/api/v1/stream?topic=pods') {
+        const body = new ReadableStream<Uint8Array>({ start(controller) { responseController = controller } })
+        return Promise.resolve(new Response(body, { headers: { 'Content-Type': 'text/event-stream' } }))
+      }
+      throw new Error(`Unexpected request: ${path}`)
+    }))
+
+    const view = render(<QueryClientProvider client={client}><ResourceLiveUpdates generation="gen_42" topics={['pods']} queryKeys={[["resources", "pods"]]} /></QueryClientProvider>)
+    fireEvent.click(screen.getByRole('button', { name: 'Start live updates' }))
+    expect(await screen.findByText(/Live updates active for pods/)).toBeInTheDocument()
+    vi.useFakeTimers()
+
+    const event = 'event: modified\ndata: {"generation":"gen_42"}\n\n'
+    for (let batch = 0; batch < 10; batch += 1) {
+      responseController?.enqueue(new TextEncoder().encode(event.repeat(1_000)))
+    }
+    await vi.advanceTimersByTimeAsync(0)
+    expect(invalidate).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1_999)
+    expect(invalidate).not.toHaveBeenCalled()
+    await vi.advanceTimersByTimeAsync(1)
+    expect(invalidate).toHaveBeenCalledTimes(1)
+
+    view.unmount()
+    responseController?.close()
   })
 })

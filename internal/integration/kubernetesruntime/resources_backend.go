@@ -20,6 +20,9 @@ import (
 
 // ResourceBackendOptions carries production wiring for the resource backend.
 type ResourceBackendOptions struct {
+	// StreamingLists enables the optional Kubernetes initial-events watch fast
+	// path. It is off by default and falls back to LIST+WATCH when unsupported.
+	StreamingLists bool
 	// ListWindowTimeout bounds one collection fan-out window. Zero falls back
 	// to the resources package default; values are clamped to the supported
 	// ceiling.
@@ -48,6 +51,8 @@ type ResourceBackend struct {
 	listFanout        int
 	listCoalescerOnce sync.Once
 	listCoalescer     *resources.RequestCoalescer
+	collectionCache   *resources.CollectionCache
+	scheduler         *resources.RequestScheduler
 
 	watchMu         sync.Mutex
 	watchManager    *resources.WatchManager
@@ -69,12 +74,23 @@ func NewResourceBackendWithOptions(runtime *Runtime, authorizer resources.Author
 		metrics:           options.Metrics,
 		listFanout:        resources.NormalizeFanout(options.ListFanout),
 		watchBindings:     make(map[string]namespaces.SelectionBinding),
+		collectionCache:   resources.NewCollectionCacheWithMetrics(0, 0, 0, nil, options.Metrics),
+		scheduler:         resources.NewRequestScheduler(8, nil),
 	}
-	backend.watchManager = resources.NewWatchManagerWithMetrics(&resourceWatchPort{backend: backend}, options.Metrics)
+	backend.watchManager = resources.NewWatchManagerWithConfig(&resourceWatchPort{backend: backend}, resources.WatchManagerConfig{
+		Metrics: options.Metrics, StreamingLists: options.StreamingLists,
+		Cache: resources.NewResourceCache(resources.ResourceCacheConfig{MaxBytes: 128 << 20, Metrics: options.Metrics}),
+		OnChange: func(key resources.WatchKey) {
+			if collection, ok := collectionForTopic(key.Topic); ok {
+				backend.collectionCache.InvalidateCollection(key.Generation, collection)
+			}
+		},
+	})
 	return backend, nil
 }
 
 func (backend *ResourceBackend) OnGeneration(next string) {
+	backend.collectionCache.SwitchGeneration(next)
 	backend.watchMu.Lock()
 	previous := backend.watchGeneration
 	backend.watchGeneration = next
@@ -99,12 +115,60 @@ func (backend *ResourceBackend) Close() {
 	backend.requestCoalescer().Close()
 }
 
+func (backend *ResourceBackend) activeWatchManager() *resources.WatchManager {
+	backend.watchMu.Lock()
+	defer backend.watchMu.Unlock()
+	return backend.watchManager
+}
+
 func resourceSelection(binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution) resources.Selection {
 	scope := resolution.ScopeName
 	if scope == "" {
 		scope = resolution.ScopeSource
 	}
 	return resources.Selection{Generation: binding.Generation, Context: binding.Context, Scope: scope, Namespaces: append([]string(nil), resolution.Namespaces...)}
+}
+
+func collectionForTopic(topic resources.Topic) (resources.Collection, bool) {
+	switch topic {
+	case resources.TopicPods:
+		return resources.CollectionPods, true
+	case resources.TopicEvents:
+		return resources.CollectionEvents, true
+	case resources.TopicWorkloads:
+		return resources.CollectionWorkloads, true
+	case resources.TopicServices:
+		return resources.CollectionServices, true
+	case resources.TopicIngresses:
+		return resources.CollectionIngresses, true
+	case resources.TopicEndpointSlices:
+		return resources.CollectionEndpointSlices, true
+	case resources.TopicConfigMaps:
+		return resources.CollectionConfigMaps, true
+	default:
+		return "", false
+	}
+}
+
+func topicForCollection(collection resources.Collection) (resources.Topic, bool) {
+	switch collection {
+	case resources.CollectionPods:
+		return resources.TopicPods, true
+	case resources.CollectionEvents:
+		return resources.TopicEvents, true
+	case resources.CollectionWorkloads:
+		return resources.TopicWorkloads, true
+	case resources.CollectionServices:
+		return resources.TopicServices, true
+	case resources.CollectionIngresses:
+		return resources.TopicIngresses, true
+	case resources.CollectionEndpointSlices:
+		return resources.TopicEndpointSlices, true
+	case resources.CollectionConfigMaps:
+		return resources.TopicConfigMaps, true
+	default:
+		return "", false
+	}
 }
 
 type originListerFunc[T resources.ListItem] func(context.Context, resources.PageRequest) (resources.OriginPage[T], error)
@@ -134,9 +198,52 @@ func collectFilteredResource[T resources.ListItem](
 		return resources.ListResult[T]{}, err
 	}
 	value, err := backend.requestCoalescer().Do(ctx, key, func(shared context.Context) (any, error) {
+		topic, mapped := topicForCollection(collection)
+		if mapped {
+			if cached, ok := resources.LoadCollectionPage[T](shared, backend.collectionCache, key, binding.Generation, backend.authorizer); ok && cached.Cursor != nil {
+				origins := make([]resources.Origin, 0, len(cached.Cursor.Origins))
+				for _, state := range cached.Cursor.Origins {
+					origins = append(origins, state.Origin)
+				}
+				if manager := backend.activeWatchManager(); manager != nil && manager.Covers(watchCoverageSelection(binding, resolution, origins), topic, origins) {
+					backend.metrics.IncCounter(observability.CollectionCacheHitsTotalName, map[string]string{"resource": string(collection)})
+					return cached, nil
+				}
+			}
+			backend.metrics.IncCounter(observability.CollectionCacheMissesTotalName, map[string]string{"resource": string(collection)})
+		}
+		var token resources.CollectionCacheToken
+		cacheable := false
+		if mapped {
+			token, cacheable = backend.collectionCache.Begin(binding.Generation, key)
+			if cacheable && cursor == nil {
+				if local, ok := collectFromWatchSnapshots(shared, backend, binding, resolution, collection, topic, normalized, filterSort); ok {
+					if cacheable {
+						resources.StoreCollectionPage(backend.collectionCache, token, collection, local)
+					}
+					return local, nil
+				}
+			}
+		}
+		release, scheduleErr := backend.scheduler.Acquire(shared, resources.PriorityVisible)
+		if scheduleErr != nil {
+			return resources.ListResult[T]{}, scheduleErr
+		}
+		started := time.Now()
 		result, collectErr := collectResource(shared, backend, binding, resolution, collection, normalized, cursor, less, list)
+		if cursor == nil && resources.ErrorCodeOf(collectErr) == resources.CodeCursorExpired && shared.Err() == nil {
+			result, collectErr = collectResource(shared, backend, binding, resolution, collection, normalized, nil, less, list)
+		}
+		backend.scheduler.Observe(time.Since(started), resources.ErrorCodeOf(collectErr) == resources.CodeRateLimited, resources.ErrorCodeOf(collectErr) == resources.CodeUpstreamTimeout || errors.Is(collectErr, context.DeadlineExceeded))
+		release()
 		if collectErr == nil {
 			result.Items = filterSort(result.Items, normalized)
+			markCollectionScope(&result, cursor == nil)
+			if cacheable {
+				resources.StoreCollectionPage(backend.collectionCache, token, collection, result)
+			}
+		} else if resources.ErrorCodeOf(collectErr) == resources.CodeForbidden {
+			backend.collectionCache.InvalidateCollection(binding.Generation, collection)
 		}
 		return result, collectErr
 	})
@@ -147,11 +254,102 @@ func collectFilteredResource[T resources.ListItem](
 	return result, err
 }
 
+// A complete, authorized watch snapshot can satisfy a bounded first page
+// without another Kubernetes LIST. Larger or incomplete snapshots keep the
+// established paginated LIST path and its cursor semantics.
+func collectFromWatchSnapshots[T resources.ListItem](ctx context.Context, backend *ResourceBackend, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, collection resources.Collection, topic resources.Topic, options resources.ListOptions, filterSort func([]T, resources.ListOptions) []T) (resources.ListResult[T], bool) {
+	manager := backend.activeWatchManager()
+	if manager == nil {
+		return resources.ListResult[T]{}, false
+	}
+	var origins []resources.Origin
+	var err error
+	if resolution.PreferGlobal && len(options.Namespaces) == 0 {
+		origins, err = resources.GlobalOriginsFor(collection, options.Kinds)
+	} else {
+		var names []string
+		names, err = resources.ResolveNamespaces(resolution.Namespaces, options.Namespaces)
+		if err == nil {
+			origins, err = resources.OriginsFor(collection, names, options.Kinds)
+		}
+	}
+	if err != nil || len(origins) == 0 {
+		return resources.ListResult[T]{}, false
+	}
+	snapshots, covered := manager.SnapshotsFor(watchCoverageSelection(binding, resolution, origins), topic, origins)
+	if !covered {
+		return resources.ListResult[T]{}, false
+	}
+	items := make([]T, 0)
+	snapshotBytes := 0
+	cursor := resources.NewCompositeCursor[T](origins)
+	for index := range cursor.Origins {
+		origin := cursor.Origins[index].Origin
+		capability := backend.authorizer.Check(ctx, authorization.Key{Generation: binding.Generation, Namespace: origin.Namespace, APIGroup: origin.APIGroup, Resource: origin.Resource, Verb: "list"})
+		if capability.Decision != authorization.DecisionAllowed {
+			return resources.ListResult[T]{}, false
+		}
+		snapshot := snapshots[origin.Key()]
+		if len(items)+len(snapshot.Items) > resources.MaximumSnapshotItems {
+			return resources.ListResult[T]{}, false
+		}
+		encoded, encodeErr := json.Marshal(snapshot.Items)
+		if encodeErr != nil || snapshotBytes+len(encoded) > resources.MaximumSnapshotBytes {
+			return resources.ListResult[T]{}, false
+		}
+		snapshotBytes += len(encoded)
+		for _, object := range snapshot.Items {
+			item, ok := object.(T)
+			if !ok {
+				return resources.ListResult[T]{}, false
+			}
+			items = append(items, item)
+		}
+		cursor.Origins[index].ResourceVersion = snapshot.ResourceVersion
+		cursor.Origins[index].Exhausted = true
+	}
+	items = filterSort(items, options)
+	if len(items) > options.Limit {
+		return resources.ListResult[T]{}, false
+	}
+	completed := len(resolution.Namespaces)
+	if len(options.Namespaces) != 0 {
+		completed = len(options.Namespaces)
+	}
+	return resources.ListResult[T]{
+		Items: items, Cursor: &cursor,
+		Page:        resources.PageDTO{Limit: options.Limit, Complete: true, FilterScope: resources.FilterScopeCollection},
+		Coverage:    resources.CoverageDTO{RequestedNamespaces: completed, CompletedNamespaces: completed, DeniedNamespaces: []string{}, Failed: []resources.PartialErrorDTO{}},
+		CollectedAt: time.Now().UTC(),
+	}, true
+}
+
+// An authorized all-namespaces WATCH uses the single Kubernetes global origin
+// as its effective origin. Match that identity only for global cursor/snapshot
+// origins; namespaced fan-out must retain its exact resolved namespace set.
+func watchCoverageSelection(binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, origins []resources.Origin) resources.Selection {
+	selection := resourceSelection(binding, resolution)
+	if !resolution.PreferGlobal || len(origins) == 0 {
+		return selection
+	}
+	for _, origin := range origins {
+		if origin.Namespace != "" {
+			return selection
+		}
+	}
+	selection.Namespaces = []string{""}
+	return selection
+}
+
 func (backend *ResourceBackend) requestCoalescer() *resources.RequestCoalescer {
 	backend.listCoalescerOnce.Do(func() {
 		backend.listCoalescer = resources.NewRequestCoalescer()
 	})
 	return backend.listCoalescer
+}
+
+func (backend *ResourceBackend) listRetryPolicy() resources.RetryPolicy {
+	return resources.RetryPolicy{OnThrottle: func() { backend.scheduler.Observe(0, true, false) }}
 }
 
 func collectionRequestKey[T resources.ListItem](binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, collection resources.Collection, options resources.ListOptions, cursor *resources.CompositeCursor[T]) (string, error) {
@@ -205,6 +403,7 @@ func collectResource[T resources.ListItem](
 				RequestedNamespaces: len(resolution.Namespaces),
 				Fanout:              backend.listFanout,
 				NativeIdentityOrder: true,
+				Retry:               backend.listRetryPolicy(),
 			})
 			observeListDuration(backend.metrics, collection, "global", started)
 			if collectErr == nil {
@@ -242,6 +441,7 @@ func collectResource[T resources.ListItem](
 		RequestedNamespaces: len(names),
 		Fanout:              backend.listFanout,
 		NativeIdentityOrder: true,
+		Retry:               backend.listRetryPolicy(),
 	})
 	observeListDuration(backend.metrics, collection, "fanout", started)
 	if collectErr == nil {
@@ -360,6 +560,11 @@ func clusterCollect[T resources.ListItem](ctx context.Context, backend *Resource
 }
 
 func clusterCollectUncoalesced[T resources.ListItem](ctx context.Context, backend *ResourceBackend, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, collection resources.Collection, options resources.ListOptions, cursor *resources.CompositeCursor[T], less func(T, T) bool, list originListerFunc[T], filterSort func([]T, resources.ListOptions) []T) (resources.ListResult[T], error) {
+	release, scheduleErr := backend.scheduler.Acquire(ctx, resources.PriorityVisible)
+	if scheduleErr != nil {
+		return resources.ListResult[T]{}, scheduleErr
+	}
+	defer release()
 	normalized, err := resources.NormalizeListOptions(collection, options)
 	if err != nil {
 		return resources.ListResult[T]{}, err
@@ -384,7 +589,17 @@ func clusterCollectUncoalesced[T resources.ListItem](ctx context.Context, backen
 		Timeout:             backend.listWindowTimeout,
 		Fanout:              backend.listFanout,
 		NativeIdentityOrder: true,
+		Retry:               backend.listRetryPolicy(),
 	})
+	if cursor == nil && resources.ErrorCodeOf(collectErr) == resources.CodeCursorExpired && ctx.Err() == nil {
+		result, collectErr = resources.Collect(ctx, resources.CollectionRequest[T]{
+			Selection: selection, Options: normalized, Origins: []resources.Origin{origin},
+			Lister: countingLister(list, &received), Authorizer: backend.authorizer, Less: less,
+			Timeout: backend.listWindowTimeout, Fanout: backend.listFanout, NativeIdentityOrder: true,
+			Retry: backend.listRetryPolicy(),
+		})
+	}
+	backend.scheduler.Observe(time.Since(started), resources.ErrorCodeOf(collectErr) == resources.CodeRateLimited, resources.ErrorCodeOf(collectErr) == resources.CodeUpstreamTimeout || errors.Is(collectErr, context.DeadlineExceeded))
 	observeListDuration(backend.metrics, collection, "global", started)
 	if collectErr != nil {
 		return resources.ListResult[T]{}, collectErr
@@ -394,7 +609,14 @@ func clusterCollectUncoalesced[T resources.ListItem](ctx context.Context, backen
 	// single empty namespace origin must not surface as fictitious counts.
 	result.Coverage = resources.CoverageDTO{RequestedNamespaces: 0, CompletedNamespaces: 0, DeniedNamespaces: []string{}, Failed: sanitizeClusterFailures(result.Coverage.Failed)}
 	result.Items = filterSort(result.Items, normalized)
+	markCollectionScope(&result, cursor == nil)
 	return result, nil
+}
+
+func markCollectionScope[T resources.ListItem](result *resources.ListResult[T], firstPage bool) {
+	if firstPage && result.Page.Complete && !result.Page.Truncated && len(result.Coverage.Failed) == 0 {
+		result.Page.FilterScope = resources.FilterScopeCollection
+	}
 }
 
 func sanitizeClusterFailures(failures []resources.PartialErrorDTO) []resources.PartialErrorDTO {
@@ -905,7 +1127,10 @@ func eventIdentityLess(left, right resources.EventDTO) bool {
 	if left.ObjectName != right.ObjectName {
 		return left.ObjectName < right.ObjectName
 	}
-	return left.Reason < right.Reason
+	if left.Reason != right.Reason {
+		return left.Reason < right.Reason
+	}
+	return left.Name < right.Name
 }
 func serviceIdentityLess(left, right resources.ServiceDTO) bool {
 	if left.Namespace != right.Namespace {

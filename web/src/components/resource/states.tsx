@@ -38,7 +38,7 @@ export function QueryState({ pending, error, empty, children }: { pending: boole
 
 export function CollectionFooter<T>({ result, currentCursor, onNext, onRestart }: { result: CollectionResult<T>; currentCursor: string; onNext: (cursor: string) => void; onRestart: () => void }) {
   const coverage = result.coverage
-  const firstPage = currentCursor === ''
+  const firstPage = currentCursor === '' || result.snapshotRenewed === true
   const hasNextPage = result.page.next !== ''
   return (
     <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-kp-overlay-0 px-3 py-2.5">
@@ -47,6 +47,7 @@ export function CollectionFooter<T>({ result, currentCursor, onNext, onRestart }
         <small className="block">
           {result.page.complete ? 'Collection complete' : `Bounded ${result.page.filterScope} result`}{result.page.truncated ? ' · truncated' : ''}
         </small>
+        {result.snapshotRenewed ? <small className="block text-kp-yellow" role="status">The list snapshot expired and was renewed from the first page.</small> : null}
         {coverage ? (
           <small className="block">
             {coverage.requestedNamespaces === 0

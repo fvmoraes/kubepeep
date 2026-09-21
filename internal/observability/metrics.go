@@ -46,6 +46,14 @@ var allowedMetrics = map[string]struct{}{
 	CursorMissesTotalName:                         {},
 	CursorExpiredTotalName:                        {},
 	CursorEvictedTotalName:                        {},
+	ResourceCacheHitsTotalName:                    {},
+	ResourceCacheMissesTotalName:                  {},
+	ResourceCacheEvictionsTotalName:               {},
+	ResourceCacheInvalidationsTotalName:           {},
+	CollectionCacheHitsTotalName:                  {},
+	CollectionCacheMissesTotalName:                {},
+	CollectionCacheEvictionsTotalName:             {},
+	CollectionCacheInvalidationsTotalName:         {},
 	WatchReconnectsTotalName:                      {},
 	WatchExpiredTotalName:                         {},
 	WatchEventsTotalName:                          {},
@@ -59,7 +67,7 @@ var allowedMetrics = map[string]struct{}{
 }
 
 var allowedGauges = map[string]struct{}{
-	CursorEntriesName: {}, CursorBytesName: {}, WatchActiveName: {}, WatchLagMillisecondsName: {},
+	CursorEntriesName: {}, CursorBytesName: {}, ResourceCacheEntriesName: {}, ResourceCacheBytesName: {}, CollectionCacheEntriesName: {}, CollectionCacheBytesName: {}, WatchActiveName: {}, WatchLagMillisecondsName: {},
 }
 
 var allowedLabels = map[string]struct{}{
@@ -213,22 +221,34 @@ const RequestsTotalName = "kubepeep_requests_total"
 // Resource list over-fetch instrumentation: items received from Kubernetes
 // versus items returned to the UI. received/returned is the over-fetch ratio.
 const (
-	ResourceListItemsReceivedTotalName = "kubepeep_resource_list_items_received_total"
-	ResourceListItemsReturnedTotalName = "kubepeep_resource_list_items_returned_total"
-	ResourceListsTotalName             = "kubepeep_resource_lists_total"
-	CursorEntriesName                  = "kubepeep_cursor_entries"
-	CursorBytesName                    = "kubepeep_cursor_bytes"
-	CursorHitsTotalName                = "kubepeep_cursor_hits_total"
-	CursorMissesTotalName              = "kubepeep_cursor_misses_total"
-	CursorExpiredTotalName             = "kubepeep_cursor_expired_total"
-	CursorEvictedTotalName             = "kubepeep_cursor_evicted_total"
-	WatchActiveName                    = "kubepeep_watch_active"
-	WatchReconnectsTotalName           = "kubepeep_watch_reconnects_total"
-	WatchExpiredTotalName              = "kubepeep_watch_expired_total"
-	WatchEventsTotalName               = "kubepeep_watch_events_total"
-	WatchLagMillisecondsName           = "kubepeep_watch_lag_milliseconds"
-	KubernetesRequestsTotalName        = "kubepeep_kubernetes_requests_total"
-	ClientThrottleTotalName            = "kubepeep_client_throttle_total"
-	ClientThrottleNanosecondsTotalName = "kubepeep_client_throttle_nanoseconds_total"
-	TraceExportErrorsTotalName         = "kubepeep_trace_export_errors_total"
+	ResourceListItemsReceivedTotalName    = "kubepeep_resource_list_items_received_total"
+	ResourceListItemsReturnedTotalName    = "kubepeep_resource_list_items_returned_total"
+	ResourceListsTotalName                = "kubepeep_resource_lists_total"
+	CursorEntriesName                     = "kubepeep_cursor_entries"
+	CursorBytesName                       = "kubepeep_cursor_bytes"
+	CursorHitsTotalName                   = "kubepeep_cursor_hits_total"
+	CursorMissesTotalName                 = "kubepeep_cursor_misses_total"
+	CursorExpiredTotalName                = "kubepeep_cursor_expired_total"
+	CursorEvictedTotalName                = "kubepeep_cursor_evicted_total"
+	ResourceCacheEntriesName              = "kubepeep_resource_cache_entries"
+	ResourceCacheBytesName                = "kubepeep_resource_cache_bytes"
+	ResourceCacheHitsTotalName            = "kubepeep_resource_cache_hits_total"
+	ResourceCacheMissesTotalName          = "kubepeep_resource_cache_misses_total"
+	ResourceCacheEvictionsTotalName       = "kubepeep_resource_cache_evictions_total"
+	ResourceCacheInvalidationsTotalName   = "kubepeep_resource_cache_invalidations_total"
+	CollectionCacheEntriesName            = "kubepeep_collection_cache_entries"
+	CollectionCacheBytesName              = "kubepeep_collection_cache_bytes"
+	CollectionCacheHitsTotalName          = "kubepeep_collection_cache_hits_total"
+	CollectionCacheMissesTotalName        = "kubepeep_collection_cache_misses_total"
+	CollectionCacheEvictionsTotalName     = "kubepeep_collection_cache_evictions_total"
+	CollectionCacheInvalidationsTotalName = "kubepeep_collection_cache_invalidations_total"
+	WatchActiveName                       = "kubepeep_watch_active"
+	WatchReconnectsTotalName              = "kubepeep_watch_reconnects_total"
+	WatchExpiredTotalName                 = "kubepeep_watch_expired_total"
+	WatchEventsTotalName                  = "kubepeep_watch_events_total"
+	WatchLagMillisecondsName              = "kubepeep_watch_lag_milliseconds"
+	KubernetesRequestsTotalName           = "kubepeep_kubernetes_requests_total"
+	ClientThrottleTotalName               = "kubepeep_client_throttle_total"
+	ClientThrottleNanosecondsTotalName    = "kubepeep_client_throttle_nanoseconds_total"
+	TraceExportErrorsTotalName            = "kubepeep_trace_export_errors_total"
 )

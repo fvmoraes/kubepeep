@@ -51,7 +51,7 @@ method, route, status, resource, strategy, traffic
 - `traffic`: somente `unary` ou `streaming` no client-go;
 - `status`: status HTTP decimal ou `transport_error`.
 
-### 3.2 Séries expostas na Fase 0
+### 3.2 Séries expostas a partir das Fases 0 e 2
 
 | Série | Tipo | Labels | Interpretação |
 | --- | --- | --- | --- |
@@ -66,6 +66,18 @@ method, route, status, resource, strategy, traffic
 | `kubepeep_cursor_misses_total` | counter | — | referências ausentes/expiradas |
 | `kubepeep_cursor_expired_total` | counter | — | entradas purgadas por TTL |
 | `kubepeep_cursor_evicted_total` | counter | — | entradas removidas por LRU/budget |
+| `kubepeep_resource_cache_entries` | gauge | — | snapshots vivos no cache sob demanda |
+| `kubepeep_resource_cache_bytes` | gauge | — | bytes serializados dos snapshots vivos |
+| `kubepeep_resource_cache_hits_total` | counter | `resource` | snapshots encontrados pela identidade completa |
+| `kubepeep_resource_cache_misses_total` | counter | `resource` | snapshots ausentes ou incompatíveis |
+| `kubepeep_resource_cache_evictions_total` | counter | `resource` | snapshots inativos removidos por LRU/budget |
+| `kubepeep_resource_cache_invalidations_total` | counter | `resource` | snapshots removidos por geração, RBAC ou reset explícito |
+| `kubepeep_collection_cache_entries` | gauge | — | páginas de coleção retidas em memória |
+| `kubepeep_collection_cache_bytes` | gauge | — | bytes serializados dessas páginas |
+| `kubepeep_collection_cache_hits_total` | counter | `resource` | páginas autorizadas encontradas e cobertas por watch |
+| `kubepeep_collection_cache_misses_total` | counter | `resource` | páginas ausentes, expiradas ou sem cobertura de watch |
+| `kubepeep_collection_cache_evictions_total` | counter | `resource` | páginas removidas por LRU/budget |
+| `kubepeep_collection_cache_invalidations_total` | counter | `resource` | páginas removidas por geração ou alteração do watch |
 | `kubepeep_watch_active` | gauge | `resource` | workers de watch ativos |
 | `kubepeep_watch_reconnects_total` | counter | `resource` | novas conexões após a inicial |
 | `kubepeep_watch_expired_total` | counter | `resource` | 410/RV expirado observado |
@@ -84,6 +96,13 @@ inclusive em erro. `received ÷ returned` mede over-fetch; quando `returned=0`,
 a razão deve ser tratada como indefinida, não como zero. Percentis não são
 inferidos desses counters: p50/p95 vêm do runner reproduzível da baseline.
 
+As séries `kubepeep_resource_cache_*` e `kubepeep_collection_cache_*`
+começaram na F2; não fazem parte da medição histórica da F0. O cache de
+páginas só responde se o watch ativo cobre todas as origens da página e cada
+origem passa novamente pela autorização. Uma primeira página inteira que cabe
+no limite pode ser reconstruída diretamente do snapshot do watch, sem LIST;
+páginas maiores preservam o LIST paginado. Sem watch, Refresh executa LIST.
+
 ### 3.3 Endpoint `/metrics`
 
 O endpoint é desabilitado por padrão. Quando configurado, o servidor continua
@@ -97,6 +116,26 @@ observability:
 ```
 
 ## 4. Métricas UX e budgets
+
+### 4.1 Política de freshness da Fase 2
+
+| Fonte | Revalidação | Limite/condição |
+| --- | --- | --- |
+| recursos core com stream ativo | WATCH após snapshot inicial | compartilhamento por identidade completa; idle de 45 s; sem polling implícito se WATCH indisponível |
+| páginas de coleção cobertas por WATCH | cache em memória por até 30 s | reautorização por origem em cada hit; delta, 403 e troca de geração invalidam |
+| CPU/memória do overview | 8 s | somente após Tier 1; suspenso em background |
+| capabilities/RBAC | TTL de 30–60 s (45 s padrão) | 403/revogação e generation exigem revalidação/invalidação |
+| discovery da Metrics API | 10 min | generation troca o cliente e seu cache |
+| análise de logs | sob ação explícita | nunca bloqueia Tier 1 nem inicia varredura global |
+
+O botão Refresh consulta o Kubernetes quando não há watch cobrindo
+integralmente as origens. A UI agrupa deltas em janelas de 2 s antes de
+revalidar a página HTTP; o watch e sua fila fazem coalescing por objeto para
+os tópicos level-driven, preservando Events cronológicos. Páginas completas e
+pequenas são reconstruídas do snapshot local após cada delta; páginas maiores
+ainda usam LIST paginado.
+
+### 4.2 Métricas no cliente
 
 `web/src/observability/uxMetrics.ts` mantém no máximo 256 amostras apenas em
 memória do WebView/browser. Não há POST, persistência ou exporter. A inspeção
@@ -153,6 +192,7 @@ resources.list.origin
 resources.merge
 cursor.get | cursor.put
 watch.connect | watch.reconnect
+cache.snapshot | cache.apply_event
 cache.authorization | cache.clients
 ```
 
@@ -166,8 +206,10 @@ marcam status genérico `operation failed`, sem copiar mensagem upstream.
 
 ### 5.1 Contrato do resource cache da Fase 2 (C04)
 
-`cache.snapshot` e `cache.apply_event` já estão reservados na allowlist, mas
-**não são emitidos na Fase 0**. A integração real da F2 deve:
+`cache.snapshot` é emitido ao assinar e armazenar um snapshot real;
+`cache.apply_event` é emitido quando o worker aplica um delta ao snapshot local.
+Nenhum dos dois inclui identidade de objeto ou conteúdo no span. A integração
+da F2 deve:
 
 - usar `cache.snapshot` para construir/obter snapshot e `cache.apply_event`
   para aplicar evento autorizado;

@@ -16,11 +16,12 @@ const (
 )
 
 type RetryPolicy struct {
-	Attempts int
-	Base     time.Duration
-	Maximum  time.Duration
-	Jitter   func(time.Duration) time.Duration
-	Wait     func(context.Context, time.Duration) error
+	Attempts   int
+	Base       time.Duration
+	Maximum    time.Duration
+	Jitter     func(time.Duration) time.Duration
+	Wait       func(context.Context, time.Duration) error
+	OnThrottle func()
 }
 
 type apiPressure struct {
@@ -67,6 +68,9 @@ func retryListPage[T ListItem](ctx context.Context, lister OriginLister[T], requ
 			return page, nil
 		}
 		lastErr = err
+		if ErrorCodeOf(err) == CodeRateLimited && policy.OnThrottle != nil {
+			policy.OnThrottle()
+		}
 		if ErrorCodeOf(err) != CodeRateLimited || attempt+1 >= policy.Attempts {
 			return page, err
 		}

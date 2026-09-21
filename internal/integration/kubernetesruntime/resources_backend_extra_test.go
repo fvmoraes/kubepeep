@@ -2,6 +2,7 @@ package kubernetesruntime
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	kubefake "k8s.io/client-go/kubernetes/fake"
 	metadatafake "k8s.io/client-go/metadata/fake"
 
+	"github.com/fvmoraes/kubepeep/internal/observability"
 	"github.com/fvmoraes/kubepeep/internal/services/authorization"
 	"github.com/fvmoraes/kubepeep/internal/services/namespaces"
 	"github.com/fvmoraes/kubepeep/internal/services/resources"
@@ -79,6 +81,9 @@ func TestResourceBackendListsNetworkAndStorageCollections(t *testing.T) {
 	if err != nil || len(services.Items) != 1 || services.Items[0].Name != "api" || services.Items[0].Type != "ClusterIP" {
 		t.Fatalf("services = %#v err = %v", services.Items, err)
 	}
+	if !services.Page.Complete || services.Page.FilterScope != resources.FilterScopeCollection {
+		t.Fatalf("complete authorized collection scope = %#v", services.Page)
+	}
 	ingresses, err := backend.ListIngresses(ctx, binding, resolution, resources.ListOptions{Limit: 10}, nil)
 	if err != nil || len(ingresses.Items) != 1 || len(ingresses.Items[0].Hosts) != 1 || ingresses.Items[0].Hosts[0] != "app.example.com" {
 		t.Fatalf("ingresses = %#v err = %v", ingresses.Items, err)
@@ -96,6 +101,172 @@ func TestResourceBackendListsNetworkAndStorageCollections(t *testing.T) {
 		t.Fatalf("secrets = %#v err = %v", secrets.Items, err)
 	}
 }
+
+func TestResourceBackendReusesAuthorizedPageAndInvalidatesOnChange(t *testing.T) {
+	t.Parallel()
+	client := kubefake.NewSimpleClientset(
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "api"}},
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "worker"}},
+	)
+	metrics := observability.NewRegistry()
+	backend := &ResourceBackend{
+		clients:    fixedResourceClientProvider{set: resourceClientSet{kubernetes: client}},
+		authorizer: &allowResourceAuthorization{}, now: time.Now,
+		metrics: metrics, collectionCache: resources.NewCollectionCacheWithMetrics(1<<20, 4, time.Minute, nil, metrics),
+	}
+	watchPort := &collectionCacheWatchPort{changes: make(chan resources.WatchChange)}
+	backend.watchManager = resources.NewWatchManagerWithConfig(watchPort, resources.WatchManagerConfig{OnChange: func(key resources.WatchKey) {
+		backend.collectionCache.InvalidateCollection(key.Generation, resources.CollectionPods)
+	}})
+	defer backend.watchManager.Close()
+	binding := namespaces.SelectionBinding{ClusterProfileID: 1, Context: "ctx", Generation: "gen"}
+	resolution := namespaces.ScopeResolution{ScopeName: "scope", Namespaces: []string{"default"}}
+	subscription, err := backend.watchManager.Subscribe(t.Context(), resources.WatchKey{
+		Generation: "gen", Context: "ctx", Scope: "scope", Topic: resources.TopicPods,
+		GVR: schema.GroupVersionResource{Version: "v1", Resource: "pods"}, Namespace: "default", EffectiveOrigins: []string{"default"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer subscription.Close()
+	readyContext, cancelReady := context.WithTimeout(t.Context(), time.Second)
+	defer cancelReady()
+	ready, err := subscription.Next(readyContext)
+	if err != nil || ready.Event != "snapshot" {
+		t.Fatalf("watch readiness=%#v err=%v", ready, err)
+	}
+	origins := []resources.Origin{{Namespace: "default", Version: "v1", Resource: "pods"}}
+	for !backend.watchManager.Covers(resourceSelection(binding, resolution), resources.TopicPods, origins) && readyContext.Err() == nil {
+		time.Sleep(time.Millisecond)
+	}
+	if !backend.watchManager.Covers(resourceSelection(binding, resolution), resources.TopicPods, origins) {
+		t.Fatal("watch did not connect before page lookup")
+	}
+	for range 2 {
+		result, err := backend.ListPods(t.Context(), binding, resolution, resources.ListOptions{Limit: 10}, nil)
+		if err != nil || len(result.Items) != 1 {
+			t.Fatalf("cached list items=%#v err=%v", result.Items, err)
+		}
+	}
+	if actions := len(client.Actions()); actions != 0 {
+		t.Fatalf("complete watch snapshot caused %d Kubernetes actions", actions)
+	}
+	watchPort.changes <- resources.WatchChange{Type: "ADDED", ResourceVersion: "2", Object: resources.PodDTO{Namespace: "default", Name: "worker"}}
+	if event, nextErr := subscription.Next(readyContext); nextErr != nil || event.Event != "added" {
+		t.Fatalf("watch delta=%#v err=%v", event, nextErr)
+	}
+	updated, err := backend.ListPods(t.Context(), binding, resolution, resources.ListOptions{Limit: 10}, nil)
+	if err != nil || len(updated.Items) != 2 {
+		t.Fatalf("updated watch page=%#v err=%v", updated.Items, err)
+	}
+	sorted, err := backend.ListPods(t.Context(), binding, resolution, resources.ListOptions{Limit: 10, Sort: "name", Order: resources.OrderDescending}, nil)
+	if err != nil || len(sorted.Items) != 2 || sorted.Items[0].Name != "worker" || sorted.Items[1].Name != "api" || sorted.Page.FilterScope != resources.FilterScopeCollection {
+		t.Fatalf("complete watch sort=%#v page=%#v err=%v", sorted.Items, sorted.Page, err)
+	}
+	if actions := len(client.Actions()); actions != 0 {
+		t.Fatalf("watch refresh caused %d Kubernetes actions", actions)
+	}
+	limited, err := backend.ListPods(t.Context(), binding, resolution, resources.ListOptions{Limit: 1}, nil)
+	if err != nil || len(limited.Items) != 1 || limited.Page.Complete || limited.Page.FilterScope != resources.FilterScopePage {
+		t.Fatalf("oversized watch snapshot must use paginated LIST: page=%#v items=%#v err=%v", limited.Page, limited.Items, err)
+	}
+	if actions := len(client.Actions()); actions != 1 {
+		t.Fatalf("oversized page caused %d Kubernetes actions", actions)
+	}
+	backend.watchManager.Close()
+	if _, err := backend.ListPods(t.Context(), binding, resolution, resources.ListOptions{Limit: 10}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if actions := len(client.Actions()); actions != 2 {
+		t.Fatalf("manual refresh without watch used stale cache: %d actions", actions)
+	}
+	if rendered := metrics.Render(); !strings.Contains(rendered, "kubepeep_collection_cache_hits_total{resource=\"pods\"} 1") || !strings.Contains(rendered, "kubepeep_collection_cache_misses_total{resource=\"pods\"} 5") {
+		t.Fatalf("cache metrics did not match real lookup outcomes: %s", rendered)
+	}
+}
+
+func TestResourceBackendGlobalWatchCoversPaginatedPage(t *testing.T) {
+	t.Parallel()
+	client := kubefake.NewSimpleClientset(
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "one", Name: "api"}},
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "two", Name: "worker"}},
+	)
+	metrics := observability.NewRegistry()
+	backend := &ResourceBackend{
+		clients:    fixedResourceClientProvider{set: resourceClientSet{kubernetes: client}},
+		authorizer: &allowResourceAuthorization{}, now: time.Now,
+		metrics: metrics, collectionCache: resources.NewCollectionCacheWithMetrics(1<<20, 4, time.Minute, nil, metrics),
+	}
+	port := &collectionCacheWatchPort{changes: make(chan resources.WatchChange), snapshot: resources.WatchSnapshot{
+		ResourceVersion: "1", Items: []resources.TopicObject{
+			resources.PodDTO{Namespace: "one", Name: "api"},
+			resources.PodDTO{Namespace: "two", Name: "worker"},
+		},
+	}}
+	backend.watchManager = resources.NewWatchManagerWithConfig(port, resources.WatchManagerConfig{})
+	defer backend.watchManager.Close()
+	binding := namespaces.SelectionBinding{ClusterProfileID: 1, Context: "ctx", Generation: "gen"}
+	resolution := namespaces.ScopeResolution{ScopeName: "scope", Namespaces: []string{"one", "two"}, PreferGlobal: true}
+	globalOrigin := resources.Origin{Version: "v1", Resource: "pods"}
+	subscription, err := backend.watchManager.Subscribe(t.Context(), resources.WatchKey{
+		Generation: "gen", Context: "ctx", Scope: "scope", Topic: resources.TopicPods,
+		GVR: schema.GroupVersionResource{Version: "v1", Resource: "pods"}, EffectiveOrigins: []string{""},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer subscription.Close()
+	readyContext, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	if event, nextErr := subscription.Next(readyContext); nextErr != nil || event.Event != "snapshot" {
+		t.Fatalf("global watch readiness=%#v err=%v", event, nextErr)
+	}
+	selection := watchCoverageSelection(binding, resolution, []resources.Origin{globalOrigin})
+	for !backend.watchManager.Covers(selection, resources.TopicPods, []resources.Origin{globalOrigin}) && readyContext.Err() == nil {
+		time.Sleep(time.Millisecond)
+	}
+	if !backend.watchManager.Covers(selection, resources.TopicPods, []resources.Origin{globalOrigin}) {
+		t.Fatal("global WATCH did not cover its matching global cursor")
+	}
+	for range 2 {
+		result, listErr := backend.ListPods(t.Context(), binding, resolution, resources.ListOptions{Limit: 1}, nil)
+		if listErr != nil || len(result.Items) != 1 || result.Page.Complete {
+			t.Fatalf("paginated global list=%#v err=%v", result, listErr)
+		}
+	}
+	if actions := len(client.Actions()); actions != 1 {
+		t.Fatalf("paginated global WATCH generated %d Kubernetes LISTs, want 1", actions)
+	}
+	if rendered := metrics.Render(); !strings.Contains(rendered, "kubepeep_collection_cache_hits_total{resource=\"pods\"} 1") {
+		t.Fatalf("global page cache hit was not instrumented: %s", rendered)
+	}
+	if selected := watchCoverageSelection(binding, resolution, []resources.Origin{{Namespace: "one", Version: "v1", Resource: "pods"}}); len(selected.Namespaces) != 2 {
+		t.Fatalf("namespaced cursor lost its effective origin fence: %#v", selected)
+	}
+}
+
+type collectionCacheWatchPort struct {
+	changes  chan resources.WatchChange
+	snapshot resources.WatchSnapshot
+}
+
+func (port *collectionCacheWatchPort) List(context.Context, resources.WatchKey) (resources.WatchSnapshot, error) {
+	if port.snapshot.ResourceVersion != "" {
+		return port.snapshot, nil
+	}
+	return resources.WatchSnapshot{ResourceVersion: "1", Items: []resources.TopicObject{resources.PodDTO{Namespace: "default", Name: "api"}}}, nil
+}
+
+func (port *collectionCacheWatchPort) Watch(context.Context, resources.WatchKey, string, int64, bool) (resources.WatchStream, error) {
+	return collectionCacheWatchStream{changes: port.changes}, nil
+}
+
+type collectionCacheWatchStream struct{ changes chan resources.WatchChange }
+
+func (stream collectionCacheWatchStream) ResultChan() <-chan resources.WatchChange {
+	return stream.changes
+}
+func (collectionCacheWatchStream) Stop() {}
 
 func TestResourceBackendCollectGuardrails(t *testing.T) {
 	t.Parallel()
@@ -139,6 +310,52 @@ func TestResourceBackendCollectGuardrails(t *testing.T) {
 
 	if _, err := newBackend(&allowResourceAuthorization{}).ListPods(ctx, binding, resolution, resources.ListOptions{Limit: 10, Sort: "bogus"}, nil); resources.ErrorCodeOf(err) != resources.CodeValidationFailed {
 		t.Fatalf("invalid sort err = %v", err)
+	}
+}
+
+func TestInitialCollectionRetriesExpiredSnapshotOnce(t *testing.T) {
+	t.Parallel()
+	backend := &ResourceBackend{authorizer: &allowResourceAuthorization{}}
+	binding := namespaces.SelectionBinding{Context: "ctx", Generation: "gen"}
+	resolution := namespaces.ScopeResolution{ScopeName: "scope", Namespaces: []string{"default"}}
+	calls := 0
+	lister := originListerFunc[resources.PodDTO](func(_ context.Context, request resources.PageRequest) (resources.OriginPage[resources.PodDTO], error) {
+		calls++
+		if calls == 1 {
+			return resources.OriginPage[resources.PodDTO]{}, resources.ErrResourceExpired
+		}
+		return resources.OriginPage[resources.PodDTO]{Origin: request.Origin, Items: []resources.PodDTO{{Namespace: "default", Name: "api"}}, ResourceVersion: "2"}, nil
+	})
+	result, err := collectFilteredResource(t.Context(), backend, binding, resolution, resources.CollectionPods, resources.ListOptions{Limit: 10}, nil, podIdentityLess, lister, filterSortPods)
+	if err != nil || calls != 2 || len(result.Items) != 1 || result.Items[0].Name != "api" {
+		t.Fatalf("recovered collection calls=%d items=%#v err=%v", calls, result.Items, err)
+	}
+}
+
+func TestCollectionSortScopeRequiresWholeAuthorizedFirstPage(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name   string
+		first  bool
+		page   resources.PageDTO
+		failed int
+		want   resources.FilterScope
+	}{
+		{name: "complete", first: true, page: resources.PageDTO{Complete: true, FilterScope: resources.FilterScopePage}, want: resources.FilterScopeCollection},
+		{name: "continuation", first: false, page: resources.PageDTO{Complete: true, FilterScope: resources.FilterScopePage}, want: resources.FilterScopePage},
+		{name: "truncated", first: true, page: resources.PageDTO{Complete: false, Truncated: true, FilterScope: resources.FilterScopePage}, want: resources.FilterScopePage},
+		{name: "partial authorization", first: true, page: resources.PageDTO{Complete: true, FilterScope: resources.FilterScopePage}, failed: 1, want: resources.FilterScopePage},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			result := resources.ListResult[resources.PodDTO]{Page: test.page}
+			if test.failed != 0 {
+				result.Coverage.Failed = []resources.PartialErrorDTO{{Code: resources.CodeForbidden}}
+			}
+			markCollectionScope(&result, test.first)
+			if result.Page.FilterScope != test.want {
+				t.Fatalf("sort scope = %s, want %s", result.Page.FilterScope, test.want)
+			}
+		})
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -15,6 +16,7 @@ import (
 	dynamicfake "k8s.io/client-go/dynamic/fake"
 	kubefake "k8s.io/client-go/kubernetes/fake"
 	metadatafake "k8s.io/client-go/metadata/fake"
+	ktesting "k8s.io/client-go/testing"
 
 	"github.com/fvmoraes/kubepeep/internal/services/authorization"
 	"github.com/fvmoraes/kubepeep/internal/services/namespaces"
@@ -158,6 +160,41 @@ func TestResourceWatchPortListValidatesClientsAndSnapshots(t *testing.T) {
 	}
 }
 
+func TestResourceWatchPortRestartsExpiredPaginatedList(t *testing.T) {
+	t.Parallel()
+	key := resources.WatchKey{Generation: "gen", Topic: resources.TopicPods, GVR: schema.GroupVersionResource{Version: "v1", Resource: "pods"}, Namespace: "default"}
+	scheme := runtime.NewScheme()
+	if err := corev1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	client := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(scheme, map[schema.GroupVersionResource]string{key.GVR: "PodList"})
+	calls := 0
+	client.PrependReactor("list", "pods", func(ktesting.Action) (bool, runtime.Object, error) {
+		calls++
+		if calls == 2 {
+			return true, nil, apierrors.NewResourceExpired("expired")
+		}
+		list := &unstructured.UnstructuredList{}
+		list.SetAPIVersion("v1")
+		list.SetKind("PodList")
+		list.SetResourceVersion("1")
+		if calls == 1 {
+			list.Items = []unstructured.Unstructured{*unstructuredPod("old", "old-uid")}
+			list.SetContinue("next")
+		} else {
+			list.SetResourceVersion("2")
+			list.Items = []unstructured.Unstructured{*unstructuredPod("fresh", "fresh-uid")}
+		}
+		return true, list, nil
+	})
+	backend := &ResourceBackend{now: time.Now}
+	port := &resourceWatchPort{backend: backend}
+	snapshot, err := port.listWithClients(t.Context(), watchTestBinding(), resourceClientSet{dynamic: client}, key)
+	if err != nil || calls != 3 || snapshot.ResourceVersion != "2" || len(snapshot.Items) != 1 || snapshot.Items[0].(resources.PodDTO).Name != "fresh" {
+		t.Fatalf("restarted LIST calls=%d snapshot=%#v err=%v", calls, snapshot, err)
+	}
+}
+
 func TestWatchRejectsStaleBindingOrMissingLease(t *testing.T) {
 	t.Parallel()
 	binding := watchTestBinding()
@@ -240,11 +277,12 @@ func TestWatchStreamRunProcessesAddsDeletesAndBookmarks(t *testing.T) {
 	source.Add(unstructuredPod("api", "uid-1"))
 	source.Modify(unstructuredPod("api", "uid-1"))
 	source.Delete(unstructuredPod("api", "uid-1"))
+	source.Action(kwatch.Bookmark, &metav1.PartialObjectMetadata{ObjectMeta: metav1.ObjectMeta{ResourceVersion: "8"}})
 	source.Add(&metav1.Status{Status: metav1.StatusSuccess})
 	source.Stop()
 
 	changes := <-done
-	if len(changes) != 4 {
+	if len(changes) != 5 {
 		t.Fatalf("changes = %#v", changes)
 	}
 	if changes[0].Type != string(kwatch.Added) {
@@ -262,8 +300,41 @@ func TestWatchStreamRunProcessesAddsDeletesAndBookmarks(t *testing.T) {
 	if changes[2].ResourceVersion != "7" {
 		t.Fatalf("resource version = %q", changes[2].ResourceVersion)
 	}
-	if changes[3].Err == nil || resources.ErrorCodeOf(changes[3].Err) != resources.CodeClusterUnavailable {
-		t.Fatalf("invalid object change = %#v", changes[3])
+	if changes[3].Type != string(kwatch.Bookmark) || changes[3].ResourceVersion != "8" || changes[3].Object != nil {
+		t.Fatalf("bookmark change = %#v", changes[3])
+	}
+	if changes[4].Err == nil || resources.ErrorCodeOf(changes[4].Err) != resources.CodeClusterUnavailable {
+		t.Fatalf("invalid object change = %#v", changes[4])
+	}
+}
+
+func TestInitialWatchBookmarkAndUnsupportedError(t *testing.T) {
+	t.Parallel()
+	key := resources.WatchKey{Topic: resources.TopicPods, GVR: schema.GroupVersionResource{Version: "v1", Resource: "pods"}}
+	source := kwatch.NewFake()
+	stream := &resourceWatchStream{ctx: context.Background(), source: source, cancel: func() {}, results: make(chan resources.WatchChange, 4), initial: true}
+	done := make(chan []resources.WatchChange, 1)
+	go func() {
+		stream.run(key, &resourceWatchPort{})
+		done <- collectWatchChanges(t, stream)
+	}()
+	source.Action(kwatch.Bookmark, &metav1.PartialObjectMetadata{ObjectMeta: metav1.ObjectMeta{ResourceVersion: "9", Annotations: map[string]string{"k8s.io/initial-events-end": "true"}}})
+	source.Stop()
+	changes := <-done
+	if len(changes) != 1 || !changes[0].InitialEventsEnd || changes[0].ResourceVersion != "9" {
+		t.Fatalf("initial bookmark = %#v", changes)
+	}
+
+	unsupportedSource := kwatch.NewFake()
+	unsupported := &resourceWatchStream{ctx: context.Background(), source: unsupportedSource, cancel: func() {}, results: make(chan resources.WatchChange, 4), initial: true}
+	go func() {
+		unsupported.run(key, &resourceWatchPort{})
+		done <- collectWatchChanges(t, unsupported)
+	}()
+	unsupportedSource.Error(&metav1.Status{Status: metav1.StatusFailure, Code: 400, Reason: metav1.StatusReasonBadRequest})
+	changes = <-done
+	if len(changes) != 1 || !errors.Is(changes[0].Err, resources.ErrStreamingListsUnsupported) {
+		t.Fatalf("unsupported streaming list = %#v", changes)
 	}
 }
 

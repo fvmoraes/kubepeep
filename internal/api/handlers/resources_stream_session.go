@@ -534,6 +534,8 @@ func (session *resourceStreamSession) wireEvent(entry resourcecore.ReplayEntry, 
 	payload := map[string]any{"streamId": session.streamID, "topic": event.Topic, "generation": session.binding.Generation, "sequence": sequence, "observedAt": event.ObservedAt, "resourceVersion": event.ResourceVersion}
 	if event.Event == "snapshot" {
 		payload["snapshotId"], payload["chunk"], payload["final"], payload["items"] = session.snapshotIDs[event.Topic], event.Chunk, event.Final, event.Items
+	} else if event.Event == "refreshed" {
+		payload["reason"], payload["refetchRequired"] = event.Reason, event.RefetchRequired
 	} else if event.Event == "deleted" {
 		payload["object"] = event.Deleted
 	} else {

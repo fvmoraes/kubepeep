@@ -81,7 +81,7 @@ afterEach(() => {
 })
 
 describe('progressive dashboard', () => {
-  it('keeps partial, empty, and optional blocks distinct while loading all queries independently', async () => {
+  it('keeps partial, empty, and optional blocks distinct while loading tier two after summary', async () => {
     const fetch = vi.fn((input: string | URL | Request) => {
       const path = String(input)
       if (path === '/api/v1/dashboard/problems') {
@@ -123,7 +123,7 @@ describe('progressive dashboard', () => {
     expect((await screen.findAllByText('api-abc', { selector: 'strong' })).length).toBeGreaterThanOrEqual(2)
     expect(screen.getByText('Coverage: 1 of 2 namespaces. 1 denied.')).toBeInTheDocument()
     expect(screen.getByText('BackOff', { selector: 'strong' })).toBeInTheDocument()
-    expect(screen.getByText('Metrics API is not available. The rest of the dashboard is unaffected.')).toBeInTheDocument()
+    expect(await screen.findByText('Metrics API is not available. The rest of the dashboard is unaffected.')).toBeInTheDocument()
     expect(screen.getByText('Scan has not been run')).toBeInTheDocument()
     expect(screen.getByLabelText('Warning events: access denied')).toBeInTheDocument()
 

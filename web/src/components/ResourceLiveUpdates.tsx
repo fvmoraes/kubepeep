@@ -45,12 +45,12 @@ export function ResourceLiveUpdates({ generation, topics, queryKeys }: { generat
     await Promise.all(queryKeys.map((queryKey) => queryClient.invalidateQueries({ queryKey })))
   }, [queryClient, queryKeys])
 
-  function scheduleInvalidate() {
+  function scheduleInvalidate(delayMs: number) {
     if (invalidateTimerRef.current) return
     invalidateTimerRef.current = setTimeout(() => {
       invalidateTimerRef.current = null
       void invalidate()
-    }, 250)
+    }, delayMs)
   }
 
   useEffect(() => {
@@ -69,6 +69,8 @@ export function ResourceLiveUpdates({ generation, topics, queryKeys }: { generat
   function stop() {
     controllerRef.current?.abort()
     controllerRef.current = null
+    if (invalidateTimerRef.current) clearTimeout(invalidateTimerRef.current)
+    invalidateTimerRef.current = null
     setState({ mode: 'idle', message: 'Live updates are off; use Refresh for an HTTP snapshot.' })
   }
 
@@ -118,9 +120,14 @@ export function ResourceLiveUpdates({ generation, topics, queryKeys }: { generat
           try { payload = JSON.parse(event.data) as Record<string, unknown> } catch { throw new APIError(502, { code: 'INVALID_RESPONSE', message: 'The resource stream sent invalid JSON.' }) }
           if (typeof payload.generation === 'string' && payload.generation !== generation) throw new APIError(409, { code: 'GENERATION_CHANGED', message: 'The resource stream belongs to another generation.' })
           if (event.event === 'snapshot') {
-            if (payload.final === true) scheduleInvalidate()
+            if (payload.final === true) scheduleInvalidate(250)
+          } else if (event.event === 'refreshed') {
+            setState({ mode: 'live', message: 'The Kubernetes snapshot expired and was renewed automatically; live updates remain active.' })
+            scheduleInvalidate(250)
           } else if (event.event === 'added' || event.event === 'modified' || event.event === 'deleted') {
-            scheduleInvalidate()
+            // A sustained watch burst must not turn into a LIST every 250 ms.
+            // Coalesce all deltas in one bounded screen-refresh window.
+            scheduleInvalidate(2_000)
           } else if (event.event === 'reset') {
             await invalidate()
             if (payload.reason === 'generation_changed') throw new APIError(409, { code: 'GENERATION_CHANGED', message: 'The active selection changed.' })

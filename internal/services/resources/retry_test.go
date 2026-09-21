@@ -20,11 +20,13 @@ func TestRetryListPageRespectsRetryAfterAndReducesPressure(t *testing.T) {
 	lister := &retryTestLister{}
 	pressure := &apiPressure{}
 	waits := []time.Duration{}
+	throttles := 0
 	page, err := retryListPage(t.Context(), lister, PageRequest{Origin: Origin{Version: "v1", Resource: "pods"}}, RetryPolicy{
-		Attempts: 3,
-		Base:     time.Millisecond,
-		Maximum:  2 * time.Second,
-		Jitter:   func(value time.Duration) time.Duration { return value },
+		Attempts:   3,
+		Base:       time.Millisecond,
+		Maximum:    2 * time.Second,
+		OnThrottle: func() { throttles++ },
+		Jitter:     func(value time.Duration) time.Duration { return value },
 		Wait: func(_ context.Context, value time.Duration) error {
 			waits = append(waits, value)
 			return nil
@@ -38,6 +40,9 @@ func TestRetryListPageRespectsRetryAfterAndReducesPressure(t *testing.T) {
 	}
 	if got := pressure.fanout(4); got != 2 {
 		t.Fatalf("fanout after repeated 429 = %d", got)
+	}
+	if throttles != 2 {
+		t.Fatalf("observed 429 count = %d", throttles)
 	}
 }
 

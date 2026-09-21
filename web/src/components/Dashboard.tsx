@@ -566,8 +566,9 @@ function DashboardContent({ selection, cluster }: { selection: SelectionSummary;
 	const problems = useQuery({ queryKey: ['dashboard', 'problems', selection.generation], queryFn: ({ signal }) => getDashboardProblems(signal, selection.generation), ...dashboardQueryDefaults })
 	const restarts = useQuery({ queryKey: ['dashboard', 'restarts', selection.generation, 10], queryFn: ({ signal }) => getDashboardRestarts(10, signal, selection.generation), ...dashboardQueryDefaults })
 	const events = useQuery({ queryKey: ['dashboard', 'events', selection.generation], queryFn: ({ signal }) => getDashboardEvents(signal, selection.generation), ...dashboardQueryDefaults })
-	const metrics = useQuery({ queryKey: ['dashboard', 'metrics', selection.generation], queryFn: ({ signal }) => getDashboardMetrics(signal, selection.generation), ...dashboardQueryDefaults })
-	const namespaceHealth = useQuery({ queryKey: ['dashboard', 'namespace-health', selection.generation], queryFn: ({ signal }) => getDashboardNamespaceHealth(signal, selection.generation), ...dashboardQueryDefaults })
+	// Tier 2 cannot occupy network capacity before the core overview settles.
+	const metrics = useQuery({ queryKey: ['dashboard', 'metrics', selection.generation], queryFn: ({ signal }) => getDashboardMetrics(signal, selection.generation), ...dashboardQueryDefaults, enabled: summary.isSuccess, staleTime: 8_000, refetchInterval: 8_000, refetchIntervalInBackground: false })
+	const namespaceHealth = useQuery({ queryKey: ['dashboard', 'namespace-health', selection.generation], queryFn: ({ signal }) => getDashboardNamespaceHealth(signal, selection.generation), ...dashboardQueryDefaults, enabled: summary.isSuccess })
   const session = useQuery({ queryKey: ['session', selection.generation], queryFn: ({ signal }) => getSession(signal), staleTime: 5 * 60_000, retry: false })
   const [scanWindow, setScanWindow] = useState<LogScanRequest['window']>('15m')
   const [logScan, setLogScan] = useState<LogScanState>({ kind: 'idle' })
