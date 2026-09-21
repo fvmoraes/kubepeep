@@ -39,6 +39,7 @@ import {
   type SelectionSummary,
 } from '../api/client'
 import { StatePanel } from './StatePanel'
+import { PanelErrorBoundary } from './PanelErrorBoundary'
 import { Badge, Button, DataTable, Select, type BadgeVariant } from './ui'
 import { WarningBanner } from './ui/Banner'
 
@@ -252,14 +253,14 @@ function NamespaceHealthTable({ values }: { values: DashboardNamespaceHealth[] }
   )
 }
 
-function DashboardSection({ id, title, action, children }: { id: string; title: string; action?: ReactNode; children: ReactNode }) {
+function DashboardSection({ id, title, action, children, error = false, onRetry }: { id: string; title: string; action?: ReactNode; children: ReactNode; error?: boolean; onRetry?: () => void }) {
   return (
     <section id={id} aria-labelledby={`${id}-title`} className="rounded-xl border border-kp-overlay-0 bg-kp-surface-0 p-4">
       <div className="mb-3 flex items-center justify-between gap-4">
         <h2 id={`${id}-title`} className="text-base text-kp-text">{title}</h2>
-        {action}
+        <div className="flex items-center gap-2">{action}{error && onRetry ? <Button variant="secondary" size="sm" onClick={onRetry}>Retry {title}</Button> : null}</div>
       </div>
-      {children}
+      <PanelErrorBoundary name={title} onRetry={onRetry}>{children}</PanelErrorBoundary>
     </section>
   )
 }
@@ -651,7 +652,7 @@ function DashboardContent({ selection, cluster }: { selection: SelectionSummary;
         <div className="flex items-center justify-center gap-3 bg-kp-surface-1 px-3 py-2.5 text-xs"><Link className="text-kp-mauve hover:underline" to="/namespaces">Edit scope</Link><Link className="text-kp-mauve hover:underline" to="/permissions">View RBAC</Link></div>
       </div>
 
-      <DashboardSection id="summary" title="Summary" action={<BlockAge response={summary.data as DashboardResponse<unknown> | undefined} />}>
+      <DashboardSection id="summary" title="Summary" action={<BlockAge response={summary.data as DashboardResponse<unknown> | undefined} />} error={summary.isError} onRetry={() => void summary.refetch()}>
         <ResultBody
           pending={summary.isPending}
           error={summary.error}
@@ -664,13 +665,13 @@ function DashboardContent({ selection, cluster }: { selection: SelectionSummary;
       </DashboardSection>
 
       <div className="grid items-start gap-4 lg:grid-cols-2">
-        <DashboardSection id="problems" title="Problem pods" action={<BlockAge response={problems.data as DashboardResponse<unknown> | undefined} />}>
+        <DashboardSection id="problems" title="Problem pods" action={<BlockAge response={problems.data as DashboardResponse<unknown> | undefined} />} error={problems.isError} onRetry={() => void problems.refetch()}>
           <ResultBody pending={problems.isPending} error={problems.error} response={problems.data} isEmpty={(value) => value.length === 0} emptyCopy="No problematic pod was found in the completed coverage.">
             {(value) => <ProblemsTable values={value} />}
           </ResultBody>
         </DashboardSection>
 
-        <DashboardSection id="restarts" title="Container restarts" action={<BlockAge response={restarts.data as DashboardResponse<unknown> | undefined} />}>
+        <DashboardSection id="restarts" title="Container restarts" action={<BlockAge response={restarts.data as DashboardResponse<unknown> | undefined} />} error={restarts.isError} onRetry={() => void restarts.refetch()}>
           <ResultBody pending={restarts.isPending} error={restarts.error} response={restarts.data} isEmpty={(value) => value.length === 0} emptyCopy="No container restart was found in the completed coverage.">
             {(value) => <RestartsTable values={value} />}
           </ResultBody>
@@ -678,20 +679,20 @@ function DashboardContent({ selection, cluster }: { selection: SelectionSummary;
       </div>
 
       <div className="grid items-start gap-4 lg:grid-cols-2">
-        <DashboardSection id="warning-events" title="Warning events" action={<BlockAge response={events.data as DashboardResponse<unknown> | undefined} />}>
+        <DashboardSection id="warning-events" title="Warning events" action={<BlockAge response={events.data as DashboardResponse<unknown> | undefined} />} error={events.isError} onRetry={() => void events.refetch()}>
           <ResultBody pending={events.isPending} error={events.error} response={events.data} isEmpty={(value) => value.length === 0} emptyCopy="No Warning event was found in the completed coverage.">
             {(value) => <EventsTable values={value} />}
           </ResultBody>
         </DashboardSection>
 
-        <DashboardSection id="namespace-health" title="Namespace health" action={<BlockAge response={namespaceHealth.data as DashboardResponse<unknown> | undefined} />}>
+        <DashboardSection id="namespace-health" title="Namespace health" action={<BlockAge response={namespaceHealth.data as DashboardResponse<unknown> | undefined} />} error={namespaceHealth.isError} onRetry={() => void namespaceHealth.refetch()}>
           <ResultBody pending={namespaceHealth.isPending} error={namespaceHealth.error} response={namespaceHealth.data} isEmpty={(value) => value.length === 0} emptyCopy="No namespace health was collected for the active scope.">
             {(value) => <NamespaceHealthTable values={value} />}
           </ResultBody>
         </DashboardSection>
       </div>
 
-      <DashboardSection id="metrics" title="Pod metrics" action={<BlockAge response={metrics.data as DashboardResponse<unknown> | undefined} />}>
+      <DashboardSection id="metrics" title="Pod metrics" action={<BlockAge response={metrics.data as DashboardResponse<unknown> | undefined} />} error={metrics.isError} onRetry={() => void metrics.refetch()}>
         <ResultBody pending={metrics.isPending} error={metrics.error} response={metrics.data} isEmpty={(value) => value.pods.length === 0} emptyCopy="The Metrics API returned no pod metrics for the completed coverage." optional>
           {(value) => <MetricsView value={value} />}
         </ResultBody>
@@ -700,6 +701,8 @@ function DashboardContent({ selection, cluster }: { selection: SelectionSummary;
       <DashboardSection
         id="log-scan"
         title="Possible errors in logs"
+        error={logScan.kind === 'error'}
+        onRetry={() => void runLogScan()}
         action={(
           <div className="flex items-end justify-end gap-2">
             <label className="grid gap-1">

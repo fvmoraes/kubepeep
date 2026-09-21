@@ -19,6 +19,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/options/linux"
 	"github.com/wailsapp/wails/v2/pkg/options/mac"
 	"github.com/wailsapp/wails/v2/pkg/options/windows"
+	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"github.com/fvmoraes/kubepeep/internal/adapters/userdirs"
 	"github.com/fvmoraes/kubepeep/internal/application"
@@ -54,6 +55,7 @@ type Params struct {
 // SPA assets are served from the embedded filesystem; no external browser is
 // ever opened.
 func Run(ctx context.Context, params Params) error {
+	startupStarted := time.Now()
 	listener, port, err := localruntime.BindLoopback(params.Port)
 	if err != nil {
 		return fmt.Errorf("desktop: bind loopback: %w", err)
@@ -65,18 +67,19 @@ func Run(ctx context.Context, params Params) error {
 	}
 
 	platform, err := application.Compose(ctx, application.Options{
-		Layout:        params.Layout,
-		Config:        params.Config,
-		Kubeconfig:    params.Kubeconfig,
-		KubeconfigSet: params.KubeconfigSet,
-		Context:       params.Context,
-		ContextSet:    params.ContextSet,
-		Namespace:     params.Namespace,
-		NamespaceSet:  params.NamespaceSet,
-		LogOutput:     params.LogOutput,
-		Port:          port,
-		ExtraHosts:    params.ExtraHosts,
-		ExtraOrigins:  params.ExtraOrigins,
+		Layout:         params.Layout,
+		Config:         params.Config,
+		Kubeconfig:     params.Kubeconfig,
+		KubeconfigSet:  params.KubeconfigSet,
+		Context:        params.Context,
+		ContextSet:     params.ContextSet,
+		Namespace:      params.Namespace,
+		NamespaceSet:   params.NamespaceSet,
+		LogOutput:      params.LogOutput,
+		Port:           port,
+		ExtraHosts:     params.ExtraHosts,
+		ExtraOrigins:   params.ExtraOrigins,
+		BootstrapAsync: true,
 	})
 	if err != nil {
 		_ = listener.Close()
@@ -135,6 +138,13 @@ func Run(ctx context.Context, params Params) error {
 		},
 		Mac: &mac.Options{
 			Appearance: mac.DefaultAppearance,
+		},
+		OnStartup: func(runtimeContext context.Context) {
+			wailsruntime.EventsOnce(runtimeContext, "kubepeep:shell-ready", func(...interface{}) {
+				if params.LogOutput != nil {
+					_, _ = fmt.Fprintf(params.LogOutput, "{\"component\":\"desktop\",\"operation\":\"shell_ready\",\"duration_ms\":%.1f}\n", float64(time.Since(startupStarted).Microseconds())/1_000)
+				}
+			})
 		},
 		OnShutdown: func(context.Context) {
 			shutdownContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)

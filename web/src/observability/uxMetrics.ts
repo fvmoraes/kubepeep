@@ -4,6 +4,7 @@ export type UXMetricName =
   | 'filter_interaction_latency'
   | 'sort_interaction_latency'
   | 'rendered_row_count'
+  | 'time_to_shell_ready'
 
 export interface UXMetricSample {
   name: UXMetricName
@@ -72,6 +73,7 @@ let rowsToRequest = new WeakMap<readonly unknown[], ListRequestID>()
 let queryToInteraction = new WeakMap<object, ListInteractionID>()
 let requestSequence = 0
 let interactionSequence = 0
+let shellReadyRecorded = false
 
 function now(): number {
   return typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now()
@@ -182,6 +184,18 @@ export function recordRenderedRowCount(rows: number, view = currentUXView()): vo
   record('rendered_row_count', rows, 'rows', view)
 }
 
+export function recordShellReady(): void {
+  if (shellReadyRecorded) return
+  shellReadyRecorded = true
+  record('time_to_shell_ready', now(), 'milliseconds', 'overview')
+  // The native host measures from process startup, not navigationStart.
+  try {
+    (window as Window & { runtime?: { EventsEmit?: (name: string) => void } }).runtime?.EventsEmit?.('kubepeep:shell-ready')
+  } catch {
+    // Browser timing remains valid when the optional desktop bridge is absent.
+  }
+}
+
 export function snapshotUXMetrics(): UXMetricSample[] {
   return samples.map((sample) => ({ ...sample }))
 }
@@ -194,6 +208,7 @@ export function resetUXMetrics(): void {
   queryToInteraction = new WeakMap<object, ListInteractionID>()
   requestSequence = 0
   interactionSequence = 0
+  shellReadyRecorded = false
 }
 
 if (typeof window !== 'undefined') {

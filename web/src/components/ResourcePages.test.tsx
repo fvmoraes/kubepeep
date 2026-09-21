@@ -75,6 +75,33 @@ afterEach(() => {
 
 describe('read-only resource pages', () => {
 
+  it('shows a bounded Pod stream preview while HTTP is pending, then replaces it with the authorized page', async () => {
+    const streamed = { namespace: 'payments', name: 'streamed', status: 'Running', ready: { current: 1, desired: 1 }, restarts: 0, node: null, ip: null, owner: null, ageSeconds: 60, problematic: false }
+    let resolvePods: ((response: Response) => void) | undefined
+    let streamController: ReadableStreamDefaultController<Uint8Array> | undefined
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const path = String(input)
+      if (path === '/api/v1/status') return Promise.resolve(json({ ...selectedStatus(), components: { ...selectedStatus().components, metrics: { status: 'unknown' } } }))
+      if (path === '/api/v1/preferences') return Promise.resolve(json(preferences()))
+      if (path === '/api/v1/namespace-scopes/7') return Promise.resolve(json({ namespaces: ['payments'] }))
+      if (path.startsWith('/api/v1/pods?')) return new Promise<Response>((resolve) => { resolvePods = resolve })
+      if (path === '/api/v1/session') return Promise.resolve(json({ csrfToken: 'csrf', generation, origin: 'http://127.0.0.1:2748', expiresAt: '2026-09-12T12:00:00Z' }))
+      if (path === '/api/v1/stream?topic=pods') return Promise.resolve(new Response(new ReadableStream<Uint8Array>({ start(controller) {
+        streamController = controller
+        controller.enqueue(new TextEncoder().encode(`event: progress\ndata: ${JSON.stringify({ generation, topic: 'pods', snapshotId: 'snap_1', items: [streamed], completedNamespaces: 1, requestedNamespaces: 2 })}\n\n`))
+      } }), { headers: { 'Content-Type': 'text/event-stream' } }))
+      throw new Error(`Unexpected request: ${path}`)
+    }))
+    renderPage(<PodsPage />)
+    expect(await screen.findByRole('button', { name: 'Open Pod streamed in payments' })).toBeInTheDocument()
+    expect(screen.getByText(/✓ 1\/2 namespaces · partial preview/)).toBeInTheDocument()
+    expect(screen.queryByRole('checkbox', { name: 'Select row payments/streamed' })).not.toBeInTheDocument()
+    await act(async () => { resolvePods?.(json([{ ...streamed, name: 'from-http' }], page())) })
+    expect(await screen.findByRole('button', { name: 'Open Pod from-http in payments' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Open Pod streamed in payments' })).not.toBeInTheDocument()
+    streamController?.close()
+  })
+
   it('keeps hidden Storage columns in the chooser so they can be restored', async () => {
     const storedPreferences = {
       ...preferences(),
@@ -105,7 +132,7 @@ describe('read-only resource pages', () => {
     expect(await screen.findByRole('columnheader', { name: 'Phase' })).toBeInTheDocument()
   })
 
-  it('reloads Pods and drops the old cursor when the global namespace changes', async () => {
+  it('accumulates Pod pages and drops old cursors when the global namespace changes', async () => {
     const paths: string[] = []
     const pod = { namespace: 'payments', name: 'all-pods', status: 'Running', ready: { current: 1, desired: 1 }, restarts: 0, ageSeconds: 60, problematic: false }
     vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
@@ -124,8 +151,9 @@ describe('read-only resource pages', () => {
     await screen.findByRole('button', { name: 'Open Pod all-pods in payments' })
     expect(screen.getByRole('button', { name: 'First page' })).toBeDisabled()
     expect(screen.getByRole('button', { name: 'First page' })).toHaveAttribute('title', 'Already on the first page.')
-    fireEvent.click(screen.getByRole('button', { name: 'Next page' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Load next page' }))
     await screen.findByRole('button', { name: 'Open Pod page-two in payments' })
+    expect(screen.getByRole('button', { name: 'Open Pod all-pods in payments' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'First page' })).toBeEnabled()
     fireEvent.click(screen.getByRole('button', { name: 'First page' }))
     await screen.findByRole('button', { name: 'Open Pod all-pods in payments' })
@@ -135,6 +163,102 @@ describe('read-only resource pages', () => {
     expect(paths.slice(before).filter((path) => path.startsWith('/api/v1/pods?')).every((path) => !path.includes('continue='))).toBe(true)
     fireEvent.click(screen.getByRole('button', { name: 'Change global namespace' }))
     await screen.findByRole('button', { name: 'Open Pod all-pods in payments' })
+  })
+
+  it('retains no more than five Pod pages while loading forward', async () => {
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const path = String(input)
+      if (path === '/api/v1/status') return Promise.resolve(json({ ...selectedStatus(), components: { ...selectedStatus().components, metrics: { status: 'unknown' } } }))
+      if (path === '/api/v1/preferences') return Promise.resolve(json(preferences()))
+      if (path === '/api/v1/namespace-scopes/7') return Promise.resolve(json({ namespaces: ['payments'] }))
+      if (path.startsWith('/api/v1/pods?')) {
+        const cursor = new URL(path, 'http://127.0.0.1').searchParams.get('continue')
+        const index = cursor === null ? 0 : Number(cursor)
+        return Promise.resolve(json([{ namespace: 'payments', name: `page-${index}`, status: 'Running', ready: { current: 1, desired: 1 }, restarts: 0, ageSeconds: 60, problematic: false }], page(index < 6 ? String(index + 1) : '')))
+      }
+      throw new Error(`Unexpected request: ${path}`)
+    }))
+    const { client } = renderPage(<PodsPage />)
+    await screen.findByRole('button', { name: 'Open Pod page-0 in payments' })
+    for (let index = 1; index <= 5; index += 1) {
+      fireEvent.click(screen.getByRole('button', { name: 'Load next page' }))
+      await screen.findByRole('button', { name: `Open Pod page-${index} in payments` })
+    }
+    expect(screen.queryByRole('button', { name: 'Open Pod page-0 in payments' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Open Pod page-1 in payments' })).toBeInTheDocument()
+    const data = client.getQueriesData({ queryKey: ['resources', 'pods'] }).map(([, value]) => value).find((value): value is { pages: unknown[]; pageParams: unknown[] } => Boolean(value && typeof value === 'object' && 'pages' in value))
+    expect(data).toBeDefined()
+    expect(data?.pages).toHaveLength(5)
+    expect(data?.pageParams).toHaveLength(5)
+  })
+
+  it('replaces accumulated Pods when a continuation expires', async () => {
+    let firstPageRequests = 0
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const path = String(input)
+      if (path === '/api/v1/status') return Promise.resolve(json({ ...selectedStatus(), components: { ...selectedStatus().components, metrics: { status: 'unknown' } } }))
+      if (path === '/api/v1/preferences') return Promise.resolve(json(preferences()))
+      if (path === '/api/v1/namespace-scopes/7') return Promise.resolve(json({ namespaces: ['payments'] }))
+      if (path.startsWith('/api/v1/pods?')) {
+        const cursor = new URL(path, 'http://127.0.0.1').searchParams.get('continue')
+        if (cursor === 'expired-token') return Promise.resolve(new Response(JSON.stringify({ code: 'CURSOR_EXPIRED', message: 'expired' }), { status: 410, headers: { 'Content-Type': 'application/json' } }))
+        firstPageRequests += 1
+        const name = firstPageRequests === 1 ? 'old-pod' : 'fresh-pod'
+        return Promise.resolve(json([{ namespace: 'payments', name, status: 'Running', ready: { current: 1, desired: 1 }, restarts: 0, ageSeconds: 60, problematic: false }], page(firstPageRequests === 1 ? 'expired-token' : '')))
+      }
+      throw new Error(`Unexpected request: ${path}`)
+    }))
+    renderPage(<PodsPage />)
+    await screen.findByRole('button', { name: 'Open Pod old-pod in payments' })
+    fireEvent.click(screen.getByRole('button', { name: 'Load next page' }))
+    await screen.findByRole('button', { name: 'Open Pod fresh-pod in payments' })
+    expect(screen.queryByRole('button', { name: 'Open Pod old-pod in payments' })).not.toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('snapshot expired')
+    expect(firstPageRequests).toBe(2)
+  })
+
+  it('hides loaded Pods when a later page is forbidden', async () => {
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const path = String(input)
+      if (path === '/api/v1/status') return Promise.resolve(json({ ...selectedStatus(), components: { ...selectedStatus().components, metrics: { status: 'unknown' } } }))
+      if (path === '/api/v1/preferences') return Promise.resolve(json(preferences()))
+      if (path === '/api/v1/namespace-scopes/7') return Promise.resolve(json({ namespaces: ['payments'] }))
+      if (path.startsWith('/api/v1/pods?')) {
+        const cursor = new URL(path, 'http://127.0.0.1').searchParams.get('continue')
+        if (cursor) return Promise.resolve(new Response(JSON.stringify({ code: 'FORBIDDEN', message: 'access revoked' }), { status: 403, headers: { 'Content-Type': 'application/json' } }))
+        return Promise.resolve(json([{ namespace: 'payments', name: 'private-pod', status: 'Running', ready: { current: 1, desired: 1 }, restarts: 0, ageSeconds: 60, problematic: false }], page('next-token')))
+      }
+      throw new Error(`Unexpected request: ${path}`)
+    }))
+    renderPage(<PodsPage />)
+    await screen.findByRole('button', { name: 'Open Pod private-pod in payments' })
+    fireEvent.click(screen.getByRole('button', { name: 'Load next page' }))
+    await screen.findByText('Resource request failed')
+    expect(screen.queryByRole('button', { name: 'Open Pod private-pod in payments' })).not.toBeInTheDocument()
+  })
+
+  it('keeps Pods visible while same-selection filters refresh', async () => {
+    let release: ((response: Response) => void) | undefined
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const path = String(input)
+      if (path === '/api/v1/status') return Promise.resolve(json({ ...selectedStatus(), components: { ...selectedStatus().components, metrics: { status: 'unknown' } } }))
+      if (path === '/api/v1/preferences') return Promise.resolve(json(preferences()))
+      if (path === '/api/v1/namespace-scopes/7') return Promise.resolve(json({ namespaces: ['payments'] }))
+      if (path.startsWith('/api/v1/pods?')) {
+        if (new URL(path, 'http://127.0.0.1').searchParams.has('search')) return new Promise<Response>((resolve) => { release = resolve })
+        return Promise.resolve(json([{ namespace: 'payments', name: 'old-pod', status: 'Running', ready: { current: 1, desired: 1 }, restarts: 0, ageSeconds: 60, problematic: false }], page()))
+      }
+      throw new Error(`Unexpected request: ${path}`)
+    }))
+    renderPage(<PodsPage />)
+    await screen.findByRole('button', { name: 'Open Pod old-pod in payments' })
+    fireEvent.change(screen.getByLabelText('Search this bounded page'), { target: { value: 'new' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Apply filters' }))
+    await screen.findByText('Refreshing Pods…')
+    expect(screen.getByRole('button', { name: 'Open Pod old-pod in payments' })).toBeInTheDocument()
+    await act(async () => release?.(json([{ namespace: 'payments', name: 'new-pod', status: 'Running', ready: { current: 1, desired: 1 }, restarts: 0, ageSeconds: 60, problematic: false }], page())))
+    await screen.findByRole('button', { name: 'Open Pod new-pod in payments' })
+    expect(screen.queryByRole('button', { name: 'Open Pod old-pod in payments' })).not.toBeInTheDocument()
   })
 
 
@@ -194,13 +318,15 @@ describe('read-only resource pages', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Load authorized YAML' }))
     expect(await screen.findByLabelText('YAML document')).toHaveTextContent('kind: Deployment')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Next page' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Load next page' }))
     expect(await screen.findByRole('button', { name: 'Open Deployment worker in payments' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Open Deployment api in payments' })).toBeInTheDocument()
     expect(calls.some((call) => call.path.endsWith('continue=next-token'))).toBe(true)
     const resourceRequestsBeforeGenerationChange = calls.filter((call) => call.path.startsWith('/api/v1/workloads?')).length
     activeGeneration = 'gen_43'
     await act(async () => client.setQueryData(['local-status'], selectedStatus(activeGeneration)))
     expect(await screen.findByRole('button', { name: 'Open Deployment fresh in payments' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Open Deployment worker in payments' })).not.toBeInTheDocument()
     const requestsAfterGenerationChange = calls.filter((call) => call.path.startsWith('/api/v1/workloads?')).slice(resourceRequestsBeforeGenerationChange)
     expect(requestsAfterGenerationChange.some((call) => call.path === '/api/v1/workloads?limit=100')).toBe(true)
     expect(requestsAfterGenerationChange.some((call) => call.path.includes('continue='))).toBe(false)
@@ -246,12 +372,11 @@ describe('read-only resource pages', () => {
 
     const requestsBeforeClear = paths.length
     fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }))
-    await waitFor(() => expect(paths.slice(requestsBeforeClear).some((path) => {
-      if (!path.startsWith('/api/v1/pods?')) return false
+    await waitFor(() => expect(screen.getByText('None')).toBeInTheDocument())
+    expect(paths.slice(requestsBeforeClear).filter((path) => path.startsWith('/api/v1/pods?')).every((path) => {
       const query = new URL(path, 'http://127.0.0.1').searchParams
       return !query.has('namespace') && !query.has('search') && !query.has('sort') && !query.has('order') && !query.has('continue')
-    })).toBe(true))
-    expect(screen.getByText('None')).toBeInTheDocument()
+    })).toBe(true)
 
     fireEvent.change(await screen.findByRole('combobox', { name: 'Saved filter' }), { target: { value: 'saved-pods' } })
     fireEvent.click(screen.getByRole('button', { name: 'Apply saved filter' }))

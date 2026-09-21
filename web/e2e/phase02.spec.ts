@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-test('returning to Pods renders the cached snapshot while HTTP revalidates', async ({ page }) => {
+test('returning to Pods keeps the fresh cache and manual HTTP revalidation preserves it', async ({ page }) => {
   const generation = 'gen_phase02'
   const status = {
     version: 'test', commit: 'test', buildDate: 'test', port: 2748,
@@ -37,6 +37,9 @@ test('returning to Pods renders the cached snapshot while HTTP revalidates', asy
   await expect(page).toHaveURL(/\/workloads\/kind\/deployments$/)
   await navigation.locator('a[href="/pods"]').click()
   try {
+    await expect(page.getByText('cached-api')).toBeVisible({ timeout: 1_000 })
+    expect(podRequests).toBe(1)
+    await page.getByRole('button', { name: 'Refresh now' }).click()
     await expect.poll(() => podRequests).toBe(2)
     await expect(page.getByText('cached-api')).toBeVisible({ timeout: 1_000 })
   } finally {

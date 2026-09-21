@@ -227,6 +227,12 @@ func TestResourceStreamPublishesOneTransactionalSnapshotPerTopic(t *testing.T) {
 	done := make(chan struct{})
 	go func() { handler.Resources(recorder, request); close(done) }()
 	body := recorder.waitContains(t, "event: snapshot", `"namespace":"alpha"`, `"namespace":"beta"`, `"final":true`)
+	if progress, snapshot := strings.Index(body, "event: progress"), strings.Index(body, "event: snapshot"); progress < 0 || progress >= snapshot {
+		t.Fatalf("the bounded preview must precede the authoritative snapshot: %s", body)
+	}
+	if !strings.Contains(body, `"completedNamespaces":1`) || !strings.Contains(body, `"completedNamespaces":2`) || !strings.Contains(body, `"requestedNamespaces":2`) {
+		t.Fatalf("progress did not count completed namespaces: %s", body)
+	}
 	if count := strings.Count(body, "event: snapshot"); count != 1 {
 		t.Fatalf("snapshot was published per origin instead of per topic: count=%d body=%s", count, body)
 	}
@@ -361,7 +367,7 @@ func TestResourceStreamReplaysMissedEventsWithinLiveRingWithoutSnapshot(t *testi
 	secondDone := make(chan struct{})
 	go func() { handler.Resources(secondRecorder, secondRequest); close(secondDone) }()
 	secondBody := secondRecorder.waitContains(t, "event: modified", `"resourceVersion":"rv-2"`)
-	if strings.Contains(secondBody, "event: snapshot") || strings.Contains(secondBody, "resume_unavailable") {
+	if strings.Contains(secondBody, "event: snapshot") || strings.Contains(secondBody, "event: progress") || strings.Contains(secondBody, "resume_unavailable") {
 		t.Fatalf("resume unexpectedly snapshotted/reset: %s", secondBody)
 	}
 	if !strings.Contains(secondBody, "id: "+replayedID) {

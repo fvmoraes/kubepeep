@@ -281,6 +281,43 @@ func TestResourceStreamValidUnavailableResumeUsesTerminalReset(t *testing.T) {
 	}
 }
 
+func TestResourceStreamAllowsSameOriginBrowserGETWithoutOriginHeader(t *testing.T) {
+	origin := "http://127.0.0.1:2748"
+	sessions, err := api.NewSessionStore(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := sessions.Current(origin, "gen")
+	if err != nil {
+		t.Fatal(err)
+	}
+	selection := &resourceSelectionStub{binding: namespaces.SelectionBinding{ClusterProfileID: 1, Context: "ctx", Generation: "gen"}, resolution: namespaces.ScopeResolution{Namespaces: []string{"default"}}}
+	handler := NewResourceStreams(&resourceStreamServiceStub{}, selection, sessions, origin)
+	for _, test := range []struct {
+		name, site, csrf string
+		want             int
+	}{
+		{name: "same origin", site: "same-origin", csrf: session.CSRFToken, want: http.StatusOK},
+		{name: "missing fetch metadata", csrf: session.CSRFToken, want: http.StatusForbidden},
+		{name: "cross site", site: "cross-site", csrf: session.CSRFToken, want: http.StatusForbidden},
+		{name: "missing csrf", site: "same-origin", want: http.StatusForbidden},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, "/api/v1/stream?topic=pods", nil)
+			if test.site != "" {
+				request.Header.Set("Sec-Fetch-Site", test.site)
+			}
+			request.Header.Set("X-KubePeep-CSRF", test.csrf)
+			response := httptest.NewRecorder()
+			_, _, err := handler.preflight(response, request)
+			var httpErr *api.HTTPError
+			if test.want == http.StatusOK && err != nil || test.want == http.StatusForbidden && (!errors.As(err, &httpErr) || httpErr.Status != http.StatusForbidden) {
+				t.Fatalf("preflight error = %v", err)
+			}
+		})
+	}
+}
+
 func TestResourceAllowedMethodsMergeReadAndDelete(t *testing.T) {
 	allow, known := allowedMethods("/api/v1/pods/default/api")
 	if !known || allow != "DELETE, GET, HEAD" {

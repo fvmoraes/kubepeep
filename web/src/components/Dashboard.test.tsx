@@ -81,6 +81,26 @@ afterEach(() => {
 })
 
 describe('progressive dashboard', () => {
+  it('isolates a failed metrics request and retries only that panel', async () => {
+    let metricsCalls = 0
+    const fetch = vi.fn((input: string | URL | Request) => {
+      const path = String(input)
+      if (path === '/api/v1/metrics') {
+        metricsCalls += 1
+        if (metricsCalls === 1) return Promise.resolve(new Response(JSON.stringify({ code: 'FEATURE_UNAVAILABLE', message: 'Metrics API failed.' }), { status: 503, headers: { 'Content-Type': 'application/json' } }))
+      }
+      return Promise.resolve(defaultResponse(path))
+    })
+    vi.stubGlobal('fetch', fetch)
+    renderDashboard()
+    expect(await screen.findByRole('button', { name: 'Retry Pod metrics' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Cluster overview' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Problem pods' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Retry Pod metrics' }))
+    await waitFor(() => expect(metricsCalls).toBe(2))
+    expect(screen.queryByRole('button', { name: 'Retry Pod metrics' })).not.toBeInTheDocument()
+  })
+
   it('keeps partial, empty, and optional blocks distinct while loading tier two after summary', async () => {
     const fetch = vi.fn((input: string | URL | Request) => {
       const path = String(input)

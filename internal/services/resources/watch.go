@@ -30,7 +30,12 @@ const (
 	DefaultWatchIdleTimeout  = 45 * time.Second
 	InitialWatchSyncTimeout  = 10 * time.Second
 	streamSSEEnvelopeReserve = 64
+	// A single slow scope must not serialize hundreds of SAR requests, while
+	// concurrent streams must not create an unbounded authorization burst.
+	maximumConcurrentStreamAuthorizations = 16
 )
+
+var streamAuthorizationSlots = make(chan struct{}, maximumConcurrentStreamAuthorizations)
 
 type Topic string
 
@@ -138,18 +143,20 @@ type InitialWatchPort interface {
 var ErrStreamingListsUnsupported = errors.New("streaming lists unsupported")
 
 type StreamEvent struct {
-	Event           string        `json:"event"`
-	Topic           Topic         `json:"topic,omitempty"`
-	Generation      string        `json:"generation"`
-	ResourceVersion string        `json:"resourceVersion,omitempty"`
-	Items           []TopicObject `json:"items,omitempty"`
-	Object          TopicObject   `json:"object,omitempty"`
-	Deleted         *ResourceRef  `json:"deleted,omitempty"`
-	Reason          string        `json:"reason,omitempty"`
-	RefetchRequired bool          `json:"refetchRequired,omitempty"`
-	Final           bool          `json:"final,omitempty"`
-	Chunk           int           `json:"chunk,omitempty"`
-	ObservedAt      string        `json:"observedAt,omitempty"`
+	Event               string        `json:"event"`
+	Topic               Topic         `json:"topic,omitempty"`
+	Generation          string        `json:"generation"`
+	ResourceVersion     string        `json:"resourceVersion,omitempty"`
+	Items               []TopicObject `json:"items,omitempty"`
+	Object              TopicObject   `json:"object,omitempty"`
+	Deleted             *ResourceRef  `json:"deleted,omitempty"`
+	Reason              string        `json:"reason,omitempty"`
+	RefetchRequired     bool          `json:"refetchRequired,omitempty"`
+	Final               bool          `json:"final,omitempty"`
+	Chunk               int           `json:"chunk,omitempty"`
+	CompletedNamespaces int           `json:"completedNamespaces,omitempty"`
+	RequestedNamespaces int           `json:"requestedNamespaces,omitempty"`
+	ObservedAt          string        `json:"observedAt,omitempty"`
 }
 
 type WatchManager struct {
@@ -572,8 +579,11 @@ func (worker *watchWorker) run() {
 func (worker *watchWorker) setConnected(connected bool) {
 	worker.manager.mu.Lock()
 	worker.connected = connected
+	stopping := worker.stopping
 	worker.manager.mu.Unlock()
-	if !connected && worker.cacheSubscription != nil {
+	// An intentional idle shutdown retains its last RV as a safe reconnect
+	// checkpoint. An unexpected disconnect still makes the cache stale.
+	if !connected && !stopping && worker.cacheSubscription != nil {
 		worker.cacheSubscription.MarkStale()
 	}
 }
@@ -1223,6 +1233,33 @@ func authorizeTopics(ctx context.Context, checker AuthorizationChecker, selectio
 	if selection.Generation == "" || len(selection.Namespaces) == 0 {
 		return validationError("stream selection is incomplete")
 	}
+	if len(selection.Namespaces) > 1 {
+		// A cluster-wide grant is stronger than every requested namespace grant.
+		// A denied/unknown global probe is never used as a denial: restricted
+		// identities still get the complete per-origin capability check below.
+		globalAllowed := true
+		for _, topic := range canonical {
+			for _, gvr := range topicGVRs[topic] {
+				for _, verb := range []string{"list", "watch"} {
+					capability := authorizationCapability(ctx, checker, authorization.Key{Generation: selection.Generation, APIGroup: gvr.Group, Resource: gvr.Resource, Verb: verb}, refresh)
+					if capability.Decision != authorization.DecisionAllowed {
+						globalAllowed = false
+						break
+					}
+				}
+				if !globalAllowed {
+					break
+				}
+			}
+			if !globalAllowed {
+				break
+			}
+		}
+		if globalAllowed {
+			return nil
+		}
+		return authorizeTopicsConcurrently(ctx, checker, selection, canonical, refresh)
+	}
 	for _, topic := range canonical {
 		for _, gvr := range topicGVRs[topic] {
 			for _, namespace := range selection.Namespaces {
@@ -1238,6 +1275,73 @@ func authorizeTopics(ctx context.Context, checker AuthorizationChecker, selectio
 				}
 			}
 		}
+	}
+	return nil
+}
+
+func authorizeTopicsConcurrently(ctx context.Context, checker AuthorizationChecker, selection Selection, topics []Topic, refresh bool) error {
+	keys := make([]authorization.Key, 0, len(selection.Namespaces)*len(topics)*2)
+	for _, topic := range topics {
+		for _, gvr := range topicGVRs[topic] {
+			for _, namespace := range selection.Namespaces {
+				for _, verb := range []string{"list", "watch"} {
+					keys = append(keys, authorization.Key{Generation: selection.Generation, Namespace: namespace, APIGroup: gvr.Group, Resource: gvr.Resource, Verb: verb})
+				}
+			}
+		}
+	}
+	workCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	jobs := make(chan authorization.Key)
+	producerDone := make(chan struct{})
+	go func() {
+		defer close(producerDone)
+		defer close(jobs)
+		for _, key := range keys {
+			select {
+			case jobs <- key:
+			case <-workCtx.Done():
+				return
+			}
+		}
+	}()
+	var workers sync.WaitGroup
+	var resultMu sync.Mutex
+	denied, unavailable := false, false
+	for range min(maximumConcurrentStreamAuthorizations, len(keys)) {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			for key := range jobs {
+				select {
+				case streamAuthorizationSlots <- struct{}{}:
+				case <-workCtx.Done():
+					return
+				}
+				capability := authorizationCapability(workCtx, checker, key, refresh)
+				<-streamAuthorizationSlots
+				if capability.Decision == authorization.DecisionAllowed {
+					continue
+				}
+				resultMu.Lock()
+				if capability.Decision == authorization.DecisionDenied {
+					denied = true
+				} else {
+					unavailable = true
+				}
+				resultMu.Unlock()
+				cancel()
+				return
+			}
+		}()
+	}
+	workers.Wait()
+	<-producerDone
+	if denied {
+		return domainError(CodeForbidden, "Access to the requested resource stream was denied.", nil)
+	}
+	if unavailable || ctx.Err() != nil {
+		return domainError(CodeAuthorizationUnavailable, "Authorization could not be confirmed.", nil)
 	}
 	return nil
 }

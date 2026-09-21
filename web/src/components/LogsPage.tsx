@@ -9,6 +9,7 @@ import { Badge, Button, Checkbox, Input, Select, type BadgeVariant } from '../co
 import { ErrorBanner, InfoBanner, WarningBanner } from '../components/ui/Banner'
 import { SavedFilterControls } from './SavedFilterControls'
 import { StatePanel } from './StatePanel'
+import { PanelErrorBoundary } from './PanelErrorBoundary'
 
 interface FollowState {
   status: 'idle' | 'connecting' | 'following' | 'ended' | 'error'
@@ -237,7 +238,7 @@ export function LogsPage() {
       {status.isPending ? <StatePanel kind="loading" title="Loading active selection">The local service is resolving the current generation.</StatePanel>
         : status.isError ? <StatePanel kind="error" title="Selection unavailable">{message(status.error)}</StatePanel>
           : !selection ? <StatePanel kind="empty" title="Choose a Kubernetes context">Select a context and namespace scope before reading logs.</StatePanel>
-            : <LogsWorkspace key={selection.generation} selection={selection} params={params} defaults={preferences.data?.logs ?? defaultLogPreferences} preferencesUnavailable={preferences.isError} />}
+            : <PanelErrorBoundary key={selection.generation} name="Logs"><LogsWorkspace selection={selection} params={params} defaults={preferences.data?.logs ?? defaultLogPreferences} preferencesUnavailable={preferences.isError} /></PanelErrorBoundary>}
     </div>
   )
 }
@@ -263,6 +264,11 @@ function LogsWorkspace({ selection, params, defaults, preferencesUnavailable }: 
   const readAbortRef = useRef<AbortController | null>(null)
   const mountedRef = useRef(true)
   const followBufferRef = useRef<LogLine[]>([])
+  const pendingFollowLinesRef = useRef<LogLine[]>([])
+  const followFlushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const pausedRef = useRef(paused)
+
+  useEffect(() => { pausedRef.current = paused }, [paused])
 
   const catalog = useQuery({
     queryKey: ['resources', 'log-target-catalog', selection.generation],
@@ -300,15 +306,35 @@ function LogsWorkspace({ selection, params, defaults, preferencesUnavailable }: 
       mountedRef.current = false
       followAbortRef.current?.abort()
       readAbortRef.current?.abort()
+      if (followFlushTimerRef.current) clearTimeout(followFlushTimerRef.current)
     }
   }, [])
 
   function clearBuffer() {
+    if (followFlushTimerRef.current) clearTimeout(followFlushTimerRef.current)
+    followFlushTimerRef.current = null
+    pendingFollowLinesRef.current = []
     followBufferRef.current = []
     setFollowBuffer([])
   }
 
+  function flushPendingLines() {
+    if (followFlushTimerRef.current) clearTimeout(followFlushTimerRef.current)
+    followFlushTimerRef.current = null
+    const batch = pendingFollowLinesRef.current
+    if (batch.length === 0) return
+    pendingFollowLinesRef.current = []
+    if (pausedRef.current) {
+      const next = batch.reduce((buffer, line) => appendBounded(buffer, line), followBufferRef.current)
+      followBufferRef.current = next
+      setFollowBuffer(next)
+    } else {
+      setFollowLines((lines) => batch.reduce((current, line) => appendBounded(current, line), lines))
+    }
+  }
+
   function flushBuffer() {
+    flushPendingLines()
     const buffer = followBufferRef.current
     if (buffer.length === 0) return
     setFollowLines((lines) => buffer.reduce((acc, line) => appendBounded(acc, line), lines))
@@ -388,13 +414,8 @@ function LogsWorkspace({ selection, params, defaults, preferencesUnavailable }: 
           } else if (event.event === 'line') {
             if (!metaSeen) throw new APIError(502, { code: 'INVALID_RESPONSE', message: 'The log stream sent data before metadata.' })
             const line: LogLine = { timestamp: typeof payload.timestamp === 'string' ? payload.timestamp : null, text: typeof payload.text === 'string' ? payload.text : '', truncated: payload.truncated === true }
-            if (paused) {
-              const next = appendBounded(followBufferRef.current, line)
-              followBufferRef.current = next
-              setFollowBuffer(next)
-            } else {
-              setFollowLines((lines) => appendBounded(lines, line))
-            }
+            pendingFollowLinesRef.current = appendBounded(pendingFollowLinesRef.current, line)
+            if (!followFlushTimerRef.current) followFlushTimerRef.current = setTimeout(flushPendingLines, 75)
           } else if (event.event === 'end') {
             flushBuffer()
             setPaused(false)

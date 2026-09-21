@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -50,20 +50,19 @@ describe('command center global resource search (F7-04)', () => {
 
     const input = screen.getByRole('combobox', { name: 'Search application pages' })
     fireEvent.change(input, { target: { value: 'api-abc' } })
-    const option = screen.getByRole('option', { name: /api-abc/ })
-    expect(option).toHaveAttribute('aria-selected', 'true')
+    await waitFor(() => expect(screen.getByRole('option', { name: /api-abc/ })).toHaveAttribute('aria-selected', 'true'))
     fireEvent.keyDown(input, { key: 'Enter' })
     expect(screen.getByText('pod detail')).toBeInTheDocument()
   })
 
-  it('searches identifiers of loaded resources without opening network requests', () => {
+  it('searches identifiers of loaded resources without opening network requests', async () => {
     const fetchSpy = vi.fn()
     vi.stubGlobal('fetch', fetchSpy)
     renderPalette(() => resources)
     fireEvent.keyDown(document, { key: 'k', ctrlKey: true })
     fireEvent.change(screen.getByRole('combobox', { name: 'Search application pages' }), { target: { value: 'payments pod' } })
     expect(screen.getByRole('option', { name: /api-abc/ })).toBeInTheDocument()
-    expect(screen.queryByRole('option', { name: /store/ })).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByRole('option', { name: /store/ })).not.toBeInTheDocument())
     expect(fetchSpy).not.toHaveBeenCalled()
   })
 

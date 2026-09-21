@@ -441,6 +441,7 @@ func collectResource[T resources.ListItem](
 		RequestedNamespaces: len(names),
 		Fanout:              backend.listFanout,
 		NativeIdentityOrder: true,
+		GlobalGrantFastPath: true,
 		Retry:               backend.listRetryPolicy(),
 	})
 	observeListDuration(backend.metrics, collection, "fanout", started)

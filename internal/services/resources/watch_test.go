@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -737,6 +738,75 @@ func TestReauthorizeTopicsBypassesCacheAndStopsOnRevocation(t *testing.T) {
 	err := ReauthorizeTopics(context.Background(), stub, Selection{Generation: "gen", Namespaces: []string{"payments"}}, []Topic{TopicPods})
 	if ErrorCodeOf(err) != CodeForbidden || stub.refreshes != 1 || stub.checks != 0 {
 		t.Fatalf("err=%v refreshes=%d checks=%d", err, stub.refreshes, stub.checks)
+	}
+}
+
+type concurrentStreamAuthorization struct {
+	globalDecision    authorization.Decision
+	namespaceDecision authorization.Decision
+	checks            atomic.Int32
+	active            atomic.Int32
+	maximum           atomic.Int32
+}
+
+func (stub *concurrentStreamAuthorization) Check(ctx context.Context, key authorization.Key) authorization.Capability {
+	return stub.capability(ctx, key)
+}
+
+func (stub *concurrentStreamAuthorization) Refresh(ctx context.Context, key authorization.Key) authorization.Capability {
+	return stub.capability(ctx, key)
+}
+
+func (stub *concurrentStreamAuthorization) capability(ctx context.Context, key authorization.Key) authorization.Capability {
+	stub.checks.Add(1)
+	if key.Namespace == "" {
+		return authorization.Capability{Decision: stub.globalDecision}
+	}
+	active := stub.active.Add(1)
+	defer stub.active.Add(-1)
+	for {
+		maximum := stub.maximum.Load()
+		if active <= maximum || stub.maximum.CompareAndSwap(maximum, active) {
+			break
+		}
+	}
+	select {
+	case <-time.After(time.Millisecond):
+	case <-ctx.Done():
+		return authorization.Capability{Decision: authorization.DecisionUnknown}
+	}
+	return authorization.Capability{Decision: stub.namespaceDecision}
+}
+
+func TestMultiNamespaceStreamAuthorizationUsesGlobalGrant(t *testing.T) {
+	selection := Selection{Generation: "gen", Namespaces: []string{"a", "b", "c"}}
+	stub := &concurrentStreamAuthorization{globalDecision: authorization.DecisionAllowed}
+	if err := AuthorizeTopics(t.Context(), stub, selection, []Topic{TopicPods}); err != nil {
+		t.Fatal(err)
+	}
+	if got := stub.checks.Load(); got != 2 {
+		t.Fatalf("expected only global list/watch probes, got %d", got)
+	}
+}
+
+func TestMultiNamespaceStreamAuthorizationFallsBackToBoundedChecks(t *testing.T) {
+	selection := Selection{Generation: "gen"}
+	for index := range 50 {
+		selection.Namespaces = append(selection.Namespaces, "ns-"+strconv.Itoa(index))
+	}
+	stub := &concurrentStreamAuthorization{globalDecision: authorization.DecisionDenied, namespaceDecision: authorization.DecisionAllowed}
+	if err := ReauthorizeTopics(t.Context(), stub, selection, []Topic{TopicPods}); err != nil {
+		t.Fatal(err)
+	}
+	if got := stub.checks.Load(); got != 101 {
+		t.Fatalf("expected global probe and 100 namespace checks, got %d", got)
+	}
+	if got := stub.maximum.Load(); got <= 1 || got > maximumConcurrentStreamAuthorizations {
+		t.Fatalf("bounded parallelism = %d", got)
+	}
+	stub.namespaceDecision = authorization.DecisionDenied
+	if err := AuthorizeTopics(t.Context(), stub, selection, []Topic{TopicPods}); ErrorCodeOf(err) != CodeForbidden {
+		t.Fatalf("denied namespace grant = %v", err)
 	}
 }
 

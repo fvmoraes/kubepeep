@@ -112,16 +112,16 @@ describe('application shell', () => {
     expect(screen.queryByRole('heading', { name: 'The local API is unavailable' })).not.toBeInTheDocument()
   })
 
-  it('renders every placeholder route on a direct deep link', () => {
+  it('renders every placeholder route on a direct deep link', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('offline')))
     for (const [path, title] of placeholderRoutes) {
       const view = renderApp(path)
-      expect(screen.getByRole('heading', { name: title })).toBeInTheDocument()
+      expect(await screen.findByRole('heading', { name: title })).toBeInTheDocument()
       view.unmount()
     }
   })
 
-  it('exposes the exact static application routes in the topbar command center', () => {
+  it('exposes the exact static application routes in the topbar command center', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('offline')))
     renderApp()
 
@@ -178,7 +178,7 @@ describe('application shell', () => {
 
     fireEvent.change(screen.getByRole('combobox', { name: 'Search application pages' }), { target: { value: 'rbac' } })
     expect(screen.getByRole('option', { name: /Permissions/ })).toBeInTheDocument()
-    expect(screen.queryByRole('option', { name: /Overview/ })).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByRole('option', { name: /Overview/ })).not.toBeInTheDocument())
   })
 
   it('globally refreshes only explicitly allowlisted active read queries', async () => {

@@ -60,6 +60,11 @@ type CollectionRequest[T ListItem] struct {
 	// NativeIdentityOrder is set only by adapters whose LIST continuation is
 	// monotonic for the same namespace/name comparator used by Less.
 	NativeIdentityOrder bool
+	// A cluster-wide list grant is stronger than each namespace grant. Enable
+	// only for real Kubernetes authorizers; a denied/unknown probe falls back
+	// to the ordinary per-namespace matrix.
+	GlobalGrantFastPath bool
+	globalListGrant     *authorization.Capability
 	pressure            *apiPressure
 }
 
@@ -90,6 +95,17 @@ func Collect[T ListItem](ctx context.Context, request CollectionRequest[T]) (_ L
 		return result, validationError("list options must be normalized before collection")
 	}
 	origins := canonicalOrigins(request.Origins)
+	if request.GlobalGrantFastPath && len(origins) > 1 && singleGVR(origins) {
+		capability := request.Authorizer.Check(ctx, authorization.Key{
+			Generation: request.Selection.Generation,
+			APIGroup:   origins[0].APIGroup,
+			Resource:   origins[0].Resource,
+			Verb:       "list",
+		})
+		if capability.Decision == authorization.DecisionAllowed {
+			request.globalListGrant = &capability
+		}
+	}
 	pagination := selectPaginationStrategy(request, origins)
 	strategy := pagination.Name()
 	spanName := "resources.list.fanout"

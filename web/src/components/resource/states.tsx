@@ -64,3 +64,33 @@ export function CollectionFooter<T>({ result, currentCursor, onNext, onRestart }
     </footer>
   )
 }
+
+export function InfiniteCollectionFooter<T>({ result, itemCount, pageCount, firstPage, hasNextPage, loading, refreshing, nextPageError, onNext, onRestart }: {
+  result: CollectionResult<T>
+  itemCount: number
+  pageCount: number
+  firstPage: boolean
+  hasNextPage: boolean
+  loading: boolean
+  refreshing: boolean
+  nextPageError: boolean
+  onNext: () => void
+  onRestart: () => void
+}) {
+  const coverage = result.coverage
+  return (
+    <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-kp-overlay-0 px-3 py-2.5">
+      <div className="min-w-0 text-xs text-kp-overlay-text">
+        <span className="block text-kp-subtext">{itemCount} item{itemCount === 1 ? '' : 's'} loaded · {pageCount} page{pageCount === 1 ? '' : 's'} retained</span>
+        <small className="block">{result.page.complete ? 'Collection complete' : `Bounded ${result.page.filterScope} result`}{result.page.truncated ? ' · truncated' : ''}</small>
+        {result.snapshotRenewed ? <small className="block text-kp-yellow" role="status">The list snapshot expired and was renewed from the first page.</small> : null}
+        {coverage ? <small className="block">{coverage.requestedNamespaces === 0 ? 'Cluster-scoped result' : `${coverage.completedNamespaces}/${coverage.requestedNamespaces} namespaces completed · ${coverage.deniedNamespaces.length} denied`}{coverage.failed.length ? ` · ${coverage.failed.length} failed` : ''}</small> : null}
+      </div>
+      <div className="flex gap-2">
+        <Button variant="secondary" size="sm" disabled={firstPage} disabledReason="Already on the first page." onClick={onRestart}>First page</Button>
+        <Button size="sm" disabled={!hasNextPage || loading || refreshing} disabledReason="The current result has no next page or is refreshing." onClick={onNext}>{loading ? 'Loading…' : 'Load next page'}</Button>
+      </div>
+      {nextPageError ? <p className="w-full text-xs text-kp-red" role="alert">The next page could not be loaded. Loaded resources remain available; retry when ready.</p> : null}
+    </footer>
+  )
+}

@@ -244,11 +244,11 @@ test('filters Pods, persists allowlisted saved filters and builds the Logs catal
 
   const requestsBeforeClear = podRequests.length
   await page.getByRole('button', { name: 'Clear filters' }).click()
-  await expect.poll(() => podRequests.slice(requestsBeforeClear).some((value) => {
+  await expect(page.getByText('None')).toBeVisible()
+  expect(podRequests.slice(requestsBeforeClear).every((value) => {
     const query = new URL(value, 'http://127.0.0.1').searchParams
     return !query.has('namespace') && !query.has('search') && !query.has('sort') && !query.has('order') && !query.has('continue')
   })).toBe(true)
-  await expect(page.getByText('None')).toBeVisible()
 
   await page.getByRole('combobox', { name: 'Saved filter', exact: true }).selectOption('saved-worker')
   await page.getByRole('button', { name: 'Apply saved filter' }).click()

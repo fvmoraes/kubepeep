@@ -23,6 +23,7 @@ const defaultStreamReauthorizationInterval = 60 * time.Second
 type resourceStreamSource struct {
 	topic        resourcecore.Topic
 	key          string
+	namespace    string
 	subscription *resourcecore.Subscription
 }
 
@@ -89,7 +90,7 @@ func (handler *ResourceStreams) createStreamSession(binding namespaces.Selection
 					session.stop()
 					return nil, subscribeErr
 				}
-				session.sources = append(session.sources, resourceStreamSource{topic: topic, key: streamSourceKey(topic, gvr, namespace), subscription: subscription})
+				session.sources = append(session.sources, resourceStreamSource{topic: topic, key: streamSourceKey(topic, gvr, namespace), namespace: namespace, subscription: subscription})
 			}
 		}
 	}
@@ -256,6 +257,24 @@ func (session *resourceStreamSession) publish(event resourcecore.StreamEvent) bo
 	return true
 }
 
+// Progress is a bounded, non-authoritative preview. It is intentionally not
+// replayed: reconnects receive the transactional snapshot once it is ready.
+func (session *resourceStreamSession) publishTransient(event resourcecore.StreamEvent) bool {
+	session.mu.Lock()
+	defer session.mu.Unlock()
+	if session.expired || session.terminal != nil {
+		return false
+	}
+	entry := resourcecore.ReplayEntry{Event: event}
+	for client := range session.clients {
+		if !client.push(entry) {
+			client.forceTerminal(resourcecore.StreamEvent{Event: "reset", Topic: event.Topic, Generation: session.binding.Generation, Reason: "slow_consumer", RefetchRequired: true})
+			delete(session.clients, client)
+		}
+	}
+	return true
+}
+
 func (session *resourceStreamSession) publishTerminal(event resourcecore.StreamEvent) {
 	if event.Generation == "" {
 		event.Generation = session.binding.Generation
@@ -304,7 +323,7 @@ func (session *resourceStreamSession) run() {
 	}
 	states := map[resourcecore.Topic]*resourceTopicSnapshot{}
 	for _, topic := range session.topics {
-		states[topic] = &resourceTopicSnapshot{expected: expected[topic], items: []resourcecore.TopicObject{}, finalSources: map[string]struct{}{}, buffered: []resourcecore.StreamEvent{}}
+		states[topic] = &resourceTopicSnapshot{expected: expected[topic], items: []resourcecore.TopicObject{}, finalSources: map[string]struct{}{}, finalNamespaces: map[string]int{}, buffered: []resourcecore.StreamEvent{}}
 	}
 	for {
 		select {
@@ -348,6 +367,24 @@ func (session *resourceStreamSession) run() {
 					}
 					if event.Final {
 						state.finalSources[item.source.key] = struct{}{}
+						state.finalNamespaces[item.source.namespace]++
+					}
+					completedNamespaces := 0
+					for _, count := range state.finalNamespaces {
+						if count == len(resourcecore.TopicGVRs(item.source.topic)) {
+							completedNamespaces++
+						}
+					}
+					preview := event.Items
+					if remaining := 500 - state.previewSent; len(preview) > remaining {
+						preview = preview[:max(0, remaining)]
+					}
+					state.previewSent += len(preview)
+					if (len(preview) > 0 || event.Final) && !session.publishTransient(resourcecore.StreamEvent{
+						Event: "progress", Topic: item.source.topic, Generation: session.binding.Generation,
+						Items: preview, CompletedNamespaces: completedNamespaces, RequestedNamespaces: len(session.resolution.Namespaces),
+					}) {
+						return
 					}
 					if len(state.finalSources) == state.expected {
 						chunks, err := resourcecore.SnapshotEvents(session.binding.Generation, item.source.topic, resourcecore.WatchSnapshot{ResourceVersion: state.resourceVersion, Items: state.items})
@@ -386,6 +423,8 @@ func (session *resourceStreamSession) run() {
 type resourceTopicSnapshot struct {
 	expected        int
 	finalSources    map[string]struct{}
+	finalNamespaces map[string]int
+	previewSent     int
 	items           []resourcecore.TopicObject
 	resourceVersion string
 	complete        bool
@@ -532,7 +571,10 @@ func (session *resourceStreamSession) wireEvent(entry resourcecore.ReplayEntry, 
 	}
 	sequence := replaySequence(entry.ID)
 	payload := map[string]any{"streamId": session.streamID, "topic": event.Topic, "generation": session.binding.Generation, "sequence": sequence, "observedAt": event.ObservedAt, "resourceVersion": event.ResourceVersion}
-	if event.Event == "snapshot" {
+	if event.Event == "progress" {
+		payload["snapshotId"], payload["items"] = session.snapshotIDs[event.Topic], event.Items
+		payload["completedNamespaces"], payload["requestedNamespaces"] = event.CompletedNamespaces, event.RequestedNamespaces
+	} else if event.Event == "snapshot" {
 		payload["snapshotId"], payload["chunk"], payload["final"], payload["items"] = session.snapshotIDs[event.Topic], event.Chunk, event.Final, event.Items
 	} else if event.Event == "refreshed" {
 		payload["reason"], payload["refetchRequired"] = event.Reason, event.RefetchRequired

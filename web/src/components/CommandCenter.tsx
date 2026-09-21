@@ -82,6 +82,7 @@ export function CommandCenter({ routes, getFavorites, getRecent, getResources, o
   const navigate = useNavigate()
   const [view, setView] = useState<CommandCenterView>(null)
   const [query, setQuery] = useState('')
+  const [debouncedQuery, setDebouncedQuery] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)
   const dialogRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -90,18 +91,22 @@ export function CommandCenter({ routes, getFavorites, getRecent, getResources, o
   const titleId = useId()
   const descriptionId = useId()
   const listboxId = useId()
-  const filteredRoutes = useMemo(() => routes.filter((route) => matchesQuery(route, query)), [query, routes])
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(query), 100)
+    return () => clearTimeout(timer)
+  }, [query])
+  const filteredRoutes = useMemo(() => routes.filter((route) => matchesQuery(route, debouncedQuery)), [debouncedQuery, routes])
   const filteredResources = useMemo(
-    () => (sessionResources.length > 0 ? sessionResources.filter((entry) => matchesQuery(entry, query)) : []),
-    [query, sessionResources],
+    () => (sessionResources.length > 0 ? sessionResources.filter((entry) => matchesQuery(entry, debouncedQuery)) : []),
+    [debouncedQuery, sessionResources],
   )
   const filteredFavorites = useMemo(
-    () => (sessionFavorites.length > 0 ? sessionFavorites.filter((entry) => matchesQuery(entry, query)) : []),
-    [query, sessionFavorites],
+    () => (sessionFavorites.length > 0 ? sessionFavorites.filter((entry) => matchesQuery(entry, debouncedQuery)) : []),
+    [debouncedQuery, sessionFavorites],
   )
   const filteredRecent = useMemo(
-    () => (sessionRecent.length > 0 ? sessionRecent.filter((entry) => matchesQuery(entry, query)) : []),
-    [query, sessionRecent],
+    () => (sessionRecent.length > 0 ? sessionRecent.filter((entry) => matchesQuery(entry, debouncedQuery)) : []),
+    [debouncedQuery, sessionRecent],
   )
   const combinedResults = useMemo(
     () => [...filteredFavorites, ...filteredRecent, ...filteredRoutes, ...(filteredResources.length > 0 ? filteredResources : [])],
@@ -210,16 +215,22 @@ export function CommandCenter({ routes, getFavorites, getRecent, getResources, o
       return
     }
 
-    if (view !== 'commands' || combinedResults.length === 0) return
+    if (view !== 'commands') return
+    if (event.key === 'Enter' && event.target === inputRef.current) {
+      event.preventDefault()
+      const currentResults = query === debouncedQuery
+        ? combinedResults
+        : [...sessionFavorites, ...sessionRecent, ...routes, ...sessionResources].filter((entry) => matchesQuery(entry, query))
+      if (currentResults.length > 0) chooseRoute(currentResults[Math.min(activeIndex, currentResults.length - 1)])
+      return
+    }
+    if (combinedResults.length === 0) return
     if (event.key === 'ArrowDown') {
       event.preventDefault()
       setActiveIndex((current) => (current + 1) % combinedResults.length)
     } else if (event.key === 'ArrowUp') {
       event.preventDefault()
       setActiveIndex((current) => (current - 1 + combinedResults.length) % combinedResults.length)
-    } else if (event.key === 'Enter' && event.target === inputRef.current) {
-      event.preventDefault()
-      chooseRoute(combinedResults[Math.min(activeIndex, combinedResults.length - 1)])
     }
   }
 

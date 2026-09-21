@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   associateListRequestRows,
@@ -11,6 +11,7 @@ import {
   listInteractionFor,
   recordFirstRowRendered,
   recordRenderedRowCount,
+  recordShellReady,
   resetUXMetrics,
   snapshotUXMetrics,
 } from './uxMetrics'
@@ -27,6 +28,19 @@ function completeRows(view = 'pods') {
 }
 
 describe('UX metrics', () => {
+  it('reports native shell readiness once without sending resource data', () => {
+    const emit = vi.fn()
+    Object.defineProperty(window, 'runtime', { configurable: true, value: { EventsEmit: emit } })
+    try {
+      recordShellReady()
+      recordShellReady()
+      expect(emit).toHaveBeenCalledExactlyOnceWith('kubepeep:shell-ready')
+      expect(snapshotUXMetrics().filter((sample) => sample.name === 'time_to_shell_ready')).toHaveLength(1)
+    } finally {
+      Reflect.deleteProperty(window, 'runtime')
+    }
+  })
+
   it('records bounded request, committed-row and interaction timings without resource identity', () => {
     const interactionId = beginListInteraction('filter', 'pods')
     const requestId = beginListRequest({ view: 'pods', interactionId })

@@ -73,6 +73,71 @@ func TestNamespaceSequentialStopsAfterFillingPage(t *testing.T) {
 	}
 }
 
+func TestNamespaceSequentialFetchesSparseNamespacesInBoundedParallelOrder(t *testing.T) {
+	names := make([]string, 50)
+	pages := make(map[string]OriginPage[testListItem], len(names))
+	for index := range names {
+		names[index] = fmt.Sprintf("ns-%02d", index)
+		pages[names[index]] = OriginPage[testListItem]{Items: []testListItem{testListItem(names[index] + "/pod")}}
+	}
+	origins, err := OriginsFor(CollectionPods, names, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lister := &fakeStringLister{pages: pages, errs: map[string]error{}, delay: 2 * time.Millisecond}
+	result, err := Collect(t.Context(), CollectionRequest[testListItem]{
+		Selection:           Selection{Generation: "gen", Context: "ctx", Scope: "scope"},
+		Options:             ListOptions{Limit: 10, Sort: "identity", Order: OrderAscending},
+		NativeIdentityOrder: true,
+		Origins:             origins,
+		Lister:              lister,
+		Authorizer:          &fakeAuthorization{decisions: map[string]authorization.Decision{}},
+		Less:                func(left, right testListItem) bool { return left < right },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Items) != 10 {
+		t.Fatalf("items = %d", len(result.Items))
+	}
+	for index, item := range result.Items {
+		if want := testListItem(names[index] + "/pod"); item != want {
+			t.Fatalf("item %d = %q, want %q", index, item, want)
+		}
+	}
+	if got := lister.maximum.Load(); got <= 1 || got > DefaultFanout {
+		t.Fatalf("bounded concurrency = %d", got)
+	}
+}
+
+func TestGlobalListGrantFastPathRequiresPositiveClusterCapability(t *testing.T) {
+	origins, err := OriginsFor(CollectionPods, []string{"a", "b"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := CollectionRequest[testListItem]{
+		Selection: Selection{Generation: "gen", Context: "ctx", Scope: "scope"},
+		Options:   ListOptions{Limit: 2, Sort: "identity", Order: OrderAscending},
+		Origins:   origins, NativeIdentityOrder: true, GlobalGrantFastPath: true,
+		Lister: &fakeStringLister{pages: map[string]OriginPage[testListItem]{
+			"a": {Items: []testListItem{"a/pod"}}, "b": {Items: []testListItem{"b/pod"}},
+		}, errs: map[string]error{}},
+		Less: func(left, right testListItem) bool { return left < right },
+	}
+	global := &fakeAuthorization{decisions: map[string]authorization.Decision{"a": authorization.DecisionDenied}}
+	request.Authorizer = global
+	result, err := Collect(t.Context(), request)
+	if err != nil || len(result.Items) != 2 || len(global.keys) != 1 || global.keys[0].Namespace != "" {
+		t.Fatalf("global grant result=%+v err=%v checks=%+v", result.Items, err, global.keys)
+	}
+	restricted := &fakeAuthorization{decisions: map[string]authorization.Decision{"": authorization.DecisionDenied, "a": authorization.DecisionDenied}}
+	request.Authorizer = restricted
+	result, err = Collect(t.Context(), request)
+	if err != nil || len(result.Items) != 1 || result.Items[0] != "b/pod" || len(restricted.keys) < 2 {
+		t.Fatalf("restricted fallback result=%+v err=%v checks=%+v", result.Items, err, restricted.keys)
+	}
+}
+
 func TestLazyMergeLimitsOriginWindow(t *testing.T) {
 	names := make([]string, 100)
 	pages := make(map[string]OriginPage[testListItem], len(names))

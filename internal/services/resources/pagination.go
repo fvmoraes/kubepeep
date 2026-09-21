@@ -68,6 +68,7 @@ func (NamespaceSequential[T]) Name() string { return "namespace-sequential" }
 func (NamespaceSequential[T]) Next(ctx context.Context, state PaginationState[T]) (PaginationPage[T], PaginationState[T], error) {
 	result := PaginationPage[T]{outcomes: []originOutcome[T]{}}
 	available := 0
+	prefetched := make(map[int]originOutcome[T])
 	for index := range state.Cursor.Origins {
 		if err := ctx.Err(); err != nil {
 			return result, state, err
@@ -76,10 +77,43 @@ func (NamespaceSequential[T]) Next(ctx context.Context, state PaginationState[T]
 		if originState.Exhausted && len(originState.Buffered) == 0 {
 			continue
 		}
-		authorized := authorizeOrigin(ctx, state.Request, originState.Origin)
-		authorized.authoritative = originState.Exhausted || len(originState.Buffered) > 0
-		result.outcomes = append(result.outcomes, authorized)
+		// Probe the first origin alone: a dense namespace can fill the page
+		// without touching any other namespace. Once it is exhausted, fetch a
+		// bounded window of untouched origins concurrently while consuming their
+		// buffers strictly in namespace order.
+		if index > 0 && len(originState.Buffered) == 0 && originState.Continue == "" {
+			if _, ok := prefetched[index]; !ok {
+				indices := make([]int, 0, NormalizeFanout(state.Request.Fanout))
+				for next := index; next < len(state.Cursor.Origins) && len(indices) < cap(indices); next++ {
+					candidate := state.Cursor.Origins[next]
+					if len(candidate.Buffered) > 0 || candidate.Continue != "" {
+						break
+					}
+					if !candidate.Exhausted {
+						indices = append(indices, next)
+					}
+				}
+				for _, fetched := range fetchBatch(ctx, state.Request, state.Cursor, indices, nil) {
+					result.outcomes = append(result.outcomes, fetched.outcome)
+					prefetched[fetched.index] = fetched.outcome
+					if fetched.outcome.err == nil && fetched.outcome.queried {
+						if err := applyOriginPage(&state.Cursor.Origins[fetched.index], fetched.outcome.page, state.Request.Less); err != nil {
+							return PaginationPage[T]{}, state, err
+						}
+					}
+				}
+			}
+		}
+		authorized, wasPrefetched := prefetched[index]
+		if !wasPrefetched {
+			authorized = authorizeOrigin(ctx, state.Request, originState.Origin)
+			authorized.authoritative = originState.Exhausted || len(originState.Buffered) > 0
+			result.outcomes = append(result.outcomes, authorized)
+		}
 		if authorized.capability.Decision != authorization.DecisionAllowed {
+			continue
+		}
+		if wasPrefetched && authorized.err != nil {
 			continue
 		}
 		available += len(originState.Buffered)
@@ -196,6 +230,9 @@ func singleGVR(origins []Origin) bool {
 }
 
 func authorizeOrigin[T ListItem](ctx context.Context, request CollectionRequest[T], origin Origin) originOutcome[T] {
+	if request.globalListGrant != nil {
+		return originOutcome[T]{page: OriginPage[T]{Origin: origin}, capability: *request.globalListGrant}
+	}
 	capability := request.Authorizer.Check(ctx, authorization.Key{
 		Generation: request.Selection.Generation,
 		Namespace:  origin.Namespace,

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { ResourceLiveUpdates } from './ResourceLiveUpdates'
@@ -100,7 +100,9 @@ describe('optional resource SSE', () => {
     }
     await vi.advanceTimersByTimeAsync(0)
     expect(invalidate).not.toHaveBeenCalled()
-    await vi.advanceTimersByTimeAsync(1_999)
+    await act(async () => { await vi.advanceTimersByTimeAsync(150) })
+    expect(screen.getByText(/watch changes batched/)).toBeInTheDocument()
+    await vi.advanceTimersByTimeAsync(1_849)
     expect(invalidate).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(1)
     expect(invalidate).toHaveBeenCalledTimes(1)

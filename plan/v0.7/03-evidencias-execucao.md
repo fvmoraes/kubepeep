@@ -127,7 +127,12 @@ O ensaio encontrou LIST repetido de página grande mesmo com WATCH global conect
 
 | ID | Commit | Evidência | Resultado |
 | --- | --- | --- | --- |
-|  |  |  |  |
+| F3-01 | `WORKTREE@a2664f4` | `ResourcePages.tsx`, `ResourcePages.test.tsx`, `App.tsx`; 118 testes Vitest, 16 Playwright, build e format-check | **EM ANDAMENTO:** Pods usa `useInfiniteQuery` com cursor opaco, `fetchNextPage`/`hasNextPage`, `maxPages=5` e linhas acumuladas. Testes cobrem troca de namespace, limite de páginas, 410 que substitui snapshot antigo e 403 que oculta dados anteriores. Busca global lê páginas acumuladas. Demais coleções seguem pendentes. |
+| F3-02 | `WORKTREE@a2664f4` | `@tanstack/react-virtual@3.14.13`, `DataTable.test.tsx` (50k linhas), `phase03.spec.ts` (12k Pods e scroll real) | **EM ANDAMENTO:** `DataTable` virtualiza listas acima de 100 linhas, com overscan 8, cabeçalho sticky e ARIA de índice/contagem. DOM ficou abaixo de 60 linhas nos ensaios. Falta medir FPS/CPU e validar alturas variáveis e todas as famílias. |
+| F3-04 | `WORKTREE@a2664f4` | `ResourcePages.test.tsx`; teste de filtro com resposta pendente; `phase02.spec.ts` atualizado para cache fresco | **EM ANDAMENTO:** placeholder de Pods conserva linhas apenas na mesma identidade de seleção e exibe “Refreshing Pods…”; 403/generation_changed escondem linhas. Ainda não cobre todos os recursos nem a matriz completa de trocas de contexto/scope/revogação. |
+| F3-08 | `WORKTREE@a2664f4` | `ResourcePages.tsx`; testes de retorno à tela sem novo HTTP antes do refresh manual | **EM ANDAMENTO:** Pods usa `staleTime=30s` e `gcTime=120s`; o cache fresco evita revalidação imediata ao retornar à tela. Batching 50–100 ms de watch/log e as demais queries seguem pendentes. |
+
+Validação desta rodada: `npm run typecheck`, 118 testes Vitest, build e 16 testes Playwright passaram; `format:check` passou com os 9 avisos preexistentes. O `npm install` relatou duas vulnerabilidades moderadas no conjunto de dependências; não foi feito `audit fix --force`. Os números de DOM são sintéticos e não comprovam 60 FPS, primeira linha <500 ms nem startup da janela Wails.
 
 ## Fase 4 — Fechamento do refinamento UI/UX e scope default
 
