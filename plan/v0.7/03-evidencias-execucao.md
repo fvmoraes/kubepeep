@@ -392,6 +392,47 @@ de coleta. O comparativo reproduzível permanece ligado a `b148a60`. O nó
 `kubepeep-f4-control-plane` permaneceu `Ready` em Kubernetes v1.35.0 após o
 harness. GoReleaser e publicação multiplataforma continuam na decisão externa.
 
+## Auditoria aprofundada de comportamento — 2026-09-29
+
+**Status: APROVADA no commit funcional `caaf40a`.** A nova revisão confrontou
+os contratos C01–C06 e os caminhos reais de F0–F7. A contagem documental segue
+79 tarefas/68 entregas, todas com linha de evidência; isso não foi usado como
+substituto de inspeção e execução. A conclusão anterior de ausência de
+defeitos foi superada pelos casos abaixo, reproduzidos e corrigidos com
+regressões. Os históricos anteriores permanecem como registros das respectivas
+coletas.
+
+| Requisito | Lacuna corrigida | Evidência |
+| --- | --- | --- |
+| F1-10 / D14 | jitter antecipava Retry-After; aviso acima do budget gerava retry prematuro | `retry_test.go`: piso após jitter e retorno do 429 original quando a espera não cabe |
+| F2-01/F2-03 / D15/D17 | deltas podiam exceder 10 mil objetos/10 MiB; cópias dos workers não entravam na soma; replay recusado vazava assinatura | `watch_test.go`, `resources_backend_extra_test.go`: quota conjunta de 32 MiB, resource cache de 96 MiB, liberação/reuso, cache replay e reset; total padrão preservado em 224 MiB |
+| F2-07/F2-09/F6-06 / D20 | unrelated nunca iniciava com limite inicial/fixo 4; Nodes/PVC concorrentes disputavam a única vaga de baixa prioridade | `scheduler_test.go`, `Dashboard.test.tsx`: admissão ociosa nos limites 2/4/8, reserva visível e Nodes antes de PVC |
+| F3/F4-04 / R03/X05 | recursos montavam antes da seleção confirmada; retry não recuperava sessão; default além de 100 scopes era ignorado | `DefaultScopeGate.test.tsx`: montagem cercada, sessão renovada e busca paginada das preferências locais |
+| F5-01/F5-02 / I01/I02 | label ausente casava com selector de valor vazio; OOMKilled atual era omitido | `index_test.go`, `problems_test.go`: presença da label e término atual/anterior sem duplicação |
+| F5-05 / I04 | falha de um log deixava streams irmãos sem cancelamento; produto cartesiano criava pares Pod/container inexistentes | `LogsPage.test.tsx`: falha HTTP/SSE, cleanup, resposta antiga e pares compatíveis; limites preservados |
+| F7-04 / T06 | `test-integration` filtrava nomes inexistentes e não executava testes | target corrigido executa `./internal/integration/...` |
+| F7-06/F7-07 / T01 | scanner ignorava desktop Wails e arquivos compactados aninhados; CI não o executava | `release_artifact_check_test.sh`: `dist` + `build/bin`, subdiretórios/ocultos/pacotes, erro fechado e conteúdo não impresso; integrado em verify/builds/publish |
+| F7-07 | publicação podia aceitar uma única perna nativa ou rejeitar rerun recuperado por ler falhas antigas | `release_check_status.sh` compartilhado com workflow/harness: quatro nomes obrigatórios, maior ID por nome; tag após scan e smoke |
+
+| Gate executado nesta revisão | Resultado |
+| --- | --- |
+| `rtk make verify` | aprovado: Go/vet, Vitest, Playwright, tipos, build, smoke, Ginger e testes dos gates de release |
+| `rtk make test-race build-desktop` | aprovado; suíte completa com race e Wails Linux/WebKitGTK |
+| Kind `app-e2e ./dist/kubePeep` | aprovado: seleção, dashboard, SSE/log, exec, revogação/restauração e offline; cluster preservado/Ready |
+| `make test-integration`; `make test-release-gates` | aprovados; seis cenários do gate de checks e regressões do scanner |
+| actionlint v1.7.12 | aprovado; workflows não disparados |
+| segurança staged/histórico, `go mod verify`, `govulncheck ./...` | aprovados; zero leak e vulnerabilidade Go alcançável; um advisory importado sem call path |
+| `npm ci`/audit completo; `make release-artifact-check` | zero vulnerabilidade npm; CLI e desktop aprovados |
+| benchmarks em árvore limpa `caaf40a` | 10 representativos, 47 da matriz e protocolo Kind aprovados; valores e condições em `docs/performance-baseline.md`, seção 10 |
+
+Limites: oito warnings Fast Refresh e o aviso informativo de canvas/jsdom
+permanecem. Os testes web/bridge não são prova de execução Windows/macOS;
+esta revisão construiu Wails Linux e reutiliza a inspeção AT-SPI histórica,
+sem declarar nova medição de startup nativo. Não houve push, tag, release ou
+execução remota da CI. O comando de protocolo exigiu kubeconfig explícito do
+Kind após falhar com a configuração implícita. Artefatos de benchmark seguem
+locais; apenas agregados sanitizados são versionados.
+
 ## Decisão externa remanescente
 
 - Escolha da versão/tag, execução dos builds multiplataforma, push e publicação

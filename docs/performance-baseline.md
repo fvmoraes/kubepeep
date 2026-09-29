@@ -225,9 +225,10 @@ mudar, a diferença deve ser declarada em vez de misturar as séries.
   jitter de rede, etcd, admission webhooks ou contenção real do API Server.
 - As coletas não fixaram frequência de CPU nem isolaram o host; diferenças
   pequenas exigem múltiplas execuções antes de qualquer decisão algorítmica.
-- O build frontend mantém o warning conhecido `INEFFECTIVE_DYNAMIC_IMPORT` em
-  `src/api/client.ts` e um chunk principal de aproximadamente 633 kB; o
-  tratamento está fora da F0.
+- Na coleta original da F0, o build frontend tinha o warning
+  `INEFFECTIVE_DYNAMIC_IMPORT` em `src/api/client.ts` e um chunk principal de
+  aproximadamente 633 kB. A divisão de bundles da F3 substituiu esse estado;
+  esses números não descrevem o candidato atual.
 - Na coleta original da F0 havia nove warnings ESLint e duas vulnerabilidades
   moderadas de desenvolvimento. No fechamento geral em `52aa3db`, o lint
   manteve oito warnings Fast Refresh e zero erro; Vitest 4.1.11 e `undici`
@@ -296,3 +297,46 @@ binário Wails atual, uma execução nativa isolada registrou shell pronto em
 expôs uma tabela autorizada com nove linhas reais do namespace `kp-allowed`.
 Esta inspeção comprova R01 no desktop, mas a amostra única de shell não
 substitui a série de startup registrada na F3.
+
+## 10. Revalidação após a auditoria aprofundada
+
+Em 29 de setembro de 2026, `caaf40a3c40862f4312cd496ffe3a7b3e2115331` repetiu
+as três suítes em árvore limpa, no mesmo host e com as condições da seção 9.
+Os relatórios locais são `test/kind/.state/deep-audit-{representative,matrix,protocol}.json`.
+A correção alterou retry, admissão de prefetch e limites de snapshots; não
+mudou a estratégia de paginação. A comparação abaixo usa a suíte
+representativa, um aquecimento e cinco repetições por cenário.
+
+| Cenário | p95 de página em `b148a60` → `caaf40a` | Requests p50 | Over-fetch p50 |
+| --- | ---: | ---: | ---: |
+| `global-200` | 0,144 → 0,130 ms | 1 | 1,0 |
+| `namespace-100` | 61,363 → 61,197 ms | 12 | 1,2 |
+| `mixed-100` | 101,773 → 102,043 ms | 6 | 1,2 |
+| `internal-200-origins` | 0,535 → 0,439 ms | 12 | 1,2 |
+
+As pequenas oscilações de tempo são compatíveis com a coleta sem isolamento
+de CPU; não justificam outro ajuste de defaults. A matriz manteve 29 `ok` e
+18 `expected_error`, sem instabilidade ou erro inesperado. Os dez cenários
+representativos encerraram com delta de goroutines zero. O runner sintético
+continua sem simular hits/reconexões inexistentes; os novos limites dos
+workers foram validados por testes de admissão, deltas, replay e `-race`.
+
+O protocolo real usou explicitamente um kubeconfig temporário do Kind
+`kubepeep-f4`, Kubernetes v1.35.0, 23 Pods e 12 repetições. A tentativa com
+configuração implícita falhou antes de produzir relatório; somente a coleta
+explícita bem-sucedida integra estes resultados.
+
+| Transporte | p95 | Bytes recebidos |
+| --- | ---: | ---: |
+| JSON Kind | 5,442 ms | 142.634 |
+| PartialObjectMetadata Kind | 3,688 ms | 69.590 |
+| Protobuf Kind | 3,714 ms | 95.503 |
+| gzip Kind | 5,929 ms | 21.136 |
+| JSON em rede modelada | 139,691 ms | 142.634 |
+| gzip em rede modelada | 40,927 ms | 12.431 |
+
+Os defaults permanecem: metadata/Protobuf ativos, gzip opt-in e QPS/Burst
+10/20. O ensaio AIMD determinístico voltou a reduzir 429 de 9 para 2, com
+231,971 → 231,249 ms de duração. Prefetch preservou a chamada visível:
+40,205 ms no controle ingênuo e abaixo da resolução de 0,001 ms com prioridade.
+Rede modelada e AIMD local continuam separados de transporte Kind real.
