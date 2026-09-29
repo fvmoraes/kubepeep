@@ -2,7 +2,7 @@
 
 `docs/` descreve o produto e seus contratos. O trabalho pendente vive no
 [plano v1](../plan/README.md), baseado na
-[referência UI/UX](../plan/reference/KubePeep_UI_UX_Design_System_e_Recursos_Kubernetes.md).
+[referência UI/UX](../plan/v0.7_reference/KUBEPEEP_UI_UX_REFINEMENT_PLAN.md).
 
 ## Usar e desenvolver
 
@@ -25,6 +25,7 @@
 | [Segurança](security.md) | Loopback, CSRF, RBAC, redaction e conteúdo proibido |
 | [RBAC](rbac-requirements.md) | Capabilities e operações Kubernetes |
 | [Observabilidade](observability.md) | Logs operacionais, métricas e diagnóstico |
+| [Protocolo e tuning](protocol-tuning.md) | Benchmarks, decisões e rollback da Fase 6 |
 
 ## Decisões e histórico
 

@@ -1,7 +1,7 @@
 # Estado atual e limites da v0.7
 
-Base atual auditada: branch `review/plan-v0.7`, no commit funcional `146b6a0`,
-com Fases 0–5 implementadas. O inventário foi revisado por Codebase MCP,
+Base atual auditada: branch `review/plan-v0.7`, no commit funcional `148419f`,
+com Fases 0–6 implementadas. O inventário foi revisado por Codebase MCP,
 leitura da fonte e gates completos em 29 de setembro de 2026.
 O registro verificável está em [03-evidencias-execucao.md](03-evidencias-execucao.md).
 
@@ -13,12 +13,13 @@ O registro verificável está em [03-evidencias-execucao.md](03-evidencias-execu
 | F3 | finalizada; 9/9 tarefas com evidência |
 | F4 | finalizada; 15/15 tarefas com evidência |
 | F5 | finalizada; 8/8 tarefas com evidência |
-| F6–F7 | ainda não executadas |
+| F6 | finalizada; 6/6 tarefas avaliadas, com ativações condicionadas a benchmark |
+| F7 | ainda não executada |
 
 **Enquadramento desta v0.7:** todo o conteúdo dos três documentos em
 [`../v0.7_reference/`](../v0.7_reference/) foi tratado como trabalho de ajuste,
-melhoria e revisão, independentemente do que já existia na base. As Fases 0–5
-passaram pelos respectivos aceites e possuem evidência própria; F6–F7 continuam
+melhoria e revisão, independentemente do que já existia na base. As Fases 0–6
+passaram pelos respectivos aceites e possuem evidência própria; F7 continua
 como trabalho futuro. Os caminhos abaixo localizam onde cada tema toca o código.
 
 ## Onde as referências tocam a base (mapa de trabalho, não lista de concluído)
@@ -32,13 +33,15 @@ como trabalho futuro. Os caminhos abaixo localizam onde cada tema toca o código
 | Watch/cache | `internal/services/resources/watch.go`, `internal/adapters/kubernetes/client_cache.go` | cache de snapshot sob demanda, bookmarks, backpressure (F2) |
 | Frontend de listagem | `web/src/components/ResourcePages.tsx`, `ResourceLiveUpdates.tsx`, `api/client.ts` | progressividade, virtualização, infinite query, startup (F3) |
 | Paleta/diagnóstico | `web/src/components/CommandCenter.tsx`, `internal/observability/` | busca local, problems, diagnostics (F5) |
-| Laboratório | `test/kind/harness.sh` | matriz de benchmark de performance (F0) |
+| Laboratório | `test/kind/harness.sh`, `test/kind/protocol/` | matrizes de benchmark de performance e protocolo (F0/F6) |
 
 Infinite query, virtualização, coalescing de consultas e resource cache de
 snapshot foram entregues nas Fases 1–3. Scope default e o refinamento funcional
 da UI foram entregues na Fase 4. Índices locais, Problems Engine, Investigation,
 logs agregados, busca local e Diagnostics foram entregues na Fase 5. Usar os
-caminhos reais acima, sem criar duplicatas.
+caminhos reais acima, sem criar duplicatas. PartialObjectMetadata, Protobuf,
+AIMD e prefetch relacionado foram ativados após a medição da Fase 6;
+compressão e QPS/Burst preservam os defaults decididos pelo comparativo.
 
 ## Contrato da v0.7
 
@@ -60,7 +63,7 @@ Secrets permanecem metadata-only (sem conteúdo em cache, cursor, telemetria ou 
 2. Cache de recursos em memória com orçamento e eviction. SQLite permanece apenas para preferências/configurações.
 3. Watch é **demand-driven** (ref count + idle timeout). Nenhum informer permanente de todos os GVRs; KubePeep é dashboard desktop, não controller.
 4. WATCH saudável elimina polling completo. Fallback é refresh manual ou polling controlado com jitter — nunca LIST completo a cada 1–2 s.
-5. Streaming lists, Protobuf, PartialObjectMetadata, compressão e concorrência adaptativa são **opt-in com flag**, só ativados com ganho comprovado; clusters antigos continuam suportados pelo fallback clássico.
+5. Streaming lists e compressão permanecem opt-in; Protobuf, PartialObjectMetadata e concorrência adaptativa estão ativos pelos ganhos medidos da F6. Todos possuem configuração de rollback; clusters antigos continuam suportados pelo fallback clássico.
 6. `meta.page.filterScope` continua descrevendo filtro/ordenação. As estratégias de paginação não expõem estado interno ao frontend; o cursor permanece opaco. Aplicar [C01–C06](05-contratos-e-aceite.md) a ordenação, limites, identidade, instrumentação, gates condicionais e cobertura.
 7. `AUTHORIZATION_UNAVAILABLE` ≠ `Forbidden`; proibição autoritativa nunca degrada para lista vazia; cobertura parcial continua com causa sanitizada.
 8. A severidade do Problems Engine é diagnóstico derivado de estado observado — nunca inventa saúde nem infere permissão a partir de Role.

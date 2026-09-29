@@ -304,9 +304,31 @@ novo comando explícito.
 
 ## Fase 6 — Protocolo e tuning avançado (condicional a benchmark)
 
+**Status: FINALIZADA no commit funcional `148419f` da branch
+`review/plan-v0.7`.** A coleta final usou esse SHA com árvore limpa, Go 1.26.7,
+Linux/amd64, 12 CPUs, `GOMAXPROCS=12`, 41.716.428.800 bytes de memória e
+Kind/Kubernetes v1.35.0. O dataset observado tinha 23 Pods; transporte teve
+duas execuções de aquecimento e 30 amostras por variante. O JSON sanitizado é
+gerado localmente em `test/kind/.state/performance-protocol.json` e não é
+versionado.
+
 | ID | Commit | Evidência | Resultado |
 | --- | --- | --- | --- |
-|  |  |  |  |
+| F6-01 / D31 | `148419f` | `make benchmark-protocol`; `TestFactoryScopesProtocolNegotiationByClientFamily`; fallback 406/415 | **APLICADO:** PartialObjectMetadata reduziu p95 de 7,767 para 3,841 ms (-50,5%) e payload de 142.202 para 69.584 bytes (-51,1%). ServiceAccount/ConfigMap possuem fallback explícito; o cliente metadata negocia JSON como segunda opção. Secrets nunca usam cliente tipado nem expõem conteúdo. |
+| F6-02 / D32 | `148419f` | `make benchmark-protocol`; teste de negociação por família | **APLICADO:** Protobuf reduziu p95 para 5,504 ms (-29,1%) e payload para 95.261 bytes (-33,0%). `Accept` inclui JSON; dynamic, CRDs e aggregated APIs permanecem JSON. |
+| F6-03 / D33 | `148419f` | Kind real × rede modelada 30 ms/10 Mbit/s, 30 amostras | **AVALIADO, NÃO ATIVADO NO DEFAULT:** gzip local reduziu bytes em 85,4%, mas elevou p95 de 7,767 para 8,070 ms (+3,9%). Na rede modelada, p95 caiu de 140,091 para 41,071 ms (-70,7%); `compression=true` fica disponível para cenário remoto medido. A rede modelada não é apresentada como cluster remoto real. |
+| F6-04 / D30 | `148419f` | 40 LISTs por faixa 5/10, 10/20 e 20/40; throttle, p95, erros e 429 | **AVALIADO, DEFAULT 10/20 MANTIDO:** p95 foi 5.602,510 / 1.803,443 / 11,803 ms; throttle agregado 92.996,9 / 21.010,8 / 0,4 ms; zero 429 e zero erros em todas. O Kind pequeno não prova segurança de 20/40 sob carga compartilhada; configuração rejeita 100/200. |
+| F6-05 / D34 | `148419f` | experimento determinístico 429, 40 requisições por variante; `TestRequestSchedulerAIMDReducesAndRecoversWithinBounds` | **APLICADO:** fixo 4 gerou 9 respostas 429 em 231,463 ms; AIMD gerou 2 (-77,8%) em 231,668 ms, reduziu duas vezes e recuperou quatro vezes, limitado a 2/4/8. |
+| F6-06 | `148419f` | `TestRelatedPrefetchWarmsBoundedPodAndEventPages`; ensaio scheduler; `make test-race` | **APLICADO:** prefetch relacionado lê páginas autorizadas de 20 Pods/Events com prazo de 3 s e cancelamento coletivo. Quatro trabalhos sem reserva fizeram visible esperar 40,152 ms; prioridades reservaram capacidade e a espera ficou abaixo de 0,001 ms, adiando um prefetch. |
+
+Gates: `rtk make verify`, `rtk make test-race`, `rtk go test ./...` (1.204
+testes em 41 pacotes), `rtk npm test -- --run` (150 testes em 30 arquivos),
+`govulncheck` sobre `go list ./...` (zero vulnerabilidades alcançáveis; um
+advisory importado sem call path), `npm audit --omit=dev` (zero vulnerabilidades
+de produção), gate de segurança, benchmark Kind real, `rtk git diff --check` e
+harness Kind `app-e2e` passaram. O cluster não recebeu dataset nem mutação do
+benchmark de protocolo e permaneceu preservado; contexto/scope, dashboard,
+SSE/log, WebSocket exec, revogação/restauração RBAC e modo offline passaram.
 
 ## Fase 7 — Validação comparativa e preparação da release
 
