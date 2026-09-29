@@ -26,6 +26,30 @@ func TestDetectPodCoversCriticalWarningAndInfoWithoutInventingHealth(t *testing.
 	}
 }
 
+func TestDetectPodIncludesCurrentOOMTerminationWithoutDuplicates(t *testing.T) {
+	t.Parallel()
+	oom := corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{Reason: "OOMKilled"}}
+	for _, tc := range []struct {
+		name     string
+		current  corev1.ContainerState
+		previous corev1.ContainerState
+	}{
+		{name: "current", current: oom},
+		{name: "previous", previous: oom},
+		{name: "both", current: oom, previous: oom},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "job", Namespace: "portal"}, Status: corev1.PodStatus{
+				ContainerStatuses: []corev1.ContainerStatus{{Name: "worker", State: tc.current, LastTerminationState: tc.previous}},
+			}}
+			got := DetectPod(pod, time.Now())
+			if len(got) != 1 || got[0].Reason != "OOMKilled" || got[0].Severity != SeverityCritical || got[0].Container != "worker" {
+				t.Fatalf("problems = %#v, want one critical OOMKilled for worker", got)
+			}
+		})
+	}
+}
+
 func TestWorkloadPVCNodeAndEventSeverity(t *testing.T) {
 	available, desired := int64(0), int64(3)
 	if got := DetectWorkload(WorkloadObservation{Resource: Resource{Kind: "Deployment", Name: "portal"}, Status: "Degraded", Available: &available, Desired: &desired}); len(got) != 1 || got[0].Severity != SeverityCritical {

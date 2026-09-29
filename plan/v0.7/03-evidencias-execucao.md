@@ -394,5 +394,8 @@ harness. GoReleaser e publicação multiplataforma continuam na decisão externa
 
 ## Decisão externa remanescente
 
-- Escolha da versão/tag, instalação/execução do GoReleaser, push e publicação
-  dependem de ação explícita do mantenedor e não reabrem a Fase 7.
+- Escolha da versão/tag, execução dos builds multiplataforma, push e publicação
+  dependem de ação explícita do mantenedor e não reabrem a Fase 7. O pipeline
+  atual usa Wails, nfpm, NSIS e hdiutil; GoReleaser não é um requisito. As notas
+  anteriores sobre sua ausência descrevem o host, sem constituir um bloqueio
+  do pipeline implementado.

@@ -23,6 +23,11 @@ Contratos transversais de execução e aceite: [C01–C06](05-contratos-e-aceite
 
 ## Cenários obrigatórios de aceite
 
+A auditoria aprofundada de 2026-09-29 incluiu explicitamente as cópias dos
+workers no teto de F2-01: 96 MiB de resource cache, 32 MiB de snapshots de watch,
+64 MiB de páginas e 32 MiB de cursores. F2-03 também cobre cleanup quando o
+replay inicial é recusado e limites durante ADDED/MODIFIED, além do LIST inicial.
+
 | Cenário | Resultado exigido |
 | --- | --- |
 | abrir Pods → Deployments → voltar a Pods | trocas ~instantâneas via cache; watch único compartilhado; ref count correto |

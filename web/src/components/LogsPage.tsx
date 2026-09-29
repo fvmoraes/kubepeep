@@ -264,22 +264,35 @@ async function loadWorkloadCatalog(selection: SelectionSummary, signal?: AbortSi
 }
 
 async function consumeAggregateStream(target: { namespace: string; pod: string; container: string }, selection: SelectionSummary, session: { csrfToken: string }, options: { timestamps: boolean; tailLines: number; since: string }, signal: AbortSignal, onLine: (line: AggregatedLogLine) => void) {
-	const response = await fetch(await streamURL(logURL(target.namespace, target.pod, target.container, options.timestamps, options.tailLines, options.since)), { method: 'GET', headers: { Accept: 'text/event-stream', 'X-KubePeep-CSRF': session.csrfToken }, cache: 'no-store', credentials: 'same-origin', signal })
+	const url = await streamURL(logURL(target.namespace, target.pod, target.container, options.timestamps, options.tailLines, options.since))
+	signal.throwIfAborted()
+	const response = await fetch(url, { method: 'GET', headers: { Accept: 'text/event-stream', 'X-KubePeep-CSRF': session.csrfToken }, cache: 'no-store', credentials: 'same-origin', signal })
 	if (!response.ok || !response.body) throw new APIError(response.status, { code: 'STREAM_ERROR', message: 'An aggregate log stream could not be opened.' })
 	const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = ''; let metaSeen = false
-	while (true) {
-		const chunk = await reader.read(); if (chunk.done) return
-		buffer += decoder.decode(chunk.value, { stream: true })
-		if (new TextEncoder().encode(buffer).byteLength > 136 * 1_024) throw new APIError(502, { code: 'INVALID_RESPONSE', message: 'An aggregate stream exceeded the bounded event buffer.' })
+	const cancelReader = () => { void reader.cancel().catch(() => {}) }
+	signal.addEventListener('abort', cancelReader, { once: true })
+	try {
+		signal.throwIfAborted()
 		while (true) {
-			const separator = /\r?\n\r?\n/.exec(buffer); if (!separator) break
-			const event = parseSSEBlock(buffer.slice(0, separator.index)); buffer = buffer.slice(separator.index + separator[0].length); if (!event) continue
-			const payload = JSON.parse(event.data) as Record<string, unknown>
-			if (event.event === 'meta') { if (payload.generation !== selection.generation) throw new APIError(409, { code: 'GENERATION_CHANGED', message: 'An aggregate stream belongs to another generation.' }); metaSeen = true }
-			if (event.event === 'line') { if (!metaSeen) throw new APIError(502, { code: 'INVALID_RESPONSE', message: 'An aggregate stream sent data before metadata.' }); onLine({ pod: target.pod, container: target.container, timestamp: typeof payload.timestamp === 'string' ? payload.timestamp : null, text: typeof payload.text === 'string' ? payload.text : '', truncated: payload.truncated === true }) }
-			if (event.event === 'error') throw new APIError(502, { code: String(payload.code ?? 'STREAM_ERROR'), message: String(payload.message ?? 'An aggregate stream ended.') })
-			if (event.event === 'end') return
+			const chunk = await reader.read()
+			signal.throwIfAborted()
+			if (chunk.done) return
+			buffer += decoder.decode(chunk.value, { stream: true })
+			if (new TextEncoder().encode(buffer).byteLength > 136 * 1_024) throw new APIError(502, { code: 'INVALID_RESPONSE', message: 'An aggregate stream exceeded the bounded event buffer.' })
+			while (true) {
+				const separator = /\r?\n\r?\n/.exec(buffer); if (!separator) break
+				const event = parseSSEBlock(buffer.slice(0, separator.index)); buffer = buffer.slice(separator.index + separator[0].length); if (!event) continue
+				const payload = JSON.parse(event.data) as Record<string, unknown>
+				if (event.event === 'meta') { if (payload.generation !== selection.generation) throw new APIError(409, { code: 'GENERATION_CHANGED', message: 'An aggregate stream belongs to another generation.' }); metaSeen = true }
+				if (event.event === 'line') { if (!metaSeen) throw new APIError(502, { code: 'INVALID_RESPONSE', message: 'An aggregate stream sent data before metadata.' }); onLine({ pod: target.pod, container: target.container, timestamp: typeof payload.timestamp === 'string' ? payload.timestamp : null, text: typeof payload.text === 'string' ? payload.text : '', truncated: payload.truncated === true }) }
+				if (event.event === 'error') throw new APIError(502, { code: String(payload.code ?? 'STREAM_ERROR'), message: String(payload.message ?? 'An aggregate stream ended.') })
+				if (event.event === 'end') return
+			}
 		}
+	} finally {
+		signal.removeEventListener('abort', cancelReader)
+		await reader.cancel().catch(() => {})
+		reader.releaseLock()
 	}
 }
 
@@ -310,12 +323,68 @@ function WorkloadLogsWorkspace({ selection, params, defaults }: { selection: Sel
 
 	function flush() { if (timerRef.current) clearTimeout(timerRef.current); timerRef.current=null; const batch=pendingRef.current;pendingRef.current=[];if(batch.length>0)setLines((current)=>batch.reduce((result,line)=>appendBounded(result,line),current)) }
 	function stop(reason='Aggregate follow stopped.') {controllerRef.current?.abort();controllerRef.current=null;flush();setState({status:'ended',message:reason})}
-	useEffect(() => () => {controllerRef.current?.abort();if(timerRef.current)clearTimeout(timerRef.current)}, [])
-	const targets = activePods.flatMap((pod) => activeContainers.map((container) => ({ namespace:selectedWorkload?.namespace ?? '',pod,container }))).slice(0,MaximumAggregateStreams)
-	const targetsTruncated = activePods.length*activeContainers.length>MaximumAggregateStreams
+	useEffect(() => () => {controllerRef.current?.abort();controllerRef.current=null;if(timerRef.current)clearTimeout(timerRef.current);pendingRef.current=[]}, [])
+	const compatibleTargets = activePods.flatMap((pod) => {
+		const detail = podDetails.data?.find((value) => value.metadata.namespace === selectedWorkload?.namespace && value.metadata.name === pod)
+		const available = new Set(detail ? [...detail.containers, ...detail.initContainers, ...detail.ephemeralContainers].map((value) => value.spec.name) : [])
+		return activeContainers.filter((container) => available.has(container)).map((container) => ({ namespace: selectedWorkload?.namespace ?? '', pod, container }))
+	})
+	const targets = compatibleTargets.slice(0, MaximumAggregateStreams)
+	const targetsTruncated = compatibleTargets.length > MaximumAggregateStreams
 
-	async function readAggregate() { stop('Starting bounded aggregate read.');setState({status:'connecting',message:'Reading selected streams…'});setLines([]);const controller=new AbortController();controllerRef.current=controller;try{const responses=await Promise.all(targets.map(async(target)=>({target,response:await getPodLogs(target.namespace,target.pod,{container:target.container,previous,timestamps,tailLines,since:since||undefined},controller.signal,selection.generation)})));const next=responses.flatMap(({target,response})=>response.lines.map((line)=>({...line,pod:target.pod,container:target.container})));next.sort((left,right)=>(left.timestamp??'').localeCompare(right.timestamp??''));setLines(next.reduce((result,line)=>appendBounded(result,line),[] as AggregatedLogLine[]));setState({status:'ended',message:`Read ${targets.length} bounded stream${targets.length===1?'':'s'}.`})}catch(error){if(!controller.signal.aborted)setState({status:'error',message:message(error)})}finally{if(controllerRef.current===controller)controllerRef.current=null}}
-	async function followAggregate(){stop('Restarting aggregate follow.');setLines([]);const controller=new AbortController();controllerRef.current=controller;setState({status:'connecting',message:'Authorizing aggregate streams…'});try{const session=await getSession(controller.signal);if(session.generation!==selection.generation)throw new APIError(409,{code:'GENERATION_CHANGED',message:'The active selection changed.'});setState({status:'following',message:`Following ${targets.length} stream${targets.length===1?'':'s'} with 75 ms batching.`});await Promise.all(targets.map((target)=>consumeAggregateStream(target,selection,session,{timestamps,tailLines,since},controller.signal,(line)=>{pendingRef.current=appendBounded(pendingRef.current,line);if(!timerRef.current)timerRef.current=setTimeout(flush,75)})));flush();setState({status:'ended',message:'All aggregate streams ended.'})}catch(error){if(!controller.signal.aborted){flush();setState({status:'error',message:message(error)})}}finally{if(controllerRef.current===controller)controllerRef.current=null}}
+	async function readAggregate() {
+		stop('Starting bounded aggregate read.')
+		setState({ status: 'connecting', message: 'Reading selected streams…' })
+		setLines([])
+		const controller = new AbortController()
+		controllerRef.current = controller
+		try {
+			const responses = await Promise.all(targets.map(async (target) => ({ target, response: await getPodLogs(target.namespace, target.pod, { container: target.container, previous, timestamps, tailLines, since: since || undefined }, controller.signal, selection.generation) })))
+			if (controller.signal.aborted || controllerRef.current !== controller) return
+			const next = responses.flatMap(({ target, response }) => response.lines.map((line) => ({ ...line, pod: target.pod, container: target.container })))
+			next.sort((left, right) => (left.timestamp ?? '').localeCompare(right.timestamp ?? ''))
+			setLines(next.reduce((result, line) => appendBounded(result, line), [] as AggregatedLogLine[]))
+			setState({ status: 'ended', message: `Read ${targets.length} bounded stream${targets.length === 1 ? '' : 's'}.` })
+		} catch (error) {
+			if (!controller.signal.aborted && controllerRef.current === controller) {
+				controller.abort()
+				setState({ status: 'error', message: message(error) })
+			}
+		} finally {
+			controller.abort()
+			if (controllerRef.current === controller) controllerRef.current = null
+		}
+	}
+	async function followAggregate() {
+		stop('Restarting aggregate follow.')
+		setLines([])
+		const controller = new AbortController()
+		controllerRef.current = controller
+		setState({ status: 'connecting', message: 'Authorizing aggregate streams…' })
+		try {
+			const session = await getSession(controller.signal)
+			if (controller.signal.aborted || controllerRef.current !== controller) return
+			if (session.generation !== selection.generation) throw new APIError(409, { code: 'GENERATION_CHANGED', message: 'The active selection changed.' })
+			setState({ status: 'following', message: `Following ${targets.length} stream${targets.length === 1 ? '' : 's'} with 75 ms batching.` })
+			await Promise.all(targets.map((target) => consumeAggregateStream(target, selection, session, { timestamps, tailLines, since }, controller.signal, (line) => {
+				if (controller.signal.aborted || controllerRef.current !== controller) return
+				pendingRef.current = appendBounded(pendingRef.current, line)
+				if (!timerRef.current) timerRef.current = setTimeout(flush, 75)
+			})))
+			if (controller.signal.aborted || controllerRef.current !== controller) return
+			flush()
+			setState({ status: 'ended', message: 'All aggregate streams ended.' })
+		} catch (error) {
+			if (!controller.signal.aborted && controllerRef.current === controller) {
+				controller.abort()
+				flush()
+				setState({ status: 'error', message: message(error) })
+			}
+		} finally {
+			controller.abort()
+			if (controllerRef.current === controller) controllerRef.current = null
+		}
+	}
 	let expression: RegExp | null=null;let regexError='';if(regex&&search){try{expression=new RegExp(search,'i')}catch{regexError='Invalid regular expression.'}}
 	const visible=search===''?lines:regex?(expression?lines.filter((line)=>expression!.test(line.text)):[]):lines.filter((line)=>line.text.toLocaleLowerCase().includes(search.toLocaleLowerCase()))
 	const ready=Boolean(selectedWorkload&&targets.length>0&&validSince(since)&&tailLines>=1&&tailLines<=2_000)

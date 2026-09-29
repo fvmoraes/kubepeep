@@ -626,10 +626,10 @@ function DashboardContent({ selection, cluster }: { selection: SelectionSummary;
 	const infrastructure = useQuery({
 		queryKey: ['dashboard', 'infrastructure', selection.generation],
 		queryFn: async ({ signal }) => {
-			const [nodes, claims] = await Promise.all([
-				getNodes({ limit: 100, priority: 'unrelated', skipUXTiming: true }, signal, selection.generation),
-				getPersistentVolumeClaims({ limit: 100, priority: 'unrelated', skipUXTiming: true }, signal, selection.generation),
-			])
+			// A cold scheduler admits one unrelated read while reserving capacity
+			// for visible work. Keep this background panel inside that allowance.
+			const nodes = await getNodes({ limit: 100, priority: 'unrelated', skipUXTiming: true }, signal, selection.generation)
+			const claims = await getPersistentVolumeClaims({ limit: 100, priority: 'unrelated', skipUXTiming: true }, signal, selection.generation)
 			return { nodes, claims }
 		},
 		...dashboardQueryDefaults,

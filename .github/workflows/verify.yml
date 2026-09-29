@@ -96,6 +96,12 @@ jobs:
           go build -trimpath -o dist/kubePeep ./cmd/kubePeep
           ./scripts/smoke.sh dist/kubePeep
 
+      - name: Verify release gates and scan the embedded binary
+        run: |
+          ./scripts/release_gate_harness.sh
+          ./scripts/release_artifact_check_test.sh
+          ./scripts/release_artifact_check.sh dist
+
       - name: Run the race detector
         env:
           CGO_ENABLED: "1"

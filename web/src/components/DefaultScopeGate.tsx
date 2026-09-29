@@ -3,7 +3,7 @@ import { useEffect, useRef, type ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router'
 
 import {
-  getNamespaceScopes,
+  getDefaultNamespaceScope,
   getSession,
   selectNamespaceScope,
   type SelectionSummary,
@@ -18,12 +18,12 @@ export function DefaultScopeGate({ selection, selectionPending = false, children
   const attemptedGeneration = useRef<string | null>(null)
   const needsSavedScope = Boolean(selection && selection.scopeSource !== 'cli' && selection.scopeId === null)
   const scopes = useQuery({
-    queryKey: ['namespace-scopes', selection?.generation],
-    queryFn: ({ signal }) => getNamespaceScopes({ limit: 100 }, signal),
+    queryKey: ['namespace-scopes', 'default', selection?.generation],
+    queryFn: ({ signal }) => getDefaultNamespaceScope(signal),
     enabled: needsSavedScope,
     retry: false,
   })
-  const defaultScope = scopes.data?.find((scope) => scope.isDefault) ?? null
+  const defaultScope = scopes.data?.scope ?? null
   const session = useQuery({
     queryKey: ['session'],
     queryFn: ({ signal }) => getSession(signal),
@@ -43,11 +43,11 @@ export function DefaultScopeGate({ selection, selectionPending = false, children
   })
 
   useEffect(() => {
-    if (!selection || !defaultScope || !session.data || activate.isPending) return
+    if (selectionPending || !needsSavedScope || !selection || !defaultScope || !session.data || scopes.isFetching || session.isFetching || activate.isPending) return
     if (attemptedGeneration.current === selection.generation) return
     attemptedGeneration.current = selection.generation
     activate.mutate()
-  }, [activate, defaultScope, selection, session.data])
+  }, [activate, defaultScope, needsSavedScope, scopes.isFetching, selection, selectionPending, session.data, session.isFetching])
 
   if (selectionPending) {
     return <StatePanel kind="loading" title="Loading the active context">KubePeep is resolving the required namespace universe before resources are requested.</StatePanel>
@@ -61,12 +61,19 @@ export function DefaultScopeGate({ selection, selectionPending = false, children
       <StatePanel
         kind="error"
         title="Default scope could not be activated"
-        action={<Button onClick={() => { attemptedGeneration.current = null; void scopes.refetch() }}>Retry activation</Button>}
+        action={<Button onClick={() => {
+          attemptedGeneration.current = null
+          activate.reset()
+          void Promise.all([
+            queryClient.resetQueries({ queryKey: ['namespace-scopes', 'default', selection?.generation], exact: true }),
+            queryClient.resetQueries({ queryKey: ['session'], exact: true }),
+          ])
+        }}>Retry activation</Button>}
       >Open Namespace Scopes to verify the saved default and retry without broadening cluster access.</StatePanel>
     )
   }
   if (!defaultScope) {
-    const hasScopes = (scopes.data?.length ?? 0) > 0
+    const hasScopes = scopes.data?.hasScopes ?? false
     return (
       <StatePanel
         kind="empty"
@@ -75,5 +82,7 @@ export function DefaultScopeGate({ selection, selectionPending = false, children
       >KubePeep requires an explicit default for this context and will not assume access to all namespaces.</StatePanel>
     )
   }
-  return <>{children}</>
+  // The mutation can finish before local-status publishes the new selection.
+  // Keep resource queries unmounted throughout that transition.
+  return <StatePanel kind="loading" title="Activating the default scope">KubePeep is restoring the required namespace universe for this context.</StatePanel>
 }

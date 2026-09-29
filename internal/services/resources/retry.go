@@ -78,9 +78,18 @@ func retryListPage[T ListItem](ctx context.Context, lister OriginLister[T], requ
 			pressure.recordThrottle()
 		}
 		delay := policy.Base << attempt
+		var retryAfter time.Duration
 		var suggested interface{ RetryAfter() time.Duration }
-		if errors.As(err, &suggested) && suggested.RetryAfter() > delay {
-			delay = suggested.RetryAfter()
+		if errors.As(err, &suggested) {
+			retryAfter = suggested.RetryAfter()
+		}
+		// A server minimum outside this request's retry budget cannot be
+		// shortened safely. Preserve the rate-limit error for the caller.
+		if retryAfter > policy.Maximum {
+			return page, err
+		}
+		if retryAfter > delay {
+			delay = retryAfter
 		}
 		if delay > policy.Maximum {
 			delay = policy.Maximum
@@ -91,6 +100,9 @@ func retryListPage[T ListItem](ctx context.Context, lister OriginLister[T], requ
 		}
 		if delay > policy.Maximum {
 			delay = policy.Maximum
+		}
+		if delay < retryAfter {
+			delay = retryAfter
 		}
 		if err := policy.Wait(ctx, delay); err != nil {
 			return OriginPage[T]{Origin: request.Origin}, err

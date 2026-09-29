@@ -20,16 +20,17 @@ import (
 )
 
 const (
-	WatchTimeoutSeconds      = int64(300)
-	MaximumStreams           = 8
-	MaximumStreamEventBytes  = 64 << 10
-	MaximumSnapshotItems     = 10000
-	MaximumSnapshotBytes     = 10 << 20
-	MaximumStreamQueueBytes  = 1 << 20
-	MaximumStreamQueueEvents = 1000
-	DefaultWatchIdleTimeout  = 45 * time.Second
-	InitialWatchSyncTimeout  = 10 * time.Second
-	streamSSEEnvelopeReserve = 64
+	WatchTimeoutSeconds       = int64(300)
+	MaximumStreams            = 8
+	MaximumStreamEventBytes   = 64 << 10
+	MaximumSnapshotItems      = 10000
+	MaximumSnapshotBytes      = 10 << 20
+	DefaultWatchSnapshotBytes = 32 << 20
+	MaximumStreamQueueBytes   = 1 << 20
+	MaximumStreamQueueEvents  = 1000
+	DefaultWatchIdleTimeout   = 45 * time.Second
+	InitialWatchSyncTimeout   = 10 * time.Second
+	streamSSEEnvelopeReserve  = 64
 	// A single slow scope must not serialize hundreds of SAR requests, while
 	// concurrent streams must not create an unbounded authorization burst.
 	maximumConcurrentStreamAuthorizations = 16
@@ -173,6 +174,7 @@ type WatchManager struct {
 	port                 WatchPort
 	cache                *ResourceCache
 	idleTimeout          time.Duration
+	maxSnapshotBytes     int
 	streamingLists       bool
 	streamingUnsupported map[string]bool
 	onChange             func(WatchKey)
@@ -188,6 +190,7 @@ type watchWorker struct {
 	subscribers       map[*Subscription]struct{}
 	initial           []StreamEvent
 	snapshot          WatchSnapshot
+	snapshotBytes     int
 	snapshotReady     bool
 	connected         bool
 	cacheFresh        bool
@@ -197,11 +200,14 @@ type watchWorker struct {
 }
 
 type WatchManagerConfig struct {
-	Metrics        *observability.Registry
-	Cache          *ResourceCache
-	IdleTimeout    time.Duration
-	StreamingLists bool
-	OnChange       func(WatchKey)
+	Metrics     *observability.Registry
+	Cache       *ResourceCache
+	IdleTimeout time.Duration
+	// MaxSnapshotBytes bounds the sum retained by all workers, independently
+	// of the resource cache's own copies and each worker's per-snapshot limit.
+	MaxSnapshotBytes int
+	StreamingLists   bool
+	OnChange         func(WatchKey)
 }
 
 func NewWatchManager(port WatchPort) *WatchManager {
@@ -219,10 +225,14 @@ func NewWatchManagerWithConfig(port WatchPort, config WatchManagerConfig) *Watch
 	if config.IdleTimeout <= 0 {
 		config.IdleTimeout = DefaultWatchIdleTimeout
 	}
+	if config.MaxSnapshotBytes <= 0 {
+		config.MaxSnapshotBytes = DefaultWatchSnapshotBytes
+	}
 	return &WatchManager{
 		port: port, workers: map[string]*watchWorker{}, metrics: config.Metrics,
 		cache: config.Cache, idleTimeout: config.IdleTimeout,
-		streamingLists: config.StreamingLists, streamingUnsupported: make(map[string]bool),
+		maxSnapshotBytes: config.MaxSnapshotBytes,
+		streamingLists:   config.StreamingLists, streamingUnsupported: make(map[string]bool),
 		onChange: config.OnChange,
 	}
 }
@@ -263,10 +273,13 @@ func (manager *WatchManager) Subscribe(ctx context.Context, key WatchKey) (*Subs
 		if cached, ok := cacheSubscription.Load(ctx); ok && cached.State != CacheStateExpired {
 			events, snapshotErr := SnapshotEvents(key.Generation, key.Topic, cached.Snapshot)
 			if snapshotErr == nil {
-				worker.snapshot = cached.Snapshot
-				worker.snapshotReady = true
+				if err := worker.installSnapshotLocked(cached.Snapshot, events); err != nil {
+					cacheSubscription.Close()
+					cancel()
+					manager.mu.Unlock()
+					return nil, err
+				}
 				worker.cacheFresh = cached.State == CacheStateFresh
-				worker.initial = events
 			} else {
 				if invalidateErr := manager.cache.Invalidate(ResourceCacheKey{WatchKey: key}); invalidateErr != nil {
 					cacheSubscription.Close()
@@ -297,8 +310,18 @@ func (manager *WatchManager) Subscribe(ctx context.Context, key WatchKey) (*Subs
 	for _, event := range initial {
 		if !subscription.push(event) {
 			subscription.forceTerminal(StreamEvent{Event: "reset", Topic: key.Topic, Generation: key.Generation, Reason: "slow_consumer", RefetchRequired: true})
+			if created {
+				delete(manager.workers, identity)
+				worker.stopping = true
+			}
 			manager.mu.Unlock()
-			worker.remove(subscription)
+			if created {
+				// run has not started, so its deferred cleanup cannot release
+				// the cache subscription or stop this rejected worker.
+				worker.finish()
+			} else {
+				worker.remove(subscription)
+			}
 			return subscription, nil
 		}
 	}
@@ -358,6 +381,51 @@ func (manager *WatchManager) SharedWatchCount() int {
 	manager.mu.Lock()
 	defer manager.mu.Unlock()
 	return len(manager.workers)
+}
+
+func (manager *WatchManager) SnapshotBytes() int {
+	if manager == nil {
+		return 0
+	}
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	total := 0
+	for _, worker := range manager.workers {
+		total += worker.snapshotBytes
+	}
+	return total
+}
+
+func (worker *watchWorker) snapshotFitsLocked(size int) bool {
+	limit := worker.manager.maxSnapshotBytes
+	if limit <= 0 {
+		limit = DefaultWatchSnapshotBytes
+	}
+	total := size
+	for _, other := range worker.manager.workers {
+		if other != worker {
+			total += other.snapshotBytes
+		}
+	}
+	return total <= limit
+}
+
+func (worker *watchWorker) installSnapshotLocked(snapshot WatchSnapshot, events []StreamEvent) error {
+	if worker.stopping || worker.manager.closed || worker.ctx.Err() != nil {
+		return context.Canceled
+	}
+	encoded, err := json.Marshal(snapshot.Items)
+	if err != nil {
+		return err
+	}
+	if len(snapshot.Items) > MaximumSnapshotItems || len(encoded) > MaximumSnapshotBytes || !worker.snapshotFitsLocked(len(encoded)) {
+		return domainError(CodeLimitExceeded, "The resource watch snapshot memory budget was reached.", nil)
+	}
+	worker.snapshot = snapshot
+	worker.snapshotBytes = len(encoded)
+	worker.snapshotReady = true
+	worker.initial = append([]StreamEvent(nil), events...)
+	return nil
 }
 
 // EvictIdle stops workers with no subscribers immediately. Normal navigation
@@ -688,10 +756,11 @@ func (worker *watchWorker) tryInitialWatch() (WatchStream, string) {
 					}
 				}
 				worker.manager.mu.Lock()
-				worker.snapshot = snapshot
-				worker.snapshotReady = true
-				worker.initial = append([]StreamEvent(nil), events...)
+				installErr := worker.installSnapshotLocked(snapshot, events)
 				worker.manager.mu.Unlock()
+				if installErr != nil {
+					return nil, ""
+				}
 				if worker.manager.onChange != nil {
 					worker.manager.onChange(worker.key)
 				}
@@ -777,10 +846,11 @@ func (worker *watchWorker) relist() (string, error) {
 		}
 	}
 	worker.manager.mu.Lock()
-	worker.snapshot = snapshot
-	worker.snapshotReady = true
-	worker.initial = append([]StreamEvent(nil), events...)
+	installErr := worker.installSnapshotLocked(snapshot, events)
 	worker.manager.mu.Unlock()
+	if installErr != nil {
+		return "", installErr
+	}
 	if worker.manager.onChange != nil {
 		worker.manager.onChange(worker.key)
 	}
@@ -794,15 +864,85 @@ func (worker *watchWorker) relist() (string, error) {
 
 func (worker *watchWorker) updateSnapshot(event StreamEvent) bool {
 	worker.manager.mu.Lock()
-	defer worker.manager.mu.Unlock()
 	if worker.stopping || !worker.snapshotReady {
-		return !worker.stopping
+		active := !worker.stopping
+		worker.manager.mu.Unlock()
+		return active
 	}
 	_, end := observability.StartSpan(worker.ctx, "cache.apply_event")
 	defer end(nil)
-	worker.snapshot = applyStreamEventToSnapshot(worker.key.Topic, worker.snapshot, event)
+	if worker.snapshotBytes == 0 {
+		encoded, _ := json.Marshal(worker.snapshot.Items)
+		worker.snapshotBytes = len(encoded)
+		if len(worker.snapshot.Items) == 0 {
+			worker.snapshotBytes = 2 // Empty arrays have no item or separator bytes.
+		}
+	}
+	next := applyStreamEventToSnapshot(worker.key.Topic, worker.snapshot, event)
+	delta, err := snapshotEventSizeDelta(worker.key.Topic, worker.snapshot, event)
+	if err != nil || len(next.Items) > MaximumSnapshotItems || worker.snapshotBytes+delta > MaximumSnapshotBytes || !worker.snapshotFitsLocked(worker.snapshotBytes+delta) {
+		// A stream can grow beyond its bounded initial LIST. Drop the now
+		// incomplete level state before any reader can reuse or cache it.
+		worker.snapshot = WatchSnapshot{}
+		worker.snapshotBytes = 0
+		worker.snapshotReady = false
+		worker.initial = nil
+		worker.stopping = true
+		worker.manager.mu.Unlock()
+		if invalidateErr := worker.invalidateCache(); invalidateErr != nil {
+			worker.fail(invalidateErr)
+		} else {
+			worker.terminal("snapshot_limit_exceeded")
+		}
+		return false
+	}
+	worker.snapshot = next
+	worker.snapshotBytes += delta
 	worker.initial = nil
+	worker.manager.mu.Unlock()
 	return true
+}
+
+// snapshotEventSizeDelta accounts only for the changed object and its array
+// separator; serializing the entire collection on every delta would turn a
+// bounded watch into repeated multi-megabyte allocations.
+func snapshotEventSizeDelta(topic Topic, snapshot WatchSnapshot, event StreamEvent) (int, error) {
+	var identity string
+	var ok bool
+	newBytes := 0
+	switch event.Event {
+	case "added", "modified":
+		identity, ok = topicObjectIdentity(event.Object)
+		if ok {
+			encoded, err := json.Marshal(event.Object)
+			if err != nil {
+				return 0, err
+			}
+			newBytes = len(encoded)
+		}
+	case "deleted":
+		identity, ok = resourceRefIdentity(topic, event.Deleted)
+	}
+	if !ok {
+		return 0, nil
+	}
+	for _, item := range snapshot.Items {
+		if candidate, valid := topicObjectIdentity(item); valid && candidate == identity {
+			encoded, err := json.Marshal(item)
+			if err != nil {
+				return 0, err
+			}
+			delta := newBytes - len(encoded)
+			if newBytes == 0 && len(snapshot.Items) > 1 {
+				delta--
+			}
+			return delta, nil
+		}
+	}
+	if newBytes > 0 && len(snapshot.Items) > 0 {
+		newBytes++
+	}
+	return newBytes, nil
 }
 
 func (worker *watchWorker) invalidateCache() error {

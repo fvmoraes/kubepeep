@@ -387,7 +387,7 @@ func anyPodMatches(selector map[string]string, pods []PodDTO) bool {
 	for _, pod := range pods {
 		matched := true
 		for key, value := range selector {
-			if pod.Labels[key] != value {
+			if actual, present := pod.Labels[key]; !present || actual != value {
 				matched = false
 				break
 			}

@@ -41,8 +41,13 @@ plataforma definidos em CI; um build local não os substitui.
 
 Na CI, [release.yml](../.github/workflows/release.yml) organiza os jobs em
 `01 Prepare` → `02 Build` (Linux/Windows/macOS em paralelo) → `03 Publish` →
-`04 Latest`. A publicação consulta o check `build-and-test` de `verify.yml`;
-preservar esse nome, os IDs dos jobs e os nomes dos artifacts ao reorganizar.
+`04 Latest`. A publicação exige `build-and-test`, `restricted-kind` e as duas
+pernas `native-runtime (macos-latest)` / `native-runtime (windows-latest)` de
+`verify.yml`, considerando a execução mais recente de cada nome. Preservar
+esses nomes, os IDs dos jobs e os nomes dos artifacts ao reorganizar.
+Os binários e pacotes passam pelo scanner antes dos uploads e novamente antes
+da criação de tag; o build Windows usa Git Bash para o binário e o gate Ubuntu
+extrai o ZIP. `make test-release-gates` testa localmente classificação e scanner.
 A revisão dos gates e das etapas repetidas está na
 [Fase 7 da v0.7](../plan/v0.7/phase-07-validacao-release.md).
 

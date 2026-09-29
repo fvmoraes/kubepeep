@@ -84,8 +84,10 @@ afterEach(() => {
 })
 
 describe('progressive dashboard', () => {
-	it('loads node health and storage after the core summary at unrelated priority', async () => {
+	it('loads node health and storage after the core summary within one unrelated slot', async () => {
 		let summaryResolved = false
+		let resolveNodes!: (response: Response) => void
+		const nodesResponse = new Promise<Response>((resolve) => { resolveNodes = resolve })
 		const fetch = vi.fn((input: string | URL | Request, init?: RequestInit) => {
 			const path = String(input)
 			if (path === '/api/v1/dashboard/summary') {
@@ -95,7 +97,7 @@ describe('progressive dashboard', () => {
 			if (path === '/api/v1/nodes?limit=100') {
 				expect(summaryResolved).toBe(true)
 				expect(init?.headers).toMatchObject({ 'X-KubePeep-List-Priority': 'unrelated' })
-				return Promise.resolve(json([{ name: 'worker-1', ready: true, roles: [], version: 'v1', ageSeconds: 10, cpuCapacity: '', memoryCapacity: '', pods: 1 }], { generation: 'gen_42', collectedAt: '2026-08-10T12:00:00Z', page: { limit: 100, complete: true, truncated: false, filterScope: 'collection' } }))
+				return nodesResponse
 			}
 			if (path === '/api/v1/persistent-volume-claims?limit=100') {
 				expect(summaryResolved).toBe(true)
@@ -108,6 +110,9 @@ describe('progressive dashboard', () => {
 
 		renderDashboard()
 
+		await waitFor(() => expect(fetch.mock.calls.some(([input]) => String(input) === '/api/v1/nodes?limit=100')).toBe(true))
+		expect(fetch.mock.calls.some(([input]) => String(input) === '/api/v1/persistent-volume-claims?limit=100')).toBe(false)
+		resolveNodes(json([{ name: 'worker-1', ready: true, roles: [], version: 'v1', ageSeconds: 10, cpuCapacity: '', memoryCapacity: '', pods: 1 }], { generation: 'gen_42', collectedAt: '2026-08-10T12:00:00Z', page: { limit: 100, complete: true, truncated: false, filterScope: 'collection' } }))
 		expect(await screen.findByText('1/1 Ready')).toBeInTheDocument()
 		expect(screen.getByText('1 not Bound')).toBeInTheDocument()
 	})

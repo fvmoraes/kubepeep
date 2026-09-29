@@ -168,6 +168,30 @@ func TestInvestigationResolvesOwnerServiceStorageConfigAndEventsLocally(t *testi
 	}
 }
 
+func TestInvestigationServiceSelectorsRequirePresentLabels(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name   string
+		labels map[string]string
+		want   int
+	}{
+		{name: "missing label", labels: map[string]string{"app": "portal"}, want: 0},
+		{name: "present empty label", labels: map[string]string{"app": "portal", "exposed": ""}, want: 1},
+		{name: "different value", labels: map[string]string{"app": "portal", "exposed": "true"}, want: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			index := LocalIndexSnapshot{
+				Pods:     []PodDTO{{Namespace: "portal", Name: "api", Labels: tc.labels}},
+				Services: []ServiceDTO{{Namespace: "portal", Name: "service", Selector: map[string]string{"app": "portal", "exposed": ""}}},
+			}
+			got := index.Investigate("Pod", "portal", "api")
+			if len(got.Services) != tc.want {
+				t.Fatalf("related services = %v, want %d", got.Services, tc.want)
+			}
+		})
+	}
+}
+
 func TestLocalIndexAcceptsPVCWatchTopic(t *testing.T) {
 	t.Parallel()
 	cache := NewResourceCache(ResourceCacheConfig{MaxBytes: 1 << 20, MaxEntries: 2})

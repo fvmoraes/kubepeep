@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -44,6 +44,25 @@ function renderLogs(initialEntry = '/logs?namespace=payments&pod=api-abc&contain
   return render(<QueryClientProvider client={client}><MemoryRouter initialEntries={[initialEntry]}><LogsPage /></MemoryRouter></QueryClientProvider>)
 }
 
+function mockAggregateRequests(containersByPod: Record<string, string[]>, logs: (path: string, signal: AbortSignal) => Response | Promise<Response>) {
+  const pods = Object.keys(containersByPod)
+  vi.stubGlobal('fetch', vi.fn((input: string | URL | Request, init?: RequestInit) => {
+    const path = String(input)
+    if (path === '/api/v1/status') return Promise.resolve(json(status()))
+    if (path === '/api/v1/preferences') return Promise.resolve(json(preferences()))
+    const page = { page: { limit: 500, next: '', complete: true, truncated: false, filterScope: 'collection' }, coverage: null }
+    if (path === '/api/v1/workloads?limit=500') return Promise.resolve(json([{ namespace: 'payments', kind: 'Deployment', name: 'api', status: 'Healthy', ageSeconds: 60 }], page))
+    if (path === '/api/v1/pods?limit=500') return Promise.resolve(json(pods.map((name) => ({ namespace: 'payments', name })), page))
+    if (path.startsWith('/api/v1/permissions?')) return Promise.resolve(json({ generation, complete: true, truncated: false, errors: [], decisions: pods.map((name) => ({ capabilityId: 'pods.logs.get', namespace: 'payments', resourceName: name, decision: 'allowed' })) }))
+    if (path === '/api/v1/session') return Promise.resolve(json({ csrfToken: 'csrf-aggregate', generation }))
+    if (path === '/api/v1/workloads/Deployment/payments/api') return Promise.resolve(json({ metadata: { namespace: 'payments', name: 'api' }, kind: 'Deployment', conditions: [], containers: [], related: pods.map((name) => ({ kind: 'Pod', namespace: 'payments', name })) }))
+    const detail = /^\/api\/v1\/pods\/payments\/([^/?]+)$/.exec(path)
+    if (detail && containersByPod[detail[1]]) return Promise.resolve(json({ metadata: { namespace: 'payments', name: detail[1] }, summary: { namespace: 'payments', name: detail[1] }, conditions: [], containers: containersByPod[detail[1]].map((name) => ({ spec: { name }, type: 'regular' })), initContainers: [], ephemeralContainers: [], relatedEvents: [] }))
+    if (path.includes('/logs')) return Promise.resolve(logs(path, init?.signal as AbortSignal))
+    throw new Error(`Unexpected request: ${path}`)
+  }))
+}
+
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
@@ -52,6 +71,72 @@ afterEach(() => {
 })
 
 describe('bounded log viewer', () => {
+  it('cancels sibling aggregate streams when one stream fails and cancels replacement streams on cleanup', async () => {
+    const signals: AbortSignal[] = []
+    const controllers: ReadableStreamDefaultController<Uint8Array>[] = []
+    const canceled: number[] = []
+    mockAggregateRequests({ 'api-0': ['api'], 'api-1': ['api'] }, (_path, signal) => {
+      const index = signals.length
+      signals.push(signal)
+      return new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          controllers.push(controller)
+          controller.enqueue(new TextEncoder().encode(`event: meta\ndata: ${JSON.stringify({ generation })}\n\n`))
+        },
+        cancel() { canceled.push(index) },
+      }), { headers: { 'Content-Type': 'text/event-stream' } })
+    })
+    const view = renderLogs('/logs?workload=Deployment%2Fpayments%2Fapi')
+    const follow = await screen.findByRole('button', { name: 'Follow aggregate' })
+    await waitFor(() => expect(follow).toBeEnabled())
+    fireEvent.click(follow)
+    await waitFor(() => expect(signals).toHaveLength(2))
+    await act(async () => {
+      controllers[0].enqueue(new TextEncoder().encode('event: error\ndata: {"code":"FORBIDDEN","message":"Stream permission revoked."}\n\n'))
+    })
+    expect(await screen.findByText('FORBIDDEN: Stream permission revoked.')).toBeInTheDocument()
+    expect(signals.every((signal) => signal.aborted)).toBe(true)
+    await waitFor(() => expect(canceled.sort()).toEqual([0, 1]))
+
+    fireEvent.click(follow)
+    await waitFor(() => expect(signals).toHaveLength(4))
+    view.unmount()
+    expect(signals.every((signal) => signal.aborted)).toBe(true)
+    await waitFor(() => expect(canceled.sort()).toEqual([0, 1, 2, 3]))
+  })
+
+  it('aborts sibling aggregate reads when one request fails', async () => {
+    const signals: AbortSignal[] = []
+    mockAggregateRequests({ 'api-0': ['api'], 'api-1': ['api'] }, (path, signal) => {
+      signals.push(signal)
+      if (path.includes('/api-0/')) return new Response(JSON.stringify({ code: 'FORBIDDEN', message: 'Read permission revoked.' }), { status: 403, headers: { 'Content-Type': 'application/json' } })
+      return new Promise<Response>((_resolve, reject) => signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true }))
+    })
+    renderLogs('/logs?workload=Deployment%2Fpayments%2Fapi')
+    const read = await screen.findByRole('button', { name: 'Read aggregate' })
+    await waitFor(() => expect(read).toBeEnabled())
+    fireEvent.click(read)
+    expect(await screen.findByText('FORBIDDEN: Read permission revoked.')).toBeInTheDocument()
+    expect(signals).toHaveLength(2)
+    expect(signals.every((signal) => signal.aborted)).toBe(true)
+  })
+
+  it('opens only Pod and container pairs present in each selected Pod', async () => {
+    const requested: string[] = []
+    mockAggregateRequests({ 'api-0': ['api'], 'api-1': ['worker'] }, (path) => {
+      const url = new URL(path, 'http://localhost')
+      requested.push(`${url.pathname.split('/')[5]}/${url.searchParams.get('container')}`)
+      return json({ container: url.searchParams.get('container'), previous: false, lines: [], truncated: false })
+    })
+    renderLogs('/logs?workload=Deployment%2Fpayments%2Fapi')
+    const read = await screen.findByRole('button', { name: 'Read aggregate' })
+    await waitFor(() => expect(read).toBeEnabled())
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'worker' }))
+    fireEvent.click(read)
+    await waitFor(() => expect(screen.getByText('Read 2 bounded streams.')).toBeInTheDocument())
+    expect(requested).toEqual(['api-0/api', 'api-1/worker'])
+  })
+
 	it('aggregates at most five workload streams and filters the bounded result with a regular expression', async () => {
 		const pods = Array.from({ length: 6 }, (_, index) => `api-${index}`)
 		const logCalls: string[] = []

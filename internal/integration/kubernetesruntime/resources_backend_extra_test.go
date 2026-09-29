@@ -289,6 +289,18 @@ func TestResourceBackendGlobalWatchCoversPaginatedPage(t *testing.T) {
 	if !backend.watchManager.Covers(selection, resources.TopicPods, []resources.Origin{globalOrigin}) {
 		t.Fatal("global WATCH did not cover its matching global cursor")
 	}
+	stats := backend.MemoryStats()
+	if stats.WatchBytes <= 0 {
+		t.Fatal("aggregate budget omitted the live watch snapshot")
+	}
+	backend.memoryBudget = int64(stats.ResourceBytes + stats.CollectionBytes)
+	if backend.memoryBudget == 0 {
+		backend.memoryBudget = 1
+	}
+	if !backend.memoryOverBudget(stats) {
+		t.Fatalf("watch memory did not participate in pressure: %#v", stats)
+	}
+	backend.memoryBudget = 0
 	for range 2 {
 		result, listErr := backend.ListPods(t.Context(), binding, resolution, resources.ListOptions{Limit: 1}, nil)
 		if listErr != nil || len(result.Items) != 1 || result.Page.Complete {

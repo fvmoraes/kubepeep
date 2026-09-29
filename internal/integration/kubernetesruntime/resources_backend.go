@@ -45,7 +45,7 @@ type ResourceBackendOptions struct {
 	// CursorMemory participates in the process-wide in-memory budget without
 	// exposing cursor payloads to the Kubernetes adapter.
 	CursorMemory CursorMemoryStore
-	// MemoryBudget bounds resource snapshots, authorized screen pages and
+	// MemoryBudget bounds cached and live watch snapshots, screen pages and
 	// cursor payloads together. Zero uses the sum of their default budgets.
 	MemoryBudget int64
 }
@@ -108,7 +108,9 @@ func NewResourceBackendWithOptions(runtime *Runtime, authorizer resources.Author
 	if options.PartialMetadata != nil {
 		partialMetadata = *options.PartialMetadata
 	}
-	resourceCache := resources.NewResourceCache(resources.ResourceCacheConfig{MaxBytes: 128 << 20, Metrics: options.Metrics})
+	// Reserve 32 MiB of the previous 128 MiB snapshot allowance for live
+	// workers, which retain DTO copies independently of the resource cache.
+	resourceCache := resources.NewResourceCache(resources.ResourceCacheConfig{MaxBytes: (128 << 20) - resources.DefaultWatchSnapshotBytes, Metrics: options.Metrics})
 	backend := &ResourceBackend{
 		runtime: runtime, clients: runtimeResourceClientProvider{runtime: runtime}, authorizer: authorizer, redactor: redactor, now: time.Now,
 		listWindowTimeout: resources.NormalizeListWindowTimeout(options.ListWindowTimeout),
@@ -174,6 +176,7 @@ func (backend *ResourceBackend) activeWatchManager() *resources.WatchManager {
 
 type ResourceMemoryStats struct {
 	ResourceBytes      int
+	WatchBytes         int
 	CollectionBytes    int
 	CursorBytes        int64
 	IdleWatchesEvicted int
@@ -197,6 +200,9 @@ func (backend *ResourceBackend) memoryStats() ResourceMemoryStats {
 	if backend.cursorMemory != nil {
 		stats.CursorBytes = backend.cursorMemory.Bytes()
 	}
+	if manager := backend.activeWatchManager(); manager != nil {
+		stats.WatchBytes = manager.SnapshotBytes()
+	}
 	return stats
 }
 
@@ -214,7 +220,7 @@ func (backend *ResourceBackend) Investigation(generation, kind, namespace, name 
 }
 
 func (backend *ResourceBackend) memoryOverBudget(stats ResourceMemoryStats) bool {
-	return backend != nil && backend.memoryBudget > 0 && int64(stats.ResourceBytes+stats.CollectionBytes)+stats.CursorBytes > backend.memoryBudget
+	return backend != nil && backend.memoryBudget > 0 && int64(stats.ResourceBytes+stats.WatchBytes+stats.CollectionBytes)+stats.CursorBytes > backend.memoryBudget
 }
 
 // enforceMemoryBudget coordinates the independently bounded stores in the
@@ -254,7 +260,7 @@ func (backend *ResourceBackend) enforceMemoryBudget() ResourceMemoryStats {
 	backend.resourceCache.EvictInactive(0)
 	stats = backend.memoryStats()
 	if backend.memoryOverBudget(stats) {
-		total := int64(stats.ResourceBytes+stats.CollectionBytes) + stats.CursorBytes
+		total := int64(stats.ResourceBytes+stats.WatchBytes+stats.CollectionBytes) + stats.CursorBytes
 		target := stats.CollectionBytes - int(total-backend.memoryBudget)
 		backend.collectionCache.EvictLRU(target)
 	}

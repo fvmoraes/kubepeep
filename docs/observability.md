@@ -136,8 +136,14 @@ os tópicos level-driven, preservando Events cronológicos. Páginas completas e
 pequenas são reconstruídas do snapshot local após cada delta; páginas maiores
 ainda usam LIST paginado.
 
-Snapshots de recursos (128 MiB), páginas autorizadas (64 MiB) e cursores
-(32 MiB) também participam de um teto agregado padrão de 224 MiB. Sob pressão,
+Snapshots do resource cache (96 MiB), snapshots retidos pelos workers de watch
+(32 MiB no conjunto), páginas autorizadas (64 MiB) e cursores (32 MiB) participam
+de um teto agregado padrão de 224 MiB. A soma inclui as cópias independentes
+mantidas pelos workers; cada watch também respeita 10 mil objetos/10 MiB durante
+LIST, replay e deltas. Exceder o limite exige nova leitura, sem conservar uma
+coleção incompleta como snapshot válido. Os budgets contam payloads retidos;
+não representam um limite de RSS do processo ou das alocações transitórias.
+Sob pressão,
 o backend encerra watches ociosos, remove cursores e páginas expirados, libera
 snapshots sem referência e só então reduz as páginas menos recentemente usadas.
 

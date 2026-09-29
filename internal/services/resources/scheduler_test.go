@@ -33,6 +33,56 @@ func TestRequestSchedulerReservesVisibleCapacityAndQPS(t *testing.T) {
 	}
 }
 
+func TestRequestSchedulerAdmitsIdleUnrelatedWorkWithinVisibleReserve(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name     string
+		config   SchedulerConfig
+		capacity int
+	}{
+		{name: "adaptive initial four", config: SchedulerConfig{Minimum: 2, Initial: 4, Maximum: 8, Adaptive: true}, capacity: 1},
+		{name: "fixed four", config: SchedulerConfig{Minimum: 4, Initial: 4, Maximum: 4}, capacity: 1},
+		{name: "adaptive minimum two", config: SchedulerConfig{Minimum: 2, Initial: 2, Maximum: 8, Adaptive: true}, capacity: 1},
+		{name: "maximum eight", config: SchedulerConfig{Minimum: 2, Initial: 8, Maximum: 8, Adaptive: true}, capacity: 4},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			scheduler := NewRequestSchedulerWithConfig(test.config, nil)
+			for range test.capacity {
+				release, err := scheduler.Acquire(t.Context(), PriorityUnrelated)
+				if err != nil {
+					t.Fatalf("idle unrelated read was starved: %v", err)
+				}
+				t.Cleanup(release)
+			}
+			if _, err := scheduler.Acquire(t.Context(), PriorityUnrelated); !errors.Is(err, ErrPrefetchDeferred) {
+				t.Fatalf("unrelated work consumed reserved visible capacity: %v", err)
+			}
+			visible, err := scheduler.Acquire(t.Context(), PriorityVisible)
+			if err != nil {
+				t.Fatalf("visible read lost its reserved capacity: %v", err)
+			}
+			visible()
+		})
+	}
+}
+
+func TestRequestSchedulerUnrelatedWorkResumesAfterCongestionPause(t *testing.T) {
+	t.Parallel()
+	now := time.Unix(100, 0)
+	scheduler := NewRequestSchedulerWithConfig(SchedulerConfig{Minimum: 2, Initial: 4, Maximum: 8, Adaptive: true}, func() time.Time { return now })
+	scheduler.Observe(time.Second, true, false)
+	if _, err := scheduler.Acquire(t.Context(), PriorityUnrelated); !errors.Is(err, ErrPrefetchDeferred) {
+		t.Fatalf("congestion did not pause unrelated work: %v", err)
+	}
+	now = now.Add(16 * time.Second)
+	release, err := scheduler.Acquire(t.Context(), PriorityUnrelated)
+	if err != nil {
+		t.Fatalf("idle unrelated read remained starved after congestion: %v", err)
+	}
+	release()
+}
+
 func TestRequestSchedulerWaitCancellationAndCongestion(t *testing.T) {
 	t.Parallel()
 	now := time.Unix(100, 0)

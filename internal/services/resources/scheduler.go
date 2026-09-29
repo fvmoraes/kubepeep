@@ -149,13 +149,17 @@ func (scheduler *RequestScheduler) Acquire(ctx context.Context, priority Request
 }
 
 func (scheduler *RequestScheduler) prefetchDeferredLocked(priority RequestPriority) bool {
+	if scheduler.limit <= 1 {
+		return true
+	}
 	reserve := 2
 	if priority == PriorityUnrelated {
 		reserve = 4
 	}
-	if scheduler.limit <= reserve {
-		return true
-	}
+	// Keep an idle slot usable even before AIMD grows the initial limit or
+	// when adaptive scheduling is disabled. Otherwise unrelated Dashboard
+	// reads can never start at the default limit of four.
+	reserve = min(reserve, scheduler.limit-1)
 	return scheduler.visibleWaiting > 0 || scheduler.active >= scheduler.limit-reserve || scheduler.now().Before(scheduler.prefetchPauseUntil)
 }
 

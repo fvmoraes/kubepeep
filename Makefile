@@ -26,7 +26,7 @@ LDFLAGS := -s -w \
 .PHONY: format format-check lint typecheck test-unit test-integration test-race \
 	test-e2e test web-install web-build build smoke cross-build verify-ginger \
 	verify clean benchmark benchmark-matrix benchmark-protocol benchmark-dataset dev-desktop build-desktop build-desktop-linux \
-	build-desktop-windows build-desktop-darwin release-artifact-check
+	build-desktop-windows build-desktop-darwin release-artifact-check test-release-artifacts test-release-gates
 
 WAILS ?= $(shell $(GO) env GOPATH)/bin/wails
 # WebKitGTK: prefer 4.0 (upstream default); fall back to 4.1 via Wails'
@@ -61,7 +61,7 @@ test-unit: web-build
 	cd $(WEB_DIR) && $(NPM) test
 
 test-integration: web-build
-	$(GO) test $(GO_PACKAGES) -run Integration
+	$(GO) test ./internal/integration/...
 
 test-race: web-build
 	CGO_ENABLED=1 $(GO) test -race $(GO_PACKAGES)
@@ -98,7 +98,15 @@ smoke: build
 	./scripts/smoke.sh $(BINARY)
 
 release-artifact-check:
-	./scripts/release_artifact_check.sh $(DIST_DIR)
+	@set -- "$(DIST_DIR)"; \
+	if [ -d "build/bin" ]; then set -- "$$@" "build/bin"; fi; \
+	./scripts/release_artifact_check.sh "$$@"
+
+test-release-artifacts:
+	./scripts/release_artifact_check_test.sh
+
+test-release-gates: test-release-artifacts
+	./scripts/release_gate_harness.sh
 
 cross-build: web-build
 	@set -eu; \
@@ -133,7 +141,7 @@ build-desktop-windows:
 build-desktop-darwin:
 	$(WAILS) build $(WAILS_BINDING_FLAGS) -tags "$(DESKTOP_TAGS)" -clean -platform darwin/amd64 -o "$(DESKTOP_OUT)/darwin-amd64/kubePeep"
 
-verify: format-check lint typecheck test test-e2e build smoke verify-ginger
+verify: format-check lint typecheck test test-e2e build smoke verify-ginger test-release-gates
 
 clean:
 	rm -f $(BINARY)

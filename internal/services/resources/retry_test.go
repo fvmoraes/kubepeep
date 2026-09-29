@@ -6,14 +6,64 @@ import (
 	"time"
 )
 
-type retryTestLister struct{ calls int }
+type retryTestLister struct {
+	calls      int
+	retryAfter time.Duration
+}
 
 func (lister *retryTestLister) ListPage(_ context.Context, request PageRequest) (OriginPage[testListItem], error) {
 	lister.calls++
 	if lister.calls < 3 {
-		return OriginPage[testListItem]{Origin: request.Origin}, NewRateLimitedError(time.Second, nil)
+		retryAfter := lister.retryAfter
+		if retryAfter == 0 {
+			retryAfter = time.Second
+		}
+		return OriginPage[testListItem]{Origin: request.Origin}, NewRateLimitedError(retryAfter, nil)
 	}
 	return OriginPage[testListItem]{Origin: request.Origin, Items: []testListItem{"ok"}}, nil
+}
+
+func TestRetryListPageNeverRetriesBeforeServerDelay(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		retryAfter time.Duration
+		wantCalls  int
+		wantWaits  int
+	}{
+		{name: "negative jitter preserves server minimum", retryAfter: time.Second, wantCalls: 3, wantWaits: 2},
+		{name: "server minimum at policy maximum", retryAfter: 2 * time.Second, wantCalls: 3, wantWaits: 2},
+		{name: "server delay beyond budget stops retries", retryAfter: 3 * time.Second, wantCalls: 1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			lister := &retryTestLister{retryAfter: test.retryAfter}
+			waits := []time.Duration{}
+			_, err := retryListPage(t.Context(), lister, PageRequest{Origin: Origin{Version: "v1", Resource: "pods"}}, RetryPolicy{
+				Attempts: 3,
+				Base:     time.Millisecond,
+				Maximum:  2 * time.Second,
+				Jitter:   func(value time.Duration) time.Duration { return value * 3 / 4 },
+				Wait: func(_ context.Context, value time.Duration) error {
+					waits = append(waits, value)
+					return nil
+				},
+			}, &apiPressure{})
+			if lister.calls != test.wantCalls || len(waits) != test.wantWaits {
+				t.Fatalf("calls=%d waits=%v, want calls=%d waits=%d", lister.calls, waits, test.wantCalls, test.wantWaits)
+			}
+			if test.wantWaits == 0 {
+				if ErrorCodeOf(err) != CodeRateLimited {
+					t.Fatalf("over-budget Retry-After error = %v, want rate limited", err)
+				}
+			} else if err != nil {
+				t.Fatalf("retry failed: %v", err)
+			}
+			for _, wait := range waits {
+				if wait < test.retryAfter || wait > 2*time.Second {
+					t.Fatalf("wait=%v, want server minimum %v through policy maximum 2s", wait, test.retryAfter)
+				}
+			}
+		})
+	}
 }
 
 func TestRetryListPageRespectsRetryAfterAndReducesPressure(t *testing.T) {

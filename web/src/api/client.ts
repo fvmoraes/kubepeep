@@ -401,6 +401,20 @@ export function getNamespaceScopes(page: PageQuery = {}, signal?: AbortSignal): 
   return request<NamespaceScope[]>(`/api/v1/namespace-scopes${query}`, { method: 'GET', signal })
 }
 
+export async function getDefaultNamespaceScope(signal?: AbortSignal): Promise<{ scope: NamespaceScope | null; hasScopes: boolean }> {
+  let continueToken = ''
+  let hasScopes = false
+  do {
+    const query = queryString([['limit', 100], ['continue', continueToken || undefined]])
+    const result = await requestEnvelope<NamespaceScope[]>(`/api/v1/namespace-scopes${query}`, { method: 'GET', signal })
+    hasScopes ||= result.data.length > 0
+    const scope = result.data.find((item) => item.isDefault)
+    if (scope) return { scope, hasScopes }
+    continueToken = result.meta?.page?.next ?? ''
+  } while (continueToken)
+  return { scope: null, hasScopes }
+}
+
 export function getNamespaceScope(id: number, signal?: AbortSignal): Promise<NamespaceScope> {
   return request<NamespaceScope>(`/api/v1/namespace-scopes/${id}`, { method: 'GET', signal })
 }

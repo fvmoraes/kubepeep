@@ -70,8 +70,11 @@ func DetectPod(pod *corev1.Pod, now time.Time) []Problem {
 				add(SeverityWarning, waiting.Reason, "Container configuration is invalid.", "containerWaiting", status.Name)
 			}
 		}
-		if terminated := status.LastTerminationState.Terminated; terminated != nil && terminated.Reason == "OOMKilled" {
-			add(SeverityCritical, "OOMKilled", "Container was terminated after exceeding its memory limit.", "containerTerminated", status.Name)
+		for _, terminated := range []*corev1.ContainerStateTerminated{status.State.Terminated, status.LastTerminationState.Terminated} {
+			if terminated != nil && terminated.Reason == "OOMKilled" {
+				add(SeverityCritical, "OOMKilled", "Container was terminated after exceeding its memory limit.", "containerTerminated", status.Name)
+				break
+			}
 		}
 		if status.RestartCount >= HighRestartThreshold {
 			add(SeverityWarning, "HighRestarts", fmt.Sprintf("Container restarted %d times.", status.RestartCount), "containerStatus", status.Name)

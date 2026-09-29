@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter } from 'react-router'
 
@@ -37,9 +37,9 @@ function response(data: unknown): Response {
   return new Response(JSON.stringify({ data }), { status: 200, headers: { 'Content-Type': 'application/json' } })
 }
 
-function renderGate() {
+function renderGate(children = <div>Protected resources</div>) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
-  return render(<QueryClientProvider client={client}><MemoryRouter><DefaultScopeGate selection={selection}><div>Protected resources</div></DefaultScopeGate></MemoryRouter></QueryClientProvider>)
+  return render(<QueryClientProvider client={client}><MemoryRouter><DefaultScopeGate selection={selection}>{children}</DefaultScopeGate></MemoryRouter></QueryClientProvider>)
 }
 
 afterEach(() => {
@@ -75,12 +75,82 @@ describe('default scope gate', () => {
     await waitFor(() => expect(selectBody).toEqual({ expectedGeneration: 'gen_42' }))
   })
 
+  it('keeps resource children unmounted until local status confirms the active scope', async () => {
+    const protectedResources = vi.fn(() => <div>Protected resources</div>)
+    const ProtectedResources = protectedResources
+    const selectScope = vi.fn()
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const path = String(input)
+      if (path === '/api/v1/namespace-scopes?limit=100') return Promise.resolve(response([defaultScope]))
+      if (path === '/api/v1/session') return Promise.resolve(response({ csrfToken: 'csrf-next', generation: selection.generation }))
+      if (path === '/api/v1/namespace-scopes/9/select') {
+        selectScope()
+        return Promise.resolve(response({ ...selection, scopeId: 9, generation: 'gen_43' }))
+      }
+      throw new Error(`Unexpected request: ${path}`)
+    }))
+    renderGate(<ProtectedResources />)
+
+    await waitFor(() => expect(selectScope).toHaveBeenCalledOnce())
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Activating the default scope' })).toBeInTheDocument())
+    expect(protectedResources).not.toHaveBeenCalled()
+  })
+
+  it.each(['session', 'activation'])('retries a failed %s with a fresh session', async (failure) => {
+    let sessionRequests = 0
+    const activated = vi.fn()
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const path = String(input)
+      if (path === '/api/v1/namespace-scopes?limit=100') return Promise.resolve(response([defaultScope]))
+      if (path === '/api/v1/session') {
+        sessionRequests += 1
+        if (failure === 'session' && sessionRequests === 1) return Promise.reject(new Error('Session temporarily unavailable'))
+        return Promise.resolve(response({ csrfToken: `csrf-${sessionRequests}`, generation: selection.generation }))
+      }
+      if (path === '/api/v1/namespace-scopes/9/select') {
+        if (sessionRequests < 2) return Promise.reject(new Error('Session expired'))
+        activated()
+        return Promise.resolve(response({ ...selection, scopeId: 9, generation: 'gen_43' }))
+      }
+      throw new Error(`Unexpected request: ${path}`)
+    }))
+    renderGate()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Retry activation' }))
+    await waitFor(() => expect(activated).toHaveBeenCalledOnce())
+    expect(screen.queryByText('Protected resources')).not.toBeInTheDocument()
+  })
+
   it('requires an explicit default instead of assuming all namespaces', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response([{ ...defaultScope, isDefault: false }])))
     renderGate()
 
     expect(await screen.findByRole('heading', { name: 'Choose a default namespace scope' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Choose Default Scope' })).toBeInTheDocument()
+    expect(screen.queryByText('Protected resources')).not.toBeInTheDocument()
+  })
+
+  it('finds the default beyond the first page of saved scopes', async () => {
+    const selected = vi.fn()
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const path = String(input)
+      if (path === '/api/v1/namespace-scopes?limit=100') {
+        return Promise.resolve(new Response(JSON.stringify({
+          data: [{ ...defaultScope, id: 1, isDefault: false }],
+          meta: { page: { next: 'next-page' } },
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      }
+      if (path === '/api/v1/namespace-scopes?limit=100&continue=next-page') return Promise.resolve(response([defaultScope]))
+      if (path === '/api/v1/session') return Promise.resolve(response({ csrfToken: 'csrf-next', generation: selection.generation }))
+      if (path === '/api/v1/namespace-scopes/9/select') {
+        selected()
+        return Promise.resolve(response({ ...selection, scopeId: 9, generation: 'gen_43' }))
+      }
+      throw new Error(`Unexpected request: ${path}`)
+    }))
+    renderGate()
+
+    await waitFor(() => expect(selected).toHaveBeenCalledOnce())
     expect(screen.queryByText('Protected resources')).not.toBeInTheDocument()
   })
 
