@@ -235,6 +235,37 @@ contexto/scope reais, dashboard, SSE/log, WebSocket exec, revogação e restaura
 de RBAC e modo offline. O cluster foi reutilizado e preservado; ao fim,
 `kubepeep-f4-control-plane` permaneceu `Ready` em Kubernetes v1.35.0.
 
+### Auditoria consolidada F1–F4 — 2026-09-29
+
+**Resultado: 49/49 tarefas conferidas e sem pendência nas Fases 1–4.** A
+auditoria partiu de `1345947`, cruzou os quatro checklists, as tabelas finais de
+evidência, os commits citados e o grafo atual. Foram encontrados 13 IDs F1,
+12 IDs F2, 9 IDs F3 e 15 IDs F4; todos estão marcados e cada ID possui evidência
+final. Os símbolos centrais continuam integrados aos caminhos reais: a seleção
+de paginação é chamada por `Collect`, o resource cache pelo Watch Manager,
+`useInfiniteCollection` pelas seis famílias e `DefaultScopeGate` pelo shell.
+
+A regressão de UX médio registrada em F1-12 é um **resultado medido**, não uma
+execução omitida: F1-12 exigia coleta e confronto honesto com os budgets. F2/F3
+posteriormente comprovaram retorno cacheado em 30 ms, primeira linha em até
+97,3 ms e página completa em até 1.012 ms no cenário Kind médio. A comparação
+final de release, incluindo nova coleta de filtro/sort, continua corretamente
+atribuída à F7 e não reabre F1–F4.
+
+A revisão encontrou quatro vulnerabilidades Go alcançáveis preexistentes em
+gRPC/OpenTelemetry. O commit `76ac4bb` atualiza gRPC para 1.83.1 e a família
+OpenTelemetry para 1.44.0, além de alinhar os documentos de estado que ainda
+descreviam o snapshot inicial. Depois da atualização, `govulncheck ./...`
+terminou com zero vulnerabilidades alcançáveis; um advisory em pacote importado
+permanece sem call path e não afeta o código segundo a análise da ferramenta.
+
+Gates desta auditoria: `rtk make verify`, `rtk make test-race`, `rtk go test
+./...` (1.178 testes), `rtk go mod verify`, `rtk govulncheck ./...`, o gate de
+segurança, `npm audit --omit=dev` e o harness Kind `app-e2e` passaram. O lint
+continua com oito avisos `react-refresh/only-export-components` e zero erros;
+o conjunto npm de produção tem zero vulnerabilidades. O cluster
+`kubepeep-f4` foi preservado e seu nó permaneceu `Ready`.
+
 ## Fase 5 — Investigação: problems, diagnóstico e logs agregados
 
 | ID | Commit | Evidência | Resultado |
