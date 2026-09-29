@@ -10,7 +10,7 @@ func TestEmbeddedMigrationsAreOrderedAndChecksummed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(loaded) != 2 || loaded[0].Version != 1 || loaded[0].Name != "initial" || loaded[1].Version != 2 || loaded[1].Name != "expand_preferences" {
+	if len(loaded) != 3 || loaded[0].Version != 1 || loaded[0].Name != "initial" || loaded[1].Version != 2 || loaded[1].Name != "expand_preferences" || loaded[2].Version != 3 || loaded[2].Name != "namespace_scope_defaults" {
 		t.Fatalf("unexpected migrations: %#v", loaded)
 	}
 	for _, migration := range loaded {

@@ -12,9 +12,11 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	autoscalingv1 "k8s.io/api/autoscaling/v1"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes/fake"
 	clienttesting "k8s.io/client-go/testing"
 )
@@ -58,6 +60,51 @@ func TestActionClientRestartUsesOnlyRestartAnnotationAndResourceVersion(t *testi
 	annotations := templateMetadata["annotations"].(map[string]any)
 	if len(annotations) != 1 || annotations["kubectl.kubernetes.io/restartedAt"] != "2026-08-17T18:04:05Z" {
 		t.Fatalf("annotations = %#v", annotations)
+	}
+}
+
+func TestActionClientResolvesServicePortToDeterministicReadyPodAndNamedTargetPort(t *testing.T) {
+	service := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "payments", Name: "api"},
+		Spec: corev1.ServiceSpec{
+			Selector: map[string]string{"app": "api"},
+			Ports:    []corev1.ServicePort{{Name: "http", Protocol: corev1.ProtocolTCP, Port: 80, TargetPort: intstr.FromString("web")}},
+		},
+	}
+	ready := func(name string) *corev1.Pod {
+		return &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Namespace: "payments", Name: name, Labels: map[string]string{"app": "api"}},
+			Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app", Ports: []corev1.ContainerPort{{Name: "web", Protocol: corev1.ProtocolTCP, ContainerPort: 8080}}}}},
+			Status:     corev1.PodStatus{Phase: corev1.PodRunning, Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}},
+		}
+	}
+	client := &ActionClient{unary: fake.NewSimpleClientset(service, ready("api-b"), ready("api-a"))}
+	resolved, err := client.ResolveServicePort(context.Background(), actions.MutationTarget{Namespace: "payments", Kind: "Service", Name: "api"}, 80)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.Target.Kind != "Pod" || resolved.Target.Name != "api-a" || resolved.RemotePort != 8080 {
+		t.Fatalf("resolved = %#v", resolved)
+	}
+}
+
+func TestActionClientRejectsServiceWhenNoReadyPodExposesNamedTargetPort(t *testing.T) {
+	service := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "payments", Name: "api"},
+		Spec: corev1.ServiceSpec{
+			Selector: map[string]string{"app": "api"},
+			Ports:    []corev1.ServicePort{{Name: "http", Protocol: corev1.ProtocolTCP, Port: 80, TargetPort: intstr.FromString("web")}},
+		},
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "payments", Name: "api-a", Labels: map[string]string{"app": "api"}},
+		Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}},
+		Status:     corev1.PodStatus{Phase: corev1.PodRunning, Conditions: []corev1.PodCondition{{Type: corev1.PodReady, Status: corev1.ConditionTrue}}},
+	}
+	client := &ActionClient{unary: fake.NewSimpleClientset(service, pod)}
+	_, err := client.ResolveServicePort(context.Background(), actions.MutationTarget{Namespace: "payments", Kind: "Service", Name: "api"}, 80)
+	if !apierrors.IsNotFound(err) {
+		t.Fatalf("expected named target port miss to be NotFound, got %v", err)
 	}
 }
 

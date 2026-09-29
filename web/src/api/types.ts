@@ -84,6 +84,7 @@ export interface NamespaceScope {
   mode: NamespaceScopeMode
   namespaces: string[]
   defaultNamespace: string | null
+  isDefault: boolean
   version: number
   createdAt: string
   updatedAt: string
@@ -132,6 +133,7 @@ export interface NamespaceScopeDeleteRequest {
   confirmed: true
   version: number
   replacementScopeId?: number
+  returnToSetup?: boolean
   expectedGeneration: string
 }
 
@@ -1077,7 +1079,7 @@ export interface ActionTarget {
   clusterProfileId: number
   context: string
   namespace: string
-  kind: ActionWorkloadKind | 'Pod'
+  kind: ActionWorkloadKind | 'Pod' | 'Service'
   name: string
 }
 
@@ -1130,7 +1132,7 @@ export interface PortForwardCreateRequest extends ConfirmedAction {
   remotePort: number
   localPort: number | null
   action: 'portForward'
-  consequenceCode: 'EXPOSE_POD_PORT_LOCALLY'
+  consequenceCode: 'EXPOSE_POD_PORT_LOCALLY' | 'EXPOSE_SERVICE_PORT_LOCALLY'
 }
 
 export interface ExecInit extends ConfirmedAction {

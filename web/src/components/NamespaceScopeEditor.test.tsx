@@ -29,12 +29,12 @@ function counter(label: string): HTMLElement {
 
 const activeScope: NamespaceScope = {
   id: 1, clusterProfileId: 7, name: 'Active', context: 'development', mode: 'list', namespaces: ['payments', 'billing'],
-  defaultNamespace: 'payments', version: 3, createdAt: '2026-08-10T12:00:00Z', updatedAt: '2026-08-10T12:00:00Z',
+  defaultNamespace: 'payments', isDefault: true, version: 3, createdAt: '2026-08-10T12:00:00Z', updatedAt: '2026-08-10T12:00:00Z',
 }
 
 const otherScope: NamespaceScope = {
   id: 2, clusterProfileId: 7, name: 'Other', context: 'development', mode: 'single', namespaces: ['invoices'],
-  defaultNamespace: 'invoices', version: 5, createdAt: '2026-08-10T12:00:00Z', updatedAt: '2026-08-10T12:00:00Z',
+  defaultNamespace: 'invoices', isDefault: false, version: 5, createdAt: '2026-08-10T12:00:00Z', updatedAt: '2026-08-10T12:00:00Z',
 }
 
 function apiJSON(data: unknown, status = 200): Response {
@@ -203,6 +203,29 @@ describe('namespace scope editor', () => {
 
     await waitFor(() => expect(fetch.mock.calls.some(([input]) => String(input) === '/api/v1/namespace-scopes/2/select')).toBe(true))
     expect(selectBody).toEqual({ expectedGeneration: 'gen_42' })
+  })
+
+  it('marks one saved scope as the context default and activates it', async () => {
+    let defaultBody: unknown
+    const fetch = vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      const path = String(input)
+      if (path === '/api/v1/status') return Promise.resolve(apiJSON(editorStatus()))
+      if (path === '/api/v1/session') return Promise.resolve(apiJSON({ csrfToken: 'csrf_scope', origin: 'http://127.0.0.1:2748', generation: 'gen_42', expiresAt: '2026-08-10T13:00:00Z' }))
+      if (path === '/api/v1/namespace-scopes?limit=100') return Promise.resolve(apiJSON([activeScope, otherScope]))
+      if (path === '/api/v1/namespace-scopes/2/default') {
+        defaultBody = JSON.parse(String(init?.body))
+        return Promise.resolve(apiJSON({ ...editorStatus().selection, scopeId: 2, scopeName: 'Other', generation: 'gen_43' }))
+      }
+      throw new Error(`Unexpected request: ${path}`)
+    })
+    vi.stubGlobal('fetch', fetch)
+    renderEditor()
+
+    const button = await screen.findByRole('button', { name: 'Make default' })
+    await waitFor(() => expect(button).toBeEnabled())
+    fireEvent.click(button)
+
+    await waitFor(() => expect(defaultBody).toEqual({ expectedGeneration: 'gen_42' }))
   })
 
   it('requires an explicit replacement before deleting the active scope', async () => {

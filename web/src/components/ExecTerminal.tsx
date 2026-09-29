@@ -16,20 +16,26 @@ export interface ExecTerminalProps {
   label?: string
 }
 
-const theme = {
-  background: '#0e0d13',
-  foreground: '#f4f1f7',
-  cursor: '#a78bfa',
-  cursorAccent: '#0e0d13',
-  selectionBackground: '#4a4166',
-  black: '#0e0d13',
-  red: '#f87171',
-  green: '#4ade80',
-  yellow: '#fbbf24',
-  blue: '#60a5fa',
-  magenta: '#a78bfa',
-  cyan: '#60a5fa',
-  white: '#f4f1f7',
+function cssToken(styles: CSSStyleDeclaration, name: string): string {
+  return styles.getPropertyValue(name).trim()
+}
+
+function terminalTheme(styles: CSSStyleDeclaration) {
+  return {
+    background: cssToken(styles, '--color-kp-crust'),
+    foreground: cssToken(styles, '--color-kp-text'),
+    cursor: cssToken(styles, '--color-kp-mauve'),
+    cursorAccent: cssToken(styles, '--color-kp-crust'),
+    selectionBackground: cssToken(styles, '--color-kp-mauve-muted'),
+    black: cssToken(styles, '--color-kp-crust'),
+    red: cssToken(styles, '--color-kp-red'),
+    green: cssToken(styles, '--color-kp-green'),
+    yellow: cssToken(styles, '--color-kp-yellow'),
+    blue: cssToken(styles, '--color-kp-sky'),
+    magenta: cssToken(styles, '--color-kp-mauve'),
+    cyan: cssToken(styles, '--color-kp-sky'),
+    white: cssToken(styles, '--color-kp-text'),
+  }
 }
 
 // ExecTerminal renders the real bidirectional exec stream with xterm.js.
@@ -54,14 +60,16 @@ const ExecTerminal = forwardRef<ExecTerminalHandle, ExecTerminalProps>(function 
     // jsdom (unit tests) and some embedded webviews lack canvas APIs; degrade
     // to an inert <pre> instead of crashing the actions panel.
     try {
+      const rootStyles = getComputedStyle(document.documentElement)
+      const tokenFontSize = Number.parseFloat(cssToken(rootStyles, '--text-terminal-px'))
       const terminal = new Terminal({
         convertEol: true,
         cursorBlink: true,
-        fontSize: 12,
-        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace',
+        ...(Number.isFinite(tokenFontSize) ? { fontSize: tokenFontSize } : {}),
+        fontFamily: cssToken(rootStyles, '--font-mono'),
         scrollback: 1_000,
         screenReaderMode: true,
-        theme,
+        theme: terminalTheme(rootStyles),
       })
       const fit = new FitAddon()
       terminal.loadAddon(fit)

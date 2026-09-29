@@ -74,6 +74,43 @@ func TestNamespaceScopeRepositoryStoresAllWithoutWildcardItems(t *testing.T) {
 	}
 }
 
+func TestNamespaceScopeRepositoryMovesOneDefaultPerContextAtomically(t *testing.T) {
+	store := openTestStore(t)
+	profileID := namespaceScopeTestProfile(t, store)
+	repository := NewNamespaceScopeRepository(store)
+	ctx := context.Background()
+	first, err := repository.Create(ctx, namespaces.ScopeDraft{ClusterProfileID: profileID, Context: "development", Name: "Finance", Mode: namespaces.ScopeModeSingle, Namespaces: []string{"payments"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := repository.Create(ctx, namespaces.ScopeDraft{ClusterProfileID: profileID, Context: "development", Name: "Platform", Mode: namespaces.ScopeModeSingle, Namespaces: []string{"platform"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if selected, err := repository.SetDefault(ctx, first.ID); err != nil || !selected.IsDefault {
+		t.Fatalf("first default = %#v, error = %v", selected, err)
+	}
+	if selected, err := repository.SetDefault(ctx, second.ID); err != nil || !selected.IsDefault {
+		t.Fatalf("second default = %#v, error = %v", selected, err)
+	}
+	listed, err := repository.List(ctx, profileID, "development")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defaults := 0
+	for _, scope := range listed {
+		if scope.IsDefault {
+			defaults++
+			if scope.ID != second.ID {
+				t.Fatalf("unexpected default: %#v", scope)
+			}
+		}
+	}
+	if defaults != 1 {
+		t.Fatalf("default count = %d, scopes = %#v", defaults, listed)
+	}
+}
+
 func TestNamespaceScopeRepositoryRejectsNameConflictAndProfileContextMismatchWithoutWrites(t *testing.T) {
 	store := openTestStore(t)
 	profileID := namespaceScopeTestProfile(t, store)
@@ -241,10 +278,10 @@ func TestNamespaceScopeRepositoryDeleteIsVersionedAndCascades(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := repository.Delete(ctx, created.ID, 2); !errors.Is(err, namespaces.ErrConflict) {
+	if err := repository.Delete(ctx, created.ID, 2, 0); !errors.Is(err, namespaces.ErrConflict) {
 		t.Fatalf("stale delete = %v", err)
 	}
-	if err := repository.Delete(ctx, created.ID, 1); err != nil {
+	if err := repository.Delete(ctx, created.ID, 1, 0); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := repository.Get(ctx, created.ID); !errors.Is(err, namespaces.ErrNotFound) {

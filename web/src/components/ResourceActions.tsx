@@ -140,7 +140,7 @@ export function WorkloadActions({ detail, selection }: { detail: WorkloadDetail;
   const toast = useToast()
   const runRequest = useGenerationRequests(selection.generation)
   const [replicas, setReplicas] = useState(detail.desired ?? 1)
-  const [confirmAction, setConfirmAction] = useState<'delete' | null>(null)
+  const [confirmAction, setConfirmAction] = useState<'delete' | 'restart' | null>(null)
   const isCronJob = detail.kind === 'CronJob'
   const suspended = detail.status === 'Suspended'
   const canRestart = restartableKinds.has(detail.kind)
@@ -194,6 +194,7 @@ export function WorkloadActions({ detail, selection }: { detail: WorkloadDetail;
     }),
     onSuccess: () => {
       toast.success(`${detail.kind} restart accepted`, `${detail.metadata.namespace}/${detail.metadata.name} — the controller will replace its Pods.`)
+      setConfirmAction(null)
       void Promise.all([
         queryClient.invalidateQueries({ queryKey: ['resources'] }),
         queryClient.invalidateQueries({ queryKey: ['workspace-detail'] }),
@@ -201,6 +202,7 @@ export function WorkloadActions({ detail, selection }: { detail: WorkloadDetail;
       ])
     },
     onError: (error) => {
+      setConfirmAction(null)
       toast.error(`${detail.kind} restart failed`, mutationError(error))
       if (isAuthorizationFailure(error)) void invalidateActionPermissions()
     },
@@ -255,6 +257,7 @@ export function WorkloadActions({ detail, selection }: { detail: WorkloadDetail;
       ])
     },
     onError: (error) => {
+      setConfirmAction(null)
       toast.error(`${detail.kind} delete failed`, mutationError(error))
       if (isAuthorizationFailure(error)) void invalidateActionPermissions()
     },
@@ -329,7 +332,7 @@ export function WorkloadActions({ detail, selection }: { detail: WorkloadDetail;
       {permissions.isError ? <p className="m-0 text-xs text-kp-red">Permission check failed; actions remain disabled.</p> : null}
       <div className="flex flex-wrap items-center gap-2">
         {canRestart ? (
-          <Button variant="warning" disabled={restartDecision !== 'allowed' || restart.isPending} onClick={() => restart.mutate()}>
+          <Button variant="warning" disabled={restartDecision !== 'allowed' || restart.isPending} onClick={() => setConfirmAction('restart')}>
             {restart.isPending ? 'Requesting restart…' : `Restart ${detail.kind}`}
           </Button>
         ) : null}
@@ -369,15 +372,18 @@ export function WorkloadActions({ detail, selection }: { detail: WorkloadDetail;
       {canScale && hpaState === 'present' ? <p className="m-0 rounded-r-md border-l-2 border-kp-yellow-border bg-kp-yellow-bg px-3 py-2 text-xs text-kp-yellow" role="note">HorizontalPodAutoscaler {hpaTarget?.name} targets this workload; manual scaling may be overridden by the autoscaler.</p> : null}
       {canScale && hpaState === 'unknown' ? <p className="m-0 text-xs text-kp-overlay-text" role="note">Autoscaler presence for this workload is unknown; scaling may conflict with an HPA you cannot list.</p> : null}
       <ConfirmDialog
-        open={confirmAction === 'delete'}
-        severity="danger"
-        title={`Delete ${detail.kind}`}
-        description={<span>The object <strong className="mono">{detail.metadata.namespace}/{detail.metadata.name}</strong> will be removed from the cluster.</span>}
+        open={confirmAction !== null}
+        severity={confirmAction === 'restart' ? 'warning' : 'danger'}
+        title={`${confirmAction === 'restart' ? 'Restart' : 'Delete'} ${detail.kind}`}
+        description={confirmAction === 'restart'
+          ? <span>Kubernetes will update <strong className="mono">{detail.metadata.namespace}/{detail.metadata.name}</strong> and replace its managed Pods.</span>
+          : <span>The object <strong className="mono">{detail.metadata.namespace}/{detail.metadata.name}</strong> will be removed from the cluster.</span>}
         resources={[{ kind: detail.kind, namespace: detail.metadata.namespace, name: detail.metadata.name }]}
-        consequenceNote="Dependent objects managed by this controller (such as ReplicaSets, Pods and Jobs) are garbage-collected by Kubernetes after deletion. This action cannot be undone."
-        confirmLabel={`Delete ${detail.kind}`}
-        pending={remove.isPending}
-        onConfirm={() => remove.mutate()}
+        consequenceNote={confirmAction === 'restart' ? 'Managed Pods are recreated according to the controller strategy; availability may change during rollout.' : 'Dependent objects managed by this controller (such as ReplicaSets, Pods and Jobs) are garbage-collected by Kubernetes after deletion. This action cannot be undone.'}
+        confirmLabel={`${confirmAction === 'restart' ? 'Restart' : 'Delete'} ${detail.kind}`}
+        requireTypingName={confirmAction === 'delete' ? detail.metadata.name : undefined}
+        pending={remove.isPending || restart.isPending}
+        onConfirm={() => confirmAction === 'restart' ? restart.mutate() : remove.mutate()}
         onCancel={() => setConfirmAction(null)}
       />
     </section>
@@ -539,6 +545,7 @@ export function PodActions({ detail, selection }: { detail: PodDetail; selection
       ])
     },
     onError: (error) => {
+      setConfirmAction(null)
       toast.error('Pod delete failed', mutationError(error))
       if (isAuthorizationFailure(error)) void invalidateActionPermissions()
     },

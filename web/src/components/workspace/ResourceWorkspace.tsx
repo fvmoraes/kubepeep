@@ -1,8 +1,10 @@
-import { lazy, Suspense, useEffect } from 'react'
-import { useMutation, useQuery } from '@tanstack/react-query'
+import { lazy, Suspense, useEffect, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronLeft, ChevronRight, X } from 'lucide-react'
 
 import {
+  createIdempotencyKey,
+  createServicePortForward,
   getClusterRole,
   getClusterRoleBinding,
   getConfigMap,
@@ -10,10 +12,12 @@ import {
   getCSINode,
   getCustomResourceDefinition,
   getConfigMapYAML,
+  getDashboardMetrics,
   getEndpointsItem,
   getEndpointSlice,
   getEndpointSliceYAML,
   getEvents,
+  getPermissions,
   getHPA,
   getIngress,
   getIngressClass,
@@ -57,8 +61,13 @@ import type {
   WorkloadDetail,
   EventResource,
   PersistentVolumeClaim,
+  IngressDetail,
+  ServiceDetail,
+  SelectionSummary,
 } from '../../api/types'
-import { Badge, Button, StatusBadge } from '../ui'
+import { Badge, Button, Input, Select, StatusBadge } from '../ui'
+import { csrfForGeneration } from '../../actions/csrf'
+import { useToast } from '../ui/Toast'
 import { FavoriteButton } from '../FavoriteButton'
 import { TableLink } from '../resource/TableLink'
 import { Facts } from '../resource/Facts'
@@ -116,7 +125,7 @@ function refToWorkspaceRef(ref: ResourceRef): { collection: string; kind: string
 export function tabsFor(entry: WorkspaceEntry): ResourceTab[] {
   const tabs: ResourceTab[] = [{ id: 'overview', label: 'Overview' }]
   if (entry.collection === 'pods') {
-    tabs.push({ id: 'logs', label: 'Logs' }, { id: 'yaml', label: 'YAML' }, { id: 'events', label: 'Events' }, { id: 'actions', label: 'Actions' })
+    tabs.push({ id: 'logs', label: 'Logs' }, { id: 'yaml', label: 'YAML' }, { id: 'events', label: 'Events' }, { id: 'metrics', label: 'Metrics' }, { id: 'containers', label: 'Containers' }, { id: 'actions', label: 'Actions' })
     return tabs
   }
   if (entry.collection === 'workloads') {
@@ -143,11 +152,11 @@ export function tabsFor(entry: WorkspaceEntry): ResourceTab[] {
     return tabs
   }
   if (entry.collection === 'services') {
-    tabs.push({ id: 'endpoints', label: 'Endpoints' }, { id: 'yaml', label: 'YAML' }, { id: 'events', label: 'Events' })
+    tabs.push({ id: 'endpoints', label: 'Endpoints' }, { id: 'yaml', label: 'YAML' }, { id: 'events', label: 'Events' }, { id: 'actions', label: 'Actions' })
     return tabs
   }
   if (entry.collection === 'ingresses') {
-    tabs.push({ id: 'rules', label: 'Rules' }, { id: 'yaml', label: 'YAML' }, { id: 'events', label: 'Events' })
+    tabs.push({ id: 'rules', label: 'Rules' }, { id: 'backends', label: 'Backends' }, { id: 'yaml', label: 'YAML' }, { id: 'events', label: 'Events' }, { id: 'actions', label: 'Actions' })
     return tabs
   }
   if (entry.collection === 'configmaps') {
@@ -446,6 +455,136 @@ function PodLogsLink({ detail }: { detail: PodDetail }) {
   )
 }
 
+function PodMetrics({ detail, generation }: { detail: PodDetail; generation: string | undefined }) {
+  const metrics = useQuery({
+    queryKey: ['workspace-pod-metrics', generation, detail.metadata.namespace, detail.metadata.name],
+    queryFn: ({ signal }) => getDashboardMetrics(signal, generation),
+    enabled: Boolean(generation),
+    staleTime: 8_000,
+    refetchInterval: 8_000,
+  })
+  if (metrics.isPending) return <p className="m-0 text-sm text-kp-overlay-text" role="status">Loading Pod metrics…</p>
+  if (metrics.isError) return <p className="m-0 text-sm text-kp-yellow" role="note">Metrics API data is unavailable for this Pod.</p>
+  const pod = metrics.data.block.value.pods.find((item) => item.namespace === detail.metadata.namespace && item.pod === detail.metadata.name)
+  if (!pod) return <p className="m-0 text-sm text-kp-overlay-text" role="note">No current Metrics API sample is available for this Pod.</p>
+  return (
+    <div className="grid content-start gap-3">
+      <Facts facts={[{ label: 'CPU', value: `${pod.cpuMillicores} m` }, { label: 'Memory', value: `${Math.round(pod.memoryBytes / (1024 * 1024))} MiB` }]} />
+      <div className="overflow-x-auto rounded-lg border border-kp-overlay-0 bg-kp-surface-0">
+        <table className="w-full border-collapse text-left text-sm">
+          <thead><tr className="border-b border-kp-overlay-0 text-2xs uppercase tracking-wider text-kp-overlay-text"><th className="px-2.5 py-1.5 font-medium">Container</th><th className="px-2.5 py-1.5 font-medium">CPU</th><th className="px-2.5 py-1.5 font-medium">Memory</th></tr></thead>
+          <tbody>{pod.containers.map((container) => <tr key={container.name} className="border-b border-kp-overlay-0/50 last:border-0"><td className="px-2.5 py-1.5 text-kp-text">{container.name}</td><td className="px-2.5 py-1.5 tabular-nums text-kp-subtext">{container.cpuMillicores} m</td><td className="px-2.5 py-1.5 tabular-nums text-kp-subtext">{Math.round(container.memoryBytes / (1024 * 1024))} MiB</td></tr>)}</tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
+function PodContainers({ detail }: { detail: PodDetail }) {
+  const containers = [...detail.initContainers, ...detail.containers, ...detail.ephemeralContainers]
+  if (containers.length === 0) return <p className="m-0 text-sm text-kp-overlay-text" role="note">No containers are declared.</p>
+  return (
+    <div className="overflow-x-auto rounded-lg border border-kp-overlay-0 bg-kp-surface-0">
+      <table className="w-full border-collapse text-left text-sm">
+        <thead><tr className="border-b border-kp-overlay-0 text-2xs uppercase tracking-wider text-kp-overlay-text"><th className="px-2.5 py-1.5 font-medium">Name</th><th className="px-2.5 py-1.5 font-medium">Type</th><th className="px-2.5 py-1.5 font-medium">Image</th><th className="px-2.5 py-1.5 font-medium">State</th><th className="px-2.5 py-1.5 font-medium">Ready</th><th className="px-2.5 py-1.5 font-medium">Restarts</th></tr></thead>
+        <tbody>{containers.map((container) => <tr key={`${container.type}/${container.spec.name}`} className="border-b border-kp-overlay-0/50 last:border-0"><td className="px-2.5 py-1.5 text-kp-text">{container.spec.name}</td><td className="px-2.5 py-1.5 text-kp-subtext">{container.type}</td><td className="max-w-[28rem] truncate px-2.5 py-1.5 mono text-kp-subtext" title={container.spec.image}>{container.spec.image}</td><td className="px-2.5 py-1.5"><StatusBadge variant={statusBadgeVariant(container.state)}>{container.reason ?? container.state}</StatusBadge></td><td className="px-2.5 py-1.5 text-kp-subtext">{container.ready === null ? '—' : container.ready ? 'yes' : 'no'}</td><td className="px-2.5 py-1.5 tabular-nums text-kp-subtext">{container.restartCount}</td></tr>)}</tbody>
+      </table>
+    </div>
+  )
+}
+
+function IngressBackends({ detail, onOpen }: { detail: IngressDetail; onOpen: (ref: ResourceRef) => void }) {
+  const names = Array.from(new Set([...detail.summary.paths.map((path) => path.backend.serviceName), ...(detail.defaultBackend ? [detail.defaultBackend.serviceName] : [])]))
+  return <RelatedRefList refs={names.map((name) => ({ kind: 'Service', namespace: detail.metadata.namespace, name }))} onOpen={onOpen} emptyNote="No Service backends are declared." />
+}
+
+function CopyAction({ label, value }: { label: string; value: string }) {
+  const [copied, setCopied] = useState(false)
+  const [failed, setFailed] = useState(false)
+  return <span className="inline-flex items-center gap-2"><Button variant="secondary" disabled={!value} onClick={async () => {
+    try {
+      await navigator.clipboard.writeText(value)
+      setFailed(false)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1_500)
+    } catch {
+      setCopied(false)
+      setFailed(true)
+    }
+  }}>{copied ? 'Copied' : label}</Button>{failed ? <span className="text-xs text-kp-red" role="alert">Copy failed</span> : null}</span>
+}
+
+function NetworkActions({ entry, detail, selection, setTab }: { entry: WorkspaceEntry; detail: ServiceDetail | IngressDetail; selection: SelectionSummary; setTab: (tab: string) => void }) {
+  if (entry.collection === 'services') {
+    return <ServiceActions entry={entry} detail={detail as ServiceDetail} selection={selection} setTab={setTab} />
+  }
+  const ingress = detail as IngressDetail
+  const host = ingress.summary.hosts[0] ?? ''
+  const url = host ? `${ingress.summary.tlsHosts.includes(host) ? 'https' : 'http'}://${host}` : ''
+  return <div className="flex flex-wrap items-center gap-2">{url ? <a className="inline-flex h-8 items-center justify-center rounded-md border border-kp-blue bg-kp-blue px-3 text-sm font-medium text-white transition-colors duration-100 hover:bg-kp-blue-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-kp-mauve" href={url} target="_blank" rel="noreferrer">Open URL</a> : <Button disabled disabledReason="This Ingress does not declare a host.">Open URL</Button>}<CopyAction label="Copy Host" value={host} /></div>
+}
+
+function ServiceActions({ entry, detail, selection, setTab }: { entry: WorkspaceEntry; detail: ServiceDetail; selection: SelectionSummary; setTab: (tab: string) => void }) {
+  const toast = useToast()
+  const queryClient = useQueryClient()
+  const tcpPorts = detail.summary.ports.filter((port) => port.protocol === 'TCP')
+  const [servicePort, setServicePort] = useState(tcpPorts[0]?.port ?? 0)
+  const [localPort, setLocalPort] = useState('')
+  const prerequisites = useQuery({
+    queryKey: ['service-port-forward-permissions', selection.generation, entry.namespace, entry.name],
+    queryFn: async ({ signal }) => {
+      const [service, pods] = await Promise.all([
+        getPermissions({ namespaces: [entry.namespace!], capabilityIds: ['services.get'], resourceNames: [entry.name] }, signal, selection.generation),
+        getPermissions({ namespaces: [entry.namespace!], capabilityIds: ['pods.list', 'pods.portforward.create'] }, signal, selection.generation),
+      ])
+      return [...service.decisions, ...pods.decisions]
+    },
+    staleTime: 15_000,
+  })
+  const permissionAllowed = (capabilityId: string) => prerequisites.data?.some((item) => item.capabilityId === capabilityId && item.decision === 'allowed') === true
+  const local = localPort === '' ? null : Number(localPort)
+  const localValid = local === null || (Number.isInteger(local) && local >= 1024 && local <= 65_535)
+  const hasSelector = Object.keys(detail.summary.selector ?? {}).length > 0
+  const canStart = hasSelector && servicePort > 0 && localValid && ['services.get', 'pods.list', 'pods.portforward.create'].every(permissionAllowed)
+  const portForward = useMutation({
+    mutationFn: async () => {
+      const csrfToken = await csrfForGeneration(selection.generation)
+      return createServicePortForward(entry.namespace!, entry.name, {
+        remotePort: servicePort,
+        localPort: local,
+        confirmed: true,
+        action: 'portForward',
+        consequenceCode: 'EXPOSE_SERVICE_PORT_LOCALLY',
+        target: { clusterProfileId: selection.clusterProfileId, context: selection.context, namespace: entry.namespace!, kind: 'Service', name: entry.name },
+        expectedGeneration: selection.generation,
+      }, csrfToken, createIdempotencyKey())
+    },
+    onSuccess: (session) => {
+      toast.success('Service port-forward active', `127.0.0.1:${session.localPort} → ${entry.namespace}/${entry.name}:${servicePort} through Pod ${session.pod}.`)
+      void queryClient.invalidateQueries({ queryKey: ['port-forwards'] })
+    },
+    onError: (error) => {
+      toast.error('Service port-forward failed', errorMessage(error))
+      void queryClient.invalidateQueries({ queryKey: ['service-port-forward-permissions', selection.generation] })
+    },
+  })
+  const clusterIP = detail.summary.clusterIPs.find((value) => value && value !== 'None') ?? ''
+  const disabledReason = !hasSelector ? 'This Service has no selector, so KubePeep cannot resolve a backing Pod.'
+    : prerequisites.isPending ? 'Checking Service and Pod permissions with Kubernetes.'
+      : prerequisites.isError ? 'The permission check failed; the action remains disabled.'
+        : !canStart ? 'Kubernetes denied one or more permissions required to resolve and forward this Service.' : undefined
+  return <div className="grid gap-3">
+    <div className="flex flex-wrap gap-2"><Button onClick={() => setTab('endpoints')}>View Endpoints</Button><CopyAction label="Copy ClusterIP" value={clusterIP} /></div>
+    <div className="flex flex-wrap items-end gap-2 border-t border-kp-overlay-0 pt-3">
+      <label className="grid w-40 gap-1"><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Service port</span><Select aria-label="Service port" value={servicePort} onChange={(event) => setServicePort(Number(event.target.value))}>{tcpPorts.length === 0 ? <option value={0}>No TCP ports</option> : tcpPorts.map((port) => <option key={`${port.name ?? ''}/${port.port}`} value={port.port}>{port.name ? `${port.name} · ` : ''}{port.port}</option>)}</Select></label>
+      <label className="grid w-40 gap-1"><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Local port (optional)</span><Input aria-label="Service local port" aria-invalid={!localValid} inputMode="numeric" value={localPort} onChange={(event) => setLocalPort(event.target.value)} placeholder="automatic" /></label>
+      <Button disabled={!canStart || portForward.isPending} disabledReason={disabledReason} onClick={() => portForward.mutate()}>{portForward.isPending ? 'Starting…' : 'Start port-forward'}</Button>
+    </div>
+    {!localValid ? <p className="m-0 text-xs text-kp-red" role="alert">An explicit local port must be 1,024–65,535.</p> : null}
+    <p className="m-0 text-xs text-kp-overlay-text" role="note">KubePeep resolves one ready backing Pod, rechecks exact Pod port-forward permission, and binds only to 127.0.0.1.</p>
+  </div>
+}
+
 function overviewFacts(entry: WorkspaceEntry, detail: WorkspaceDetail): Array<{ label: string; value: string }> {
   if (detail.type === 'pod') {
     const data = detail.data
@@ -617,15 +756,24 @@ export function ResourceWorkspaceOverlay() {
         )
       }
     if (tab === 'events') return <WorkspaceEvents entry={activeEntry} generation={generation} />
-    if (tab === 'logs') {
-      if (detail.data?.type === 'pod') return <PodLogsLink detail={detail.data.data} />
-      return detailFallback()
-    }
-    if (tab === 'actions') {
-      if (!detail.data || detail.isPending || detail.isError || !selection) return detailFallback()
-        if (detail.data.type === 'pod') return <Suspense fallback={<p role="status" className="text-sm text-kp-overlay-text">Opening Pod actions…</p>}><PodActions detail={detail.data.data} selection={selection} /></Suspense>
-        if (detail.data.type === 'workload') return <Suspense fallback={<p role="status" className="text-sm text-kp-overlay-text">Opening workload actions…</p>}><WorkloadActions detail={detail.data.data} selection={selection} /></Suspense>
-      return null
+      if (tab === 'logs') {
+        if (detail.data?.type === 'pod') return <PodLogsLink detail={detail.data.data} />
+        return detailFallback()
+      }
+      if (tab === 'metrics') {
+        if (detail.data?.type === 'pod') return <PodMetrics detail={detail.data.data} generation={generation} />
+        return detailFallback()
+      }
+      if (tab === 'containers') {
+        if (detail.data?.type === 'pod') return <PodContainers detail={detail.data.data} />
+        return detailFallback()
+      }
+      if (tab === 'actions') {
+        if (!detail.data || detail.isPending || detail.isError || !selection) return detailFallback()
+          if (detail.data.type === 'pod') return <Suspense fallback={<p role="status" className="text-sm text-kp-overlay-text">Opening Pod actions…</p>}><PodActions detail={detail.data.data} selection={selection} /></Suspense>
+          if (detail.data.type === 'workload') return <Suspense fallback={<p role="status" className="text-sm text-kp-overlay-text">Opening workload actions…</p>}><WorkloadActions detail={detail.data.data} selection={selection} /></Suspense>
+          if (detail.data.type === 'other' && (activeEntry.collection === 'services' || activeEntry.collection === 'ingresses')) return <NetworkActions entry={activeEntry} detail={detail.data.data as ServiceDetail | IngressDetail} selection={selection} setTab={workspace.setTab} />
+        return null
     }
     if (tab === 'pods' || tab === 'replicasets' || tab === 'jobs') {
       if (detail.data?.type === 'workload') {
@@ -643,6 +791,10 @@ export function ResourceWorkspaceOverlay() {
         const data = detail.data.data as { summary?: { paths?: Array<{ host: string; path: string; pathType: string; backend: { serviceName: string; servicePort: { value: number | string } } }> }; defaultBackend?: { serviceName: string } | null }
         return <IngressRules paths={data.summary?.paths ?? []} defaultBackend={data.defaultBackend ?? null} />
       }
+      return detailFallback()
+    }
+    if (tab === 'backends') {
+      if (detail.data?.type === 'other' && activeEntry.collection === 'ingresses') return <IngressBackends detail={detail.data.data as IngressDetail} onOpen={openRef} />
       return detailFallback()
     }
     if (tab === 'data') {

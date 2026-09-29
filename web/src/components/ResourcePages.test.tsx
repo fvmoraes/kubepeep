@@ -9,7 +9,7 @@ import { prefetchDefaultPodPreview } from './resource/podPreview'
 import type { SelectionSummary } from '../api/types'
 import { ToastProvider } from './ui/Toast'
 import { ResourceWorkspaceProvider } from './workspace/ResourceWorkspaceProvider'
-import { ResourceWorkspaceOverlay } from './workspace/ResourceWorkspace'
+import { ResourceWorkspaceOverlay, tabsFor } from './workspace/ResourceWorkspace'
 import { GlobalNamespaceProvider, useGlobalNamespace } from '../context/GlobalNamespace'
 
 const generation = 'gen_42'
@@ -75,6 +75,104 @@ afterEach(() => {
 })
 
 describe('read-only resource pages', () => {
+
+  it('publishes the complete workspace tab catalog for each actionable kind', () => {
+    const labels = (collection: string, kind: string | null = null) => tabsFor({ collection, kind, namespace: 'payments', name: 'api', tab: 'overview' }).map((tab) => tab.label)
+    expect(labels('pods', 'Pod')).toEqual(['Overview', 'Logs', 'YAML', 'Events', 'Metrics', 'Containers', 'Actions'])
+    expect(labels('workloads', 'Deployment')).toEqual(['Overview', 'Pods', 'ReplicaSets', 'YAML', 'Events', 'Rollout', 'Actions'])
+    expect(labels('workloads', 'StatefulSet')).toEqual(['Overview', 'Pods', 'PVCs', 'YAML', 'Events', 'Actions'])
+    expect(labels('workloads', 'CronJob')).toEqual(['Overview', 'Jobs', 'YAML', 'Events', 'Actions'])
+    expect(labels('services', 'Service')).toEqual(['Overview', 'Endpoints', 'YAML', 'Events', 'Actions'])
+    expect(labels('ingresses', 'Ingress')).toEqual(['Overview', 'Rules', 'Backends', 'YAML', 'Events', 'Actions'])
+  })
+
+  it('starts a Service port-forward only after all prerequisite permissions are allowed', async () => {
+    let portForwardInit: RequestInit | undefined
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      const path = String(input)
+      if (path === '/api/v1/status') return Promise.resolve(json(selectedStatus()))
+      if (path === '/api/v1/preferences') return Promise.resolve(json(preferences()))
+      if (path === '/api/v1/namespace-scopes/7') return Promise.resolve(json({ namespaces: ['payments'] }))
+      if (path.startsWith('/api/v1/services?')) return Promise.resolve(json([{ namespace: 'payments', name: 'api', type: 'ClusterIP', clusterIPs: ['10.96.0.10'], ports: [{ name: 'http', protocol: 'TCP', port: 80, targetPort: { type: 'name', value: 'web' }, nodePort: null, appProtocol: null }], selector: { app: 'api' }, externalEndpoints: [] }], page()))
+      if (path.startsWith('/api/v1/stream?')) return Promise.resolve(new Response('', { status: 503, headers: { 'Content-Type': 'application/json' } }))
+      if (path === '/api/v1/services/payments/api') return Promise.resolve(json({
+        metadata: { namespace: 'payments', name: 'api', uid: 'uid-service', resourceVersion: '7', creationTimestamp: '2026-08-17T10:00:00Z', labels: {} },
+        summary: { namespace: 'payments', name: 'api', type: 'ClusterIP', clusterIPs: ['10.96.0.10'], ports: [{ name: 'http', protocol: 'TCP', port: 80, targetPort: { type: 'name', value: 'web' }, nodePort: null, appProtocol: null }], selector: { app: 'api' }, externalEndpoints: [] },
+        sessionAffinity: 'None', externalTrafficPolicy: null, ipFamilies: ['IPv4'], healthCheckNodePort: null,
+      }))
+      if (path.startsWith('/api/v1/permissions?')) {
+        const ids = new URL(path, 'http://127.0.0.1').searchParams.getAll('capability')
+        return Promise.resolve(json({ generation, complete: true, truncated: false, errors: [], decisions: ids.map((capabilityId) => ({ capabilityId, namespace: 'payments', resourceName: capabilityId === 'services.get' ? 'api' : '', decision: 'allowed' })) }))
+      }
+      if (path === '/api/v1/session') return Promise.resolve(json({ csrfToken: 'csrf-service', generation, origin: 'http://127.0.0.1:2748', expiresAt: '2026-08-17T18:00:00Z' }))
+      if (path === '/api/v1/services/payments/api/port-forward') {
+        portForwardInit = init
+        return Promise.resolve(json({ id: 'pf_service', clusterProfileId: 1, context: 'development', generation, namespace: 'payments', pod: 'api-a', remotePort: 8080, localAddress: '127.0.0.1', localPort: 49152, status: 'active', createdAt: '2026-08-17T10:00:00Z', expiresAt: '2026-08-17T18:00:00Z', endedAt: null, endReason: null }))
+      }
+      throw new Error(`Unexpected request: ${path}`)
+    }))
+
+    renderPage(<Routes><Route path="/network/:tab" element={<NetworkPage />} /></Routes>, ['/network/services'])
+    fireEvent.click(await screen.findByRole('button', { name: 'Open services api in payments' }))
+    fireEvent.click(await screen.findByRole('tab', { name: 'Actions' }))
+    const start = await screen.findByRole('button', { name: 'Start port-forward' })
+    await waitFor(() => expect(start).toBeEnabled())
+    fireEvent.click(start)
+
+    expect(await screen.findByRole('status')).toHaveTextContent(/Service port-forward active/i)
+    expect(portForwardInit?.headers).toEqual(expect.objectContaining({ 'X-KubePeep-CSRF': 'csrf-service', 'Idempotency-Key': expect.stringMatching(/^kp-/) }))
+    expect(JSON.parse(String(portForwardInit?.body))).toEqual(expect.objectContaining({ remotePort: 80, consequenceCode: 'EXPOSE_SERVICE_PORT_LOCALLY', target: expect.objectContaining({ kind: 'Service', name: 'api' }) }))
+  })
+
+  it('restarts a compatible authorized workload selection with one contextual confirmation', async () => {
+    const restarted: string[] = []
+    const workloads = [
+      { namespace: 'payments', kind: 'Deployment', name: 'api', ready: 2, desired: 2, available: 2, updated: 2, status: 'Healthy', ageSeconds: 120 },
+      { namespace: 'payments', kind: 'StatefulSet', name: 'db', ready: 1, desired: 1, available: 1, updated: 1, status: 'Healthy', ageSeconds: 240 },
+    ]
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const path = String(input)
+      if (path === '/api/v1/status') return Promise.resolve(json(selectedStatus()))
+      if (path === '/api/v1/preferences') return Promise.resolve(json(preferences()))
+      if (path === '/api/v1/namespace-scopes/7') return Promise.resolve(json({ namespaces: ['payments'] }))
+      if (path.startsWith('/api/v1/workloads?')) return Promise.resolve(json(workloads, page()))
+      if (path.startsWith('/api/v1/stream?')) return Promise.resolve(new Response('', { status: 503, headers: { 'Content-Type': 'application/json' } }))
+      if (path.startsWith('/api/v1/permissions?')) {
+        const query = new URL(path, 'http://127.0.0.1').searchParams
+        const capabilities = query.getAll('capability')
+        const names = query.getAll('resourceName')
+        return Promise.resolve(json({ generation, complete: true, truncated: false, errors: [], decisions: capabilities.flatMap((capabilityId) => names.map((resourceName) => ({ capabilityId, namespace: 'payments', resourceName, decision: 'allowed' }))) }))
+      }
+      if (path === '/api/v1/session') return Promise.resolve(json({ csrfToken: 'csrf-bulk', generation, origin: 'http://127.0.0.1:2748', expiresAt: '2026-08-17T18:00:00Z' }))
+      const detail = path.match(/^\/api\/v1\/workloads\/(deployments|statefulsets)\/payments\/(api|db)$/)
+      if (detail) {
+        const kind = detail[1] === 'deployments' ? 'Deployment' : 'StatefulSet'
+        return Promise.resolve(json({ metadata: { namespace: 'payments', name: detail[2], uid: `uid-${detail[2]}`, resourceVersion: '17', creationTimestamp: '2026-08-17T10:00:00Z', labels: {} }, kind, ready: 1, desired: 1, available: 1, updated: 1, status: 'Healthy', selector: {}, restartAt: null, conditions: [], containers: [], related: [] }))
+      }
+      const restart = path.match(/^\/api\/v1\/workloads\/(deployments|statefulsets)\/payments\/(api|db)\/restart$/)
+      if (restart) {
+        restarted.push(restart[2])
+        return Promise.resolve(json({ accepted: true, action: 'restart', target: {}, generation, resourceVersion: '18' }))
+      }
+      throw new Error(`Unexpected request: ${path}`)
+    }))
+
+    renderPage(<WorkloadsPage />)
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Select row Deployment/payments/api' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select row StatefulSet/payments/db' }))
+    expect(screen.getByRole('toolbar', { name: 'Bulk actions' })).toHaveTextContent('2 selected')
+    const restart = screen.getByRole('button', { name: 'Restart selected' })
+    await waitFor(() => expect(restart).toBeEnabled())
+    fireEvent.click(restart)
+    const dialog = screen.getByRole('alertdialog', { name: 'Restart 2 workloads' })
+    expect(dialog).toHaveTextContent('Deployment api · ns payments')
+    expect(dialog).toHaveTextContent('StatefulSet db · ns payments')
+    fireEvent.click(within(dialog).getByRole('checkbox'))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Restart selected' }))
+
+    await waitFor(() => expect(restarted).toEqual(['api', 'db']))
+    expect(await screen.findByRole('status')).toHaveTextContent('Restarted 2 workloads')
+  })
 
   it('shows only the authorized namespace seed as a non-selectable preview and clears it on revocation', async () => {
     const pod = { namespace: 'payments', name: 'seed-pod', status: 'Running', ready: { current: 1, desired: 1 }, restarts: 0, node: null, ip: null, owner: null, ageSeconds: 60, problematic: false }

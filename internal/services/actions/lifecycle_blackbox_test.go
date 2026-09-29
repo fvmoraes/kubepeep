@@ -236,6 +236,12 @@ func newCleanupPortForwardAdapter() *cleanupPortForwardAdapter {
 	return &cleanupPortForwardAdapter{started: make(chan *cleanupPortForwardHandle, 1)}
 }
 
+func (adapter *cleanupPortForwardAdapter) ResolveService(_ context.Context, target MutationTarget, servicePort int) (ResolvedServicePort, error) {
+	target.Kind = "Pod"
+	target.Name += "-pod"
+	return ResolvedServicePort{Target: target, RemotePort: servicePort}, nil
+}
+
 func (adapter *cleanupPortForwardAdapter) Start(_ context.Context, lifetime context.Context, _ PortForwardCommand, listener net.Listener) (PortForwardHandle, error) {
 	handle := &cleanupPortForwardHandle{
 		lifetime: lifetime,

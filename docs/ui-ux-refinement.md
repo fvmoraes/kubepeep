@@ -1,32 +1,28 @@
-# UI/UX — refinamento e baseline auditável
+# UI/UX — refinamento final da v0.7
 
-Este documento é o inventário funcional e visual da Fase 0 do plano v0.7 e a
-entrada da F4/F7. O dark theme, roxo KubePeep, sidebar e navegação horizontal
-são preservados; a meta é correção e consistência, não redesign.
+Este documento consolida o inventário da Fase 0 e as decisões finais da Fase 4
+do plano v0.7. O dark theme, roxo KubePeep, sidebar e navegação horizontal são
+preservados, com correções de consistência, densidade e comportamento.
 
-**Baseline:** 2026-09-12, branch `review/plan-v0.7`. Evidência automatizada e
+**Fechamento:** 2026-09-29, branch `review/plan-v0.7`. Evidência automatizada e
 SHA de fechamento ficam em `plan/v0.7/03-evidencias-execucao.md`.
 
 ## 1. Tokens, tipografia e desvios conhecidos
 
 `web/src/tokens.css` é a fonte de verdade:
 
-- tipografia: 10/11/12/13/14/16/20/26/32 px (`text-2xs`…`text-4xl`);
+- tipografia: família, escala 10/11/12/13/14/16/20/26/32 px
+  (`text-2xs`…`text-4xl`), pesos e line-height;
 - controles: 28/32/36 px (`h-7`/`h-8`/`h-9`);
 - spacing, radius, cores, sombras e z-index também são tokens;
-- monospace fica reservado a logs, YAML/JSON e valores técnicos.
+- monospace fica reservado a logs, YAML/JSON, terminal e valores técnicos;
+- o terminal xterm lê família, tamanho e paleta diretamente dos custom
+  properties, mantendo o canvas alinhado ao restante da aplicação.
 
-Busca estática por `font-size`, `fontSize` e classes arbitrárias encontrou
-somente estas exceções intencionais:
-
-| Local | Valor | Classificação / ação F4 |
-| --- | ---: | --- |
-| `styles.css` `.mono` e `code` | `0.92em` | relativo ao contexto técnico; avaliar token mono dedicado |
-| `styles.css` `kbd` | `10px` | coincide com `text-2xs`, mas deve migrar para o token |
-| `ExecTerminal.tsx` xterm | `12px` | API JS não usa classe Tailwind; coincide com `text-sm` |
-
-Não há classe `text-[…]` na aplicação. Cores semânticas de ações continuam:
-azul normal, verde positivo, vermelho destrutivo e âmbar disruptivo.
+A busca estática por `font-size`, `fontSize` e classes `text-[…]` encontrou zero
+tamanhos arbitrários fora de `tokens.css`. Cores semânticas de ações continuam:
+azul normal, verde positivo, vermelho destrutivo e âmbar disruptivo. Literais de
+cor ficaram restritos à definição dos tokens e aos SVGs de marca.
 
 ## 2. Proporção filtros × conteúdo
 
@@ -49,10 +45,18 @@ contados como filtro nem conteúdo da tabela.
 | Logs | 96–132 px | 13,5–18,5% | 11,4–15,6% | 9,4–12,9% | 81,5–90,6% |
 | Settings, Contexts/Scopes, About | n/a | n/a | n/a | n/a | formulário/conteúdo próprio |
 
-A afirmação anterior de “20–30%” não era uma medição. O baseline real fica
-abaixo de 20% nos viewports de referência 1366×768, 1440×900, 1920×1080 e
-2560×1440; isso é aceitável porque amplia o conteúdo. O risco residual é
-quebra de linha em largura menor que 1100 px, a ser validado visualmente na F4.
+A validação Playwright final mediu a tela de Pods com 30 itens e a mesma matriz
+usada no aceite. Não houve overflow horizontal global:
+
+| Viewport | Controles / área útil | Largura do conteúdo / viewport |
+| --- | ---: | ---: |
+| 1366×768 | 5,56% | 96,27% |
+| 1440×900 | 5,56% | 96,50% |
+| 1920×1080 | 3,72% | 97,50% |
+| 2560×1440 | 3,72% | 98,19% |
+
+Os controles ficam abaixo do teto de 30% e o conteúdo supera o mínimo de 70%.
+O espaço extra amplia tabela e colunas em vez de criar blocos vazios.
 
 ## 3. Semântica dos filtros
 
@@ -96,7 +100,7 @@ condicionais críticos usam `disabledReason` específico.
 | Workspace | Back/Forward, tabs, favorito, relacionados, YAML e Close | histórico funcional; Back/Forward explicam ausência de entrada anterior/próxima |
 | Logs | Read/Follow/Stop/Pause, Copy/Download/Clear, filtros locais | funcional e limitado; estados inválidos ficam explicados/visíveis |
 | Settings | edição, remoção, Reset e Save | Reset/Save desabilitados sem dirty state; Reset restaura o snapshot salvo |
-| Ações em massa | seleção, select-all, logs, delete e clear | delete exige confirmação e reporta sucesso/falhas por toast |
+| Ações em massa | seleção, select-all, logs, restart, delete e clear | catálogo compatível com toda a seleção; confirmação e resultado parcial por toast |
 
 Defeitos fechados pela varredura F0:
 
@@ -128,24 +132,24 @@ Defeitos fechados pela varredura F0:
 
 Todas as mutações enviam o envelope backend `confirmed: true`, CSRF,
 `expectedGeneration`, consequência allowlisted e revalidação SSAR fail-closed.
-Esse campo de protocolo **não significa** que toda ação abre um diálogo visual.
-Inventário real:
+As ações disruptivas ou destrutivas do catálogo final abrem confirmação visual:
 
 | Ação | Confirmação visual | Observação |
 | --- | --- | --- |
-| Delete workload / Pod | `ConfirmDialog` | UID/RV quando aplicável; consequência explícita |
+| Delete workload | `ConfirmDialog` + nome digitado | alvo/namespace e consequência irreversível; UID/RV quando aplicável |
+| Delete Pod | `ConfirmDialog` | alvo/namespace, UID/RV quando aplicável; consequência explícita |
 | Restart Pod | `ConfirmDialog` | delete controlado; controller pode recriar |
-| Bulk delete | `ConfirmDialog` | lista alvos e resultado parcial |
-| Restart Deployment/StatefulSet/DaemonSet | direta | botão âmbar + toast; não abre dialog |
+| Bulk delete/restart | `ConfirmDialog` | lista alvos/namespaces e resultado parcial |
+| Restart Deployment/StatefulSet/DaemonSet | `ConfirmDialog` | alvo/namespace + toast |
 | Scale | direta | input validado, HPA warning e Apply explícito |
 | Suspend/Resume CronJob | direta | botão semântico + toast |
 | Run now CronJob | direta | cria Job e mostra toast |
-| Port-forward | direta | valida portas, bind somente loopback |
+| Port-forward de Pod/Service | direta | valida portas, bind somente loopback e mostra sessão criada |
 | Exec | direta | valida container/comando e usa ticket efêmero |
 
-Portanto, a frase antiga “todas com confirmação” foi removida. A F4 pode
-decidir se Restart/Scale/Suspend/Run now exigem novo UX de confirmação; a Fase
-0 apenas registra o comportamento verdadeiro e garante que o clique funciona.
+Scale, suspend/resume, run now, port-forward e exec preservam ação direta porque
+possuem campos explícitos, validação e feedback, e não removem o recurso alvo.
+O backend revalida geração, preconditions e RBAC imediatamente antes da ação.
 
 ## 7. Resource Workspace e relacionados
 
@@ -156,13 +160,20 @@ workspace. Relacionados clicáveis hoje:
 - Pods/ReplicaSets de Deployment;
 - Pods de ReplicaSet/Job e Jobs de CronJob;
 - owner de Pod quando há rota suportada;
-- PVCs de StatefulSet.
+- PVCs de StatefulSet;
+- Services referenciados por regras e backends de Ingress.
 
 A aba **Endpoints** de Service mostra facts agregados (endereços prontos/não
-prontos, portas e truncamento); ela **não contém links de Endpoint**. A afirmação
-anterior de “Endpoints de Service clicáveis” era falsa e foi corrigida aqui.
-Referências desconhecidas são renderizadas desabilitadas com motivo, sem rota
-inventada.
+prontos, portas e truncamento). Services também oferecem port-forward para uma
+porta TCP: o backend resolve um Pod Running/Ready compatível e o `targetPort`
+inteiro ou nomeado, e então revalida `create pods/portforward` para o Pod exato.
+Ingress expõe Rules/Backends, abre URL HTTP(S) e copia host. Referências
+desconhecidas são renderizadas desabilitadas com motivo, sem rota inventada.
+
+O catálogo de tabs final inclui Pods (Overview, Logs, YAML, Events, Metrics,
+Containers e Actions), workloads (relações e rollout quando aplicável), Service
+(Overview, Endpoints, YAML e Actions) e Ingress (Overview, Rules, Backends, YAML
+e Actions). O histórico Back/Forward preserva recurso e aba.
 
 ## 8. Navegação e contexto global
 
@@ -174,6 +185,17 @@ inventada.
 - `All` significa somente namespaces do scope/RBAC atual;
 - troca incompatível de contexto/scope/geração remove dados anteriores.
 
+Cada `(cluster profile, contexto)` possui no máximo um scope local marcado como
+default. Ao abrir a aplicação ou trocar de contexto, `DefaultScopeGate` ativa
+esse scope com fence de geração antes de liberar as páginas de recursos. Um
+contexto sem default direciona o usuário à tela de scopes e nunca assume todos
+os namespaces. A preferência não consulta nem cria Namespace; um scope manual
+continua funcional para operadores sem `list/get namespaces`.
+
+Excluir o default exige escolher outro default do mesmo contexto ou confirmar o
+retorno ao setup sem seleção ativa. A troca entre contextos descarta o default,
+namespace, filtros e dados do contexto anterior antes de carregar o próximo.
+
 ## 9. Segurança e limites preservados
 
 - nenhum clique bypassa backend, CSRF, fence, SSAR ou preconditions;
@@ -184,18 +206,19 @@ inventada.
   storage para dados de cluster;
 - `scripts/security_check.sh HEAD` permanece gate obrigatório.
 
-## 10. Validação e próximos passos
+## 10. Validação e limites deliberados
 
-A regressão automatizada cobre Pods, rotas/tabs, Apply/Clear, paginação,
-Settings, persistência e reativação de coluna Storage. Contagens e comandos do
-fechamento ficam no registro de evidências para não congelar números obsoletos
-neste documento.
+A regressão automatizada cobre navegação, Pods, rotas/tabs, Apply/Clear,
+paginação, saved filters, colunas, Settings, scope default, RBAC, confirmações,
+ações individuais/em massa e port-forward de Service. Playwright valida a
+matriz de quatro viewports e as tabs completas do workspace. O harness Kind
+exercita o binário contra cluster real; contagens e comandos ficam no registro
+de evidências para não congelar números obsoletos neste documento.
 
-Pendências deliberadas para fases seguintes, não cliques mortos da F0:
+Limites deliberados, sem controles que prometam essas operações:
 
 - edição/aplicação arbitrária de YAML requer contrato e política próprios;
 - CPU/memória de Pods dependem de Metrics API real;
 - Helm releases e Gateway API continuam fora da implementação atual;
-- F4 executará smoke visual comparativo e decidirá tokens relativos/UX de
-  confirmação adicional;
-- F3 fará virtualização; na F0 a página pública continua limitada a 100 linhas.
+- a API pública continua limitada e paginada; a lista virtualizada mantém o DOM
+  bounded sem fingir que resultados não carregados estão presentes.

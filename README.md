@@ -8,7 +8,7 @@ and a loopback web mode. Both share a Go backend and an embedded React
 interface. It uses your existing kubeconfig and Kubernetes RBAC identity.
 
 Inspect workloads, Pods, Events, networking, ConfigMaps and Secret metadata;
-read bounded logs; and use restart, scale, Pod deletion, port-forward and exec
+read bounded logs; and use restart, scale, Pod deletion, Pod/Service port-forward and exec
 when authorized. Secret values are never exposed. The Metrics API is optional.
 
 The expanded resource catalog for version 1 is tracked in the

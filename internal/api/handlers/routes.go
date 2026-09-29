@@ -69,6 +69,7 @@ func Register(applicationRouter *router.Router, dependencies Dependencies) {
 		apiRouter.PUT("/namespace-scopes/{id}", scopes.Update)
 		apiRouter.DELETE("/namespace-scopes/{id}", scopes.Delete)
 		apiRouter.POST("/namespace-scopes/{id}/select", scopes.Select)
+		apiRouter.PUT("/namespace-scopes/{id}/default", scopes.SetDefault)
 	}
 	if dependencies.Permissions != nil && dependencies.Selection != nil {
 		apiRouter.GET("/permissions", NewPermissions(dependencies.Permissions, dependencies.Selection).ServeHTTP)
@@ -182,6 +183,7 @@ func Register(applicationRouter *router.Router, dependencies Dependencies) {
 		}
 		if dependencies.PortForwards != nil {
 			apiRouter.POST("/pods/{namespace}/{name}/port-forward", actions.CreatePortForward)
+			apiRouter.POST("/services/{namespace}/{name}/port-forward", actions.CreateServicePortForward)
 			apiRouter.GET("/port-forwards", actions.ListPortForwards)
 			apiRouter.DELETE("/port-forwards/{id}", actions.ClosePortForward)
 		}
@@ -364,6 +366,8 @@ func actionAllowedMethods(path string) (string, bool) {
 	case len(parts) == 3 && parts[0] == "pods":
 		return "DELETE", true
 	case len(parts) == 4 && parts[0] == "pods" && parts[3] == "port-forward":
+		return "POST", true
+	case len(parts) == 4 && parts[0] == "services" && parts[3] == "port-forward":
 		return "POST", true
 	case len(parts) == 4 && parts[0] == "pods" && parts[3] == "exec":
 		return "POST", true

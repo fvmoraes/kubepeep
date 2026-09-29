@@ -25,6 +25,9 @@
   --color-kp-subtext: #c8c2d0;      /* secondary */
   --color-kp-overlay-text: #918a9e; /* tertiary  */
   --color-kp-text-disabled: #686271;
+  --color-kp-on-solid: #fff;
+  --color-kp-backdrop: rgb(0 0 0 / 62%);
+  --color-kp-selection: rgb(167 139 250 / 32%);
 
   /* Divider (subtler than overlay-0, for table rows) */
   --color-kp-divider: #24202e;
@@ -134,6 +137,14 @@
   --text-3xl--line-height: 1.2;
   --text-4xl: 2rem;                 /* 32px rare hero                     */
   --text-4xl--line-height: 1.15;
+  --text-mono-relative: 0.92em;
+  --text-terminal-px: 12;
+
+  /* Weight scale */
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
 
   /* Control heights: sm 28 / md 32 / lg 36 (h-7 / h-8 / h-9) */
 
@@ -156,7 +167,7 @@
   --sidebar-width: 240px;
   --sidebar-width-compact: 56px;
   --header-height: 56px;
-  --content-max-width: 1680px;
+  --content-max-width: 100%;
   --workspace-inset: 9vh 9vw;
   --list-controls-max-height: 30vh;
 }

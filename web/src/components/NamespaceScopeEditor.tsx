@@ -9,6 +9,7 @@ import {
   getNamespaceScopes,
   getSession,
   getStatus,
+  setDefaultNamespaceScope,
   selectNamespaceScope,
   updateNamespaceScope,
   validateNamespaceScope,
@@ -167,7 +168,7 @@ export function NamespaceScopeForm({ selection, csrfToken, sessionError, onSessi
     retry: false,
   })
   const clusterListDenied = clusterNamespaces.isError && (clusterNamespaces.error as APIError).status === 403
-  const clusterNamespaceItems = Array.isArray(clusterNamespaces.data) ? clusterNamespaces.data : []
+  const clusterNamespaceItems = useMemo(() => Array.isArray(clusterNamespaces.data) ? clusterNamespaces.data : [], [clusterNamespaces.data])
   const listedNamespaces = useMemo(() => {
     const filter = pickerFilter.trim().toLowerCase()
     return filter === '' ? clusterNamespaceItems : clusterNamespaceItems.filter((namespace) => namespace.name.includes(filter))
@@ -434,10 +435,11 @@ export function NamespaceScopeEditor() {
   const [editingScopeId, setEditingScopeId] = useState<number | null>(null)
   const [deleteScopeId, setDeleteScopeId] = useState<number | null>(null)
   const [replacementScopeId, setReplacementScopeId] = useState<number | null>(null)
+  const [returnToSetup, setReturnToSetup] = useState(false)
   const status = useQuery({ queryKey: ['local-status'], queryFn: ({ signal }) => getStatus(signal), staleTime: 15_000, retry: false })
   const session = useQuery({ queryKey: ['session'], queryFn: ({ signal }) => getSession(signal), staleTime: 5 * 60_000, retry: false })
   const scopes = useQuery({
-    queryKey: ['namespace-scopes'],
+    queryKey: ['namespace-scopes', status.data?.selection?.generation],
     queryFn: ({ signal }) => getNamespaceScopes({ limit: 100 }, signal),
     enabled: status.data?.selection !== null && status.data?.selection !== undefined,
     retry: false,
@@ -446,6 +448,7 @@ export function NamespaceScopeEditor() {
     setEditingScopeId(null)
     setDeleteScopeId(null)
     setReplacementScopeId(null)
+    setReturnToSetup(false)
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['local-status'] }),
       queryClient.invalidateQueries({ queryKey: ['namespace-scopes'] }),
@@ -462,13 +465,21 @@ export function NamespaceScopeEditor() {
     },
     onSuccess: reconcile,
   })
+  const markDefault = useMutation({
+    mutationFn: (scope: NamespaceScope) => {
+      if (!selection || !session.data) throw new Error('Default scope selection is not ready.')
+      return setDefaultNamespaceScope(scope.id, { expectedGeneration: selection.generation }, session.data.csrfToken)
+    },
+    onSuccess: reconcile,
+  })
   const deleteScope = useMutation({
-    mutationFn: ({ scope, replacement }: { scope: NamespaceScope; replacement: number | null }) => {
+    mutationFn: ({ scope, replacement, setup }: { scope: NamespaceScope; replacement: number | null; setup: boolean }) => {
       if (!selection || !session.data) throw new Error('Scope deletion is not ready.')
       return deleteNamespaceScope(scope.id, {
         confirmed: true,
         version: scope.version,
         ...(replacement === null ? {} : { replacementScopeId: replacement }),
+        ...(setup ? { returnToSetup: true } : {}),
         expectedGeneration: selection.generation,
       }, session.data.csrfToken)
     },
@@ -489,8 +500,11 @@ export function NamespaceScopeEditor() {
   const editingScope = scopeList.find((scope) => scope.id === editingScopeId) ?? null
   const deleteTarget = scopeList.find((scope) => scope.id === deleteScopeId) ?? null
   const deletingActive = deleteTarget?.id === selection.scopeId
-  const replacementCandidates = deletingActive ? scopeList.filter((scope) => scope.id !== deleteTarget.id) : []
-  const deletionReady = deleteTarget !== null && (!deletingActive || replacementScopeId !== null)
+  const deletingDefault = deleteTarget?.isDefault === true
+  const needsResolution = deletingActive || deletingDefault
+  const replacementCandidates = needsResolution && deleteTarget ? scopeList.filter((scope) => scope.id !== deleteTarget.id) : []
+  const deletionReady = deleteTarget !== null && (!needsResolution || replacementScopeId !== null || (deletingDefault && returnToSetup))
+  const actionPending = selectScope.isPending || markDefault.isPending || deleteScope.isPending
 
   return (
     <div className="grid max-w-[1040px] gap-4">
@@ -509,28 +523,35 @@ export function NamespaceScopeEditor() {
           <CardHeader>
             <div>
               <h2 id="saved-scopes-title" className="text-xl text-kp-text">Namespace scopes</h2>
-              <p className="mt-0.5 text-sm text-kp-overlay-text">Saved locally; selecting one activates its namespaces for this session.</p>
+              <p className="mt-0.5 text-sm text-kp-overlay-text">Choose exactly one default for this context. It opens automatically whenever this context becomes active.</p>
             </div>
           </CardHeader>
           {scopes.isPending ? <p className="m-0 text-sm text-kp-overlay-text" role="status">Loading saved scopes…</p> : null}
           {scopes.isError ? <p className="m-0 text-sm text-kp-red" role="status">Saved scopes are temporarily unavailable.</p> : null}
           {scopeList.length === 0 && scopes.isSuccess ? <p className="m-0 text-sm text-kp-overlay-text">No saved scopes for this local installation.</p> : null}
+          {scopeList.length > 0 && !scopeList.some((scope) => scope.isDefault) ? (
+            <p className="m-0 rounded-r-md border-l-2 border-kp-yellow-border bg-kp-yellow-bg px-3 py-2 text-sm text-kp-yellow" role="alert">This context has no default scope. Mark one below before browsing cluster resources.</p>
+          ) : null}
           {scopeList.length ? (
             <ul className="m-0 grid list-none gap-2 p-0">
               {scopeList.map((scope) => (
                 <li key={scope.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-kp-overlay-0 bg-kp-surface-1 px-3 py-2.5">
                   <div className="min-w-0"><strong className="block text-sm text-kp-text">{scope.name}</strong><small className="block text-xs text-kp-overlay-text">{scope.context} · {scope.mode} · {scope.namespaces.length} namespaces</small></div>
                   <div className="flex flex-wrap items-center justify-end gap-2">
-                    {selection.scopeId === scope.id ? <Badge variant="healthy">active</Badge> : (
-                      <Button size="sm" disabled={!session.data || selectScope.isPending || deleteScope.isPending} onClick={() => selectScope.mutate(scope)}>Select {scope.name}</Button>
+                    {scope.isDefault ? <Badge variant="info">default</Badge> : (
+                      <Button variant="secondary" size="sm" disabled={!session.data || actionPending} onClick={() => markDefault.mutate(scope)}>Make default</Button>
                     )}
-                    <Button variant="secondary" size="sm" disabled={selectScope.isPending || deleteScope.isPending} onClick={() => {
+                    {selection.scopeId === scope.id ? <Badge variant="healthy">active</Badge> : (
+                      <Button size="sm" disabled={!session.data || actionPending} onClick={() => selectScope.mutate(scope)}>Select {scope.name}</Button>
+                    )}
+                    <Button variant="secondary" size="sm" disabled={actionPending} onClick={() => {
                       setEditingScopeId(scope.id)
                       setDeleteScopeId(null)
                     }}>Edit {scope.name}</Button>
-                    <Button variant="danger" size="sm" disabled={!session.data || selectScope.isPending || deleteScope.isPending} onClick={() => {
+                    <Button variant="danger" size="sm" disabled={!session.data || actionPending} onClick={() => {
                       setDeleteScopeId(scope.id)
                       setReplacementScopeId(null)
+                      setReturnToSetup(false)
                     }}>Delete {scope.name}</Button>
                   </div>
                 </li>
@@ -538,6 +559,7 @@ export function NamespaceScopeEditor() {
             </ul>
           ) : null}
           {selectScope.isError ? <p className="m-0 text-xs text-kp-red" role="alert">{messageFor(selectScope.error)}</p> : null}
+          {markDefault.isError ? <p className="m-0 text-xs text-kp-red" role="alert">{messageFor(markDefault.error)}</p> : null}
           {deleteScope.isError ? <p className="m-0 text-xs text-kp-red" role="alert">{messageFor(deleteScope.error)}</p> : null}
           {deleteTarget ? (
             <div role="alertdialog" aria-labelledby="scope-delete-title" className="grid gap-3 rounded-lg border border-kp-red-border bg-kp-red-bg/50 p-3.5">
@@ -545,22 +567,35 @@ export function NamespaceScopeEditor() {
                 <strong id="scope-delete-title" className="block text-sm text-kp-text">Delete “{deleteTarget.name}”?</strong>
                 <p className="m-0 mt-1 text-xs text-kp-subtext">This removes the local scope definition. Kubernetes resources are not modified.</p>
               </div>
-              {deletingActive ? (
+              {needsResolution ? (
                 <label className="grid max-w-[360px] gap-1">
-                  <span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Replacement scope</span>
-                  <Select aria-label="Replacement scope" value={replacementScopeId ?? ''} onChange={(event) => setReplacementScopeId(event.target.value ? Number(event.target.value) : null)}>
-                    <option value="">Choose before deleting the active scope</option>
+                  <span className="text-2xs uppercase tracking-wider text-kp-overlay-text">{deletingDefault ? 'Replacement default scope' : 'Replacement active scope'}</span>
+                  <Select aria-label="Replacement scope" value={replacementScopeId ?? ''} onChange={(event) => {
+                    setReplacementScopeId(event.target.value ? Number(event.target.value) : null)
+                    if (event.target.value) setReturnToSetup(false)
+                  }}>
+                    <option value="">Choose a replacement</option>
                     {replacementCandidates.map((scope) => <option key={scope.id} value={scope.id}>{scope.name}</option>)}
                   </Select>
                 </label>
               ) : null}
-              {deletingActive && replacementCandidates.length === 0 ? <p className="m-0 text-xs text-kp-red">Create another scope before deleting the active scope.</p> : null}
+              {deletingDefault ? (
+                <label className="flex max-w-[520px] items-start gap-2 text-xs text-kp-subtext">
+                  <input type="checkbox" checked={returnToSetup} onChange={(event) => {
+                    setReturnToSetup(event.target.checked)
+                    if (event.target.checked) setReplacementScopeId(null)
+                  }} />
+                  Return this context to default scope setup after deletion. Resource browsing stays blocked until another default is chosen.
+                </label>
+              ) : null}
+              {deletingActive && !deletingDefault && replacementCandidates.length === 0 ? <p className="m-0 text-xs text-kp-red">Create another scope before deleting the active scope.</p> : null}
               <div className="flex flex-wrap justify-end gap-2">
                 <Button variant="secondary" onClick={() => {
                   setDeleteScopeId(null)
                   setReplacementScopeId(null)
+                  setReturnToSetup(false)
                 }} disabled={deleteScope.isPending}>Cancel deletion</Button>
-                <Button variant="danger" disabled={!deletionReady || deleteScope.isPending} onClick={() => deleteScope.mutate({ scope: deleteTarget, replacement: replacementScopeId })}>
+                <Button variant="danger" disabled={!deletionReady || deleteScope.isPending} onClick={() => deleteScope.mutate({ scope: deleteTarget, replacement: replacementScopeId, setup: returnToSetup })}>
                   {deleteScope.isPending ? 'Deleting…' : `Confirm delete ${deleteTarget.name}`}
                 </Button>
               </div>

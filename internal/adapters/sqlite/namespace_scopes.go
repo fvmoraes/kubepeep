@@ -32,7 +32,7 @@ func (repository *NamespaceScopeRepository) List(ctx context.Context, profileID 
 
 	rows, err := transaction.QueryContext(ctx, `
 		SELECT id, cluster_profile_id, context_name, name, mode,
-		       default_namespace, version, created_at, updated_at
+		       default_namespace, is_default, version, created_at, updated_at
 		FROM namespace_scopes
 		WHERE cluster_profile_id = ? AND context_name = ?
 		ORDER BY name ASC, id ASC`, profileID, contextName)
@@ -124,7 +124,7 @@ func (repository *NamespaceScopeRepository) Create(ctx context.Context, draft na
 		created = namespaces.Scope{
 			ID: id, ClusterProfileID: draft.ClusterProfileID, Context: draft.Context,
 			Name: draft.Name, Mode: draft.Mode, Namespaces: append([]string(nil), draft.Namespaces...),
-			DefaultNamespace: copyNamespacePointer(draft.DefaultNamespace), Version: 1,
+			DefaultNamespace: copyNamespacePointer(draft.DefaultNamespace), IsDefault: false, Version: 1,
 			CreatedAt: time.UnixMilli(now).UTC(), UpdatedAt: time.UnixMilli(now).UTC(),
 		}
 		return nil
@@ -148,12 +148,13 @@ func (repository *NamespaceScopeRepository) Update(ctx context.Context, id, expe
 			storedProfileID int64
 			storedContext   string
 			storedVersion   int64
+			storedDefault   int
 			createdAt       int64
 		)
 		err := connection.QueryRowContext(ctx, `
-			SELECT cluster_profile_id, context_name, version, created_at
+			SELECT cluster_profile_id, context_name, version, is_default, created_at
 			FROM namespace_scopes WHERE id = ?`, id).
-			Scan(&storedProfileID, &storedContext, &storedVersion, &createdAt)
+			Scan(&storedProfileID, &storedContext, &storedVersion, &storedDefault, &createdAt)
 		if errors.Is(err, sql.ErrNoRows) {
 			return namespaces.ErrNotFound
 		}
@@ -206,7 +207,7 @@ func (repository *NamespaceScopeRepository) Update(ctx context.Context, id, expe
 		updated = namespaces.Scope{
 			ID: id, ClusterProfileID: draft.ClusterProfileID, Context: draft.Context,
 			Name: draft.Name, Mode: draft.Mode, Namespaces: append([]string(nil), draft.Namespaces...),
-			DefaultNamespace: copyNamespacePointer(draft.DefaultNamespace), Version: expectedVersion + 1,
+			DefaultNamespace: copyNamespacePointer(draft.DefaultNamespace), IsDefault: storedDefault == 1, Version: expectedVersion + 1,
 			CreatedAt: time.UnixMilli(createdAt).UTC(), UpdatedAt: time.UnixMilli(now).UTC(),
 		}
 		return nil
@@ -217,11 +218,61 @@ func (repository *NamespaceScopeRepository) Update(ctx context.Context, id, expe
 	return updated, nil
 }
 
-func (repository *NamespaceScopeRepository) Delete(ctx context.Context, id, expectedVersion int64) error {
+func (repository *NamespaceScopeRepository) SetDefault(ctx context.Context, id int64) (namespaces.Scope, error) {
+	if id <= 0 {
+		return namespaces.Scope{}, namespaces.ErrNotFound
+	}
+	var selected namespaces.Scope
+	err := withImmediate(ctx, repository.database, func(connection *sql.Conn) error {
+		target, err := loadScope(ctx, connection, id)
+		if err != nil {
+			return err
+		}
+		if _, err := connection.ExecContext(ctx, `
+			UPDATE namespace_scopes SET is_default = 0
+			WHERE cluster_profile_id = ? AND context_name = ? AND is_default = 1 AND id <> ?`,
+			target.ClusterProfileID, target.Context, id); err != nil {
+			return fmt.Errorf("sqlite namespace scopes: clear previous default: %w", err)
+		}
+		if _, err := connection.ExecContext(ctx, `
+			UPDATE namespace_scopes SET is_default = 1 WHERE id = ?`, id); err != nil {
+			return fmt.Errorf("sqlite namespace scopes: set default: %w", err)
+		}
+		target.IsDefault = true
+		selected = target
+		return nil
+	})
+	if err != nil {
+		return namespaces.Scope{}, err
+	}
+	return selected, nil
+}
+
+func (repository *NamespaceScopeRepository) Delete(ctx context.Context, id, expectedVersion, replacementDefaultID int64) error {
 	if id <= 0 || expectedVersion <= 0 {
 		return namespaces.ErrConflict
 	}
 	return withImmediate(ctx, repository.database, func(connection *sql.Conn) error {
+		target, err := loadScope(ctx, connection, id)
+		if err != nil {
+			return err
+		}
+		if target.Version != expectedVersion {
+			return namespaces.ErrConflict
+		}
+		var replacement namespaces.Scope
+		if replacementDefaultID > 0 {
+			if replacementDefaultID == id {
+				return namespaces.ErrSelectionMismatch
+			}
+			replacement, err = loadScope(ctx, connection, replacementDefaultID)
+			if err != nil {
+				return err
+			}
+			if replacement.ClusterProfileID != target.ClusterProfileID || replacement.Context != target.Context {
+				return namespaces.ErrSelectionMismatch
+			}
+		}
 		result, err := connection.ExecContext(ctx, `DELETE FROM namespace_scopes WHERE id = ? AND version = ?`, id, expectedVersion)
 		if err != nil {
 			return fmt.Errorf("sqlite namespace scopes: delete: %w", err)
@@ -231,6 +282,11 @@ func (repository *NamespaceScopeRepository) Delete(ctx context.Context, id, expe
 			return fmt.Errorf("sqlite namespace scopes: inspect delete: %w", err)
 		}
 		if rows == 1 {
+			if replacementDefaultID > 0 {
+				if _, err := connection.ExecContext(ctx, `UPDATE namespace_scopes SET is_default = 1 WHERE id = ?`, replacementDefaultID); err != nil {
+					return fmt.Errorf("sqlite namespace scopes: set replacement default: %w", err)
+				}
+			}
 			return nil
 		}
 		var exists int
@@ -258,16 +314,18 @@ func scanScope(scanner scopeScanner) (namespaces.Scope, error) {
 		scope     namespaces.Scope
 		mode      string
 		defaultNS sql.NullString
+		isDefault int
 		createdAt int64
 		updatedAt int64
 	)
 	if err := scanner.Scan(
 		&scope.ID, &scope.ClusterProfileID, &scope.Context, &scope.Name, &mode,
-		&defaultNS, &scope.Version, &createdAt, &updatedAt,
+		&defaultNS, &isDefault, &scope.Version, &createdAt, &updatedAt,
 	); err != nil {
 		return namespaces.Scope{}, fmt.Errorf("sqlite namespace scopes: decode scope: %w", err)
 	}
 	scope.Mode = namespaces.ScopeMode(mode)
+	scope.IsDefault = isDefault == 1
 	if defaultNS.Valid {
 		scope.DefaultNamespace = &defaultNS.String
 	}
@@ -279,7 +337,7 @@ func scanScope(scanner scopeScanner) (namespaces.Scope, error) {
 func loadScope(ctx context.Context, queryer scopeQueryer, id int64) (namespaces.Scope, error) {
 	scope, err := scanScope(queryer.QueryRowContext(ctx, `
 		SELECT id, cluster_profile_id, context_name, name, mode,
-		       default_namespace, version, created_at, updated_at
+		       default_namespace, is_default, version, created_at, updated_at
 		FROM namespace_scopes WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return namespaces.Scope{}, namespaces.ErrNotFound

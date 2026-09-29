@@ -1,16 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
-import { ScrollText, Trash2 } from 'lucide-react'
+import { RotateCcw, ScrollText, Trash2 } from 'lucide-react'
 
 import {
   closePortForward,
+  createIdempotencyKey,
   getDashboardMetrics,
   getEndpointsList,
   getEndpointSlices,
   getEvents,
   getIngressClasses,
   getIngresses,
+  getPermissions,
   getNetworkPolicies,
   getNodes,
   getPod,
@@ -23,6 +25,7 @@ import {
   getWorkloads,
   deletePod,
   deleteWorkload,
+  restartWorkload,
   APIError,
 } from '../api/client'
 import type {
@@ -36,6 +39,7 @@ import type {
   Pod,
   ServiceResource,
   Workload,
+  CapabilityMatrix,
 } from '../api/types'
 import { Badge, Button, DataTable, Input, Select, StatusBadge, type DataTableColumn } from './ui'
 import { ConfirmDialog } from './ui/ConfirmDialog'
@@ -311,8 +315,27 @@ function sameListState<T extends object>(left: T, right: T): boolean {
 
 /** Bulk destructive operations: per-resource detail fetch → authorized delete. */
 interface BulkOutcome {
-  deleted: number
+  succeeded: number
   failed: Array<{ name: string; reason: string }>
+}
+
+const bulkRestartCapabilities: Partial<Record<Workload['kind'], string>> = {
+  Deployment: 'deployments.restart',
+  StatefulSet: 'statefulsets.restart',
+  DaemonSet: 'daemonsets.restart',
+}
+
+const bulkDeleteCapabilities: Record<Workload['kind'], string> = {
+  Deployment: 'deployments.delete',
+  StatefulSet: 'statefulsets.delete',
+  DaemonSet: 'daemonsets.delete',
+  Job: 'jobs.delete',
+  CronJob: 'cronjobs.delete',
+  ReplicaSet: 'replicasets.delete',
+}
+
+function allows(matrix: CapabilityMatrix | undefined, capabilityId: string, namespace: string, resourceName: string): boolean {
+  return matrix?.decisions.some((item) => item.capabilityId === capabilityId && item.namespace === namespace && item.resourceName === resourceName && item.decision === 'allowed') === true
 }
 
 function mutationError(error: unknown): string {
@@ -343,7 +366,7 @@ export function WorkloadsPage() {
   const [applied, setApplied] = useState<WorkloadListState>(() => ({ ...workloadsStateFromParams(params), kind: kindPreset }))
   const queryClient = useQueryClient()
   const [selectedKeys, setSelectedKeys] = useSelectionBoundKeys([selection?.clusterProfileId, selection?.context, selection?.scopeId, generation, globalNamespace.value])
-  const [bulkConfirm, setBulkConfirm] = useState(false)
+  const [bulkAction, setBulkAction] = useState<'delete' | 'restart' | null>(null)
 
   // Deep links (/workloads/:kind/:ns/:name) open in the Resource Workspace.
   useEffect(() => {
@@ -378,11 +401,23 @@ export function WorkloadsPage() {
   const visibleItems = previewActive ? preview.preview!.items : collection.items
   useEffect(() => { if (collection.authorizationFailed) setSelectedKeys(new Set()) }, [collection.authorizationFailed, setSelectedKeys])
   const selectedItems = useMemo(() => collection.items.filter((item) => selectedKeys.has(rowKey(item))), [collection.items, selectedKeys, rowKey])
+  const selectedCapabilityIDs = useMemo(() => Array.from(new Set(selectedItems.flatMap((item) => [bulkDeleteCapabilities[item.kind], bulkRestartCapabilities[item.kind]].filter((value): value is string => Boolean(value))))), [selectedItems])
+  const bulkPermissions = useQuery({
+    queryKey: ['bulk-action-permissions', generation, selectedItems.map(rowKey).join('|'), selectedCapabilityIDs.join('|')],
+    queryFn: ({ signal }) => getPermissions({ namespaces: Array.from(new Set(selectedItems.map((item) => item.namespace))), capabilityIds: selectedCapabilityIDs, resourceNames: selectedItems.map((item) => item.name) }, signal, generation),
+    enabled: Boolean(generation && selectedItems.length),
+    staleTime: 15_000,
+  })
+  const canBulkDelete = selectedItems.length > 0 && selectedItems.every((item) => allows(bulkPermissions.data, bulkDeleteCapabilities[item.kind], item.namespace, item.name))
+  const canBulkRestart = selectedItems.length > 0 && selectedItems.every((item) => {
+    const capability = bulkRestartCapabilities[item.kind]
+    return Boolean(capability && allows(bulkPermissions.data, capability, item.namespace, item.name))
+  })
 
   const bulkDelete = useMutation({
     mutationFn: async (): Promise<BulkOutcome> => {
       const csrfToken = await csrfForGeneration(generation!)
-      const outcome: BulkOutcome = { deleted: 0, failed: [] }
+      const outcome: BulkOutcome = { succeeded: 0, failed: [] }
       for (const item of selectedItems) {
         try {
           const detail = await getWorkload(workloadKindPath(item.kind)!, item.namespace, item.name, undefined, generation)
@@ -395,7 +430,7 @@ export function WorkloadsPage() {
             expectedUid: detail.metadata.uid,
             expectedResourceVersion: detail.metadata.resourceVersion,
           }, csrfToken)
-          outcome.deleted += 1
+          outcome.succeeded += 1
         } catch (error) {
           outcome.failed.push({ name: `${item.kind}/${item.name}`, reason: mutationError(error) })
         }
@@ -403,14 +438,53 @@ export function WorkloadsPage() {
       return outcome
     },
     onSuccess: (outcome) => {
-      toast.success(`Deleted ${outcome.deleted} workload${outcome.deleted === 1 ? '' : 's'}`, outcome.failed.length ? `${outcome.failed.length} failed: ${outcome.failed.map((item) => item.name).join(', ')}` : 'Every selected workload was removed.')
-      setBulkConfirm(false)
+      toast.success(`Deleted ${outcome.succeeded} workload${outcome.succeeded === 1 ? '' : 's'}`, outcome.failed.length ? `${outcome.failed.length} failed: ${outcome.failed.map((item) => item.name).join(', ')}` : 'Every selected workload was removed.')
+      setBulkAction(null)
       setSelectedKeys(new Set())
       void queryClient.invalidateQueries({ queryKey: ['resources', 'workloads'] })
     },
     onError: (error) => {
       toast.error('Bulk delete failed', mutationError(error))
-      setBulkConfirm(false)
+      setBulkAction(null)
+    },
+  })
+
+  const bulkRestart = useMutation({
+    mutationFn: async (): Promise<BulkOutcome> => {
+      const csrfToken = await csrfForGeneration(generation!)
+      const outcome: BulkOutcome = { succeeded: 0, failed: [] }
+      for (const item of selectedItems) {
+        const kindPath = workloadKindPath(item.kind)
+        if (!kindPath || !bulkRestartCapabilities[item.kind]) {
+          outcome.failed.push({ name: `${item.kind}/${item.name}`, reason: 'This workload kind does not support rollout restart.' })
+          continue
+        }
+        try {
+          const detail = await getWorkload(kindPath, item.namespace, item.name, undefined, generation)
+          await restartWorkload(kindPath, item.namespace, item.name, {
+            confirmed: true,
+            action: 'restart',
+            consequenceCode: 'RECREATE_WORKLOAD_PODS',
+            target: { clusterProfileId: selection!.clusterProfileId, context: selection!.context, namespace: item.namespace, kind: item.kind, name: item.name },
+            expectedGeneration: generation!,
+            expectedResourceVersion: detail.metadata.resourceVersion,
+          }, csrfToken, createIdempotencyKey())
+          outcome.succeeded += 1
+        } catch (error) {
+          outcome.failed.push({ name: `${item.kind}/${item.name}`, reason: mutationError(error) })
+        }
+      }
+      return outcome
+    },
+    onSuccess: (outcome) => {
+      toast.success(`Restarted ${outcome.succeeded} workload${outcome.succeeded === 1 ? '' : 's'}`, outcome.failed.length ? `${outcome.failed.length} failed: ${outcome.failed.map((item) => item.name).join(', ')}` : 'Every selected controller accepted a rollout restart.')
+      setBulkAction(null)
+      setSelectedKeys(new Set())
+      void queryClient.invalidateQueries({ queryKey: ['resources', 'workloads'] })
+    },
+    onError: (error) => {
+      toast.error('Bulk restart failed', mutationError(error))
+      setBulkAction(null)
     },
   })
 
@@ -445,7 +519,8 @@ export function WorkloadsPage() {
         <QueryState pending={list.isPending && !previewActive} error={!list.data || collection.authorizationFailed ? list.error : null} empty={visibleItems.length === 0 && !list.hasNextPage}>
           {selectedItems.length > 0 ? (
             <BulkToolbar count={selectedItems.length}>
-              <Button variant="danger" size="sm" onClick={() => setBulkConfirm(true)}><Trash2 size={12} aria-hidden="true" /> Delete selected</Button>
+              <Button variant="warning" size="sm" disabled={!canBulkRestart || bulkPermissions.isPending} disabledReason="Every selected workload must support rollout restart and be authorized." onClick={() => setBulkAction('restart')}><RotateCcw size={12} aria-hidden="true" /> Restart selected</Button>
+              <Button variant="danger" size="sm" disabled={!canBulkDelete || bulkPermissions.isPending} disabledReason="Delete must be authorized for every selected workload." onClick={() => setBulkAction('delete')}><Trash2 size={12} aria-hidden="true" /> Delete selected</Button>
               <Button variant="ghost" size="sm" onClick={() => setSelectedKeys(new Set())}>Clear selection</Button>
             </BulkToolbar>
           ) : null}
@@ -478,17 +553,17 @@ export function WorkloadsPage() {
         </QueryState>
       </SelectionGate>
       <ConfirmDialog
-        open={bulkConfirm}
-        severity="danger"
-        title={`Delete ${selectedItems.length} workload${selectedItems.length === 1 ? '' : 's'}`}
-        description="Each delete is authorized and re-validated by Kubernetes individually before it executes."
+        open={bulkAction !== null}
+        severity={bulkAction === 'restart' ? 'warning' : 'danger'}
+        title={`${bulkAction === 'restart' ? 'Restart' : 'Delete'} ${selectedItems.length} workload${selectedItems.length === 1 ? '' : 's'}`}
+        description={`Each ${bulkAction === 'restart' ? 'restart' : 'delete'} is authorized and re-validated by Kubernetes individually before it executes.`}
         resources={selectedItems.map((item) => ({ kind: item.kind, namespace: item.namespace, name: item.name }))}
-        consequenceNote="Dependent ReplicaSets, Pods and Jobs are garbage-collected by Kubernetes after deletion. This action cannot be undone."
-        confirmLabel="Delete selected"
-        pendingLabel="Deleting…"
-        pending={bulkDelete.isPending}
-        onConfirm={() => bulkDelete.mutate()}
-        onCancel={() => setBulkConfirm(false)}
+        consequenceNote={bulkAction === 'restart' ? 'Each controller updates its Pod template and Kubernetes replaces the managed Pods.' : 'Dependent ReplicaSets, Pods and Jobs are garbage-collected by Kubernetes after deletion. This action cannot be undone.'}
+        confirmLabel={bulkAction === 'restart' ? 'Restart selected' : 'Delete selected'}
+        pendingLabel={bulkAction === 'restart' ? 'Restarting…' : 'Deleting…'}
+        pending={bulkDelete.isPending || bulkRestart.isPending}
+        onConfirm={() => bulkAction === 'restart' ? bulkRestart.mutate() : bulkDelete.mutate()}
+        onCancel={() => setBulkAction(null)}
       />
     </ResourcePage>
   )
@@ -506,7 +581,7 @@ export function PodsPage() {
   const [applied, setApplied] = useState<PodListState>(() => podsStateFromParams(params))
   const queryClient = useQueryClient()
   const [selectedKeys, setSelectedKeys] = useSelectionBoundKeys([selection?.clusterProfileId, selection?.context, selection?.scopeId, generation, globalNamespace.value])
-  const [bulkConfirm, setBulkConfirm] = useState(false)
+  const [bulkAction, setBulkAction] = useState<'delete' | 'restart' | null>(null)
   const preview = useResourceStreamPreview<Pod>({ identity: [selection?.clusterProfileId, selection?.context, selection?.scopeId, generation, globalNamespace.value], topic: 'pods', namespace: globalNamespace.value, isItem: isPodPreview, itemKey: namedPreviewKey })
   const previewNamespace = globalNamespace.value || globalNamespace.options[0] || ''
   const seedPreview = useQuery({
@@ -541,6 +616,14 @@ export function PodsPage() {
   const previewActive = list.isPending && !authorizationFailed && sameListState(applied, defaultPodList) && Boolean(preview.preview?.items.length || seedItems.length)
   const visibleItems = previewActive ? preview.preview?.items.length ? preview.preview.items : seedItems : listItems
   const selectedItems = useMemo(() => listItems.filter((item) => selectedKeys.has(rowKey(item))), [listItems, selectedKeys, rowKey])
+  const bulkPermissions = useQuery({
+    queryKey: ['bulk-action-permissions', generation, 'pods.delete', selectedItems.map(rowKey).join('|')],
+    queryFn: ({ signal }) => getPermissions({ namespaces: Array.from(new Set(selectedItems.map((item) => item.namespace))), capabilityIds: ['pods.delete'], resourceNames: selectedItems.map((item) => item.name) }, signal, generation),
+    enabled: Boolean(generation && selectedItems.length),
+    staleTime: 15_000,
+  })
+  const canBulkDelete = selectedItems.length > 0 && selectedItems.every((item) => allows(bulkPermissions.data, 'pods.delete', item.namespace, item.name))
+  const canBulkRestart = canBulkDelete && selectedItems.every((item) => item.owner !== null)
 
   // V5-11: Pod metrics render only when the Metrics API is healthy; absence,
   // denial or partial coverage touches the metrics columns alone.
@@ -569,11 +652,16 @@ export function PodsPage() {
     { key: 'age', header: 'Age', cell: (item) => age(item.ageSeconds) },
   ]
 
-  const bulkDelete = useMutation({
+  const bulkPodAction = useMutation({
     mutationFn: async (): Promise<BulkOutcome> => {
       const csrfToken = await csrfForGeneration(generation!)
-      const outcome: BulkOutcome = { deleted: 0, failed: [] }
+      const outcome: BulkOutcome = { succeeded: 0, failed: [] }
+      const restarting = bulkAction === 'restart'
       for (const item of selectedItems) {
+        if (restarting && !item.owner) {
+          outcome.failed.push({ name: `${item.namespace}/${item.name}`, reason: 'Standalone Pods cannot be restarted because no controller will recreate them.' })
+          continue
+        }
         try {
           const detail = await getPod(item.namespace, item.name, undefined, generation)
           await deletePod(item.namespace, item.name, {
@@ -585,7 +673,7 @@ export function PodsPage() {
             expectedUid: detail.metadata.uid,
             expectedResourceVersion: detail.metadata.resourceVersion,
           }, csrfToken)
-          outcome.deleted += 1
+          outcome.succeeded += 1
         } catch (error) {
           outcome.failed.push({ name: `${item.namespace}/${item.name}`, reason: mutationError(error) })
         }
@@ -593,14 +681,15 @@ export function PodsPage() {
       return outcome
     },
     onSuccess: (outcome) => {
-      toast.success(`Deleted ${outcome.deleted} Pod${outcome.deleted === 1 ? '' : 's'}`, outcome.failed.length ? `${outcome.failed.length} failed: ${outcome.failed.map((item) => item.name).join(', ')}` : 'Controllers recreate owned Pods according to their strategy.')
-      setBulkConfirm(false)
+      const restarted = bulkAction === 'restart'
+      toast.success(`${restarted ? 'Restarted' : 'Deleted'} ${outcome.succeeded} Pod${outcome.succeeded === 1 ? '' : 's'}`, outcome.failed.length ? `${outcome.failed.length} failed: ${outcome.failed.map((item) => item.name).join(', ')}` : restarted ? 'Every selected Pod will be recreated by its controller.' : 'The selected Pods were removed.')
+      setBulkAction(null)
       setSelectedKeys(new Set())
       void queryClient.invalidateQueries({ queryKey: ['resources', 'pods'] })
     },
     onError: (error) => {
-      toast.error('Bulk delete failed', mutationError(error))
-      setBulkConfirm(false)
+      toast.error(`Bulk ${bulkAction === 'restart' ? 'restart' : 'delete'} failed`, mutationError(error))
+      setBulkAction(null)
     },
   })
 
@@ -645,7 +734,8 @@ export function PodsPage() {
               {selectedItems.length === 1 ? (
                 <Link to={`/logs?namespace=${encodeURIComponent(selectedItems[0].namespace)}&pod=${encodeURIComponent(selectedItems[0].name)}`}><Button variant="secondary" size="sm"><ScrollText size={12} aria-hidden="true" /> View logs</Button></Link>
               ) : null}
-              <Button variant="danger" size="sm" onClick={() => setBulkConfirm(true)}><Trash2 size={12} aria-hidden="true" /> Delete selected</Button>
+              <Button variant="warning" size="sm" disabled={!canBulkRestart || bulkPermissions.isPending} disabledReason="Every selected Pod must have a controller owner and delete permission." onClick={() => setBulkAction('restart')}><RotateCcw size={12} aria-hidden="true" /> Restart selected</Button>
+              <Button variant="danger" size="sm" disabled={!canBulkDelete || bulkPermissions.isPending} disabledReason="Delete must be authorized for every selected Pod." onClick={() => setBulkAction('delete')}><Trash2 size={12} aria-hidden="true" /> Delete selected</Button>
               <Button variant="ghost" size="sm" onClick={() => setSelectedKeys(new Set())}>Clear selection</Button>
             </BulkToolbar>
           ) : null}
@@ -693,17 +783,17 @@ export function PodsPage() {
         </QueryState>
       </SelectionGate>
       <ConfirmDialog
-        open={bulkConfirm}
-        severity="danger"
-        title={`Delete ${selectedItems.length} Pod${selectedItems.length === 1 ? '' : 's'}`}
-        description="Each delete is authorized and re-validated by Kubernetes individually before it executes."
+        open={bulkAction !== null}
+        severity={bulkAction === 'restart' ? 'warning' : 'danger'}
+        title={`${bulkAction === 'restart' ? 'Restart' : 'Delete'} ${selectedItems.length} Pod${selectedItems.length === 1 ? '' : 's'}`}
+        description={`Each Pod deletion is authorized and re-validated by Kubernetes individually before it executes.`}
         resources={selectedItems.map((item) => ({ kind: 'Pod', namespace: item.namespace, name: item.name }))}
-        consequenceNote="Owned Pods are recreated by their controllers; standalone Pods are gone for good. This action cannot be undone."
-        confirmLabel="Delete selected"
-        pendingLabel="Deleting…"
-        pending={bulkDelete.isPending}
-        onConfirm={() => bulkDelete.mutate()}
-        onCancel={() => setBulkConfirm(false)}
+        consequenceNote={bulkAction === 'restart' ? 'Every selected Pod has an owner. Kubernetes removes each Pod and its controller creates a replacement; ephemeral local state is lost.' : 'Owned Pods may be recreated by their controllers; standalone Pods are gone for good. This action cannot be undone.'}
+        confirmLabel={bulkAction === 'restart' ? 'Restart selected' : 'Delete selected'}
+        pendingLabel={bulkAction === 'restart' ? 'Restarting…' : 'Deleting…'}
+        pending={bulkPodAction.isPending}
+        onConfirm={() => bulkPodAction.mutate()}
+        onCancel={() => setBulkAction(null)}
       />
     </ResourcePage>
   )

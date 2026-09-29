@@ -422,6 +422,10 @@ export function selectNamespaceScope(id: number, body: SelectNamespaceScopeReque
   return mutation<SelectionData>(`/api/v1/namespace-scopes/${id}/select`, 'POST', body, csrfToken, signal)
 }
 
+export function setDefaultNamespaceScope(id: number, body: SelectNamespaceScopeRequest, csrfToken: string, signal?: AbortSignal): Promise<SelectionData> {
+  return mutation<SelectionData>(`/api/v1/namespace-scopes/${id}/default`, 'PUT', body, csrfToken, signal)
+}
+
 export async function getPermissions(options: PermissionQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CapabilityMatrix> {
   const entries: Array<[string, string | number | boolean | undefined]> = []
   for (const namespace of options.namespaces ?? []) {
@@ -849,6 +853,15 @@ export function triggerCronJob(namespace: string, name: string, body: CronJobTri
 
 export function createPortForward(namespace: string, name: string, body: PortForwardCreateRequest, csrfToken: string, idempotencyKey: string, signal?: AbortSignal): Promise<PortForward> {
   return request<PortForward>(`/api/v1/pods/${resourcePath(namespace)}/${resourcePath(name)}/port-forward`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-KubePeep-CSRF': csrfToken, 'Idempotency-Key': idempotencyKey },
+    body: JSON.stringify(body),
+    signal,
+  })
+}
+
+export function createServicePortForward(namespace: string, name: string, body: PortForwardCreateRequest, csrfToken: string, idempotencyKey: string, signal?: AbortSignal): Promise<PortForward> {
+  return request<PortForward>(`/api/v1/services/${resourcePath(namespace)}/${resourcePath(name)}/port-forward`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-KubePeep-CSRF': csrfToken, 'Idempotency-Key': idempotencyKey },
     body: JSON.stringify(body),

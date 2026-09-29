@@ -212,6 +212,23 @@ func validatePortForward(binding namespaces.SelectionBinding, route RouteTarget,
 	return nil
 }
 
+func validateServicePortForward(binding namespaces.SelectionBinding, route RouteTarget, request PortForwardCreateRequest) *Error {
+	if err := validateConfirmation(binding, route, request.Confirmation, ActionPortForward, ConsequenceExposeServicePortLocally, "services", "Service"); err != nil {
+		return err
+	}
+	violations := make([]FieldViolation, 0, 2)
+	if request.RemotePort < 1 || request.RemotePort > 65535 {
+		violations = append(violations, FieldViolation{Field: "remotePort", Rule: "range_1_65535"})
+	}
+	if request.LocalPort != nil && (*request.LocalPort < 1024 || *request.LocalPort > 65535) {
+		violations = append(violations, FieldViolation{Field: "localPort", Rule: "null_or_range_1024_65535"})
+	}
+	if len(violations) > 0 {
+		return validationError(violations...)
+	}
+	return nil
+}
+
 func validateExec(binding namespaces.SelectionBinding, route RouteTarget, request ExecInit) *Error {
 	if err := validateConfirmation(binding, route, request.Confirmation, ActionExec, ConsequenceOpenInteractiveProcess, "pods", "Pod"); err != nil {
 		return err
@@ -296,6 +313,14 @@ func canonicalWorkloadPath(route RouteTarget, suffix string) string {
 
 func canonicalPodPath(route RouteTarget, suffix string) string {
 	path := "/api/v1/pods/" + route.Namespace + "/" + route.Name
+	if suffix != "" {
+		path += "/" + suffix
+	}
+	return path
+}
+
+func canonicalServicePath(route RouteTarget, suffix string) string {
+	path := "/api/v1/services/" + route.Namespace + "/" + route.Name
 	if suffix != "" {
 		path += "/" + suffix
 	}

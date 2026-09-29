@@ -96,6 +96,25 @@ func (handler *ActionHandlers) CreatePortForward(w http.ResponseWriter, r *http.
 	response.Created(w, result)
 }
 
+func (handler *ActionHandlers) CreateServicePortForward(w http.ResponseWriter, r *http.Request) {
+	var request actionservice.PortForwardCreateRequest
+	if err := api.DecodeStrict(w, r, &request, actionBodyLimit); err != nil {
+		api.WriteError(w, r, err)
+		return
+	}
+	binding, _ := handler.selection.Snapshot()
+	result, replayed, err := handler.portForwards.CreateService(r.Context(), binding, serviceRouteTarget(r), r.Header.Get("Idempotency-Key"), request)
+	if err != nil {
+		api.WriteError(w, r, actionHTTPError(err))
+		return
+	}
+	noStore(w)
+	if replayed {
+		w.Header().Set("Idempotency-Replayed", "true")
+	}
+	response.Created(w, result)
+}
+
 func (handler *ActionHandlers) ListPortForwards(w http.ResponseWriter, r *http.Request) {
 	binding, _ := handler.selection.Snapshot()
 	result, err := handler.portForwards.List(binding)
@@ -201,6 +220,14 @@ func workloadRouteTarget(r *http.Request) actionservice.RouteTarget {
 func podRouteTarget(r *http.Request) actionservice.RouteTarget {
 	return actionservice.RouteTarget{
 		Kind:      "pods",
+		Namespace: r.PathValue("namespace"),
+		Name:      r.PathValue("name"),
+	}
+}
+
+func serviceRouteTarget(r *http.Request) actionservice.RouteTarget {
+	return actionservice.RouteTarget{
+		Kind:      "services",
 		Namespace: r.PathValue("namespace"),
 		Name:      r.PathValue("name"),
 	}

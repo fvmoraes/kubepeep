@@ -670,6 +670,7 @@ fingerprint, conteúdo ou credencial.
 | `DELETE /api/v1/namespace-scopes/{id}` | MVP | `NamespaceScopeDeleteRequest` | 204 se inativo; `SelectionDTO`, 200, se ativo | CSRF; substituto `all` revalida `list namespaces` | 404; 409 versão/geração ou ativo sem substituto |
 | `POST /api/v1/namespace-scopes/validate` | MVP | `NamespaceScopeValidateRequest` | `NamespaceScopeValidationDTO`, 200 | CSRF; existência só se permitida | parcial |
 | `POST /api/v1/namespace-scopes/{id}/select` | MVP | `SelectNamespaceScopeRequest` | `SelectionDTO`, 200 | CSRF; `all` revalida `list namespaces` | 403 real, 404, `GENERATION_CHANGED`, `SELECTION_MISMATCH` |
+| `PUT /api/v1/namespace-scopes/{id}/default` | MVP | `SelectNamespaceScopeRequest` | `SelectionDTO`, 200 | CSRF; ativa o scope; `all` revalida `list namespaces` | 403 real, 404, `GENERATION_CHANGED`, `SELECTION_MISMATCH` |
 
 `NamespaceScopeWriteRequest`:
 
@@ -735,15 +736,19 @@ Exclusão usa:
   "confirmed": true,
   "version": 3,
   "replacementScopeId": 8,
+  "returnToSetup": false,
   "expectedGeneration": "gen_41"
 }
 ```
 
-`replacementScopeId` é obrigatório somente se o scope removido está ativo e
-precisa pertencer ao mesmo profile/contexto. Excluir scope inativo não muda a
-geração e retorna 204. Excluir o ativo valida o substituto e suas permissões,
-remove o aggregate, ativa o substituto, cria uma nova geração e retorna
-`SelectionDTO`; qualquer falha preserva scope e seleção anteriores.
+O scope default exige `replacementScopeId` apontando para outro scope do mesmo
+profile/contexto ou `returnToSetup: true`; os campos são mutuamente exclusivos.
+Um scope ativo que não é default também exige substituto. Excluir scope inativo
+e não default não muda a geração e retorna 204. Com substituto, a transação
+marca o novo default quando necessário, remove o aggregate, ativa o substituto,
+cria uma geração e retorna `SelectionDTO`. Com `returnToSetup`, remove o default,
+limpa a seleção ativa e retorna ao fluxo de configuração. Qualquer falha
+preserva scope, default e seleção anteriores.
 
 `SelectNamespaceScopeRequest`:
 
@@ -757,6 +762,11 @@ Selecionar um scope cria uma nova geração e cancela a anterior. Em `all`, a
 operação revalida `list namespaces`, usa exatamente a coleção retornada e nunca
 materializa `*`. Se a permissão foi removida, a seleção falha com 403 e a
 geração anterior permanece ativa.
+
+Marcar default usa o mesmo body em `PUT /{id}/default`. A operação preserva no
+banco exatamente um default por `(clusterProfileId, context)`, ativa esse scope
+na mesma mutação cercada por geração e não depende de listar namespaces para
+scopes `single`/`list`.
 
 A rota seleciona somente scope pertencente ao profile/contexto já ativo. Um ID
 de outra origem retorna `SELECTION_MISMATCH` sem trocar profile, default,
@@ -811,6 +821,7 @@ Falta de permissão para listar não invalida lista manual. O backend processa t
   "mode": "list",
   "namespaces": ["payments", "billing", "invoices"],
   "defaultNamespace": "payments",
+  "isDefault": true,
   "version": 3,
   "createdAt": "2026-07-27T12:00:00Z",
   "updatedAt": "2026-07-27T12:30:00Z"
@@ -1455,6 +1466,7 @@ omitidos, não reduzidos a objetos genéricos.
 | `GET /api/v1/services` | query comum | `ServiceDTO[]`, 200 | `list services` | cursor/parcial; 403/409/410/503/504 |
 | `GET /api/v1/services/{namespace}/{name}` | vazio | `ServiceDetailDTO`, 200 | `get services` com resourceName | 403/404/409/503/504 |
 | `GET /api/v1/services/{namespace}/{name}/yaml` | vazio | YAML, 200 | `get services` com resourceName | 403/404/409/413/503/504 |
+| `POST /api/v1/services/{namespace}/{name}/port-forward` | `PortForwardCreateRequest` | `PortForwardDTO`, 201; resolve backend Ready | CSRF + `get services`, `list pods` e `create pods/portforward` no Pod resolvido | 400/403/404/409/429/503/504 |
 | `GET /api/v1/ingresses` | query comum | `IngressDTO[]`, 200 | `list networking.k8s.io/ingresses` | cursor/parcial; 403/409/410/503/504 |
 | `GET /api/v1/ingresses/{namespace}/{name}` | vazio | `IngressDetailDTO`, 200 | `get networking.k8s.io/ingresses` com resourceName | 403/404/409/503/504 |
 | `GET /api/v1/ingresses/{namespace}/{name}/yaml` | vazio | YAML, 200 | `get networking.k8s.io/ingresses` com resourceName | 403/404/409/413/503/504 |
@@ -1638,6 +1650,15 @@ Criação pelo endpoint do Pod:
   "expectedGeneration": "gen_42"
 }
 ```
+
+Criação pelo endpoint do Service usa o mesmo envelope, com `kind: "Service"`,
+`name` do Service, `remotePort` igual à porta TCP publicada e
+`consequenceCode: "EXPOSE_SERVICE_PORT_LOCALLY"`. O backend lê o Service,
+seleciona deterministicamente um Pod Running/Ready compatível com seu selector,
+resolve `targetPort` inteiro ou nomeado e revalida `create pods/portforward`
+para o nome exato desse Pod antes do upgrade. Service sem selector, sem porta
+TCP solicitada, sem backend pronto ou sem o named target port retorna 404. O
+`PortForwardDTO.pod` identifica o backend efetivamente usado.
 
 Exige `Idempotency-Key`. O backend escolhe porta quando null e retorna somente após listener local adquirido:
 

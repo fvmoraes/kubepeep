@@ -53,6 +53,40 @@ func TestPortForwardUsesExactSARAndOwnsLoopbackLifecycle(t *testing.T) {
 	}
 }
 
+func TestServicePortForwardResolvesReadyPodBeforeExactUpgradeAuthorization(t *testing.T) {
+	generations := &generationStub{generation: "gen_1"}
+	authorizer := &authorizerStub{}
+	adapter := &portForwardAdapterStub{}
+	manager, err := NewPortForwardService(context.Background(), authorizer, generations, adapter, NoopAuditSink{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(manager.Shutdown)
+	binding := testBinding("gen_1")
+	dto, replayed, err := manager.CreateService(
+		context.Background(),
+		binding,
+		RouteTarget{Kind: "services", Namespace: "payments", Name: "api"},
+		"service-forward-key",
+		testServicePortForward("gen_1", "payments", "api", 8080),
+	)
+	if err != nil || replayed {
+		t.Fatalf("service port-forward failed: %#v replayed=%v err=%v", dto, replayed, err)
+	}
+	if dto.Pod != "api-pod" || dto.RemotePort != 8080 {
+		t.Fatalf("resolved session = %#v", dto)
+	}
+	calls := authorizer.snapshot()
+	if len(calls) != 1 || calls[0].key.Resource != "pods" || calls[0].key.Subresource != "portforward" || calls[0].key.ResourceName != "api-pod" || calls[0].kind != "upgrade" {
+		t.Fatalf("resolved exact SAR = %#v", calls)
+	}
+	adapter.mu.Lock()
+	defer adapter.mu.Unlock()
+	if len(adapter.commands) != 1 || adapter.commands[0].Target.Kind != "Pod" || adapter.commands[0].Target.Name != "api-pod" {
+		t.Fatalf("resolved command = %#v", adapter.commands)
+	}
+}
+
 func TestPortForwardValidationAndOccupiedPortFailSafely(t *testing.T) {
 	generations := &generationStub{generation: "gen_1"}
 	authorizer := &authorizerStub{}

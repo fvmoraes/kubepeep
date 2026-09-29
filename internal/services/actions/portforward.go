@@ -132,6 +132,53 @@ func (m *PortForwardManager) Create(ctx context.Context, binding namespaces.Sele
 	return copyPortForwardDTO(dto), replayed, err
 }
 
+// CreateService resolves a Service port to one ready backing Pod, then uses
+// the same exact pods/portforward authorization and lifecycle as Pod actions.
+// The Service get and selector based Pod list are real Kubernetes operations,
+// so their own RBAC is enforced by the API server before the upgrade check.
+func (m *PortForwardManager) CreateService(ctx context.Context, binding namespaces.SelectionBinding, route RouteTarget, idempotencyKey string, request PortForwardCreateRequest) (PortForwardDTO, bool, error) {
+	if err := validateContext(ctx); err != nil {
+		return PortForwardDTO{}, false, err
+	}
+	if err := validateServicePortForward(binding, route, request); err != nil {
+		return PortForwardDTO{}, false, err
+	}
+	if err := validateIdempotencyKey(idempotencyKey); err != nil {
+		return PortForwardDTO{}, false, err
+	}
+	if err := m.requireCurrent(binding.Generation); err != nil {
+		return PortForwardDTO{}, false, err
+	}
+	bodyHash, err := canonicalBodyHash(request)
+	if err != nil {
+		return PortForwardDTO{}, false, err
+	}
+	identity := idempotencyIdentity{
+		Method:           http.MethodPost,
+		Path:             canonicalServicePath(route, "port-forward"),
+		ClusterProfileID: binding.ClusterProfileID,
+		Generation:       binding.Generation,
+		BodyHash:         bodyHash,
+	}
+	dto, replayed, err := m.idempotency.Do(ctx, idempotencyKey, identity, func() (PortForwardDTO, error) {
+		serviceTarget := mutationTarget(binding, request.Target)
+		resolved, resolveErr := m.adapter.ResolveService(ctx, serviceTarget, request.RemotePort)
+		if resolveErr != nil {
+			return PortForwardDTO{}, translateError(resolveErr)
+		}
+		if currentErr := m.requireCurrent(binding.Generation); currentErr != nil {
+			return PortForwardDTO{}, currentErr
+		}
+		podRequest := request
+		podRequest.RemotePort = resolved.RemotePort
+		podRequest.Target.Namespace = resolved.Target.Namespace
+		podRequest.Target.Kind = "Pod"
+		podRequest.Target.Name = resolved.Target.Name
+		return m.createOnce(ctx, binding, podRequest)
+	})
+	return copyPortForwardDTO(dto), replayed, err
+}
+
 func (m *PortForwardManager) createOnce(ctx context.Context, binding namespaces.SelectionBinding, request PortForwardCreateRequest) (dto PortForwardDTO, returnedErr error) {
 	target := mutationTarget(binding, request.Target)
 	started := m.clock.Now().UTC()
