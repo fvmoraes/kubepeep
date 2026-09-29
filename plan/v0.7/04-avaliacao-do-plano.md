@@ -1,8 +1,21 @@
 # Avaliação do plano v0.7
 
+> **Atualização de estado — 2026-09-29:** este documento preserva a avaliação
+> inicial feita sobre `d71d488`. Desde então, F0–F4 foram implementadas,
+> validadas e registradas em
+> [03-evidencias-execucao.md](03-evidencias-execucao.md). F5–F7 permanecem
+> pendentes. As afirmações abaixo sobre código inexistente ou execução pendente
+> descrevem o snapshot inicial e não o estado atual da branch.
+
 ## Resultado
 
-O plano organiza as entregas e preserva as principais premissas do produto, mas a revisão inicial identificou conflitos de contrato que impediam executá-lo literalmente com segurança. As resoluções documentais estão em [C01–C06](05-contratos-e-aceite.md) e foram incorporadas à matriz e às fases; a validação funcional continua pendente. Esta avaliação não declara F0–F7 implementadas. A base examinada é `d71d488`; `origin/main` local está um commit à frente (`598e167`, release 0.6.2). A integração dessa referência deve preceder o baseline funcional, com revisão do diff.
+O plano organiza as entregas e preserva as principais premissas do produto, mas
+a revisão inicial identificou conflitos de contrato que impediam executá-lo
+literalmente com segurança. As resoluções documentais estão em
+[C01–C06](05-contratos-e-aceite.md) e foram incorporadas à matriz e às fases.
+Naquele snapshot, a validação funcional permanecia pendente e esta avaliação não
+declarava F0–F7 implementadas. A base examinada era `d71d488`; `origin/main`
+local apontava para `598e167` (release 0.6.2).
 
 ## Achados da revisão inicial e impacto
 
@@ -34,4 +47,6 @@ O escopo alterado é Markdown: validar destinos relativos e diff, além do gate 
 
 - **IMPLEMENTADO:** avaliação documental e dos contratos destacados, branch dedicada, correção dos links e identificação de versão, preservação das alterações preexistentes do usuário, sem push.
 - **ALTERADO:** a etapa inicial é avaliação documental; não se confunde com a Fase 0 funcional do plano. Contratos conflitantes foram resolvidos documentalmente em C01–C06, sem alteração de código ou aceite funcional.
-- **PENDENTE:** execução F0–F7 conforme os contratos resolvidos, seus testes, builds, benchmarks e evidências. Impacto: a release não está aprovada. Próxima etapa: implementar e validar F0; avançar somente após autorização do usuário.
+- **PENDENTE NO SNAPSHOT INICIAL:** execução F0–F7 conforme os contratos
+  resolvidos. Estado atual: F0–F4 finalizadas; a aprovação da release continua
+  dependente de F5–F7.

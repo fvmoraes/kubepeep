@@ -1,8 +1,24 @@
 # Estado atual e limites da v0.7
 
-Base de código: HEAD local `d71d488` (com release `0.6.1` no histórico); a referência local `origin/main` aponta para `598e167` (release `0.6.2`), ainda não integrada nesta branch, com o plano de expansão de recursos registrado em [`plan/v0/03-evidencias-execucao.md`](../v0/03-evidencias-execucao.md). Inventário revisado por Codebase MCP e leitura da fonte em setembro de 2026.
+Base atual auditada: branch `review/plan-v0.7`, a partir de `1345947`, com
+Fases 0–4 implementadas e enviadas ao remoto. O inventário foi revisado por
+Codebase MCP, leitura da fonte e gates completos em 29 de setembro de 2026.
+O registro verificável está em [03-evidencias-execucao.md](03-evidencias-execucao.md).
 
-**Enquadramento desta v0.7:** todo o conteúdo dos três documentos em [`../v0.7_reference/`](../v0.7_reference/) é tratado como **trabalho de ajuste, melhoria e revisão a executar nas fases** — independentemente do que já exista na base. Nada é assumido como pronto: cada entrega passa pelo aceite da sua fase, com evidência própria. Os caminhos abaixo apenas localizam onde cada tema toca o código hoje; eles não substituem a execução nem o aceite.
+| Fase | Estado atual |
+| --- | --- |
+| F0 | finalizada; baseline, instrumentação e inventário funcional registrados |
+| F1 | finalizada; 13/13 tarefas com evidência |
+| F2 | finalizada; 12/12 tarefas com evidência |
+| F3 | finalizada; 9/9 tarefas com evidência |
+| F4 | finalizada; 15/15 tarefas com evidência |
+| F5–F7 | ainda não executadas |
+
+**Enquadramento desta v0.7:** todo o conteúdo dos três documentos em
+[`../v0.7_reference/`](../v0.7_reference/) foi tratado como trabalho de ajuste,
+melhoria e revisão, independentemente do que já existia na base. As Fases 0–4
+passaram pelos respectivos aceites e possuem evidência própria; F5–F7 continuam
+como trabalho futuro. Os caminhos abaixo localizam onde cada tema toca o código.
 
 ## Onde as referências tocam a base (mapa de trabalho, não lista de concluído)
 
@@ -17,7 +33,10 @@ Base de código: HEAD local `d71d488` (com release `0.6.1` no histórico); a ref
 | Paleta/diagnóstico | `web/src/components/CommandCenter.tsx`, `internal/observability/` | busca local, problems, diagnostics (F5) |
 | Laboratório | `test/kind/harness.sh` | matriz de benchmark de performance (F0) |
 
-Infinite query, virtualização, coalescing de consultas, resource cache de snapshot, índices locais e Problems Engine **não existem** nesta base e serão construídos nas fases correspondentes. Usar os caminhos reais acima, sem criar duplicatas.
+Infinite query, virtualização, coalescing de consultas, resource cache de
+snapshot e índices locais foram entregues nas Fases 1–3. Scope default e o
+refinamento funcional da UI foram entregues na Fase 4. O Problems Engine
+continua atribuído à Fase 5. Usar os caminhos reais acima, sem criar duplicatas.
 
 ## Contrato da v0.7
 
@@ -47,7 +66,10 @@ Secrets permanecem metadata-only (sem conteúdo em cache, cursor, telemetria ou 
 10. Nenhum redesign: preservar identidade visual, componentes e tokens existentes; F4 audita, não substitui.
 11. O scope default é uma escolha **local** do usuário (preferência por contexto); nunca implica `list/get namespaces`, criação de objetos Namespace ou ampliação de RBAC. O carregamento obrigatório do scope default não contorna autorização por recurso.
 
-## Evidência inicial a registrar na primeira execução
+## Evidência inicial registrada
+
+Os requisitos abaixo foram executados durante F0/F1 e seus resultados, ambiente,
+SHAs e limitações estão em [03-evidencias-execucao.md](03-evidencias-execucao.md).
 
 - SHA de partida, `rtk make verify` verde como referência de regressão e worktree limpo.
 - Reprodução do bug de Pods sem dados: modo (web/desktop), contexto, scope, permissões e camada responsável — antes de qualquer correção.
