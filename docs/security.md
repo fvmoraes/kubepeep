@@ -645,6 +645,26 @@ Evidências ainda exigidas da implementação:
   em Unix e Windows nativos.
 - [ ] Os archives F8 repetem `start`/`status`/`stop` nos runners de release.
 
+### 19.1 Gate de release da Fase 7
+
+O fechamento v0.7 acrescenta `make release-artifact-check`. O comando examina
+binários e árvores de `dist/` e extrai ZIP, tar e DEB antes de procurar
+sentinelas internas, blocos de chave privada e headers Authorization. Caminho
+ausente ou formato que exija ferramenta indisponível falha fechado.
+
+Os testes de não persistência usam sentinelas distintas para contexto,
+namespace e nome do objeto e inspecionam evento de auditoria, stdout, SQLite e
+JSONL. O evento de ação passou a guardar somente o kind canônico; a alteração
+fecha a possibilidade de persistir identidade Kubernetes válida em log
+operacional. Secrets continuam metadata-only e cursor/resource cache continuam
+exclusivamente em memória.
+
+No candidato local, `scripts/security_check.sh HEAD`, `go mod verify`,
+`govulncheck ./...`, `npm audit --omit=dev` e o scanner de `dist/` passaram.
+`govulncheck` encontrou zero vulnerabilidades alcançáveis; um advisory em
+pacote importado permaneceu sem call path. Dependências npm de produção
+reportaram zero vulnerabilidades.
+
 ## 20. Delta de segurança da experiência operacional
 
 A Fase 9 introduz superfícies que aceleram navegação e troubleshooting, mas

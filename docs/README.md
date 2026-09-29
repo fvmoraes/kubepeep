@@ -26,6 +26,7 @@
 | [RBAC](rbac-requirements.md) | Capabilities e operações Kubernetes |
 | [Observabilidade](observability.md) | Logs operacionais, métricas e diagnóstico |
 | [Protocolo e tuning](protocol-tuning.md) | Benchmarks, decisões e rollback da Fase 6 |
+| [Candidato v0.7](release-v0.7-candidate.md) | Notas, gates, limitações e decisão de publicação |
 
 ## Decisões e histórico
 

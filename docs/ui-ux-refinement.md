@@ -222,3 +222,32 @@ Limites deliberados, sem controles que prometam essas operações:
 - Helm releases e Gateway API continuam fora da implementação atual;
 - a API pública continua limitada e paginada; a lista virtualizada mantém o DOM
   bounded sem fingir que resultados não carregados estão presentes.
+
+## 11. Auditoria final da Fase 7 — checklist §30
+
+A auditoria final repetiu o inventário inteiro, em vez de validar somente Pods.
+`phase07.spec.ts` percorreu os 44 destinos habilitados da navegação em
+1366×768, 1440×900, 1920×1080 e 2560×1440. Cada clique atualizou URL,
+`aria-current`, heading da tela e manteve a largura do documento dentro da
+viewport. O E2E preexistente foi alinhado ao contrato atual e também repetiu
+navegação, reload e History API com seleção resolvida.
+
+| Critério final | Evidência | Resultado |
+| --- | --- | --- |
+| hierarquia e navegação | 44 destinos × 4 viewports; reload e back | aprovado, sem clique morto nem overflow global |
+| densidade e espaço útil | medidas F4 + varredura F7 em todas as telas | filtros abaixo do teto e conteúdo predominante |
+| loading/empty/error/partial/forbidden | Vitest das páginas e E2E offline/Kind | estados distintos e com ação de recuperação |
+| scope default | browser troca dois contextos; Kind reabre, descobre e ativa o default antes da LIST | aprovado sem assumir All ou ampliar RBAC |
+| workspace | tabs por kind, histórico, overlays e fechamento | aprovado; overlays limitam altura e contêm overscroll |
+| catálogo por workload | catálogo fechado para Deployment, StatefulSet, DaemonSet, Job, CronJob e ReplicaSet | aprovado; somente ações semanticamente válidas aparecem |
+| RBAC visual | 6 kinds × allowed/denied/unknown/error | 24 combinações aprovadas; backend continua revalidando |
+| confirmação destrutiva | diálogo, foco visível, alvo, consequência e nome quando crítico | aprovado |
+| controles indisponíveis | tooltip/título e razão visível, inclusive Events sem detalhe | aprovado |
+| responsividade/acessibilidade | landmarks, headings, foco, teclado, tabela e quatro resoluções | aprovado |
+| Pods web | Playwright e suíte de recursos | dados reais/sintéticos visíveis; vazio não mascara erro |
+| Pods desktop | Wails nativo + AT-SPI em perfil isolado e Kind real | tabela `Authorized Pod pages` com nove linhas autorizadas |
+
+O gate inicial também impede que rotas de recursos montem enquanto status e
+seleção ainda não foram resolvidos. Rotas de setup (`/` e `/namespaces`) ficam
+acessíveis para carregar ou reparar o contexto. Assim, a restauração de default
+acontece antes da primeira LIST, e estados offline/erro continuam alcançáveis.

@@ -230,6 +230,7 @@ da F2 deve:
 ```sh
 make benchmark              # sintético representativo, JSON em .state/
 make benchmark-matrix       # matriz sintética completa
+make benchmark-protocol     # transporte e rate limits no contexto Kind ativo
 ./test/kind/harness.sh static
 ./test/kind/harness.sh validate   # somente com Kind disponível
 ```
@@ -251,3 +252,23 @@ nativo são resultados separados.
 | spans e atributos sem dados sensíveis | `internal/observability/tracing_test.go` |
 | métricas UX, vocabulário e limite de amostras | `web/src/observability/uxMetrics.test.ts` |
 | matriz sintética, C02 e sanitização do relatório | `test/kind/benchmark` |
+
+## 8. Fechamento observacional da Fase 7
+
+O schema `kubepeep-performance-baseline/v2` registra explicitamente
+`http_429`, `cache_hits` e `watch_reconnects` em cada cenário. Zero é um valor
+medido ou uma ausência declarada pelo protocolo, nunca campo omitido. A matriz
+de regressão também limita cursor a 1 MiB por entrada, memória do processo no
+cenário suportado e retorno das goroutines ao baseline.
+
+Auditoria de ações mantém somente campos operacionais fechados: componente,
+operação, decisão, kind canônico, duração e código de erro. Contexto,
+namespace, nome, UID, resourceVersion, body, porta e erro upstream não entram
+no evento. Kinds fora da allowlist viram `Unknown`; isso evita transformar logs
+locais em inventário de objetos Kubernetes.
+
+Os relatórios completos permanecem em `test/kind/.state/`, ignorados pelo Git.
+O resumo comparável e sanitizado está em `performance-baseline.md`; métricas de
+cache/watch de produção continuam vindo dos próprios componentes e de
+Diagnostics, porque o runner direto de `resources.Collect` não instancia esse
+cache nem fabrica reconexões.

@@ -234,3 +234,66 @@ mudar, a diferença deve ser declarada em vez de misturar as séries.
 - `npm ci` reporta duas vulnerabilidades moderadas em dependências de
   desenvolvimento; `npm audit --omit=dev` reporta zero vulnerabilidades de
   produção. Nenhum `audit fix --force` foi aplicado.
+
+## 9. Comparativo final da Fase 7
+
+A coleta posterior às Fases 1–6 foi executada em 29 de setembro de 2026 no
+commit `b148a6028dd800e30b9cc54a1cd14a8c862f1fac`, com árvore limpa, no mesmo
+host, versão de Go, arquitetura, quantidade de CPUs, `GOMAXPROCS`, memória,
+aquecimento e cinco repetições da baseline. O schema passou para
+`kubepeep-performance-baseline/v2` apenas para explicitar `http_429`,
+`cache_hits` e `watch_reconnects`; os demais campos e o protocolo de medição
+permaneceram comparáveis.
+
+### 9.1 Antes e depois nos caminhos bem-sucedidos
+
+| Cenário | Full page p95 antes → depois | Requests p50 | Bytes p50 | Over-fetch p50 | Alocação p50 | Pico de goroutines p50 | Cursor p50 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `global-200` | 0,170 → 0,144 ms (-15,3%) | 1 → 1 | 18.601 → 18.601 | 1 → 1 | 138.528 → 175.064 B | 2 → 1 | 168 → 168 B |
+| `namespace-100` | 508,069 → 61,363 ms (-87,9%) | 100 → 12 | 186.100 → 22.332 | 10 → 1,2 | 6.196.168 → 636.312 B | 100 → 5 | 184.095 → 14.959 B |
+| `mixed-100` | 760,736 → 101,773 ms (-86,6%) | 60 → 6 | 111.660 → 11.166 | 12 → 1,2 | 3.736.240 → 486.384 B | 98 → 6 | 116.580 → 12.792 B |
+| `internal-200-origins` | 1,503 → 0,535 ms (-64,4%) | 200 → 12 | 372.200 → 22.332 | 20 → 1,2 | 12.567.712 → 987.256 B | 200 → 5 | 383.495 → 25.355 B |
+
+O caminho global já era unitário; a pequena variação de alocação é ruído de
+uma suíte sintética sem isolamento de CPU. Nos três caminhos de fan-out, tempo,
+requests, bytes, over-fetch, alocação, concorrência e cursor caíram juntos. O
+delta final de goroutines foi zero em todos os dez cenários.
+
+### 9.2 Falhas, watch e contadores explícitos
+
+| Cenário | Full page p95 | Requests p50 | HTTP 429 p50 | Falhas parciais p50 | Watch lag p50/p95 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `authorization-unavailable` | 0,087 ms | 0 | 0 | 10 | — |
+| `restricted-200-rejected` | 0,026 ms | 0 | 0 | 0 | — |
+| `global-429` | 101,055 ms | 1 | 1 | 1 | — |
+| `global-410` | 201,043 ms | 1 | 0 | 0 | 1,022 / 1,040 ms |
+| `global-timeout` | 50,211 ms | 1 | 0 | 1 | — |
+| `global-reset` | 20,275 ms | 1 | 0 | 1 | — |
+
+Cada falha continuou com um único request, sem amplificação. `cache_hits=0` e
+`watch_reconnects=0` são resultados explícitos: este laboratório chama
+`resources.Collect` diretamente, não possui o cache de produção, e o probe de
+watch saudável não reconecta. Cache hit, reconexão e eviction continuam
+cobertos nas suítes dos componentes e nos Diagnostics; atribuir atividade
+artificial ao runner violaria C04.
+
+### 9.3 Matriz, protocolo e aceite real
+
+A matriz final repetiu os 47 cenários: 29 `ok`, 18 `expected_error`, zero
+instável e zero erro inesperado. Foram 145 outcomes `success`, 30
+`AUTHORIZATION_UNAVAILABLE`, 20 `CLUSTER_UNAVAILABLE`, 10 `CURSOR_EXPIRED`,
+10 `UPSTREAM_TIMEOUT` e 20 `VALIDATION_FAILED`.
+
+O protocolo Kind real no mesmo SHA e árvore limpa observou 23 Pods. Partial
+metadata usou 69.590 bytes contra 142.634 do JSON; Protobuf, 95.503 bytes; gzip,
+21.037 bytes. No ensaio determinístico de 429, concorrência fixa produziu 9
+respostas e AIMD produziu 2, com duas reduções e quatro recuperações. As
+decisões F6 permanecem válidas.
+
+O harness Kind completo passou com contexto/scope, dashboard, recursos,
+SSE/log, WebSocket exec, revogação/restauração de RBAC e modo offline. No
+binário Wails atual, uma execução nativa isolada registrou shell pronto em
+431,9 ms; após restaurar o default persistido, a árvore AT-SPI da tela Pods
+expôs uma tabela autorizada com nove linhas reais do namespace `kp-allowed`.
+Esta inspeção comprova R01 no desktop, mas a amostra única de shell não
+substitui a série de startup registrada na F3.

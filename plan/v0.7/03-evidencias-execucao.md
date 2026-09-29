@@ -332,12 +332,33 @@ SSE/log, WebSocket exec, revogação/restauração RBAC e modo offline passaram.
 
 ## Fase 7 — Validação comparativa e preparação da release
 
+**Status: FINALIZADA no commit funcional `b148a60` da branch
+`review/plan-v0.7`.** Os JSONs completos permanecem locais em
+`test/kind/.state/`; os agregados sanitizados foram publicados na documentação.
+
 | ID | Commit | Evidência | Resultado |
 | --- | --- | --- | --- |
-|  |  |  |  |
+| F7-01 | `b148a60` | `make benchmark`, `make benchmark-matrix`, `make benchmark-protocol`; `docs/performance-baseline.md` | **IMPLEMENTADO:** schema v2, 10 cenários representativos e matriz 47/47 em árvore limpa. Namespace-100 caiu de 508,069 para 61,363 ms p95 e mixed-100 de 760,736 para 101,773 ms; requests/bytes/over-fetch/cursor/concorrência caíram juntos. 429, cache hit e reconexão ficaram explícitos. |
+| F7-02 | `85a39d4` | `pagination_phase07_test.go`, handler 410, `make test-race` | **IMPLEMENTADO:** 10×100 objetos, `limit=37`, identity asc/desc, age asc/desc, sem gaps/duplicatas, mutação expira snapshot, erro sanitizado, cursor/memória limitados e goroutines de volta ao baseline. |
+| F7-03 | `b148a60` | comparação P0/P1/P2; revisões C01–C06; matriz F1–F6 | **APROVADO:** limites legítimos, generation fence, timeout, lazy merge, cancelamento, coalescing, 429/410, watch/cache, virtualização, progressividade e ações condicionais permaneceram cobertos; R01/R02/R03 não reproduziram. |
+| F7-04 | `b148a60` | `make verify`, `make test`, `make test-e2e`, `make test-race`, `make format-check lint typecheck`, `make build smoke`, `make build-desktop` | **APROVADO:** todos os gates terminaram verdes; lint manteve 8 warnings conhecidos e zero erro. |
+| F7-05 | `85a39d4` | `phase07.spec.ts`; 44 destinos × 4 viewports; catálogo por kind; matriz RBAC; Kind e AT-SPI Wails | **APROVADO:** zero clique morto/overflow; 24 combinações RBAC; default antes da LIST; Pods exibiu nove linhas Kind reais no WebView nativo. |
+| F7-06 | `b148a60` | gate de segurança em cada commit; `go mod verify`; `govulncheck ./...`; `npm audit --omit=dev`; `make release-artifact-check` | **APROVADO:** zero leak, vulnerabilidade alcançável ou de produção; audit log sem identidade de objeto; Secrets metadata-only e stores efêmeros preservados. |
+| F7-07 | `b148a60` | `docs/release-v0.7-candidate.md`; build CLI/Wails; scanner de `dist/` | **PREPARADO LOCALMENTE:** notas, limitações e decisão de publicação registradas. Nenhum tag, push ou release foi criado. GoReleaser não está instalado no host, portanto pacotes finais multiplataforma ficam para a etapa explícita de publicação. |
 
-## Pendências futuras (não reabrem a Fase 0)
+O harness `create/validate` reaplicou fixtures expirados sem excluir o cluster;
+o `app-e2e` final aprovou contexto/scope, dashboard, recursos, SSE/log,
+WebSocket exec, revogação/restauração de RBAC e offline. O kubeconfig restrito
+foi renovado antes do aceite Wails. O nó Kind permaneceu preservado.
 
-- F1-11, F1-12 e F1-13 preservam integralmente as validações transferidas.
-- Métricas e spans do novo resource cache continuam atribuídos à F2 por C04;
-  não são simulados para fechar D01/D04 antecipadamente.
+Segurança final: o evento de ação guarda apenas kind canônico, duração, decisão
+e código fechado. Sentinelas de contexto, namespace e objeto foram verificadas
+contra evento, stdout, SQLite, JSONL e artefatos. `govulncheck` reportou zero
+call paths vulneráveis e um advisory importado não alcançável; npm de produção
+reportou zero vulnerabilidades. `npm ci` ainda informa dois advisories moderados
+e um alto restritos ao conjunto de desenvolvimento.
+
+## Decisão externa remanescente
+
+- Escolha da versão/tag, instalação/execução do GoReleaser, push e publicação
+  dependem de ação explícita do mantenedor e não reabrem a Fase 7.
