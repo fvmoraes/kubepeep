@@ -48,6 +48,14 @@ afterEach(() => {
 })
 
 describe('default scope gate', () => {
+  it('does not mount resource children before the active selection is known', () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+    render(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/pods']}><DefaultScopeGate selection={null} selectionPending><div>Protected resources</div></DefaultScopeGate></MemoryRouter></QueryClientProvider>)
+
+    expect(screen.getByRole('heading', { name: 'Loading the active context' })).toBeInTheDocument()
+    expect(screen.queryByText('Protected resources')).not.toBeInTheDocument()
+  })
+
   it('activates the persisted default before exposing resources', async () => {
     let selectBody: unknown
     const fetch = vi.fn((input: string | URL | Request, init?: RequestInit) => {

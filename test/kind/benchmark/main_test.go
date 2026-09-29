@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/fvmoraes/kubepeep/internal/api"
 	"github.com/fvmoraes/kubepeep/internal/services/resources"
 )
 
@@ -126,6 +127,31 @@ func TestReportIsSanitizedAndDeclaresMeasurementProtocol(t *testing.T) {
 	}
 	if result.Results[0].Metrics.WatchEvents.P50 < 1 || result.Results[0].Metrics.CursorBytes.P50 <= 0 {
 		t.Fatalf("watch/cursor metrics missing: %#v", result.Results[0].Metrics)
+	}
+	if result.Results[0].Metrics.HTTP429.Count != 1 || result.Results[0].Metrics.CacheHits.Count != 1 || result.Results[0].Metrics.WatchReconnects.Count != 1 {
+		t.Fatalf("release comparison counters missing: %#v", result.Results[0].Metrics)
+	}
+}
+
+func TestRepresentativeReportRecordsMemoryAndWorkerBounds(t *testing.T) {
+	candidates := []scenario{
+		newScenario("global-200", profileGlobal, 200, 100, 100, 0, faultNone, true),
+		newScenario("internal-200", profileInternal, 200, 10, 100, 0, faultNone, false),
+	}
+	result := runReport("release-bounds", "deadbeef", "clean", 0, 3, candidates)
+	for _, measured := range result.Results {
+		if measured.Status != "ok" {
+			t.Fatalf("scenario %s = %s", measured.Scenario.ID, measured.Status)
+		}
+		if measured.Metrics.FinalGoroutineDelta.Max > 0 {
+			t.Fatalf("scenario %s leaked goroutines: %+v", measured.Scenario.ID, measured.Metrics.FinalGoroutineDelta)
+		}
+		if measured.Metrics.CursorBytes.Max > float64(api.CursorStoreMaxEntryBytes) {
+			t.Fatalf("scenario %s exceeded cursor entry budget: %+v", measured.Scenario.ID, measured.Metrics.CursorBytes)
+		}
+		if measured.Metrics.TotalAllocDelta.Max > float64(64<<20) {
+			t.Fatalf("scenario %s exceeded the 64 MiB laboratory allocation bound: %+v", measured.Scenario.ID, measured.Metrics.TotalAllocDelta)
+		}
 	}
 }
 

@@ -33,6 +33,7 @@ import type {
 import { Badge, Button, Input, Select } from './ui'
 import { ConfirmDialog } from './ui/ConfirmDialog'
 import { useToast } from './ui/Toast'
+import { workloadActionCatalog, type WorkloadActionID } from './workloadActionCatalog'
 
 function mutationError(error: unknown): string {
   if (error instanceof APIError) return `${error.code}: ${error.message}`
@@ -123,18 +124,6 @@ function CopyValueButton({ label, value }: { label: string; value: string }) {
   )
 }
 
-const workloadDeleteCapabilities: Record<WorkloadDetail['kind'], string> = {
-  Deployment: 'deployments.delete',
-  StatefulSet: 'statefulsets.delete',
-  DaemonSet: 'daemonsets.delete',
-  Job: 'jobs.delete',
-  CronJob: 'cronjobs.delete',
-  ReplicaSet: 'replicasets.delete',
-}
-
-const restartableKinds = new Set<WorkloadDetail['kind']>(['Deployment', 'StatefulSet', 'DaemonSet'])
-const scalableKinds = new Set<WorkloadDetail['kind']>(['Deployment', 'StatefulSet'])
-
 export function WorkloadActions({ detail, selection }: { detail: WorkloadDetail; selection: SelectionSummary }) {
   const queryClient = useQueryClient()
   const toast = useToast()
@@ -143,15 +132,11 @@ export function WorkloadActions({ detail, selection }: { detail: WorkloadDetail;
   const [confirmAction, setConfirmAction] = useState<'delete' | 'restart' | null>(null)
   const isCronJob = detail.kind === 'CronJob'
   const suspended = detail.status === 'Suspended'
-  const canRestart = restartableKinds.has(detail.kind)
-  const canScale = scalableKinds.has(detail.kind)
-
-  const capabilityIDs = [
-    ...(canRestart ? [`${kindPath(detail.kind)}.restart`] : []),
-    ...(canScale ? [`${kindPath(detail.kind)}.scale`] : []),
-    workloadDeleteCapabilities[detail.kind],
-    ...(isCronJob ? ['cronjobs.suspend', 'cronjobs.runnow'] : []),
-  ]
+  const actionCatalog = workloadActionCatalog[detail.kind]
+  const canRestart = actionCatalog.some((action) => action.id === 'restart')
+  const canScale = actionCatalog.some((action) => action.id === 'scale')
+  const capabilityIDs = actionCatalog.map((action) => action.capabilityID)
+  const capabilityFor = (id: WorkloadActionID) => actionCatalog.find((action) => action.id === id)?.capabilityID
   const permissions = useQuery({
     queryKey: ['action-permissions', selection.generation, detail.metadata.namespace, detail.metadata.name, ...capabilityIDs],
     queryFn: ({ signal }) => getPermissions({
@@ -162,11 +147,11 @@ export function WorkloadActions({ detail, selection }: { detail: WorkloadDetail;
     enabled: Boolean(selection.generation),
     staleTime: 15_000,
   })
-  const restartDecision = canRestart ? decision(permissions.data, `${kindPath(detail.kind)}.restart`) : ('denied' as const)
-  const scaleDecision = canScale ? decision(permissions.data, `${kindPath(detail.kind)}.scale`) : ('denied' as const)
-  const deleteDecision = decision(permissions.data, workloadDeleteCapabilities[detail.kind])
-  const suspendDecision = isCronJob ? decision(permissions.data, 'cronjobs.suspend') : ('denied' as const)
-  const runNowDecision = isCronJob ? decision(permissions.data, 'cronjobs.runnow') : ('denied' as const)
+  const restartDecision = canRestart ? decision(permissions.data, capabilityFor('restart')!) : ('denied' as const)
+  const scaleDecision = canScale ? decision(permissions.data, capabilityFor('scale')!) : ('denied' as const)
+  const deleteDecision = decision(permissions.data, capabilityFor('delete')!)
+  const suspendDecision = isCronJob ? decision(permissions.data, capabilityFor('suspend')!) : ('denied' as const)
+  const runNowDecision = isCronJob ? decision(permissions.data, capabilityFor('runNow')!) : ('denied' as const)
   // V3-10/V5-05: an HPA known to target this workload adds a scale warning.
   // Without horizontalpodautoscalers.list the presence stays unknown; absence
   // of access never proves there is no autoscaler.

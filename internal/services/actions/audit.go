@@ -6,14 +6,13 @@ import (
 )
 
 // AuditEvent is deliberately incapable of carrying request bodies, commands,
-// tickets, stream data, ports, or upstream error text.
+// tickets, stream data, ports, upstream error text, or Kubernetes object
+// identities. Resource contains only a canonical kind from a closed set.
 type AuditEvent struct {
 	Timestamp time.Time
 	Level     string
 	Component string
 	Operation string
-	Context   string
-	Namespace string
 	Resource  string
 	Duration  time.Duration
 	ErrorCode ErrorCode
@@ -45,12 +44,19 @@ func recordAudit(ctx context.Context, sink AuditSink, clock Clock, started time.
 		Level:     level,
 		Component: "actions",
 		Operation: safeMetadata(operation),
-		Context:   safeMetadata(target.Context),
-		Namespace: safeMetadata(target.Namespace),
-		Resource:  safeMetadata(target.Kind + "/" + target.Name),
+		Resource:  auditResourceKind(target.Kind),
 		Duration:  nonNegativeDuration(now.Sub(started)),
 		ErrorCode: code,
 	})
+}
+
+func auditResourceKind(kind string) string {
+	switch kind {
+	case "Pod", "Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob", "ReplicaSet", "Service":
+		return kind
+	default:
+		return "Unknown"
+	}
 }
 
 func nonNegativeDuration(value time.Duration) time.Duration {

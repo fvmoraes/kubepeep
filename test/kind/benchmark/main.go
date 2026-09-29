@@ -25,7 +25,7 @@ import (
 	"github.com/fvmoraes/kubepeep/internal/services/resources"
 )
 
-const schemaVersion = "kubepeep-performance-baseline/v1"
+const schemaVersion = "kubepeep-performance-baseline/v2"
 
 type profile string
 
@@ -101,6 +101,9 @@ type metrics struct {
 	PartialFailures     distribution `json:"partial_failures"`
 	WatchEvents         distribution `json:"watch_events"`
 	WatchLag            distribution `json:"watch_lag"`
+	HTTP429             distribution `json:"http_429"`
+	CacheHits           distribution `json:"cache_hits"`
+	WatchReconnects     distribution `json:"watch_reconnects"`
 }
 
 type scenarioReport struct {
@@ -136,6 +139,9 @@ type sample struct {
 	partialFailures     float64
 	watchEvents         float64
 	watchLagMS          *float64
+	http429             float64
+	cacheHits           float64
+	watchReconnects     float64
 	errorCode           resources.ErrorCode
 }
 
@@ -170,6 +176,7 @@ type listerSnapshot struct {
 	itemsReceived int
 	firstResponse time.Duration
 	peakGoroutine int
+	http429       int
 }
 
 type syntheticLister struct {
@@ -199,6 +206,9 @@ func (lister *syntheticLister) ListPage(ctx context.Context, request resources.P
 		lister.observeResponse(nil)
 		switch lister.scenario.Fault {
 		case fault429:
+			lister.mu.Lock()
+			lister.stats.http429++
+			lister.mu.Unlock()
 			return resources.OriginPage[resources.PodDTO]{Origin: request.Origin}, errors.New("synthetic HTTP 429")
 		case fault410:
 			return resources.OriginPage[resources.PodDTO]{Origin: request.Origin}, resources.ErrResourceExpired
@@ -379,6 +389,7 @@ func runReport(suite, commit, workingTree string, warmup, repetitions int, scena
 			"Each scenario uses the production resources.Collect and api.CursorStore paths.",
 			"TTFB is the earliest synthetic upstream LIST response; first_row is when Collect returns a non-empty page; full_page is Collect completion.",
 			"The watch dimension is an explicitly synthetic scheduler probe and never emits production telemetry.",
+			"HTTP 429 is counted explicitly. Cache hits and watch reconnects are zero because this direct Collect laboratory owns no production cache and its healthy synthetic watch never reconnects.",
 			"The global 200-namespace case uses one authorized all-namespaces origin; restricted fan-out remains capped at 100; 200 direct origins are internal stress only.",
 			"Output contains counts, closed error codes and environment resources only; resource identities and payloads are omitted.",
 		},
@@ -455,6 +466,7 @@ func measure(candidate scenario) sample {
 		finalGoroutineDelta: float64(runtime.NumGoroutine() - goroutinesBefore),
 		cursorBytes:         cursorBytes, cursorEntries: cursorEntries,
 		partialFailures: float64(len(result.Coverage.Failed)), watchEvents: watchEvents, watchLagMS: watchLag,
+		http429: float64(stats.http429), cacheHits: 0, watchReconnects: 0,
 		errorCode: errorCode,
 	}
 }
@@ -505,6 +517,9 @@ func summarize(candidate scenario, samples []sample) scenarioReport {
 		PartialFailures:     distributionOf("origins", values(samples, func(value sample) float64 { return value.partialFailures })),
 		WatchEvents:         distributionOf("events", values(samples, func(value sample) float64 { return value.watchEvents })),
 		WatchLag:            distributionOf("milliseconds", pointerValues(samples, func(value sample) *float64 { return value.watchLagMS })),
+		HTTP429:             distributionOf("responses", values(samples, func(value sample) float64 { return value.http429 })),
+		CacheHits:           distributionOf("hits", values(samples, func(value sample) float64 { return value.cacheHits })),
+		WatchReconnects:     distributionOf("reconnects", values(samples, func(value sample) float64 { return value.watchReconnects })),
 	}
 	return report
 }

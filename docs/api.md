@@ -862,19 +862,28 @@ Allowlist completa do MVP (`group=""` significa core):
 | `deployments.watch` | `apps` | deployments | watch | namespace / vazio |
 | `deployments.restart` | `apps` | deployments | patch | namespace / target |
 | `deployments.scale` | `apps` | deployments/scale | update | namespace / target |
+| `deployments.delete` | `apps` | deployments | delete | namespace / target |
 | `statefulsets.list` | `apps` | statefulsets | list | namespace / vazio |
 | `statefulsets.get` | `apps` | statefulsets | get | namespace / target |
 | `statefulsets.watch` | `apps` | statefulsets | watch | namespace / vazio |
+| `statefulsets.restart` | `apps` | statefulsets | patch | namespace / target |
 | `statefulsets.scale` | `apps` | statefulsets/scale | update | namespace / target |
+| `statefulsets.delete` | `apps` | statefulsets | delete | namespace / target |
 | `daemonsets.list` | `apps` | daemonsets | list | namespace / vazio |
 | `daemonsets.get` | `apps` | daemonsets | get | namespace / target |
 | `daemonsets.watch` | `apps` | daemonsets | watch | namespace / vazio |
+| `daemonsets.restart` | `apps` | daemonsets | patch | namespace / target |
+| `daemonsets.delete` | `apps` | daemonsets | delete | namespace / target |
 | `jobs.list` | `batch` | jobs | list | namespace / vazio |
 | `jobs.get` | `batch` | jobs | get | namespace / target |
 | `jobs.watch` | `batch` | jobs | watch | namespace / vazio |
+| `jobs.delete` | `batch` | jobs | delete | namespace / target |
 | `cronjobs.list` | `batch` | cronjobs | list | namespace / vazio |
 | `cronjobs.get` | `batch` | cronjobs | get | namespace / target |
 | `cronjobs.watch` | `batch` | cronjobs | watch | namespace / vazio |
+| `cronjobs.suspend` | `batch` | cronjobs | patch | namespace / target |
+| `cronjobs.runnow` | `batch` | jobs | create | namespace / vazio |
+| `cronjobs.delete` | `batch` | cronjobs | delete | namespace / target |
 | `services.list` | `""` | services | list | namespace / vazio |
 | `services.get` | `""` | services | get | namespace / target |
 | `services.watch` | `""` | services | watch | namespace / vazio |
@@ -1215,8 +1224,10 @@ Ausência da Metrics API usa `FEATURE_UNAVAILABLE`, nunca números fabricados.
 ## 14. Workloads
 
 Kinds aceitos para leitura: `deployments`, `statefulsets`, `daemonsets`, `jobs`,
-`cronjobs`, `replicasets` (F3). Restart aceita somente `deployments`; scale
-aceita somente `deployments` e `statefulsets`. ReplicaSet classifica
+`cronjobs`, `replicasets` (F3). Restart aceita `deployments`, `statefulsets` e
+`daemonsets`; scale aceita `deployments` e `statefulsets`. Todos os seis kinds
+aceitam delete; CronJob também aceita suspend/resume e criação imediata de Job.
+ReplicaSet classifica
 `Healthy` quando ready == desired e `Progressing` caso contrário; nenhuma
 outra inferência de saúde é feita. Relações Deployment → ReplicaSet → Pods
 usam `ownerReferences` com UID, nunca igualdade de nome.
@@ -1226,10 +1237,13 @@ usam `ownerReferences` com UID, nunca igualdade de nome.
 | `GET /api/v1/workloads` | MVP | query de §5.3; `WorkloadDTO[]`, 200 | `list` de cada kind | 403/409/410/503/504; parcial em 200 |
 | `GET /api/v1/workloads/{kind}/{namespace}/{name}` | MVP | vazio; `WorkloadDetailDTO`, 200 | `get` kind/alvo | 403/404/409/503/504 |
 | `GET /api/v1/workloads/{kind}/{namespace}/{name}/yaml` | MVP | vazio; YAML, 200 | `get` kind/alvo | 403/404/409/413/503/504 |
-| `POST /api/v1/workloads/{kind}/{namespace}/{name}/restart` | MVP | `RestartRequest`; `ActionAcceptedDTO`, 202 | CSRF + `patch apps/deployments` com resourceName | 403/404/409; kind não suportado |
+| `POST /api/v1/workloads/{kind}/{namespace}/{name}/restart` | MVP | `RestartRequest`; `ActionAcceptedDTO`, 202 | CSRF + `patch apps/{deployments\|statefulsets\|daemonsets}` com resourceName | 403/404/409; kind não suportado |
 | `PUT /api/v1/workloads/{kind}/{namespace}/{name}/scale` | MVP | `ScaleRequest`; `ScaleResultDTO`, 200 | CSRF + `update apps/{deployments|statefulsets}/scale` com resourceName | 403/404/409; kind não suportado |
+| `DELETE /api/v1/workloads/{kind}/{namespace}/{name}` | MVP | `WorkloadDeleteRequest`; `ActionAcceptedDTO`, 202 | CSRF + `delete` no kind/alvo exato | 403/404/409; kind não suportado |
+| `PUT /api/v1/workloads/cronjobs/{namespace}/{name}/suspend` | MVP | `CronJobSuspendRequest`; `ActionAcceptedDTO`, 200 | CSRF + `patch batch/cronjobs` com resourceName | 403/404/409 |
+| `POST /api/v1/workloads/cronjobs/{namespace}/{name}/trigger` | MVP | `CronJobTriggerRequest`; `ActionAcceptedDTO`, 202 | CSRF + `create batch/jobs`; target CronJob exato | 403/404/409 |
 
-Restart aceita apenas Deployment no MVP e exige `Idempotency-Key`.
+Restart exige `Idempotency-Key`; trigger de CronJob também usa chave idempotente.
 
 O backend envia um strategic merge patch mínimo que altera somente
 `spec.template.metadata.annotations["kubectl.kubernetes.io/restartedAt"]`, com

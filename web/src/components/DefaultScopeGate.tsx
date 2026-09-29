@@ -11,7 +11,7 @@ import {
 import { Button } from './ui'
 import { StatePanel } from './StatePanel'
 
-export function DefaultScopeGate({ selection, children }: { selection: SelectionSummary | null; children: ReactNode }) {
+export function DefaultScopeGate({ selection, selectionPending = false, children }: { selection: SelectionSummary | null; selectionPending?: boolean; children: ReactNode }) {
   const queryClient = useQueryClient()
   const navigate = useNavigate()
   const location = useLocation()
@@ -49,6 +49,9 @@ export function DefaultScopeGate({ selection, children }: { selection: Selection
     activate.mutate()
   }, [activate, defaultScope, selection, session.data])
 
+  if (selectionPending) {
+    return <StatePanel kind="loading" title="Loading the active context">KubePeep is resolving the required namespace universe before resources are requested.</StatePanel>
+  }
   if (!needsSavedScope || location.pathname === '/namespaces') return <>{children}</>
   if (scopes.isPending || defaultScope && (session.isPending || activate.isPending)) {
     return <StatePanel kind="loading" title="Activating the default scope">KubePeep is restoring the required namespace universe for this context.</StatePanel>

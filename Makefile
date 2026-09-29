@@ -26,7 +26,7 @@ LDFLAGS := -s -w \
 .PHONY: format format-check lint typecheck test-unit test-integration test-race \
 	test-e2e test web-install web-build build smoke cross-build verify-ginger \
 	verify clean benchmark benchmark-matrix benchmark-protocol benchmark-dataset dev-desktop build-desktop build-desktop-linux \
-	build-desktop-windows build-desktop-darwin
+	build-desktop-windows build-desktop-darwin release-artifact-check
 
 WAILS ?= $(shell $(GO) env GOPATH)/bin/wails
 # WebKitGTK: prefer 4.0 (upstream default); fall back to 4.1 via Wails'
@@ -96,6 +96,9 @@ build: web-build
 
 smoke: build
 	./scripts/smoke.sh $(BINARY)
+
+release-artifact-check:
+	./scripts/release_artifact_check.sh $(DIST_DIR)
 
 cross-build: web-build
 	@set -eu; \

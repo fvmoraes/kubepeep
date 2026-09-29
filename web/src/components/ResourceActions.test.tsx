@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { PodDetail, SelectionSummary, WorkloadDetail } from '../api/types'
 import { PodActions, WorkloadActions } from './ResourceActions'
+import { workloadActionCatalog, type WorkloadActionID } from './workloadActionCatalog'
 import { ToastProvider } from './ui/Toast'
 
 function json(data: unknown, status = 200): Response {
@@ -213,4 +214,54 @@ describe('generation-bound authorized actions', () => {
     view.rerender(wrapper(client, <PodActions detail={pod} selection={{ ...selection, generation: 'gen_43' }} />))
     expect(socket.close).toHaveBeenCalledWith(1000, 'page_closed')
   })
+})
+
+describe('workload action catalog RBAC matrix', () => {
+  const states = ['allowed', 'denied', 'unknown', 'error'] as const
+  const kinds = Object.keys(workloadActionCatalog) as WorkloadDetail['kind'][]
+
+  function actionButtonName(kind: WorkloadDetail['kind'], action: WorkloadActionID): string {
+    if (action === 'restart') return `Restart ${kind}`
+    if (action === 'scale') return 'Decrease replicas'
+    if (action === 'delete') return `Delete ${kind}`
+    if (action === 'suspend') return 'Suspend schedule'
+    return 'Run now'
+  }
+
+  it.each(kinds.flatMap((kind) => states.map((state) => ({ kind, state }))))(
+    'renders $kind capabilities as $state',
+    async ({ kind, state }) => {
+      const definitions = workloadActionCatalog[kind]
+      vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+        const path = String(input)
+        if (path.startsWith('/api/v1/permissions?')) {
+          if (state === 'error') return Promise.resolve(json({ code: 'CLUSTER_UNAVAILABLE', message: 'Permission check failed.' }, 503))
+          return Promise.resolve(json({
+            generation: selection.generation,
+            complete: true,
+            truncated: false,
+            errors: [],
+            decisions: definitions.map((action) => ({ capabilityId: action.capabilityID, decision: state })),
+          }))
+        }
+        if (path.startsWith('/api/v1/hpas?')) {
+          return Promise.resolve(json({ items: [], page: { limit: 100, next: '', complete: true, truncated: false, filterScope: 'collection' }, coverage: null }))
+        }
+        throw new Error(`Unexpected request: ${path}`)
+      }))
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+      render(wrapper(client, <WorkloadActions detail={{ ...workload, kind }} selection={selection} />))
+
+      if (state === 'error') {
+        expect(await screen.findByText('Permission check failed; actions remain disabled.')).toBeInTheDocument()
+      } else {
+        await screen.findAllByText(state === 'allowed' ? /allowed \(the backend/ : state === 'denied' ? /denied by Kubernetes/ : /could not be verified/)
+      }
+      for (const action of definitions) {
+        const button = screen.getByRole('button', { name: actionButtonName(kind, action.id) })
+        if (state === 'allowed') await waitFor(() => expect(button).toBeEnabled())
+        else expect(button).toBeDisabled()
+      }
+    },
+  )
 })

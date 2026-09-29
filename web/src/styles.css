@@ -217,7 +217,7 @@ main {
   background: var(--color-kp-surface-1);
 }
 
-.workspace-body { flex: 1; min-height: 0; overflow: auto; padding: 14px 16px; }
+.workspace-body { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 14px 16px; }
 
 .workspace-nav-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 

@@ -604,6 +604,11 @@ func TestResourceListCursorStoreMissingReferenceIsExpired(t *testing.T) {
 	if recovery.Code != http.StatusGone || !strings.Contains(recovery.Body.String(), api.CodeCursorExpired) {
 		t.Fatalf("missing reference status=%d body=%s", recovery.Code, recovery.Body.String())
 	}
+	for _, forbidden := range []string{"goroutine ", "runtime/", "internal/api/", "stack"} {
+		if strings.Contains(strings.ToLower(recovery.Body.String()), strings.ToLower(forbidden)) {
+			t.Fatalf("expired cursor response exposed internal diagnostics %q: %s", forbidden, recovery.Body.String())
+		}
+	}
 	if service.calls != 1 {
 		t.Fatalf("expired cursor reached the service: calls=%d", service.calls)
 	}

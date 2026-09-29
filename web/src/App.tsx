@@ -246,6 +246,10 @@ function Shell() {
     refetchOnWindowFocus: false,
   })
   const selection = status.data?.selection ?? null
+  const selectionPendingForRoute = status.isPending
+    && location.pathname !== '/'
+    && location.pathname !== '/namespaces'
+    && commandRoutes.some((route) => route.path === location.pathname)
   const globalNamespace = useGlobalNamespace()
   const prefetchedPodsFor = useRef('')
   useEffect(() => {
@@ -391,7 +395,7 @@ function Shell() {
             }))} onClearRecent={() => { clearRecentTargets(); void persistShellPrefs((currentPrefs) => { currentPrefs.recent = { version: 1, items: [] }; return currentPrefs }) }} getResources={() => commandResourceEntries(queryClient, selection?.generation)} onRefresh={refreshActiveReads} />
           </div>
         </header>
-        <main id="main-content"><DefaultScopeGate selection={selection}><Suspense fallback={<StatePanel kind="loading" title="Opening section">The shell remains available while this section loads.</StatePanel>}><Outlet /></Suspense></DefaultScopeGate></main>
+          <main id="main-content"><DefaultScopeGate selection={selection} selectionPending={selectionPendingForRoute}><Suspense fallback={<StatePanel kind="loading" title="Opening section">The shell remains available while this section loads.</StatePanel>}><Outlet /></Suspense></DefaultScopeGate></main>
       </div>
         {workspace.open ? <Suspense fallback={<div role="status" className="workspace-panel p-4 text-sm text-kp-overlay-text">Opening resource…</div>}><ResourceWorkspaceOverlay /></Suspense> : null}
     </div>

@@ -3,7 +3,9 @@ package actions
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -223,18 +225,31 @@ func TestMutationRespectsRequestCancellationAndGenerationCancelsIt(t *testing.T)
 }
 
 func TestActionAuditContainsOnlyAllowlistedMetadata(t *testing.T) {
+	const objectNameSentinel = "object-must-not-persist-7f2ab2b99e2d"
+	const namespaceSentinel = "namespace-must-not-persist-b6fb38eaa4c1"
+	const contextSentinel = "context-must-not-persist-323a02d54d81"
 	generations := &generationStub{generation: "gen_1"}
 	audit := &auditStub{}
 	service, err := NewActionService(context.Background(), &authorizerStub{}, generations, &actionAdapterStub{}, audit)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.Scale(context.Background(), testBinding("gen_1"), RouteTarget{Kind: "deployments", Namespace: "payments", Name: "api"}, testScale("gen_1", "deployments", "payments", "api", 3)); err != nil {
+	binding := testBinding("gen_1")
+	binding.Context = contextSentinel
+	request := testScale("gen_1", "deployments", namespaceSentinel, objectNameSentinel, 3)
+	request.Confirmation.Target.Context = contextSentinel
+	if _, err := service.Scale(context.Background(), binding, RouteTarget{Kind: "deployments", Namespace: namespaceSentinel, Name: objectNameSentinel}, request); err != nil {
 		t.Fatal(err)
 	}
 	events := audit.snapshot()
-	if len(events) != 1 || events[0].Operation != "scale" || events[0].Resource != "Deployment/api" || events[0].Namespace != "payments" || events[0].ErrorCode != "" {
+	if len(events) != 1 || events[0].Operation != "scale" || events[0].Resource != "Deployment" || events[0].ErrorCode != "" {
 		t.Fatalf("unexpected audit metadata: %#v", events)
+	}
+	encoded := fmt.Sprintf("%#v", events)
+	for _, forbidden := range []string{objectNameSentinel, namespaceSentinel, contextSentinel} {
+		if strings.Contains(encoded, forbidden) {
+			t.Fatalf("audit persisted Kubernetes identity %q: %s", forbidden, encoded)
+		}
 	}
 }
 
