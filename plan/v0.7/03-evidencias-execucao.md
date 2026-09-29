@@ -268,9 +268,39 @@ o conjunto npm de produção tem zero vulnerabilidades. O cluster
 
 ## Fase 5 — Investigação: problems, diagnóstico e logs agregados
 
+**Status: FINALIZADA no commit funcional `146b6a0` da branch
+`review/plan-v0.7`.**
+
 | ID | Commit | Evidência | Resultado |
 | --- | --- | --- | --- |
-|  |  |  |  |
+| F5-01 | `146b6a0` | `index_test.go`; `TestLocalIndexStaysInsideCacheBudgetAcrossTwoHundredNamespaces`; `TestIndexCoverageRequiresEveryWorkloadGVRForEveryExpectedNamespace` | **IMPLEMENTADO:** índice generation-scoped relaciona owner/status/labels, selectors de Service, involvedObject, ConfigMaps e PVCs; selectors/páginas/GVRs/origens ausentes permanecem incompletos. O cenário sintético 200×10 reteve 2.000 Pods e 200 namespaces sob budget de 4 MiB. |
+| F5-02 | `146b6a0` | `internal/problems/problems_test.go`; testes de `DashboardBackend.Problems`; Kind `app-e2e` | **IMPLEMENTADO:** detectores puros cobrem CrashLoopBackOff, image pull, Pending, OOMKilled, restarts, Jobs/replicas, PVC, Node, probes e Warning Events nas três severidades, sem converter falta de evidência em saúde. |
+| F5-03 | `146b6a0` | `Dashboard.test.tsx`; `dashboard.go`; `resources_test.go` | **IMPLEMENTADO:** Overview apresenta contadores critical/warning/info, recurso, namespace, diagnóstico e ações Inspect/Logs; busca, sort e cursor usam a identidade generalizada e o Workspace recebe o alvo. |
+| F5-04 | `146b6a0` | `TestInvestigationResolvesOwnerServiceStorageConfigAndEventsLocally`; `investigation_test.go`; catálogo de tabs em `ResourcePages.test.tsx` | **IMPLEMENTADO:** Investigation resolve Pod→ReplicaSet→Deployment, Pods, Service/EndpointSlice, ConfigMaps, PVCs e Events no índice local, com navegação pelo histórico e coverage explícito. |
+| F5-05 | `146b6a0` | `LogsPage.test.tsx` — seis Pods, cinco streams, regex e abort coletivo; `make verify` | **IMPLEMENTADO:** Deployment/ReplicaSet/StatefulSet/DaemonSet/Job usam fluxo combinado com Pod/container/timestamp, current/previous/follow, seleção e busca; teto de cinco streams, batch de 75 ms e ring de 1.000 linhas/1 MiB são cancelados por Stop, troca ou unmount. |
+| F5-06 | `146b6a0` | `GlobalResourceSearch.test.tsx`; fake timer em 30 ms; `fetch` não chamado | **IMPLEMENTADO:** Ctrl/Cmd+K busca rotas e identidades já carregadas, publica filtro local em 30 ms (<100 ms) e informa que ausência no cache não prova ausência no cluster. |
+| F5-07 | `146b6a0` | `metrics_test.go`; `diagnostics_test.go`; `SettingsPage.test.tsx` | **IMPLEMENTADO:** Settings → Diagnostics → Performance exibe p50/p95/p99 globais coerentes a partir de amostras bounded, cache hit, watches, requests/min, 429, reconnects e sync por recurso. |
+| F5-08 | `146b6a0` | `diagnostics_test.go`; `SettingsPage.test.tsx`; `make test-race`; Kind `app-e2e` | **IMPLEMENTADO:** cluster mostra versão, totais e memória do KubePeep; namespaces mostram recursos, severidades, restarts e LIST latency, mais lentos primeiro. Coleta usa quatro workers, timeout global, teto honesto de 200 e estados unknown/parcial sob RBAC. |
+
+### Gates de fechamento executados
+
+| Gate | Resultado |
+| --- | --- |
+| `rtk make verify` | aprovado; formatação, lint, tipos, unidades/integração, Playwright, build e smoke verdes |
+| `rtk make test-race` | aprovado |
+| `rtk go test ./...` | 1.191 testes em 40 pacotes aprovados |
+| `rtk npm test -- --run` | 150 testes em 30 arquivos aprovados, incluindo a paleta local em 30 ms |
+| `rtk scripts/security_check.sh HEAD` | aprovado sobre staged content, histórico, identidades, caminhos, mensagens, tags e secrets |
+| `govulncheck` sobre `go list ./...` | zero vulnerabilidades alcançáveis; um advisory importado sem call path |
+| `rtk npm audit --omit=dev` | zero vulnerabilidades de produção |
+| `rtk test/kind/harness.sh app-e2e ./dist/kubePeep` | contexto/scope, dashboard, SSE/log, exec, revogação/restauração RBAC e offline aprovados |
+| `rtk git diff --check` | aprovado |
+
+O cluster `kubepeep-f4` foi reutilizado e preservado; ao final do harness, o nó
+`kubepeep-f4-control-plane` permaneceu `Ready` em Kubernetes v1.35.0. O dataset
+massivo de C02 não foi reaplicado: F5 usa o cenário sintético 200×10 acima e a
+evidência Kind real 200×10 já registrada em F1-13, evitando carga destrutiva sem
+novo comando explícito.
 
 ## Fase 6 — Protocolo e tuning avançado (condicional a benchmark)
 

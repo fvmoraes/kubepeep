@@ -1,8 +1,8 @@
 # Estado atual e limites da v0.7
 
-Base atual auditada: branch `review/plan-v0.7`, a partir de `1345947`, com
-Fases 0–4 implementadas e enviadas ao remoto. O inventário foi revisado por
-Codebase MCP, leitura da fonte e gates completos em 29 de setembro de 2026.
+Base atual auditada: branch `review/plan-v0.7`, no commit funcional `146b6a0`,
+com Fases 0–5 implementadas. O inventário foi revisado por Codebase MCP,
+leitura da fonte e gates completos em 29 de setembro de 2026.
 O registro verificável está em [03-evidencias-execucao.md](03-evidencias-execucao.md).
 
 | Fase | Estado atual |
@@ -12,12 +12,13 @@ O registro verificável está em [03-evidencias-execucao.md](03-evidencias-execu
 | F2 | finalizada; 12/12 tarefas com evidência |
 | F3 | finalizada; 9/9 tarefas com evidência |
 | F4 | finalizada; 15/15 tarefas com evidência |
-| F5–F7 | ainda não executadas |
+| F5 | finalizada; 8/8 tarefas com evidência |
+| F6–F7 | ainda não executadas |
 
 **Enquadramento desta v0.7:** todo o conteúdo dos três documentos em
 [`../v0.7_reference/`](../v0.7_reference/) foi tratado como trabalho de ajuste,
-melhoria e revisão, independentemente do que já existia na base. As Fases 0–4
-passaram pelos respectivos aceites e possuem evidência própria; F5–F7 continuam
+melhoria e revisão, independentemente do que já existia na base. As Fases 0–5
+passaram pelos respectivos aceites e possuem evidência própria; F6–F7 continuam
 como trabalho futuro. Os caminhos abaixo localizam onde cada tema toca o código.
 
 ## Onde as referências tocam a base (mapa de trabalho, não lista de concluído)
@@ -33,10 +34,11 @@ como trabalho futuro. Os caminhos abaixo localizam onde cada tema toca o código
 | Paleta/diagnóstico | `web/src/components/CommandCenter.tsx`, `internal/observability/` | busca local, problems, diagnostics (F5) |
 | Laboratório | `test/kind/harness.sh` | matriz de benchmark de performance (F0) |
 
-Infinite query, virtualização, coalescing de consultas, resource cache de
-snapshot e índices locais foram entregues nas Fases 1–3. Scope default e o
-refinamento funcional da UI foram entregues na Fase 4. O Problems Engine
-continua atribuído à Fase 5. Usar os caminhos reais acima, sem criar duplicatas.
+Infinite query, virtualização, coalescing de consultas e resource cache de
+snapshot foram entregues nas Fases 1–3. Scope default e o refinamento funcional
+da UI foram entregues na Fase 4. Índices locais, Problems Engine, Investigation,
+logs agregados, busca local e Diagnostics foram entregues na Fase 5. Usar os
+caminhos reais acima, sem criar duplicatas.
 
 ## Contrato da v0.7
 
