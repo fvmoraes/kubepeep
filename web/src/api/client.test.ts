@@ -15,10 +15,19 @@ describe('local API client security boundary', () => {
 			.mockResolvedValueOnce(new Response(JSON.stringify({ data: [], meta: { generation: 'gen', page: { limit: 25, next: '', complete: true, truncated: false, filterScope: 'page' } } }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
 		vi.stubGlobal('fetch', fetch)
 
-		const result = await getPods({ limit: 25, search: 'api', continueToken: 'old' }, undefined, 'gen')
+		const result = await getPods({ limit: 25, search: 'api', continueToken: 'old', prefetch: true }, undefined, 'gen')
 
 		expect(result.snapshotRenewed).toBe(true)
 		expect(fetch.mock.calls.map((call) => call[0])).toEqual(['/api/v1/pods?limit=25&continue=old&search=api', '/api/v1/pods?limit=25&search=api'])
+		expect(fetch.mock.calls[0][1].headers).toMatchObject({ 'X-KubePeep-List-Priority': 'likely-next' })
+		expect(fetch.mock.calls[1][1].headers).not.toHaveProperty('X-KubePeep-List-Priority')
+	})
+
+	it('keeps an explicit next-page request visible', async () => {
+		const fetch = vi.fn().mockResolvedValue(json([]))
+		vi.stubGlobal('fetch', fetch)
+		await getPods({ limit: 100, continueToken: 'next' })
+		expect(fetch.mock.calls[0][1].headers).not.toHaveProperty('X-KubePeep-List-Priority')
 	})
 
 	it('does not renew a forbidden cursor', async () => {

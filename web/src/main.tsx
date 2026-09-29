@@ -15,6 +15,10 @@ const queryClient = new QueryClient({
   },
 })
 
+// Resource lists use the same 30-second freshness window as the authorized
+// backend page cache. Watch deltas and explicit Refresh still invalidate them.
+queryClient.setQueryDefaults(['resources'], { staleTime: 30_000, gcTime: 120_000 })
+
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   associateListRequestRows,
+  beginViewNavigation,
   beginListInteraction,
   beginListRequest,
   bindListInteraction,
@@ -10,6 +11,7 @@ import {
   currentUXView,
   listInteractionFor,
   recordFirstRowRendered,
+  recordVisibleRowRendered,
   recordRenderedRowCount,
   recordShellReady,
   resetUXMetrics,
@@ -28,6 +30,22 @@ function completeRows(view = 'pods') {
 }
 
 describe('UX metrics', () => {
+  it('times the first visible cached preview from the navigation click once', () => {
+    const previousPath = window.location.pathname
+    try {
+      beginViewNavigation('/pods')
+      window.history.replaceState({}, '', '/pods')
+      const preview = [{ name: 'private-pod' }]
+      recordVisibleRowRendered(preview)
+      recordVisibleRowRendered(preview)
+      const samples = snapshotUXMetrics()
+      expect(samples).toHaveLength(1)
+      expect(samples[0]).toEqual(expect.objectContaining({ name: 'time_to_first_visible_row', view: 'pods', unit: 'milliseconds' }))
+      expect(JSON.stringify(samples)).not.toContain('private-pod')
+    } finally {
+      window.history.replaceState({}, '', previousPath)
+    }
+  })
   it('reports native shell readiness once without sending resource data', () => {
     const emit = vi.fn()
     Object.defineProperty(window, 'runtime', { configurable: true, value: { EventsEmit: emit } })

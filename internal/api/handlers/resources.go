@@ -954,6 +954,17 @@ func decodeResourceListQuery(r *http.Request, collection resourcecore.Collection
 		}
 	}
 	options := resourcecore.ListOptions{Continue: first(values, "continue"), Search: first(values, "search"), Namespaces: values["namespace"], Statuses: values["status"], Sort: first(values, "sort"), Order: resourcecore.SortOrder(first(values, "order")), Workload: first(values, "workload"), Node: first(values, "node"), Restarts: resourcecore.RestartFilter(first(values, "restarts")), ObjectKind: first(values, "objectKind"), Reason: first(values, "reason"), AddressType: first(values, "addressType"), LabelSelector: first(values, "labelSelector"), FieldSelector: first(values, "fieldSelector")}
+	switch r.Header.Get("X-KubePeep-List-Priority") {
+	case "":
+		options.Priority = resourcecore.PriorityVisible
+	case "likely-next":
+		if options.Continue == "" {
+			return resourcecore.ListOptions{}, validationHTTPError("Speculative list priority requires a continuation cursor.", nil)
+		}
+		options.Priority = resourcecore.PriorityLikelyNext
+	default:
+		return resourcecore.ListOptions{}, validationHTTPError("The list priority is invalid.", nil)
+	}
 	for _, kind := range values["kind"] {
 		options.Kinds = append(options.Kinds, resourcecore.WorkloadKind(kind))
 	}
@@ -1069,6 +1080,9 @@ func resourceHTTPError(err error) error {
 	var httpError *api.HTTPError
 	if errors.As(err, &httpError) {
 		return err
+	}
+	if errors.Is(err, resourcecore.ErrPrefetchDeferred) {
+		return api.NewHTTPError(http.StatusTooManyRequests, api.CodePrefetchDeferred, "Speculative loading was deferred while visible requests have priority.", nil, err)
 	}
 	code := resourcecore.ErrorCodeOf(err)
 	message := resourcecore.PublicMessage(err)

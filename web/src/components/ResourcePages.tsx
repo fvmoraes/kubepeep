@@ -48,7 +48,8 @@ import type { ActiveListFilter, ListSortOrder, ListSortOption } from './Resource
 import { ResourceLiveUpdates } from './ResourceLiveUpdates'
 import { SavedFilterControls } from './SavedFilterControls'
 import { InfiniteCollectionFooter, QueryState, SelectionGate } from './resource/states'
-import { useInfiniteCollection } from './resource/useInfiniteCollection'
+import { collectionGcTime, collectionStaleTime, useInfiniteCollection } from './resource/useInfiniteCollection'
+import { podPreviewKey } from './resource/podPreview'
 import { useSelectionBoundKeys } from './resource/useSelectionBoundKeys'
 import { useResourceStreamPreview } from './resource/useResourceStreamPreview'
 import { ResourcePage } from './resource/ResourcePage'
@@ -366,9 +367,9 @@ export function WorkloadsPage() {
   const rowKey = useCallback((item: Workload) => `${item.kind}/${item.namespace}/${item.name}`, [])
 
   const collection = useInfiniteCollection<Workload>({
-    identity: ['resources', 'workloads', selection?.clusterProfileId, selection?.context, selection?.scopeId, generation, globalNamespace.value],
+    identity: ['resources', 'workloads', selection?.clusterProfileId, selection?.context, selection?.scopeId, generation, globalNamespace.value, applied.namespace],
     filters: applied,
-    fetchPage: (cursor, signal) => getWorkloads({ limit: 100, uxInteractionId: listInteractionFor(applied), search: applied.search || undefined, namespaces: effectiveNamespaces(globalNamespace.value, namespaceValues(applied.namespace)), kinds: applied.kind ? [applied.kind] : undefined, statuses: applied.workloadStatus ? [applied.workloadStatus] : undefined, ...optionalSort(applied.sort, applied.order, 'identity', 'asc'), continueToken: cursor || undefined }, signal, generation),
+    fetchPage: (cursor, signal, prefetch) => getWorkloads({ limit: 100, prefetch, uxInteractionId: listInteractionFor(applied), search: applied.search || undefined, namespaces: effectiveNamespaces(globalNamespace.value, namespaceValues(applied.namespace)), kinds: applied.kind ? [applied.kind] : undefined, statuses: applied.workloadStatus ? [applied.workloadStatus] : undefined, ...optionalSort(applied.sort, applied.order, 'identity', 'asc'), continueToken: cursor || undefined }, signal, generation),
     enabled: Boolean(selection),
   })
   const list = collection.query
@@ -472,7 +473,7 @@ export function WorkloadsPage() {
                 setSelectedKeys(checked ? new Set(collection.items.map(rowKey)) : new Set())
               }}
             />
-            {collection.lastPage ? <InfiniteCollectionFooter result={collection.lastPage} itemCount={collection.items.length} pageCount={list.data?.pages.length ?? 0} firstPage={list.data?.pageParams[0] === '' && list.data.pages.length === 1} hasNextPage={Boolean(list.hasNextPage)} loading={list.isFetching} refreshing={list.isPlaceholderData} nextPageError={list.isFetchNextPageError} onNext={() => void list.fetchNextPage()} onRestart={() => void queryClient.resetQueries({ queryKey: collection.queryKey })} /> : null}
+            {collection.lastPage ? <InfiniteCollectionFooter result={collection.lastPage} itemCount={collection.items.length} pageCount={list.data?.pages.length ?? 0} firstPage={list.data?.pageParams[0] === '' && list.data.pages.length === 1} hasNextPage={Boolean(list.hasNextPage)} loading={list.isFetching} refreshing={list.isPlaceholderData} nextPageError={collection.nextPageError} onNext={() => void collection.loadNextPage()} onRestart={() => void queryClient.resetQueries({ queryKey: collection.queryKey })} /> : null}
           </div>
         </QueryState>
       </SelectionGate>
@@ -507,6 +508,14 @@ export function PodsPage() {
   const [selectedKeys, setSelectedKeys] = useSelectionBoundKeys([selection?.clusterProfileId, selection?.context, selection?.scopeId, generation, globalNamespace.value])
   const [bulkConfirm, setBulkConfirm] = useState(false)
   const preview = useResourceStreamPreview<Pod>({ identity: [selection?.clusterProfileId, selection?.context, selection?.scopeId, generation, globalNamespace.value], topic: 'pods', namespace: globalNamespace.value, isItem: isPodPreview, itemKey: namedPreviewKey })
+  const previewNamespace = globalNamespace.value || globalNamespace.options[0] || ''
+  const seedPreview = useQuery({
+    queryKey: selection && previewNamespace ? podPreviewKey(selection, globalNamespace.value, previewNamespace) : ['pod-preview', 'unavailable'],
+    queryFn: ({ signal }) => getPods({ limit: 20, namespaces: [previewNamespace] }, signal, generation),
+    enabled: false,
+    staleTime: collectionStaleTime,
+    gcTime: collectionGcTime,
+  })
 
   useEffect(() => {
     if (!paramNamespace || !paramName || !generation) return
@@ -516,9 +525,9 @@ export function PodsPage() {
 
   const rowKey = useCallback((item: Pod) => `${item.namespace}/${item.name}`, [])
   const collection = useInfiniteCollection<Pod>({
-    identity: ['resources', 'pods', selection?.clusterProfileId, selection?.context, selection?.scopeId, generation, globalNamespace.value],
+    identity: ['resources', 'pods', selection?.clusterProfileId, selection?.context, selection?.scopeId, generation, globalNamespace.value, applied.namespace],
     filters: applied,
-    fetchPage: (cursor, signal) => getPods({ limit: 100, uxInteractionId: listInteractionFor(applied), search: applied.search || undefined, namespaces: effectiveNamespaces(globalNamespace.value, namespaceValues(applied.namespace)), statuses: applied.podStatus ? [applied.podStatus] : undefined, workload: applied.workload || undefined, node: applied.node || undefined, restarts: applied.restarts as 'any' | 'gt0' | 'gte3' | 'gte10', problematic: applied.problematic === '' ? undefined : applied.problematic === 'true', ...optionalSort(applied.sort, applied.order, 'identity', 'asc'), continueToken: cursor || undefined }, signal, generation),
+    fetchPage: (cursor, signal, prefetch) => getPods({ limit: 100, prefetch, uxInteractionId: listInteractionFor(applied), search: applied.search || undefined, namespaces: effectiveNamespaces(globalNamespace.value, namespaceValues(applied.namespace)), statuses: applied.podStatus ? [applied.podStatus] : undefined, workload: applied.workload || undefined, node: applied.node || undefined, restarts: applied.restarts as 'any' | 'gt0' | 'gte3' | 'gte10', problematic: applied.problematic === '' ? undefined : applied.problematic === 'true', ...optionalSort(applied.sort, applied.order, 'identity', 'asc'), continueToken: cursor || undefined }, signal, generation),
     enabled: Boolean(selection),
   })
   const list = collection.query
@@ -528,14 +537,15 @@ export function PodsPage() {
   const snapshotRenewed = collection.snapshotRenewed
   const authorizationFailed = collection.authorizationFailed
   useEffect(() => { if (authorizationFailed) setSelectedKeys(new Set()) }, [authorizationFailed, setSelectedKeys])
-  const previewActive = list.isPending && !authorizationFailed && sameListState(applied, defaultPodList) && Boolean(preview.preview?.items.length)
-  const visibleItems = previewActive ? preview.preview!.items : listItems
+  const seedItems = seedPreview.data?.items.filter((item) => item.namespace === previewNamespace) ?? []
+  const previewActive = list.isPending && !authorizationFailed && sameListState(applied, defaultPodList) && Boolean(preview.preview?.items.length || seedItems.length)
+  const visibleItems = previewActive ? preview.preview?.items.length ? preview.preview.items : seedItems : listItems
   const selectedItems = useMemo(() => listItems.filter((item) => selectedKeys.has(rowKey(item))), [listItems, selectedKeys, rowKey])
 
   // V5-11: Pod metrics render only when the Metrics API is healthy; absence,
   // denial or partial coverage touches the metrics columns alone.
   const metricsAvailable = status.data?.components.metrics.status === 'healthy'
-  const metrics = useQuery({ queryKey: ['pod-metrics', generation], queryFn: ({ signal }) => getDashboardMetrics(signal, generation), enabled: Boolean(selection && metricsAvailable), staleTime: 30_000 })
+  const metrics = useQuery({ queryKey: ['pod-metrics', generation], queryFn: ({ signal }) => getDashboardMetrics(signal, generation), enabled: Boolean(selection && metricsAvailable), staleTime: 8_000, refetchInterval: 8_000, refetchIntervalInBackground: false })
   const metricsByPod = useMemo(() => {
     const map = new Map<string, { cpuMillicores: number; memoryBytes: number }>()
     for (const entry of metrics.data?.block.value.pods ?? []) {
@@ -641,7 +651,7 @@ export function PodsPage() {
           ) : null}
           <div className="min-w-0 overflow-x-auto rounded-xl border border-kp-overlay-0 bg-kp-surface-0">
             <ColumnVisibilityControl state={podColumnState} columns={podColumns} />
-            {previewActive ? <p className="px-3 py-1.5 text-xs text-kp-sky" role="status">Receiving Pods · ✓ {preview.preview!.completed}/{preview.preview!.requested} namespaces · partial preview</p> : null}
+            {previewActive ? <p className="px-3 py-1.5 text-xs text-kp-sky" role="status">Receiving Pods · ✓ {preview.preview?.items.length ? preview.preview.completed : 1}/{preview.preview?.items.length ? preview.preview.requested : selection?.namespaceCount ?? 1} namespaces · partial preview</p> : null}
             {list.isPlaceholderData || list.isFetching && !list.isFetchingNextPage ? <p className="px-3 py-1.5 text-xs text-kp-overlay-text" role="status">Refreshing Pods…</p> : null}
             <DataTable
               caption="Authorized Pod pages"
@@ -673,9 +683,9 @@ export function PodsPage() {
                 </div>
                 <div className="flex gap-2">
                   <Button variant="secondary" size="sm" disabled={list.data?.pageParams[0] === '' && list.data?.pages.length === 1} disabledReason="Already on the first page." onClick={() => void queryClient.resetQueries({ queryKey: listKey })}>First page</Button>
-                  <Button size="sm" disabled={!list.hasNextPage || list.isFetching || list.isPlaceholderData} disabledReason="The current result has no next page or is refreshing." onClick={() => void list.fetchNextPage()}>{list.isFetchingNextPage ? 'Loading…' : 'Load next page'}</Button>
+                  <Button size="sm" disabled={!list.hasNextPage || list.isFetching || list.isPlaceholderData} disabledReason="The current result has no next page or is refreshing." onClick={() => void collection.loadNextPage()}>{list.isFetchingNextPage ? 'Loading…' : 'Load next page'}</Button>
                 </div>
-                {list.isFetchNextPageError ? <p className="w-full text-xs text-kp-red" role="alert">The next page could not be loaded. The loaded Pods remain available; retry when ready.</p> : null}
+                {collection.nextPageError ? <p className="w-full text-xs text-kp-red" role="alert">The next page could not be loaded. The loaded Pods remain available; retry when ready.</p> : null}
               </footer>
             ) : null}
           </div>
@@ -717,9 +727,9 @@ export function EventsPage() {
     { key: 'message', header: 'Message', cell: (item) => <span className="block max-w-[480px] break-words text-sm leading-snug">{item.message}</span> },
   ]
   const collection = useInfiniteCollection<EventResource>({
-    identity: ['resources', 'events', selection?.clusterProfileId, selection?.context, selection?.scopeId, generation, globalNamespace.value],
+    identity: ['resources', 'events', selection?.clusterProfileId, selection?.context, selection?.scopeId, generation, globalNamespace.value, applied.namespace],
     filters: applied,
-    fetchPage: (cursor, signal) => getEvents({ limit: 100, uxInteractionId: listInteractionFor(applied), search: applied.search || undefined, namespaces: effectiveNamespaces(globalNamespace.value, namespaceValues(applied.namespace)), statuses: applied.eventType ? [applied.eventType] : undefined, objectKind: applied.objectKind || undefined, reason: applied.reason || undefined, continueToken: cursor || undefined, ...optionalSort(applied.sort, applied.order, 'timestamp', 'desc') }, signal, generation),
+    fetchPage: (cursor, signal, prefetch) => getEvents({ limit: 100, prefetch, uxInteractionId: listInteractionFor(applied), search: applied.search || undefined, namespaces: effectiveNamespaces(globalNamespace.value, namespaceValues(applied.namespace)), statuses: applied.eventType ? [applied.eventType] : undefined, objectKind: applied.objectKind || undefined, reason: applied.reason || undefined, continueToken: cursor || undefined, ...optionalSort(applied.sort, applied.order, 'timestamp', 'desc') }, signal, generation),
     enabled: Boolean(selection),
   })
   const list = collection.query
@@ -769,7 +779,7 @@ export function EventsPage() {
               columns={applyColumnVisibility(eventColumns, eventColumnState)}
               stickyHeader
             />
-            {collection.lastPage ? <InfiniteCollectionFooter result={collection.lastPage} itemCount={collection.items.length} pageCount={list.data?.pages.length ?? 0} firstPage={list.data?.pageParams[0] === '' && list.data.pages.length === 1} hasNextPage={Boolean(list.hasNextPage)} loading={list.isFetching} refreshing={list.isPlaceholderData} nextPageError={list.isFetchNextPageError} onNext={() => void list.fetchNextPage()} onRestart={() => void queryClient.resetQueries({ queryKey: collection.queryKey })} /> : null}
+            {collection.lastPage ? <InfiniteCollectionFooter result={collection.lastPage} itemCount={collection.items.length} pageCount={list.data?.pages.length ?? 0} firstPage={list.data?.pageParams[0] === '' && list.data.pages.length === 1} hasNextPage={Boolean(list.hasNextPage)} loading={list.isFetching} refreshing={list.isPlaceholderData} nextPageError={collection.nextPageError} onNext={() => void collection.loadNextPage()} onRestart={() => void queryClient.resetQueries({ queryKey: collection.queryKey })} /> : null}
           </div>
         </QueryState>
       </SelectionGate>
@@ -871,8 +881,8 @@ export function NetworkPage() {
     identity: ['resources', resourceTab, selection?.clusterProfileId, selection?.context, selection?.scopeId, generation, globalNamespace.value],
     filters: applied,
     enabled: Boolean(selection && tab !== 'port-forwards'),
-    fetchPage: (cursor, signal) => {
-      const options = networkOptions(cursor)
+    fetchPage: (cursor, signal, prefetch) => {
+      const options = { ...networkOptions(cursor), prefetch }
       const namespacedOptions = { ...options, namespaces: effectiveNamespaces(globalNamespace.value, []) }
       switch (resourceTab) {
         case 'services': return getServices(namespacedOptions, signal, generation)
@@ -974,7 +984,7 @@ export function NetworkPage() {
                 columns={applyColumnVisibility(networkColumns, networkColumnState)}
                 stickyHeader
               />
-              {collection.lastPage ? <InfiniteCollectionFooter result={collection.lastPage} itemCount={collection.items.length} pageCount={activeQuery.data?.pages.length ?? 0} firstPage={activeQuery.data?.pageParams[0] === '' && activeQuery.data.pages.length === 1} hasNextPage={Boolean(activeQuery.hasNextPage)} loading={activeQuery.isFetching} refreshing={activeQuery.isPlaceholderData} nextPageError={activeQuery.isFetchNextPageError} onNext={() => void activeQuery.fetchNextPage()} onRestart={() => void queryClient.resetQueries({ queryKey: collection.queryKey })} /> : null}
+              {collection.lastPage ? <InfiniteCollectionFooter result={collection.lastPage} itemCount={collection.items.length} pageCount={activeQuery.data?.pages.length ?? 0} firstPage={activeQuery.data?.pageParams[0] === '' && activeQuery.data.pages.length === 1} hasNextPage={Boolean(activeQuery.hasNextPage)} loading={activeQuery.isFetching} refreshing={activeQuery.isPlaceholderData} nextPageError={collection.nextPageError} onNext={() => void collection.loadNextPage()} onRestart={() => void queryClient.resetQueries({ queryKey: collection.queryKey })} /> : null}
             </div>
           </QueryState>}
         </SelectionGate>
@@ -1025,8 +1035,8 @@ export function ConfigPage() {
     identity: ['resources', tab, selection?.clusterProfileId, selection?.context, selection?.scopeId, generation, globalNamespace.value],
     filters: applied,
     enabled: Boolean(selection),
-    fetchPage: (cursor, signal) => {
-      const options = { limit: 100, uxInteractionId: listInteractionFor(applied), search: applied.search || undefined, continueToken: cursor || undefined, ...optionalSort(applied.sort, applied.order, 'identity', 'asc'), namespaces: effectiveNamespaces(globalNamespace.value, []) }
+    fetchPage: (cursor, signal, prefetch) => {
+      const options = { limit: 100, prefetch, uxInteractionId: listInteractionFor(applied), search: applied.search || undefined, continueToken: cursor || undefined, ...optionalSort(applied.sort, applied.order, 'identity', 'asc'), namespaces: effectiveNamespaces(globalNamespace.value, []) }
       return tab === 'configmaps' ? getConfigMapsSafe(options, signal, generation) : getSecretsSafe(options, signal, generation)
     },
   })
@@ -1065,7 +1075,7 @@ export function ConfigPage() {
                 columns={applyColumnVisibility(configColumns, configColumnState)}
                 stickyHeader
               />
-              {collection.lastPage ? <InfiniteCollectionFooter result={collection.lastPage} itemCount={collection.items.length} pageCount={activeQuery.data?.pages.length ?? 0} firstPage={activeQuery.data?.pageParams[0] === '' && activeQuery.data.pages.length === 1} hasNextPage={Boolean(activeQuery.hasNextPage)} loading={activeQuery.isFetching} refreshing={activeQuery.isPlaceholderData} nextPageError={activeQuery.isFetchNextPageError} onNext={() => void activeQuery.fetchNextPage()} onRestart={() => void queryClient.resetQueries({ queryKey: collection.queryKey })} /> : null}
+              {collection.lastPage ? <InfiniteCollectionFooter result={collection.lastPage} itemCount={collection.items.length} pageCount={activeQuery.data?.pages.length ?? 0} firstPage={activeQuery.data?.pageParams[0] === '' && activeQuery.data.pages.length === 1} hasNextPage={Boolean(activeQuery.hasNextPage)} loading={activeQuery.isFetching} refreshing={activeQuery.isPlaceholderData} nextPageError={collection.nextPageError} onNext={() => void collection.loadNextPage()} onRestart={() => void queryClient.resetQueries({ queryKey: collection.queryKey })} /> : null}
             </div>
           </QueryState>
         </SelectionGate>
@@ -1130,7 +1140,7 @@ export function NodesPage() {
   const collection = useInfiniteCollection({
     identity: ['resources', 'nodes', selection?.clusterProfileId, selection?.context, selection?.scopeId, generation, ''],
     filters: applied,
-    fetchPage: (cursor: string, signal: AbortSignal) => getNodes({ limit: 100, uxInteractionId: listInteractionFor(applied), search: applied.search || undefined, statuses: applied.nodeStatus ? [applied.nodeStatus] : undefined, ...optionalSort(applied.sort, applied.order, 'identity', 'asc'), continueToken: cursor || undefined }, signal, generation),
+    fetchPage: (cursor: string, signal: AbortSignal, prefetch: boolean) => getNodes({ limit: 100, prefetch, uxInteractionId: listInteractionFor(applied), search: applied.search || undefined, statuses: applied.nodeStatus ? [applied.nodeStatus] : undefined, ...optionalSort(applied.sort, applied.order, 'identity', 'asc'), continueToken: cursor || undefined }, signal, generation),
     enabled: Boolean(selection),
   })
   const list = collection.query
@@ -1163,7 +1173,7 @@ export function NodesPage() {
               ]}
               stickyHeader
             />
-            {collection.lastPage ? <InfiniteCollectionFooter result={collection.lastPage} itemCount={collection.items.length} pageCount={list.data?.pages.length ?? 0} firstPage={list.data?.pageParams[0] === '' && list.data.pages.length === 1} hasNextPage={Boolean(list.hasNextPage)} loading={list.isFetching} refreshing={list.isPlaceholderData} nextPageError={list.isFetchNextPageError} onNext={() => void list.fetchNextPage()} onRestart={() => void queryClient.resetQueries({ queryKey: collection.queryKey })} /> : null}
+            {collection.lastPage ? <InfiniteCollectionFooter result={collection.lastPage} itemCount={collection.items.length} pageCount={list.data?.pages.length ?? 0} firstPage={list.data?.pageParams[0] === '' && list.data.pages.length === 1} hasNextPage={Boolean(list.hasNextPage)} loading={list.isFetching} refreshing={list.isPlaceholderData} nextPageError={collection.nextPageError} onNext={() => void collection.loadNextPage()} onRestart={() => void queryClient.resetQueries({ queryKey: collection.queryKey })} /> : null}
           </div>
         </QueryState>
       </SelectionGate>

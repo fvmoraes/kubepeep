@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, type ReactNode } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 
-import { recordFirstRowRendered, recordRenderedRowCount } from '../../observability/uxMetrics'
+import { recordFirstRowRendered, recordRenderedRowCount, recordVisibleRowRendered } from '../../observability/uxMetrics'
 import { Checkbox } from './Checkbox'
 
 export interface DataTableColumn<T> {
@@ -52,7 +52,9 @@ export function DataTable<T>({
   onScrollProgress,
 }: DataTableProps<T>) {
   const scrollRef = useRef<HTMLDivElement>(null)
-  const virtualized = virtualize ?? rows.length > 100
+  // A normal resource page contains 100 rows. Give that page its own scroll
+  // viewport so reaching 75% can request the next bounded page.
+  const virtualized = virtualize ?? rows.length >= 100
   // TanStack owns mutable scroll measurements; React Compiler must not memoize this hook.
   // eslint-disable-next-line react-hooks/incompatible-library
   const rowVirtualizer = useVirtualizer({
@@ -72,6 +74,7 @@ export function DataTable<T>({
     : virtualRows
   useEffect(() => {
     recordFirstRowRendered(rows)
+    recordVisibleRowRendered(rows)
   }, [rows])
   useEffect(() => {
     recordRenderedRowCount(virtualized ? visibleVirtualRows.length : rows.length)

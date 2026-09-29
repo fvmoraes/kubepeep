@@ -1,5 +1,6 @@
 export type UXMetricName =
   | 'time_to_first_row'
+  | 'time_to_first_visible_row'
   | 'time_to_page_complete'
   | 'filter_interaction_latency'
   | 'sort_interaction_latency'
@@ -74,6 +75,7 @@ let queryToInteraction = new WeakMap<object, ListInteractionID>()
 let requestSequence = 0
 let interactionSequence = 0
 let shellReadyRecorded = false
+let pendingNavigation: { view: string; startedAt: number } | null = null
 
 function now(): number {
   return typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now()
@@ -82,6 +84,11 @@ function now(): number {
 export function currentUXView(pathname = typeof window === 'undefined' ? '' : window.location.pathname): string {
   const segment = pathname.split('/').filter(Boolean)[0] ?? 'overview'
   return allowedViews.has(segment) ? segment : segment === '' ? 'overview' : 'other'
+}
+
+/** Start the user-perceived clock before same-tab client-side navigation. */
+export function beginViewNavigation(pathname: string): void {
+  pendingNavigation = { view: currentUXView(pathname), startedAt: now() }
 }
 
 function normalizedView(view: string): string {
@@ -180,6 +187,18 @@ export function recordFirstRowRendered(rows: readonly unknown[]): void {
   if (timing.pageCompleteRecorded) requestTimings.delete(requestId)
 }
 
+// A prefetched or streamed preview has no HTTP request identity. Capture its
+// first committed row from the navigation click without changing transport
+// attempt metrics used for refresh, filter and sort diagnostics.
+export function recordVisibleRowRendered(rows: readonly unknown[]): void {
+  if (rows.length === 0 || !pendingNavigation) return
+  const view = currentUXView()
+  if (pendingNavigation.view !== view) return
+  const elapsed = now() - pendingNavigation.startedAt
+  pendingNavigation = null
+  if (elapsed <= 30_000) record('time_to_first_visible_row', elapsed, 'milliseconds', view)
+}
+
 export function recordRenderedRowCount(rows: number, view = currentUXView()): void {
   record('rendered_row_count', rows, 'rows', view)
 }
@@ -209,6 +228,7 @@ export function resetUXMetrics(): void {
   requestSequence = 0
   interactionSequence = 0
   shellReadyRecorded = false
+  pendingNavigation = null
 }
 
 if (typeof window !== 'undefined') {

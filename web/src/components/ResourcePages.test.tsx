@@ -5,6 +5,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { StoragePage } from './FamilyPages'
 import { ConfigPage, EventsPage, NetworkPage, PodsPage, WorkloadsPage } from './ResourcePages'
+import { prefetchDefaultPodPreview } from './resource/podPreview'
+import type { SelectionSummary } from '../api/types'
 import { ToastProvider } from './ui/Toast'
 import { ResourceWorkspaceProvider } from './workspace/ResourceWorkspaceProvider'
 import { ResourceWorkspaceOverlay } from './workspace/ResourceWorkspace'
@@ -42,8 +44,7 @@ function LocationProbe() {
   return <output aria-label="Current route">{useLocation().pathname}</output>
 }
 
-function renderPage(component: React.ReactNode, initialEntries: string[] = ['/']) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+function renderPage(component: React.ReactNode, initialEntries: string[] = ['/'], client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })) {
   const selection = selectedStatus()
   return { client, ...render(
     <QueryClientProvider client={client}>
@@ -75,6 +76,35 @@ afterEach(() => {
 
 describe('read-only resource pages', () => {
 
+  it('shows only the authorized namespace seed as a non-selectable preview and clears it on revocation', async () => {
+    const pod = { namespace: 'payments', name: 'seed-pod', status: 'Running', ready: { current: 1, desired: 1 }, restarts: 0, node: null, ip: null, owner: null, ageSeconds: 60, problematic: false }
+    let rejectFullPage: ((response: Response) => void) | undefined
+    const paths: string[] = []
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const path = String(input)
+      paths.push(path)
+      if (path === '/api/v1/status') return Promise.resolve(json({ ...selectedStatus(), components: { ...selectedStatus().components, metrics: { status: 'unknown' } } }))
+      if (path === '/api/v1/preferences') return Promise.resolve(json(preferences()))
+      if (path === '/api/v1/namespace-scopes/7') return Promise.resolve(json({ namespaces: ['payments'] }))
+      if (path === '/api/v1/pods?limit=20&namespace=payments') return Promise.resolve(json([pod], page()))
+      if (path.startsWith('/api/v1/pods?')) return new Promise<Response>((resolve) => { rejectFullPage = resolve })
+      if (path === '/api/v1/session') return Promise.resolve(json({ csrfToken: 'csrf', generation, origin: 'http://127.0.0.1:2748', expiresAt: '2026-09-12T12:00:00Z' }))
+      if (path === '/api/v1/stream?topic=pods') return Promise.resolve(new Response(JSON.stringify({ code: 'FORBIDDEN', message: 'watch revoked' }), { status: 403, headers: { 'Content-Type': 'application/json' } }))
+      throw new Error(`Unexpected request: ${path}`)
+    }))
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+    await prefetchDefaultPodPreview(client, selectedStatus().selection as SelectionSummary, '', 'payments')
+    renderPage(<PodsPage />, ['/'], client)
+    expect(await screen.findByRole('button', { name: 'Open Pod seed-pod in payments' })).toBeInTheDocument()
+    expect(screen.getByText(/✓ 1\/1 namespaces · partial preview/)).toBeInTheDocument()
+    expect(screen.queryByRole('checkbox', { name: 'Select row payments/seed-pod' })).not.toBeInTheDocument()
+    expect(paths.filter((path) => path === '/api/v1/pods?limit=20&namespace=payments')).toHaveLength(1)
+    await waitFor(() => expect(rejectFullPage).toBeDefined())
+    await act(async () => rejectFullPage?.(new Response(JSON.stringify({ code: 'FORBIDDEN', message: 'list revoked' }), { status: 403, headers: { 'Content-Type': 'application/json' } })))
+    expect(await screen.findByText('Resource request failed')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Open Pod seed-pod in payments' })).not.toBeInTheDocument()
+  })
+
   it('shows a bounded Pod stream preview while HTTP is pending, then replaces it with the authorized page', async () => {
     const streamed = { namespace: 'payments', name: 'streamed', status: 'Running', ready: { current: 1, desired: 1 }, restarts: 0, node: null, ip: null, owner: null, ageSeconds: 60, problematic: false }
     let resolvePods: ((response: Response) => void) | undefined
@@ -99,6 +129,36 @@ describe('read-only resource pages', () => {
     await act(async () => { resolvePods?.(json([{ ...streamed, name: 'from-http' }], page())) })
     expect(await screen.findByRole('button', { name: 'Open Pod from-http in payments' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Open Pod streamed in payments' })).not.toBeInTheDocument()
+    streamController?.close()
+  })
+
+  it.each([
+    { name: 'Workloads', path: '/api/v1/workloads?', topic: 'workloads', route: '/', component: <WorkloadsPage />, item: { kind: 'Deployment', namespace: 'payments', name: 'streamed', status: 'Healthy', ready: 1, desired: 1, ageSeconds: 60 } },
+    { name: 'Events', path: '/api/v1/events?', topic: 'events', route: '/', component: <EventsPage />, item: { namespace: 'payments', objectKind: 'Pod', objectName: 'streamed', timestamp: '2026-09-21T12:00:00Z', type: 'Normal', reason: 'Started', count: 1, message: 'streamed event' } },
+    { name: 'Services', path: '/api/v1/services?', topic: 'services', route: '/network/services', component: <Routes><Route path="/network/:tab" element={<NetworkPage />} /></Routes>, item: { namespace: 'payments', name: 'streamed', type: 'ClusterIP', clusterIPs: ['10.0.0.1'] } },
+    { name: 'ConfigMaps', path: '/api/v1/configmaps?', topic: 'configmaps', route: '/config/configmaps', component: <Routes><Route path="/config/:tab" element={<ConfigPage />} /></Routes>, item: { namespace: 'payments', name: 'streamed', uid: 'uid-streamed', creationTimestamp: '2026-09-21T12:00:00Z' } },
+  ])('shows $name stream rows and coverage before the HTTP page completes', async ({ path, topic, route, component, item }) => {
+    let resolvePage: ((response: Response) => void) | undefined
+    let streamController: ReadableStreamDefaultController<Uint8Array> | undefined
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const requestPath = String(input)
+      if (requestPath === '/api/v1/status') return Promise.resolve(json({ ...selectedStatus(), components: { ...selectedStatus().components, metrics: { status: 'unknown' } } }))
+      if (requestPath === '/api/v1/preferences') return Promise.resolve(json(preferences()))
+      if (requestPath === '/api/v1/namespace-scopes/7') return Promise.resolve(json({ namespaces: ['payments'] }))
+      if (requestPath.startsWith(path)) return new Promise<Response>((resolve) => { resolvePage = resolve })
+      if (requestPath === '/api/v1/session') return Promise.resolve(json({ csrfToken: 'csrf', generation, origin: 'http://127.0.0.1:2748', expiresAt: '2026-09-12T12:00:00Z' }))
+      if (requestPath === `/api/v1/stream?topic=${topic}`) return Promise.resolve(new Response(new ReadableStream<Uint8Array>({ start(controller) {
+        streamController = controller
+        controller.enqueue(new TextEncoder().encode(`event: progress\ndata: ${JSON.stringify({ generation, topic, snapshotId: 'snap_1', items: [item], completedNamespaces: 1, requestedNamespaces: 2 })}\n\n`))
+      } }), { headers: { 'Content-Type': 'text/event-stream' } }))
+      throw new Error(`Unexpected request: ${requestPath}`)
+    }))
+    renderPage(component, [route])
+    await waitFor(() => expect(screen.getByRole('table')).toHaveTextContent('streamed'))
+    expect(screen.getByText(/✓ 1\/2 namespaces · partial preview/)).toBeInTheDocument()
+    await act(async () => resolvePage?.(json([{ ...item, name: 'from-http', objectName: 'from-http', message: 'from-http event', uid: 'uid-from-http' }], page())))
+    await waitFor(() => expect(screen.getByRole('table')).toHaveTextContent('from-http'))
+    expect(screen.getByRole('table')).not.toHaveTextContent('streamed')
     streamController?.close()
   })
 
@@ -217,7 +277,10 @@ describe('read-only resource pages', () => {
     expect(firstPageRequests).toBe(2)
   })
 
-  it('hides loaded Pods when a later page is forbidden', async () => {
+  it.each([
+    { code: 'FORBIDDEN', status: 403 },
+    { code: 'AUTHORIZATION_UNAVAILABLE', status: 503 },
+  ])('hides loaded Pods when a later page returns $code', async ({ code, status }) => {
     vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
       const path = String(input)
       if (path === '/api/v1/status') return Promise.resolve(json({ ...selectedStatus(), components: { ...selectedStatus().components, metrics: { status: 'unknown' } } }))
@@ -225,7 +288,7 @@ describe('read-only resource pages', () => {
       if (path === '/api/v1/namespace-scopes/7') return Promise.resolve(json({ namespaces: ['payments'] }))
       if (path.startsWith('/api/v1/pods?')) {
         const cursor = new URL(path, 'http://127.0.0.1').searchParams.get('continue')
-        if (cursor) return Promise.resolve(new Response(JSON.stringify({ code: 'FORBIDDEN', message: 'access revoked' }), { status: 403, headers: { 'Content-Type': 'application/json' } }))
+        if (cursor) return Promise.resolve(new Response(JSON.stringify({ code, message: 'access cannot be confirmed' }), { status, headers: { 'Content-Type': 'application/json' } }))
         return Promise.resolve(json([{ namespace: 'payments', name: 'private-pod', status: 'Running', ready: { current: 1, desired: 1 }, restarts: 0, ageSeconds: 60, problematic: false }], page('next-token')))
       }
       throw new Error(`Unexpected request: ${path}`)
@@ -259,6 +322,33 @@ describe('read-only resource pages', () => {
     await act(async () => release?.(json([{ namespace: 'payments', name: 'new-pod', status: 'Running', ready: { current: 1, desired: 1 }, restarts: 0, ageSeconds: 60, problematic: false }], page())))
     await screen.findByRole('button', { name: 'Open Pod new-pod in payments' })
     expect(screen.queryByRole('button', { name: 'Open Pod old-pod in payments' })).not.toBeInTheDocument()
+  })
+
+  it.each([
+    { name: 'Workloads', path: '/api/v1/workloads?', component: <WorkloadsPage />, item: { kind: 'Deployment', namespace: 'payments', name: 'old-marker', status: 'Healthy', ready: 1, desired: 1, ageSeconds: 60 } },
+    { name: 'Pods', path: '/api/v1/pods?', component: <PodsPage />, item: { namespace: 'payments', name: 'old-marker', status: 'Running', ready: { current: 1, desired: 1 }, restarts: 0, ageSeconds: 60, problematic: false } },
+    { name: 'Events', path: '/api/v1/events?', component: <EventsPage />, item: { namespace: 'payments', objectKind: 'Pod', objectName: 'old-marker', timestamp: '2026-09-21T12:00:00Z', type: 'Normal', reason: 'Started', count: 1, message: 'old-marker' } },
+  ])('drops $name rows as soon as the effective namespace filter changes', async ({ path, component, item }) => {
+    let release: ((response: Response) => void) | undefined
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const requestPath = String(input)
+      if (requestPath === '/api/v1/status') return Promise.resolve(json({ ...selectedStatus(), components: { ...selectedStatus().components, metrics: { status: 'unknown' } } }))
+      if (requestPath === '/api/v1/preferences') return Promise.resolve(json(preferences()))
+      if (requestPath === '/api/v1/namespace-scopes/7') return Promise.resolve(json({ namespaces: ['payments'] }))
+      if (requestPath.startsWith(path)) {
+        const namespace = new URL(requestPath, 'http://127.0.0.1').searchParams.get('namespace')
+        if (namespace === 'other') return new Promise<Response>((resolve) => { release = resolve })
+        return Promise.resolve(json([item], page()))
+      }
+      throw new Error(`Unexpected request: ${requestPath}`)
+    }))
+    renderPage(component)
+    await screen.findAllByText('old-marker')
+    fireEvent.change(screen.getByLabelText('Namespace'), { target: { value: 'other' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Apply filters' }))
+    await waitFor(() => expect(release).toBeDefined())
+    expect(screen.queryAllByText('old-marker')).toHaveLength(0)
+    await act(async () => release?.(json([], page())))
   })
 
 

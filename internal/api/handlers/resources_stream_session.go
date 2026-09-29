@@ -38,10 +38,14 @@ type resourceStreamSession struct {
 	service    ResourceStreamService
 	binding    namespaces.SelectionBinding
 	resolution namespaces.ScopeResolution
-	topics     []resourcecore.Topic
-	streamID   string
-	ring       *resourcecore.ReplayRing
-	sources    []resourceStreamSource
+	// A globally authorized watch for an explicit scope must never publish
+	// objects outside the requested namespaces to any replay client.
+	allowedNamespaces       map[string]struct{}
+	requestedNamespaceCount int
+	topics                  []resourcecore.Topic
+	streamID                string
+	ring                    *resourcecore.ReplayRing
+	sources                 []resourceStreamSource
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -70,7 +74,7 @@ type resourceReplayDelivery struct {
 	bytes    int
 }
 
-func (handler *ResourceStreams) createStreamSession(binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, topics []resourcecore.Topic) (*resourceStreamSession, error) {
+func (handler *ResourceStreams) createStreamSession(binding namespaces.SelectionBinding, resolution, requested namespaces.ScopeResolution, topics []resourcecore.Topic) (*resourceStreamSession, error) {
 	ring, err := resourcecore.NewReplayRing(handler.instance, binding.Generation, topics)
 	if err != nil {
 		return nil, err
@@ -78,8 +82,15 @@ func (handler *ResourceStreams) createStreamSession(binding namespaces.Selection
 	ctx, cancel := context.WithCancel(context.Background())
 	session := &resourceStreamSession{
 		handler: handler, service: handler.service, binding: binding, resolution: resolution,
-		topics: append([]resourcecore.Topic(nil), topics...), streamID: randomOpaque("str_"), ring: ring,
+		requestedNamespaceCount: len(requested.Namespaces),
+		topics:                  append([]resourcecore.Topic(nil), topics...), streamID: randomOpaque("str_"), ring: ring,
 		ctx: ctx, cancel: cancel, clients: map[*resourceReplayClient]struct{}{}, snapshotIDs: map[resourcecore.Topic]string{}, createdAt: handler.now().UTC(),
+	}
+	if resolution.PreferGlobal && !requested.PreferGlobal {
+		session.allowedNamespaces = make(map[string]struct{}, len(requested.Namespaces))
+		for _, namespace := range requested.Namespaces {
+			session.allowedNamespaces[namespace] = struct{}{}
+		}
 	}
 	for _, topic := range topics {
 		session.snapshotIDs[topic] = randomOpaque("snap_")
@@ -224,6 +235,61 @@ func (session *resourceStreamSession) stop() {
 	})
 }
 
+func (session *resourceStreamSession) filterScopedEvent(event resourcecore.StreamEvent) (resourcecore.StreamEvent, bool) {
+	if session.allowedNamespaces == nil {
+		return event, true
+	}
+	if event.Object != nil {
+		if _, allowed := session.allowedNamespaces[topicObjectNamespace(event.Object)]; !allowed {
+			return event, false
+		}
+	}
+	if event.Deleted != nil {
+		if _, allowed := session.allowedNamespaces[event.Deleted.Namespace]; !allowed {
+			return event, false
+		}
+	}
+	if event.Event == "added" || event.Event == "modified" {
+		if event.Object == nil {
+			return event, false
+		}
+	}
+	if event.Event == "deleted" && event.Deleted == nil {
+		return event, false
+	}
+	if len(event.Items) > 0 {
+		filtered := make([]resourcecore.TopicObject, 0, len(event.Items))
+		for _, item := range event.Items {
+			if _, allowed := session.allowedNamespaces[topicObjectNamespace(item)]; allowed {
+				filtered = append(filtered, item)
+			}
+		}
+		event.Items = filtered
+	}
+	return event, true
+}
+
+func topicObjectNamespace(object resourcecore.TopicObject) string {
+	switch item := object.(type) {
+	case resourcecore.PodDTO:
+		return item.Namespace
+	case resourcecore.EventDTO:
+		return item.Namespace
+	case resourcecore.WorkloadDTO:
+		return item.Namespace
+	case resourcecore.ServiceDTO:
+		return item.Namespace
+	case resourcecore.IngressDTO:
+		return item.Namespace
+	case resourcecore.EndpointSliceDTO:
+		return item.Namespace
+	case resourcecore.ConfigMapListDTO:
+		return item.Namespace
+	default:
+		return ""
+	}
+}
+
 func (session *resourceStreamSession) publish(event resourcecore.StreamEvent) bool {
 	if event.Generation == "" {
 		event.Generation = session.binding.Generation
@@ -342,7 +408,10 @@ func (session *resourceStreamSession) run() {
 				session.publishTerminal(resourcecore.StreamEvent{Event: "error", Topic: item.source.topic, Generation: session.binding.Generation, Reason: string(resourcecore.CodeClusterUnavailable), RefetchRequired: true})
 				return
 			}
-			event := item.event
+			event, allowed := session.filterScopedEvent(item.event)
+			if !allowed {
+				continue
+			}
 			if event.Event == "reset" || event.Event == "error" {
 				session.publishTerminal(event)
 				return
@@ -353,6 +422,20 @@ func (session *resourceStreamSession) run() {
 				return
 			}
 			if !state.complete {
+				if event.Event == "progress" {
+					preview := event.Items
+					if remaining := 500 - state.previewSent; len(preview) > remaining {
+						preview = preview[:max(0, remaining)]
+					}
+					state.previewSent += len(preview)
+					if len(preview) > 0 && !session.publishTransient(resourcecore.StreamEvent{
+						Event: "progress", Topic: item.source.topic, Generation: session.binding.Generation,
+						Items: preview, CompletedNamespaces: len(state.finalNamespaces), RequestedNamespaces: session.requestedNamespaceCount,
+					}) {
+						return
+					}
+					continue
+				}
 				if event.Event == "snapshot" {
 					if _, alreadyFinal := state.finalSources[item.source.key]; alreadyFinal {
 						session.publishTerminal(resourcecore.StreamEvent{Event: "reset", Topic: item.source.topic, Generation: session.binding.Generation, Reason: "snapshot_too_large", RefetchRequired: true})
@@ -375,6 +458,9 @@ func (session *resourceStreamSession) run() {
 							completedNamespaces++
 						}
 					}
+					if session.resolution.PreferGlobal && event.Final && state.expected == 1 {
+						completedNamespaces = session.requestedNamespaceCount
+					}
 					preview := event.Items
 					if remaining := 500 - state.previewSent; len(preview) > remaining {
 						preview = preview[:max(0, remaining)]
@@ -382,7 +468,7 @@ func (session *resourceStreamSession) run() {
 					state.previewSent += len(preview)
 					if (len(preview) > 0 || event.Final) && !session.publishTransient(resourcecore.StreamEvent{
 						Event: "progress", Topic: item.source.topic, Generation: session.binding.Generation,
-						Items: preview, CompletedNamespaces: completedNamespaces, RequestedNamespaces: len(session.resolution.Namespaces),
+						Items: preview, CompletedNamespaces: completedNamespaces, RequestedNamespaces: session.requestedNamespaceCount,
 					}) {
 						return
 					}

@@ -47,14 +47,17 @@ afterEach(() => {
 })
 
 describe('application shell', () => {
-  it('renders the accessible loading state while bootstrap is pending', () => {
+  it('renders the accessible loading state while bootstrap is pending', async () => {
     vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => undefined)))
     renderApp()
 
-    const heading = screen.getByRole('heading', { name: 'Preparing the local workspace' })
+    const heading = await screen.findByRole('heading', { name: 'Preparing the local workspace' })
     const panel = heading.closest('section')
     expect(panel).toHaveAttribute('aria-live', 'polite')
     expect(panel).toHaveAttribute('aria-busy', 'true')
+    expect(screen.getByRole('navigation', { name: 'Primary navigation' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Open command center' }))
+    expect(screen.getByRole('dialog', { name: 'Command center' })).toBeInTheDocument()
   })
 
   it('shows the empty context state without persisting remote data', async () => {

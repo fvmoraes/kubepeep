@@ -189,7 +189,7 @@ func TestResourceWatchPortRestartsExpiredPaginatedList(t *testing.T) {
 	})
 	backend := &ResourceBackend{now: time.Now}
 	port := &resourceWatchPort{backend: backend}
-	snapshot, err := port.listWithClients(t.Context(), watchTestBinding(), resourceClientSet{dynamic: client}, key)
+	snapshot, err := port.listWithClients(t.Context(), watchTestBinding(), resourceClientSet{dynamic: client}, key, nil)
 	if err != nil || calls != 3 || snapshot.ResourceVersion != "2" || len(snapshot.Items) != 1 || snapshot.Items[0].(resources.PodDTO).Name != "fresh" {
 		t.Fatalf("restarted LIST calls=%d snapshot=%#v err=%v", calls, snapshot, err)
 	}

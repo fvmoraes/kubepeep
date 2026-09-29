@@ -55,8 +55,8 @@ func TestOpenCreatesCompleteSchemaAndReopensIdempotently(t *testing.T) {
 	if err := store.db.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations").Scan(&migrationCount); err != nil {
 		t.Fatal(err)
 	}
-	if migrationCount != 1 {
-		t.Fatalf("migration count = %d, want 1", migrationCount)
+	if migrationCount != 2 {
+		t.Fatalf("migration count = %d, want 2", migrationCount)
 	}
 	if runtime.GOOS != "windows" {
 		info, err := os.Stat(path)
@@ -79,8 +79,8 @@ func TestOpenCreatesCompleteSchemaAndReopensIdempotently(t *testing.T) {
 	if err := reopened.db.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations").Scan(&migrationCount); err != nil {
 		t.Fatal(err)
 	}
-	if migrationCount != 1 {
-		t.Fatalf("migration count after reopen = %d, want 1", migrationCount)
+	if migrationCount != 2 {
+		t.Fatalf("migration count after reopen = %d, want 2", migrationCount)
 	}
 }
 
@@ -207,8 +207,8 @@ func TestAppliedMigrationHistoryMustBeAnExactPrefix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	second := testMigration(2, "second", "CREATE TABLE second_probe (id INTEGER);", false)
-	set := append(append([]migrations.Migration(nil), embedded...), second)
+	third := testMigration(3, "third", "CREATE TABLE third_probe (id INTEGER);", false)
+	set := append(append([]migrations.Migration(nil), embedded...), third)
 	if err := store.ApplyMigrations(ctx, set); err != nil {
 		t.Fatal(err)
 	}
@@ -266,7 +266,7 @@ func TestFailedDestructiveMigrationLeavesOriginalDatabaseIntact(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	failing := testMigration(2, "destructive_failure", "DROP TABLE preferences;\nTHIS IS NOT VALID SQL;", true)
+	failing := testMigration(3, "destructive_failure", "DROP TABLE preferences;\nTHIS IS NOT VALID SQL;", true)
 	err = store.ApplyMigrations(ctx, append(embedded, failing))
 	if err == nil {
 		t.Fatal("expected migration failure")
@@ -279,7 +279,7 @@ func TestFailedDestructiveMigrationLeavesOriginalDatabaseIntact(t *testing.T) {
 		t.Fatalf("preference = %q", value)
 	}
 	var count int
-	if err := store.db.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version = 2").Scan(&count); err != nil {
+	if err := store.db.QueryRowContext(ctx, "SELECT count(*) FROM schema_migrations WHERE version = 3").Scan(&count); err != nil {
 		t.Fatal(err)
 	}
 	if count != 0 {

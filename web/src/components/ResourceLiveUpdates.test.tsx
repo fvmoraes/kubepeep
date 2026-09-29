@@ -1,4 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { Profiler } from 'react'
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -78,6 +79,7 @@ describe('optional resource SSE', () => {
   it('coalesces 10k watch deltas into one bounded HTTP refresh', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const invalidate = vi.spyOn(client, 'invalidateQueries')
+    let commits = 0
     let responseController: ReadableStreamDefaultController<Uint8Array> | undefined
     vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
       const path = String(input)
@@ -89,9 +91,10 @@ describe('optional resource SSE', () => {
       throw new Error(`Unexpected request: ${path}`)
     }))
 
-    const view = render(<QueryClientProvider client={client}><ResourceLiveUpdates generation="gen_42" topics={['pods']} queryKeys={[["resources", "pods"]]} /></QueryClientProvider>)
+    const view = render(<QueryClientProvider client={client}><Profiler id="live-updates" onRender={() => { commits += 1 }}><ResourceLiveUpdates generation="gen_42" topics={['pods']} queryKeys={[["resources", "pods"]]} /></Profiler></QueryClientProvider>)
     fireEvent.click(screen.getByRole('button', { name: 'Start live updates' }))
     expect(await screen.findByText(/Live updates active for pods/)).toBeInTheDocument()
+    const commitsBeforeBurst = commits
     vi.useFakeTimers()
 
     const event = 'event: modified\ndata: {"generation":"gen_42"}\n\n'
@@ -102,6 +105,7 @@ describe('optional resource SSE', () => {
     expect(invalidate).not.toHaveBeenCalled()
     await act(async () => { await vi.advanceTimersByTimeAsync(150) })
     expect(screen.getByText(/watch changes batched/)).toBeInTheDocument()
+    expect(commits - commitsBeforeBurst).toBeLessThan(6)
     await vi.advanceTimersByTimeAsync(1_849)
     expect(invalidate).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(1)

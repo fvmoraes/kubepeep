@@ -77,6 +77,7 @@ export function PermissionsMatrixPage() {
     queryKey: ['permissions', status.data?.selection?.generation, refresh],
     queryFn: ({ signal }) => getBatchedPermissions(status.data!.selection!, refresh > 0, signal),
     enabled: Boolean(status.data?.selection?.scopeMode && status.data.selection.namespaceCount > 0),
+    staleTime: 45_000,
     retry: false,
   })
 

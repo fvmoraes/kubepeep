@@ -134,6 +134,12 @@ type WatchPort interface {
 	Watch(context.Context, WatchKey, string, int64, bool) (WatchStream, error)
 }
 
+// ProgressiveListPort may emit bounded, non-authoritative pages while the
+// initial LIST is still running. The complete snapshot remains transactional.
+type ProgressiveListPort interface {
+	ListProgress(context.Context, WatchKey, func([]TopicObject) bool) (WatchSnapshot, error)
+}
+
 // InitialWatchPort is optional. Clusters that do not implement streaming
 // lists continue to use the classic LIST+WATCH path.
 type InitialWatchPort interface {
@@ -689,7 +695,25 @@ func (worker *watchWorker) relist() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	snapshot, err := worker.manager.port.List(worker.ctx, worker.key)
+	var snapshot WatchSnapshot
+	if port, ok := worker.manager.port.(ProgressiveListPort); ok {
+		previewed := 0
+		snapshot, err = port.ListProgress(worker.ctx, worker.key, func(items []TopicObject) bool {
+			if previewed >= 500 {
+				return true
+			}
+			if remaining := 500 - previewed; len(items) > remaining {
+				items = items[:remaining]
+			}
+			previewed += len(items)
+			if len(items) == 0 {
+				return true
+			}
+			return worker.broadcast(StreamEvent{Event: "progress", Topic: worker.key.Topic, Generation: worker.key.Generation, Items: append([]TopicObject(nil), items...)})
+		})
+	} else {
+		snapshot, err = worker.manager.port.List(worker.ctx, worker.key)
+	}
 	if err != nil {
 		worker.cacheSubscription.AbortRefresh(token)
 		code := ErrorCodeOf(sanitizePortError(err))
@@ -1258,6 +1282,9 @@ func authorizeTopics(ctx context.Context, checker AuthorizationChecker, selectio
 		if globalAllowed {
 			return nil
 		}
+		return authorizeTopicsConcurrently(ctx, checker, selection, canonical, refresh)
+	}
+	if selection.Namespaces[0] == "" {
 		return authorizeTopicsConcurrently(ctx, checker, selection, canonical, refresh)
 	}
 	for _, topic := range canonical {

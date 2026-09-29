@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router'
 
 import { Button, Input } from './ui'
+import { beginViewNavigation } from '../observability/uxMetrics'
 
 export interface CommandRoute {
   path: string
@@ -184,6 +185,7 @@ export function CommandCenter({ routes, getFavorites, getRecent, getResources, o
   }, [view])
 
   const chooseRoute = useCallback((route: CommandRoute) => {
+    beginViewNavigation(route.path)
     navigate(route.path)
     setQuery('')
     setActiveIndex(0)

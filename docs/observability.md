@@ -151,7 +151,8 @@ requests concorrentes na mesma view não sobrescrevem estado entre si.
 
 | Métrica | Unidade | Momento |
 | --- | --- | --- |
-| `time_to_first_row` | ms | primeiro commit React de tabela não vazia |
+| `time_to_first_row` | ms | início da tentativa LIST até o primeiro commit React dos seus itens HTTP |
+| `time_to_first_visible_row` | ms | clique de navegação até o primeiro commit React de linha visível, inclusive preview autorizado |
 | `time_to_page_complete` | ms | conclusão da request da página |
 | `filter_interaction_latency` | ms | Apply até conclusão da página |
 | `sort_interaction_latency` | ms | Apply de sort/order até conclusão |

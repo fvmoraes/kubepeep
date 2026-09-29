@@ -224,7 +224,7 @@ async function loadLogCatalog(selection: SelectionSummary, signal?: AbortSignal)
 export function LogsPage() {
   const [params] = useSearchParams()
   const status = useQuery({ queryKey: ['local-status'], queryFn: ({ signal }) => getStatus(signal), staleTime: 15_000 })
-  const preferences = useQuery({ queryKey: ['preferences'], queryFn: ({ signal }) => getPreferences(signal) })
+  const preferences = useQuery({ queryKey: ['preferences'], queryFn: ({ signal }) => getPreferences(signal), staleTime: 60_000 })
   const selection = status.data?.selection ?? null
 
   return (

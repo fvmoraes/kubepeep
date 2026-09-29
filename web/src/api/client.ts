@@ -264,12 +264,12 @@ function resourceQuery(options: ResourceListQuery = {}): string {
 }
 
 async function collectionRequest<T>(path: string, options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<T>> {
-  const uxRequestId = beginListRequest({ interactionId: options.uxInteractionId })
+  const uxRequestId = options.skipUXTiming ? null : beginListRequest({ interactionId: options.uxInteractionId })
   try {
     let response: Envelope<T[]>
     let snapshotRenewed = false
     try {
-      response = await requestEnvelope<T[]>(`${path}${resourceQuery(options)}`, { method: 'GET', signal })
+      response = await requestEnvelope<T[]>(`${path}${resourceQuery(options)}`, { method: 'GET', signal, headers: options.prefetch ? { 'X-KubePeep-List-Priority': 'likely-next' } : undefined })
     } catch (error) {
       if (!options.continueToken || !(error instanceof APIError) || (error.status !== 410 && error.code !== 'CURSOR_EXPIRED') || signal?.aborted) throw error
       // Kubernetes expired the paginated LIST checkpoint. Restart at the
@@ -283,8 +283,10 @@ async function collectionRequest<T>(path: string, options: ResourceListQuery = {
     if (expectedGeneration && response.meta?.generation !== expectedGeneration) {
       throw new APIError(409, { code: 'GENERATION_CHANGED', message: 'The resource response belongs to another selection generation.' })
     }
-    associateListRequestRows(uxRequestId, response.data)
-    completeListRequest(uxRequestId, response.data.length > 0)
+    if (uxRequestId) {
+      associateListRequestRows(uxRequestId, response.data)
+      completeListRequest(uxRequestId, response.data.length > 0)
+    }
     return {
       items: response.data,
       page: response.meta?.page ?? {
@@ -300,7 +302,7 @@ async function collectionRequest<T>(path: string, options: ResourceListQuery = {
       snapshotRenewed,
     }
   } catch (error) {
-    cancelListRequest(uxRequestId)
+    if (uxRequestId) cancelListRequest(uxRequestId)
     throw error
   }
 }

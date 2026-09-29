@@ -179,13 +179,16 @@ export function ResourceLiveUpdates({ generation, topics, queryKeys, autoStart =
           if (typeof payload.generation === 'string' && payload.generation !== generation) throw new APIError(409, { code: 'GENERATION_CHANGED', message: 'The resource stream belongs to another generation.' })
           if (event.event === 'progress') {
             if (typeof payload.snapshotId !== 'string' || !topics.includes(payload.topic as ResourceTopic) || !Array.isArray(payload.items)) continue
+            const firstProgress = !hasProgressRef.current
             hasProgressRef.current = true
             const items = payload.items.slice(0, 500)
             snapshotItemCountRef.current += items.length
             const completedNamespaces = typeof payload.completedNamespaces === 'number' ? payload.completedNamespaces : 0
             const requestedNamespaces = typeof payload.requestedNamespaces === 'number' ? payload.requestedNamespaces : 0
             namespaceProgressRef.current = { completed: completedNamespaces, requested: requestedNamespaces }
-            pendingPreviewRef.current = appendPreview(pendingPreviewRef.current, { topic: payload.topic as ResourceTopic, snapshotId: payload.snapshotId, items, completedNamespaces, requestedNamespaces })
+            const progress = { topic: payload.topic as ResourceTopic, snapshotId: payload.snapshotId, items, completedNamespaces, requestedNamespaces }
+            if (firstProgress) onProgressRef.current?.(progress)
+            else pendingPreviewRef.current = appendPreview(pendingPreviewRef.current, progress)
             scheduleProgressStatus()
           } else if (event.event === 'snapshot') {
             if (!hasProgressRef.current && Array.isArray(payload.items)) snapshotItemCountRef.current += payload.items.length
@@ -234,10 +237,7 @@ export function ResourceLiveUpdates({ generation, topics, queryKeys, autoStart =
   useEffect(() => { startRef.current = start })
   useEffect(() => {
     if (!autoStart || state.mode !== 'idle' || autoAttemptedRef.current) return
-    const timer = setTimeout(() => {
-      if (!autoAttemptedRef.current) void startRef.current()
-    }, 100)
-    return () => clearTimeout(timer)
+    void startRef.current()
   }, [autoStart, generation, state.mode])
 
   const stateStyles: Record<LiveMode, string> = {

@@ -376,6 +376,10 @@ export interface CollectionResult<T> {
 export interface ResourceListQuery extends PageQuery {
   /** Ephemeral client-only UX correlation; never serialized into the request. */
   uxInteractionId?: string
+  /** Speculative shell reads do not create a visible-row timing sample. */
+  skipUXTiming?: boolean
+  /** Schedules only an automatic next-page fetch behind visible LIST work. */
+  prefetch?: boolean
   namespaces?: string[]
   kinds?: string[]
   statuses?: string[]

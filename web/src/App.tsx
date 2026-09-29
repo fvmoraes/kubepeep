@@ -11,12 +11,10 @@ import { Badge } from './components/ui/Badge'
 import { CommandCenter, type CommandRoute } from './components/CommandCenter'
 import { ContextSelector } from './components/ContextSelector'
 import { GlobalNamespaceSelect } from './components/GlobalNamespaceSelect'
-import { DashboardPage } from './components/Dashboard'
 import { Sidebar } from './components/Sidebar'
 import { StatePanel } from './components/StatePanel'
-import { ResourceWorkspaceOverlay } from './components/workspace/ResourceWorkspace'
 import { ResourceWorkspaceProvider, useResourceWorkspace } from './components/workspace/ResourceWorkspaceProvider'
-import { GlobalNamespaceProvider } from './context/GlobalNamespace'
+import { GlobalNamespaceProvider, useGlobalNamespace } from './context/GlobalNamespace'
 import { ToastProvider } from './components/ui/Toast'
 import { useAppVersion } from './hooks/useAppVersion'
 import { navGroups, settingsNavItem } from './navigation/tree'
@@ -24,8 +22,8 @@ import { resourceDetailPath } from './navigation/paths'
 import { desktopPlatform } from './api/desktop'
 import { recordShellReady } from './observability/uxMetrics'
 
-// Keep the shell and default overview in the startup chunk. Resource families,
-// logs and settings are loaded only when the user visits them.
+// Load the shell first. Sections render inside its independent fallback.
+const DashboardPage = lazy(() => import('./components/Dashboard').then((module) => ({ default: module.DashboardPage })))
 const NamespaceScopeEditor = lazy(() => import('./components/NamespaceScopeEditor').then((module) => ({ default: module.NamespaceScopeEditor })))
 const PermissionsMatrixPage = lazy(() => import('./components/PermissionsMatrix').then((module) => ({ default: module.PermissionsMatrixPage })))
 const LogsPage = lazy(() => import('./components/LogsPage').then((module) => ({ default: module.LogsPage })))
@@ -43,6 +41,7 @@ const ServiceAccountsPage = lazy(() => import('./components/ConfigurationPages')
 const AccessControlPage = lazy(() => import('./components/AccessPages').then((module) => ({ default: module.AccessControlPage })))
 const AdministrationPage = lazy(() => import('./components/AccessPages').then((module) => ({ default: module.AdministrationPage })))
 const SettingsPage = lazy(() => import('./components/SettingsPage').then((module) => ({ default: module.SettingsPage })))
+const ResourceWorkspaceOverlay = lazy(() => import('./components/workspace/ResourceWorkspace').then((module) => ({ default: module.ResourceWorkspaceOverlay })))
 
 // Command palette catalog: every enabled navigation destination. Group labels
 // disambiguate repeated item names (e.g. the Workloads "Overview").
@@ -230,8 +229,8 @@ function useShellPreferencePersistence(preferencesAvailable: boolean, onSaveErro
 function Shell() {
   const queryClient = useQueryClient()
   useEffect(() => {
-    const frame = requestAnimationFrame(recordShellReady)
-    return () => cancelAnimationFrame(frame)
+    recordShellReady()
+    void import('./components/ResourcePages')
   }, [])
   const navigate = useNavigate()
   const version = useAppVersion()
@@ -246,6 +245,18 @@ function Shell() {
     refetchOnWindowFocus: false,
   })
   const selection = status.data?.selection ?? null
+  const globalNamespace = useGlobalNamespace()
+  const prefetchedPodsFor = useRef('')
+  useEffect(() => {
+    if (!selection || selection.namespaceCount < 1 || selection.namespaceCount > 50 || globalNamespace.loading || globalNamespace.degraded || globalNamespace.options.length === 0 || location.pathname !== '/') return
+    const previewNamespace = globalNamespace.value || globalNamespace.options[0]
+    const key = `${selection.generation}:\0${globalNamespace.value}:\0${previewNamespace}`
+    if (prefetchedPodsFor.current === key) return
+    prefetchedPodsFor.current = key
+    void import('./components/resource/podPreview').then(({ prefetchDefaultPodPreview }) => {
+      if (prefetchedPodsFor.current === key) return prefetchDefaultPodPreview(queryClient, selection, globalNamespace.value, previewNamespace)
+    })
+  }, [queryClient, selection, globalNamespace.value, globalNamespace.options, globalNamespace.loading, globalNamespace.degraded, location.pathname])
   const previousGeneration = useRef<string | null>(null)
   const refreshActiveReads = useCallback(() => queryClient.refetchQueries({ type: 'active', predicate: isSafeGlobalRefreshQuery }), [queryClient])
   const preferences = useQuery({
@@ -381,7 +392,7 @@ function Shell() {
         </header>
         <main id="main-content"><Suspense fallback={<StatePanel kind="loading" title="Opening section">The shell remains available while this section loads.</StatePanel>}><Outlet /></Suspense></main>
       </div>
-      <ResourceWorkspaceOverlay />
+        {workspace.open ? <Suspense fallback={<div role="status" className="workspace-panel p-4 text-sm text-kp-overlay-text">Opening resource…</div>}><ResourceWorkspaceOverlay /></Suspense> : null}
     </div>
   )
 }

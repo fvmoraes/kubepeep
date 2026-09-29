@@ -117,6 +117,9 @@ func TestResourceListEnvelopeCursorBindingAndNoStore(t *testing.T) {
 	if service.calls != 1 || service.podOptions.Limit != 25 {
 		t.Fatalf("service options=%#v calls=%d", service.podOptions, service.calls)
 	}
+	if service.podOptions.Priority != resourcecore.PriorityVisible {
+		t.Fatalf("initial priority=%d", service.podOptions.Priority)
+	}
 	var envelope struct {
 		Data []resourcecore.PodDTO `json:"data"`
 		Meta struct {
@@ -131,14 +134,52 @@ func TestResourceListEnvelopeCursorBindingAndNoStore(t *testing.T) {
 	if envelope.Meta.RequestID != "req_test" || envelope.Meta.Generation != "gen" || envelope.Meta.Page.Next == "" {
 		t.Fatalf("bad envelope: %#v", envelope)
 	}
+	prefetch := httptest.NewRequest(http.MethodGet, "/api/v1/pods?limit=25&status=Running&sort=name&continue="+envelope.Meta.Page.Next, nil)
+	prefetch.Header.Set("X-KubePeep-List-Priority", "likely-next")
+	prefetchResponse := httptest.NewRecorder()
+	handler.Pods(prefetchResponse, prefetch)
+	if prefetchResponse.Code != http.StatusOK || service.calls != 2 || service.podOptions.Priority != resourcecore.PriorityLikelyNext {
+		t.Fatalf("prefetch status=%d calls=%d priority=%d body=%s", prefetchResponse.Code, service.calls, service.podOptions.Priority, prefetchResponse.Body.String())
+	}
+	manual := httptest.NewRequest(http.MethodGet, "/api/v1/pods?limit=25&status=Running&sort=name&continue="+envelope.Meta.Page.Next, nil)
+	manualResponse := httptest.NewRecorder()
+	handler.Pods(manualResponse, manual)
+	if manualResponse.Code != http.StatusOK || service.calls != 3 || service.podOptions.Priority != resourcecore.PriorityVisible {
+		t.Fatalf("manual status=%d calls=%d priority=%d body=%s", manualResponse.Code, service.calls, service.podOptions.Priority, manualResponse.Body.String())
+	}
 	mismatch := httptest.NewRequest(http.MethodGet, "/api/v1/pods?limit=25&status=Failed&sort=name&continue="+envelope.Meta.Page.Next, nil)
 	mismatchResponse := httptest.NewRecorder()
 	handler.Pods(mismatchResponse, mismatch)
 	if mismatchResponse.Code != http.StatusBadRequest {
 		t.Fatalf("cursor mismatch status=%d body=%s", mismatchResponse.Code, mismatchResponse.Body.String())
 	}
-	if service.calls != 1 {
+	if service.calls != 3 {
 		t.Fatalf("mismatched cursor reached service: calls=%d", service.calls)
+	}
+}
+
+func TestResourceListPriorityRejectsUnsupportedOrInitialSpeculation(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		query    string
+		priority string
+	}{
+		{name: "initial page", query: "limit=25", priority: "likely-next"},
+		{name: "unknown priority", query: "limit=25&continue=cursor", priority: "urgent"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, "/api/v1/pods?"+test.query, nil)
+			request.Header.Set("X-KubePeep-List-Priority", test.priority)
+			if _, err := decodeResourceListQuery(request, resourcecore.CollectionPods); err == nil {
+				t.Fatal("invalid priority was accepted")
+			}
+		})
+	}
+	err := resourceHTTPError(resourcecore.ErrPrefetchDeferred)
+	recorder := httptest.NewRecorder()
+	api.WriteError(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/pods", nil), err)
+	if recorder.Code != http.StatusTooManyRequests || !strings.Contains(recorder.Body.String(), api.CodePrefetchDeferred) {
+		t.Fatalf("deferred response status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 }
 

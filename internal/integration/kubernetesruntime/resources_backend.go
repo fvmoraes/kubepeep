@@ -197,7 +197,11 @@ func collectFilteredResource[T resources.ListItem](
 	if err != nil {
 		return resources.ListResult[T]{}, err
 	}
-	value, err := backend.requestCoalescer().Do(ctx, key, func(shared context.Context) (any, error) {
+	coalescingKey := key
+	if normalized.Priority != resources.PriorityVisible {
+		coalescingKey += ":speculative"
+	}
+	value, err := backend.requestCoalescer().Do(ctx, coalescingKey, func(shared context.Context) (any, error) {
 		topic, mapped := topicForCollection(collection)
 		if mapped {
 			if cached, ok := resources.LoadCollectionPage[T](shared, backend.collectionCache, key, binding.Generation, backend.authorizer); ok && cached.Cursor != nil {
@@ -225,7 +229,7 @@ func collectFilteredResource[T resources.ListItem](
 				}
 			}
 		}
-		release, scheduleErr := backend.scheduler.Acquire(shared, resources.PriorityVisible)
+		release, scheduleErr := backend.scheduler.Acquire(shared, normalized.Priority)
 		if scheduleErr != nil {
 			return resources.ListResult[T]{}, scheduleErr
 		}
@@ -418,6 +422,48 @@ func collectResource[T resources.ListItem](
 			return resources.ListResult[T]{}, resourceDomain(resources.CodeAuthorizationUnavailable, "Authorization could not be confirmed.", nil)
 		}
 	}
+	if collection == resources.CollectionPods && !resolution.PreferGlobal && !cursorNamespaced && len(resolution.Namespaces) > 1 && (len(options.Namespaces) != 1 || cursorGlobal) {
+		names, namesErr := resources.ResolveNamespaces(resolution.Namespaces, options.Namespaces)
+		if namesErr != nil {
+			return resources.ListResult[T]{}, namesErr
+		}
+		origins, originsErr := resources.GlobalOriginsFor(collection, options.Kinds)
+		if originsErr != nil {
+			return resources.ListResult[T]{}, originsErr
+		}
+		decision := globalListDecision(ctx, backend.authorizer, binding.Generation, origins)
+		if decision == authorization.DecisionAllowed {
+			allowed := make(map[string]struct{}, len(names))
+			for _, name := range names {
+				allowed[name] = struct{}{}
+			}
+			selection := resourceSelection(binding, resolution)
+			selection.Namespaces = []string{""}
+			var received atomic.Int64
+			counted := countingLister(list, &received)
+			started := time.Now()
+			result, collectErr := resources.Collect(ctx, resources.CollectionRequest[T]{
+				Selection: selection, Options: options, Origins: origins, Cursor: cursor,
+				Lister: originListerFunc[T](func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[T], error) {
+					return listGlobalPodPageInScope(ctx, page, counted, allowed)
+				}),
+				Authorizer: backend.authorizer, Less: less, Timeout: backend.listWindowTimeout,
+				RequestedNamespaces: len(names), Fanout: backend.listFanout, NativeIdentityOrder: true,
+				Retry: backend.listRetryPolicy(),
+			})
+			observeListDuration(backend.metrics, collection, "global", started)
+			if collectErr == nil {
+				backend.observeList(collection, int(received.Load()), len(result.Items))
+			}
+			return result, collectErr
+		}
+		if cursorGlobal {
+			if decision == authorization.DecisionDenied {
+				return resources.ListResult[T]{}, resourceDomain(resources.CodeForbidden, "The global list grant required by this cursor is unavailable.", nil)
+			}
+			return resources.ListResult[T]{}, resourceDomain(resources.CodeAuthorizationUnavailable, "Authorization could not be confirmed.", nil)
+		}
+	}
 	if len(options.Namespaces) == 0 && len(resolution.Namespaces) > resources.MaximumNamespaces {
 		return resources.ListResult[T]{}, resourceDomain(resources.CodeLimitExceeded, "The selected scope is too large for namespace list fan-out; narrow the namespace filter.", nil)
 	}
@@ -449,6 +495,62 @@ func collectResource[T resources.ListItem](
 		backend.observeList(collection, int(received.Load()), len(result.Items))
 	}
 	return result, collectErr
+}
+
+// A global LIST is safe for an explicit scope only after a global LIST grant.
+// Filter each native page before it reaches the cursor. Bound the raw scan to
+// five pages so a scope sparse in a large cluster cannot monopolize a request.
+func listGlobalPodPageInScope[T resources.ListItem](ctx context.Context, page resources.PageRequest, list originListerFunc[T], allowed map[string]struct{}) (resources.OriginPage[T], error) {
+	result := resources.OriginPage[T]{Origin: page.Origin, Items: []T{}}
+	maxNamespace := ""
+	for namespace := range allowed {
+		if namespace > maxNamespace {
+			maxNamespace = namespace
+		}
+	}
+	next := page
+	for range 5 {
+		if err := ctx.Err(); err != nil {
+			return result, err
+		}
+		fetched, err := list(ctx, next)
+		if err != nil {
+			return result, err
+		}
+		if result.ResourceVersion == "" {
+			result.ResourceVersion = fetched.ResourceVersion
+		}
+		lastNamespace := ""
+		for _, item := range fetched.Items {
+			pod, ok := any(item).(resources.PodDTO)
+			if !ok {
+				return result, resourceDomain(resources.CodeClusterUnavailable, "The global Pod list returned an invalid item.", nil)
+			}
+			lastNamespace = pod.Namespace
+			if _, included := allowed[pod.Namespace]; included {
+				result.Items = append(result.Items, item)
+			}
+		}
+		result.Continue = fetched.Continue
+		// Native Pod LIST order is namespace/name. Once it passes the last
+		// selected namespace, no later raw page can add an allowed Pod.
+		if lastNamespace > maxNamespace {
+			result.Continue = ""
+			return result, nil
+		}
+		if result.Continue == "" || len(result.Items) > int(page.Limit) || len(result.Items) >= int(page.Limit) && lastNamespace < maxNamespace {
+			return result, nil
+		}
+		next.Continue = result.Continue
+		// A full page at the last selected namespace needs one-item lookahead
+		// to distinguish an exact terminal page from a real continuation.
+		if len(result.Items) >= int(page.Limit) {
+			next.Limit = 1
+		} else {
+			next.Limit = page.Limit
+		}
+	}
+	return result, nil
 }
 
 func listCursorMode[T resources.ListItem](cursor *resources.CompositeCursor[T]) (global, namespaced bool, err error) {
@@ -547,7 +649,11 @@ func clusterCollect[T resources.ListItem](ctx context.Context, backend *Resource
 	if err != nil {
 		return resources.ListResult[T]{}, err
 	}
-	value, err := backend.requestCoalescer().Do(ctx, key, func(shared context.Context) (any, error) {
+	coalescingKey := key
+	if normalized.Priority != resources.PriorityVisible {
+		coalescingKey += ":speculative"
+	}
+	value, err := backend.requestCoalescer().Do(ctx, coalescingKey, func(shared context.Context) (any, error) {
 		return clusterCollectUncoalesced(shared, backend, binding, resolution, collection, normalized, cursor, less, list, filterSort)
 	})
 	if err != nil {
@@ -561,7 +667,7 @@ func clusterCollect[T resources.ListItem](ctx context.Context, backend *Resource
 }
 
 func clusterCollectUncoalesced[T resources.ListItem](ctx context.Context, backend *ResourceBackend, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, collection resources.Collection, options resources.ListOptions, cursor *resources.CompositeCursor[T], less func(T, T) bool, list originListerFunc[T], filterSort func([]T, resources.ListOptions) []T) (resources.ListResult[T], error) {
-	release, scheduleErr := backend.scheduler.Acquire(ctx, resources.PriorityVisible)
+	release, scheduleErr := backend.scheduler.Acquire(ctx, options.Priority)
 	if scheduleErr != nil {
 		return resources.ListResult[T]{}, scheduleErr
 	}

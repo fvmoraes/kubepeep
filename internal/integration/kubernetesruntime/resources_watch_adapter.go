@@ -27,8 +27,9 @@ type resourceWatchPort struct{ backend *ResourceBackend }
 const maximumWatchFanout = 100
 
 func (backend *ResourceBackend) AuthorizeTopics(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, topics []resources.Topic) (namespaces.ScopeResolution, error) {
-	if resolution.PreferGlobal {
+	if resolution.PreferGlobal || len(resolution.Namespaces) > 1 {
 		global := resolution
+		global.PreferGlobal = true
 		global.Namespaces = []string{metav1.NamespaceAll}
 		if err := resources.AuthorizeTopics(ctx, backend.authorizer, resourceSelection(binding, global), topics); err == nil {
 			return global, nil
@@ -99,6 +100,14 @@ func (port *resourceWatchPort) binding(generation string) (namespaces.SelectionB
 }
 
 func (port *resourceWatchPort) List(ctx context.Context, key resources.WatchKey) (resources.WatchSnapshot, error) {
+	return port.list(ctx, key, nil)
+}
+
+func (port *resourceWatchPort) ListProgress(ctx context.Context, key resources.WatchKey, emit func([]resources.TopicObject) bool) (resources.WatchSnapshot, error) {
+	return port.list(ctx, key, emit)
+}
+
+func (port *resourceWatchPort) list(ctx context.Context, key resources.WatchKey, emit func([]resources.TopicObject) bool) (resources.WatchSnapshot, error) {
 	binding, err := port.binding(key.Generation)
 	if err != nil {
 		return resources.WatchSnapshot{}, err
@@ -111,12 +120,12 @@ func (port *resourceWatchPort) List(ctx context.Context, key resources.WatchKey)
 	if key.Topic != resources.TopicConfigMaps && clients.dynamic == nil {
 		return resources.WatchSnapshot{}, resourceDomain(resources.CodeFeatureUnavailable, "Resource watches are unavailable.", nil)
 	}
-	return port.listWithClients(requestContext, binding, clients, key)
+	return port.listWithClients(requestContext, binding, clients, key, emit)
 }
 
 // Go interfaces cannot express client-go's covariant NamespaceableResource
 // return type. Keep the actual list implementations concrete and small.
-func (port *resourceWatchPort) listWithClients(ctx context.Context, binding namespaces.SelectionBinding, clients resourceClientSet, key resources.WatchKey) (resources.WatchSnapshot, error) {
+func (port *resourceWatchPort) listWithClients(ctx context.Context, binding namespaces.SelectionBinding, clients resourceClientSet, key resources.WatchKey, emit func([]resources.TopicObject) bool) (resources.WatchSnapshot, error) {
 	snapshot := resources.WatchSnapshot{Items: []resources.TopicObject{}}
 	var cronJobs []batchv1.Job
 	cronHistoryComplete := false
@@ -126,7 +135,15 @@ func (port *resourceWatchPort) listWithClients(ctx context.Context, binding name
 	continueToken := ""
 	restarted := false
 	for {
-		options := metav1.ListOptions{Limit: 500, Continue: continueToken}
+		pageStart := len(snapshot.Items)
+		limit := int64(500)
+		if emit != nil {
+			limit = 100
+			if continueToken == "" {
+				limit = 20
+			}
+		}
+		options := metav1.ListOptions{Limit: limit, Continue: continueToken}
 		if key.Topic == resources.TopicConfigMaps {
 			list, err := clients.metadata.Resource(key.GVR).Namespace(key.Namespace).List(ctx, options)
 			if err != nil {
@@ -162,6 +179,9 @@ func (port *resourceWatchPort) listWithClients(ctx context.Context, binding name
 		}
 		if len(snapshot.Items) > resources.MaximumSnapshotItems {
 			return resources.WatchSnapshot{}, resourceDomain(resources.CodeLimitExceeded, "The initial snapshot is too large.", nil)
+		}
+		if emit != nil && len(snapshot.Items) > pageStart && !emit(snapshot.Items[pageStart:]) {
+			return resources.WatchSnapshot{}, context.Canceled
 		}
 		if continueToken == "" {
 			return snapshot, nil

@@ -122,6 +122,7 @@ Limites de bytes de logs/frames têm configuração própria e não herdam o bod
 | 413 | `BODY_TOO_LARGE` | body excedeu limite |
 | 415 | `UNSUPPORTED_MEDIA_TYPE` | tipo de conteúdo não aceito |
 | 429 | `LIMIT_EXCEEDED` | concorrência/sessões/budget excedido |
+| 429 | `PREFETCH_DEFERRED` | prefetch da próxima página adiado para preservar a capacidade das listas visíveis |
 | 500 | `INTERNAL` | falha local inesperada sanitizada |
 | 503 | `CLUSTER_UNAVAILABLE` | API Kubernetes inacessível |
 | 503 | `AUTHENTICATION_UNAVAILABLE` | kubeconfig/plugin não concluiu autenticação |
@@ -153,6 +154,15 @@ Repetição não declarada, valor vazio e query desconhecida retornam
 `VALIDATION_FAILED`. `namespace` aceita no máximo 100 valores distintos, todos
 dentro do scope ativo; funciona como interseção, nunca amplia o scope.
 `status` e `kind` preservam a ordem canônica da tabela, não a ordem recebida.
+
+Nas listas de recursos, o cliente pode enviar o header
+`X-KubePeep-List-Priority: likely-next` somente com `continue` para o prefetch automático da próxima
+página. A ausência do header indica requisição visível, inclusive quando o
+usuário pede a próxima página manualmente. O header não altera a identidade
+do cursor ou do cache. O servidor pode responder `429/PREFETCH_DEFERRED` ao
+prefetch; o cliente conserva a página já carregada e permite a tentativa
+manual. Valores desconhecidos ou uso na primeira página retornam
+`VALIDATION_FAILED`.
 
 ### 5.2 Meta de página
 

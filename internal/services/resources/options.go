@@ -38,6 +38,8 @@ type ListOptions struct {
 	AddressType   string
 	LabelSelector string
 	FieldSelector string
+	// Priority controls scheduling only; it must not change cursor or cache identity.
+	Priority RequestPriority `json:"-"`
 }
 
 type collectionRules struct {
@@ -90,6 +92,9 @@ func NormalizeListOptions(collection Collection, options ListOptions) (ListOptio
 	rules, ok := rulesByCollection[collection]
 	if !ok {
 		return ListOptions{}, validationError("collection is not supported")
+	}
+	if options.Priority > PriorityUnrelated {
+		return ListOptions{}, validationError("list priority is invalid")
 	}
 	if options.Limit == 0 {
 		options.Limit = DefaultListLimit

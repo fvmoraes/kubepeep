@@ -250,7 +250,7 @@ func (handler *ResourceStreams) Resources(w http.ResponseWriter, r *http.Request
 			return
 		}
 	} else {
-		session, err = handler.createStreamSession(binding, streamResolution, topics)
+		session, err = handler.createStreamSession(binding, streamResolution, resolution, topics)
 		if err != nil {
 			api.WriteError(w, r, resourceHTTPError(err))
 			return

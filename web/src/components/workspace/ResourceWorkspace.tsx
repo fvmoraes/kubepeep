@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { lazy, Suspense, useEffect } from 'react'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { ChevronLeft, ChevronRight, X } from 'lucide-react'
 
@@ -60,8 +60,6 @@ import type {
 } from '../../api/types'
 import { Badge, Button, StatusBadge } from '../ui'
 import { FavoriteButton } from '../FavoriteButton'
-import { PodActions, WorkloadActions } from '../ResourceActions'
-import { YamlViewer } from '../YamlViewer'
 import { TableLink } from '../resource/TableLink'
 import { Facts } from '../resource/Facts'
 import { errorMessage } from '../resource/errors'
@@ -70,6 +68,10 @@ import { eventBadgeVariant, statusBadgeVariant } from '../resource/status'
 import { ResourceTabStrip, type ResourceTab } from '../resource/ResourceTabStrip'
 import { resourceDetailPath, resourceKindLabel, workloadKindPath } from '../../navigation/paths'
 import { useResourceWorkspace, type WorkspaceEntry } from './ResourceWorkspaceProvider'
+
+const YamlViewer = lazy(() => import('../YamlViewer').then((module) => ({ default: module.YamlViewer })))
+const PodActions = lazy(() => import('../ResourceActions').then((module) => ({ default: module.PodActions })))
+const WorkloadActions = lazy(() => import('../ResourceActions').then((module) => ({ default: module.WorkloadActions })))
 
 const yamlCollections = new Set([
   'pods', 'services', 'ingresses', 'endpoint-slices', 'configmaps',
@@ -601,17 +603,19 @@ export function ResourceWorkspaceOverlay() {
         </div>
       )
     }
-    if (tab === 'yaml') {
-      return (
-        <YamlViewer
-          value={yaml.data}
-          pending={yaml.isPending}
-          error={yaml.error}
-          onLoad={() => yaml.mutate(undefined)}
-          diffTarget={yamlDiffTarget(activeEntry)}
-        />
-      )
-    }
+      if (tab === 'yaml') {
+        return (
+          <Suspense fallback={<p role="status" className="text-sm text-kp-overlay-text">Opening YAML viewer…</p>}>
+            <YamlViewer
+              value={yaml.data}
+              pending={yaml.isPending}
+              error={yaml.error}
+              onLoad={() => yaml.mutate(undefined)}
+              diffTarget={yamlDiffTarget(activeEntry)}
+            />
+          </Suspense>
+        )
+      }
     if (tab === 'events') return <WorkspaceEvents entry={activeEntry} generation={generation} />
     if (tab === 'logs') {
       if (detail.data?.type === 'pod') return <PodLogsLink detail={detail.data.data} />
@@ -619,8 +623,8 @@ export function ResourceWorkspaceOverlay() {
     }
     if (tab === 'actions') {
       if (!detail.data || detail.isPending || detail.isError || !selection) return detailFallback()
-      if (detail.data.type === 'pod') return <PodActions detail={detail.data.data} selection={selection} />
-      if (detail.data.type === 'workload') return <WorkloadActions detail={detail.data.data} selection={selection} />
+        if (detail.data.type === 'pod') return <Suspense fallback={<p role="status" className="text-sm text-kp-overlay-text">Opening Pod actions…</p>}><PodActions detail={detail.data.data} selection={selection} /></Suspense>
+        if (detail.data.type === 'workload') return <Suspense fallback={<p role="status" className="text-sm text-kp-overlay-text">Opening workload actions…</p>}><WorkloadActions detail={detail.data.data} selection={selection} /></Suspense>
       return null
     }
     if (tab === 'pods' || tab === 'replicasets' || tab === 'jobs') {
