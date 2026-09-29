@@ -1,9 +1,10 @@
 # Candidato local da v0.7
 
 **Estado:** pronto para decisão de publicação. O candidato funcional é o commit
-`b148a6028dd800e30b9cc54a1cd14a8c862f1fac` da branch
-`review/plan-v0.7`. Esta preparação não cria tag, release remota nem push; o
-nome e a versão final dos pacotes continuam sujeitos à decisão do mantenedor.
+`52aa3db` da branch `review/plan-v0.7`; o comparativo de performance foi
+coletado no ancestral funcional `b148a6028dd800e30b9cc54a1cd14a8c862f1fac`.
+Esta preparação não cria tag, release remota nem push; o nome e a versão final
+dos pacotes continuam sujeitos à decisão do mantenedor.
 
 ## Destaques
 
@@ -40,7 +41,7 @@ nome e a versão final dos pacotes continuam sujeitos à decisão do mantenedor.
 | Kind `create/validate` e `app-e2e` | aprovado; cluster preservado |
 | Wails nativo + AT-SPI | scope default restaurado; Pods exibiu 9 linhas Kind reais |
 | benchmark representativo/matriz/protocolo | aprovado em árvore limpa; 10 + 47 cenários e protocolo Kind |
-| segurança, módulos, vulnerabilidades e artefatos | aprovado; zero vulnerabilidade alcançável/produção |
+| segurança, módulos, vulnerabilidades e artefatos | aprovado; zero vulnerabilidade Go alcançável e zero advisory npm |
 
 O comparativo completo está em [performance-baseline.md](performance-baseline.md)
 e o registro item a item em
@@ -51,8 +52,6 @@ e o registro item a item em
 - medições sintéticas não modelam jitter, etcd, admission webhooks nem cluster
   remoto real;
 - gzip remoto usa rede modelada de 30 ms/10 Mbit/s;
-- `npm ci` relata três advisories em dependências de desenvolvimento (dois
-  moderados e um alto); `npm audit --omit=dev` retorna zero;
 - a amostra Wails final comprova render e dados via acessibilidade, mas a série
   de startup controlada continua sendo a registrada na F3;
 - Helm, Gateway API, edição arbitrária de YAML, Prometheus e multi-contexto

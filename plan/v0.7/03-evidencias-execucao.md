@@ -355,8 +355,42 @@ Segurança final: o evento de ação guarda apenas kind canônico, duração, de
 e código fechado. Sentinelas de contexto, namespace e objeto foram verificadas
 contra evento, stdout, SQLite, JSONL e artefatos. `govulncheck` reportou zero
 call paths vulneráveis e um advisory importado não alcançável; npm de produção
-reportou zero vulnerabilidades. `npm ci` ainda informa dois advisories moderados
-e um alto restritos ao conjunto de desenvolvimento.
+reportou zero vulnerabilidades. A auditoria geral posterior atualizou Vitest e
+`undici`, eliminando também os três advisories de desenvolvimento.
+
+## Auditoria geral F0–F7 — 2026-09-29
+
+**Status: APROVADA no commit funcional `52aa3db`.** A revisão releu o plano,
+os contratos, a matriz, os checklists e os documentos correntes; cruzou o grafo
+atualizado com a fonte física e reexecutou os gates afetados. O inventário tem
+79/79 tarefas marcadas nas oito fases e 68/68 linhas na matriz; cada tarefa
+possui evidência final sem `PENDENTE` ou `EM ANDAMENTO`. Todos os SHAs citados
+existem e todos os links Markdown locais dos documentos correntes são válidos.
+
+Achados corrigidos: o `doctor` ainda descrevia o exporter OTLP implementado
+como ausente; o diagnóstico agora aprova a configuração habilitada e possui
+regressão. Estados antigos ainda mostravam F5–F7 ou toda a v0.7 como planejados;
+sete links apontavam para diretórios removidos; documentos de produto não
+refletiam as famílias e jornadas entregues. Vitest 4.1.10 e `undici` 8.9.0
+tinham três advisories apenas no tooling; as versões 4.1.11 e 8.11.2 encerraram
+o `npm audit` completo sem `--force`.
+
+| Verificação final | Resultado |
+| --- | --- |
+| `rtk make verify` | aprovado; 175 Vitest, Playwright, Go/vet, tipos, build, smoke e Ginger verdes; 8 warnings Fast Refresh, zero erro |
+| `rtk make test-race` | aprovado |
+| `rtk make build-desktop` | aprovado com Wails 2.15/WebKitGTK |
+| `rtk test/kind/harness.sh app-e2e ./dist/kubePeep` | aprovado; contexto/scope, dashboard, SSE/log, exec, revogação/restauração e offline reais |
+| `rtk scripts/security_check.sh HEAD` | aprovado; staged content, histórico completo, identidades, paths, mensagens, tags e secrets |
+| `rtk go mod verify`; `rtk govulncheck ./...` | módulos íntegros; zero vulnerabilidade alcançável e um pacote importado sem call path |
+| `rtk npm audit`; `rtk make release-artifact-check` | zero vulnerabilidades npm; artefato local aprovado |
+| links, tarefas, matriz, evidências e commits | 0 link quebrado; 79/79 tarefas; 68/68 entregas; 0 SHA ausente |
+
+O benchmark não foi repetido após `52aa3db` porque esse commit altera o
+diagnóstico local, documentação e dependências de teste, sem tocar os caminhos
+de coleta. O comparativo reproduzível permanece ligado a `b148a60`. O nó
+`kubepeep-f4-control-plane` permaneceu `Ready` em Kubernetes v1.35.0 após o
+harness. GoReleaser e publicação multiplataforma continuam na decisão externa.
 
 ## Decisão externa remanescente
 

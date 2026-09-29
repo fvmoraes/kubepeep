@@ -228,12 +228,11 @@ mudar, a diferença deve ser declarada em vez de misturar as séries.
 - O build frontend mantém o warning conhecido `INEFFECTIVE_DYNAMIC_IMPORT` em
   `src/api/client.ts` e um chunk principal de aproximadamente 633 kB; o
   tratamento está fora da F0.
-- Permanecem nove warnings ESLint já conhecidos e o aviso jsdom de
-  `HTMLCanvasElement.getContext()` sem o pacote `canvas`; os gates executados
-  continuam verdes.
-- `npm ci` reporta duas vulnerabilidades moderadas em dependências de
-  desenvolvimento; `npm audit --omit=dev` reporta zero vulnerabilidades de
-  produção. Nenhum `audit fix --force` foi aplicado.
+- Na coleta original da F0 havia nove warnings ESLint e duas vulnerabilidades
+  moderadas de desenvolvimento. No fechamento geral em `52aa3db`, o lint
+  manteve oito warnings Fast Refresh e zero erro; Vitest 4.1.11 e `undici`
+  8.11.2 levaram `npm audit` completo a zero vulnerabilidades. O aviso jsdom de
+  `HTMLCanvasElement.getContext()` sem o pacote `canvas` continua informativo.
 
 ## 9. Comparativo final da Fase 7
 
