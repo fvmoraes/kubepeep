@@ -123,6 +123,41 @@ Validação Kind real após o Docker subir (2026-09-21): foi criado **somente** 
 
 O ensaio encontrou LIST repetido de página grande mesmo com WATCH global conectado (identidade de origem efetiva `""` contra catálogo resolvido). `watchCoverageSelection` corrige só a equivalência do cursor global, preserva a cerca de namespaces para fan-out, e `TestResourceBackendGlobalWatchCoversPaginatedPage` passou junto do teste de invalidação existente. A correção **ainda não foi revalidada no binário real**; os números de cache/LIST acima são anteriores a ela. A instância de teste foi encerrada; `kubectl delete -f test/kind/.state/dataset-200x10.yaml` removeu exatamente o dataset (0 namespaces/0 Pods próprios restantes). Os clusters `kubepeep-f4` e `tks-lab` permanecem preservados.
 
+### Fechamento F2 — 2026-09-29
+
+**Status: FINALIZADA no commit `cf0400b` da branch `review/plan-v0.7`.** A
+rodada de fechamento eliminou todas as caixas abertas da fase e reexecutou os
+gates completos. O ensaio real usou o cluster Kind dedicado `kubepeep-f4`, o
+manifesto exato `test/kind/.state/dataset-200x10.yaml`, identidade com
+LIST/WATCH global e scope `all` com 209 namespaces resolvidos.
+
+| ID | Commit | Evidência final | Resultado |
+| --- | --- | --- | --- |
+| F2-01 | `cf0400b` | `TestResourceBackendCoordinatesAggregateMemoryPressureInOrder`; `TestCollectionCachePressurePurgesExpiredThenTrimsLeastRecentlyUsed`; `phase02_browser.py` | **IMPLEMENTADO:** teto agregado padrão de 224 MiB para snapshots, páginas e cursores, com eviction ordenada. No C02 real o processo foi de 50,4 para 62,4 MiB RSS e 15 para 17 threads. |
+| F2-02 | `cf0400b` | testes de cache, fencing e revogação já consolidados; `make test-race` | **IMPLEMENTADO:** estados e geração impedem resposta antiga; cache fresco reaparece sem bloquear a tela. |
+| F2-03 | `cf0400b` | `phase02-real.spec.ts`; métrica local real | **IMPLEMENTADO:** Pods → Deployments → Pods retornou em 30 ms, sem novo HTTP de Pods; `kubepeep_watch_active{resource="pods"}` permaneceu 1 antes e depois. |
+| F2-04 | `cf0400b` | testes de bookmark/reconnect existentes; `make test-race` | **IMPLEMENTADO:** bookmark avança o checkpoint sem emitir delta de UI. |
+| F2-05 | `cf0400b` | `TestSubscriptionCoalescesResourceBurstButPreservesEvents`; `ResourceLiveUpdates.test.tsx` | **IMPLEMENTADO:** 10k deltas ficam sob fila de 1 MiB/1.000 eventos, um estado por objeto, uma revalidação, menos de seis commits e menos de 500 ms de CPU de render React; Events continuam cronológicos. |
+| F2-06 | `cf0400b` | `version_cache.go`; quatro testes de coalescing/TTL/invalidação/falha | **IMPLEMENTADO:** `/version` saudável usa TTL de 10 min e chave completa da seleção; falha não é cacheada; generation invalida. Os demais TTLs permanecem documentados em `docs/observability.md`. |
+| F2-07 | `cf0400b` | `Dashboard.test.tsx`; `phase02-real.spec.ts` | **IMPLEMENTADO:** summary/Tier 1 libera depois Node health e PVCs no Tier 2; métricas continuam isoladas e log scan continua explícito no Tier 3. O browser confirmou as duas requests após a resposta do summary. |
+| F2-08 | `cf0400b` | fast path e fallback já consolidados; gate completo | **IMPLEMENTADO:** streaming list permanece opcional e o fallback clássico segue coberto. |
+| F2-09 | `cf0400b` | testes HTTP/client/scheduler; captura real de headers | **IMPLEMENTADO:** prioridades visible, `likely-next` e `unrelated` dividem o scheduler global. Node/PVC reais saíram com `unrelated`; prefetch preserva `likely-next`; trabalho visível conserva capacidade. |
+| F2-10 | `cf0400b` | testes 410 de LIST/WATCH e renovação de cursor já consolidados | **IMPLEMENTADO:** cursor/RV expirado reconstrói o snapshot sem erro fatal. |
+| F2-11 | `cf0400b` | `TestWatchCacheOperationsExportSafeOTLPSpans` | **IMPLEMENTADO:** collector OTLP protobuf recebeu `cache.snapshot` e `cache.apply_event`; o payload não contém generation, contexto, scope, namespace ou nome do objeto usados pelo teste. Métricas reais de hit/miss/bytes/eviction/invalidação também passaram. |
+| F2-12 | `cf0400b` | `TestLazyMergeMultiKindKeepsLaterExtremesOutsidePageScope`; matriz de backend/cache | **IMPLEMENTADO:** ordem de coleção só aparece em snapshot completo; multi-kind, extremo em origem posterior, paginação, autorização parcial e mutação preservam escopo honesto. |
+
+Gates finais: `rtk make verify`, `rtk make test-race`, `rtk git diff --check`
+e os dois testes Playwright do Kind passaram. O manifesto C02 foi removido pela
+mesma entrada YAML; restaram zero namespaces e zero Pods com o label do
+dataset, o ClusterRole próprio não existe mais e
+`kubepeep-f4-control-plane` permaneceu `Ready`. O relatório reproduzível fica
+em `test/kind/.state/phase02-real.json`, deliberadamente ignorado pelo Git.
+
+O fechamento também resolve as pendências cruzadas das fases já concluídas:
+a regressão histórica de navegação da F1 fica substituída pelo retorno real de
+30 ms com o mesmo watch, e a rajada F3-08 agora possui perfil direto de CPU de
+render, além da contagem de commits e da revalidação única.
+
 ## Fase 3 — Frontend progressivo, virtualizado e inicialização instantânea
 
 | ID | Commit | Evidência | Resultado |
@@ -160,7 +195,7 @@ Validação da integração F3-05/F2-09 em 2026-09-28: `rtk make verify` passou 
 
 A execução final do binário após a telemetria teve `time_to_first_visible_row=75,1 ms`, primeira linha no DOM em 98,9 ms, página completa em 991,8 ms, cinco páginas/500 Pods e crescimento do heap JS de 5,14 MiB. Todas as operações de preferências observadas no percurso responderam HTTP 200.
 
-Limites da coleta: a meta de primeira linha foi medida com o preview preparado após 1 s na Overview e primeiro namespace populado; um namespace inicial vazio depende do stream ou da LIST completa. Os 60 FPS vieram de uma execução isolada, pois a suíte concorrente variou até 31,6 FPS. A rajada de 10k deltas confirmou batching/revalidação e poucos commits React, mas não incluiu perfil direto de CPU.
+Limites da coleta: a meta de primeira linha foi medida com o preview preparado após 1 s na Overview e primeiro namespace populado; um namespace inicial vazio depende do stream ou da LIST completa. Os 60 FPS vieram de uma execução isolada, pois a suíte concorrente variou até 31,6 FPS. A rajada de 10k deltas confirmou batching/revalidação e poucos commits React; o fechamento F2 posterior acrescentou perfil direto e exige menos de 500 ms de CPU de render React para a rajada.
 
 Gates finais: `rtk make verify`, `rtk make test-race`, `rtk git diff --check`, o gate de segurança e `npm audit --omit=dev` passaram; o ensaio isolado de 12k linhas passou a 60,00 FPS; a execução Kind completa passou depois da migração. O PUT de preferências que devolvia 503 foi corrigido com `0002_expand_preferences.sql`, que preserva os registros antigos sob backup verificado; o teste de migração e o browser confirmaram gravação HTTP 200. A exclusão foi enviada pelo manifesto exato `test/kind/.state/dataset-50x10.yaml`; a espera do `kubectl delete --wait=true` foi interrompida após verificar zero namespaces e zero Pods com o rótulo do dataset, além da ausência do ClusterRole próprio. O nó `kubepeep-f4-control-plane` permaneceu `Ready`.
 
