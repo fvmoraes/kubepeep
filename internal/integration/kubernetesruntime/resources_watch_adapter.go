@@ -430,6 +430,12 @@ func (port *resourceWatchPort) convertWithCronHistory(key resources.WatchKey, ob
 			return nil, mapResourceError(err)
 		}
 		return resources.ConvertEndpointSlice(&value), nil
+	case "persistentvolumeclaims":
+		var value corev1.PersistentVolumeClaim
+		if err := kruntime.DefaultUnstructuredConverter.FromUnstructured(object.Object, &value); err != nil {
+			return nil, mapResourceError(err)
+		}
+		return resources.ConvertPersistentVolumeClaim(&value, now), nil
 	default:
 		return nil, resourceDomain(resources.CodeValidationFailed, "The watch resource is invalid.", nil)
 	}
@@ -459,6 +465,8 @@ func kindForGVR(gvr schema.GroupVersionResource) string {
 		return "EndpointSlice"
 	case "configmaps":
 		return "ConfigMap"
+	case "persistentvolumeclaims":
+		return "PersistentVolumeClaim"
 	default:
 		return "Unknown"
 	}

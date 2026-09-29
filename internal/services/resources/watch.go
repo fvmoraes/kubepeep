@@ -47,18 +47,20 @@ const (
 	TopicIngresses      Topic = "ingresses"
 	TopicEndpointSlices Topic = "endpoint-slices"
 	TopicConfigMaps     Topic = "configmaps"
+	TopicPVCs           Topic = "persistent-volume-claims"
 )
 
-var topicOrder = []Topic{TopicPods, TopicEvents, TopicWorkloads, TopicServices, TopicIngresses, TopicEndpointSlices, TopicConfigMaps}
+var topicOrder = []Topic{TopicPods, TopicEvents, TopicWorkloads, TopicServices, TopicIngresses, TopicEndpointSlices, TopicConfigMaps, TopicPVCs}
 var topicGVRs = map[Topic][]schema.GroupVersionResource{
 	TopicPods: {{Group: "", Version: "v1", Resource: "pods"}}, TopicEvents: {{Group: "", Version: "v1", Resource: "events"}},
 	TopicWorkloads: {{Group: "apps", Version: "v1", Resource: "deployments"}, {Group: "apps", Version: "v1", Resource: "statefulsets"}, {Group: "apps", Version: "v1", Resource: "daemonsets"}, {Group: "batch", Version: "v1", Resource: "jobs"}, {Group: "batch", Version: "v1", Resource: "cronjobs"}},
 	TopicServices:  {{Group: "", Version: "v1", Resource: "services"}}, TopicIngresses: {{Group: "networking.k8s.io", Version: "v1", Resource: "ingresses"}}, TopicEndpointSlices: {{Group: "discovery.k8s.io", Version: "v1", Resource: "endpointslices"}}, TopicConfigMaps: {{Group: "", Version: "v1", Resource: "configmaps"}},
+	TopicPVCs: {{Group: "", Version: "v1", Resource: "persistentvolumeclaims"}},
 }
 
 func ValidateTopics(values []Topic) ([]Topic, error) {
-	if len(values) < 1 || len(values) > 7 {
-		return nil, validationError("topic cardinality must be between 1 and 7")
+	if len(values) < 1 || len(values) > len(topicOrder) {
+		return nil, validationError("topic cardinality must be between 1 and 8")
 	}
 	seen := map[Topic]struct{}{}
 	for _, value := range values {
@@ -86,13 +88,14 @@ func TopicGVRs(topic Topic) []schema.GroupVersionResource {
 // intentionally cannot be placed in a watch snapshot or event.
 type TopicObject interface{ resourceTopic() Topic }
 
-func (PodDTO) resourceTopic() Topic           { return TopicPods }
-func (EventDTO) resourceTopic() Topic         { return TopicEvents }
-func (WorkloadDTO) resourceTopic() Topic      { return TopicWorkloads }
-func (ServiceDTO) resourceTopic() Topic       { return TopicServices }
-func (IngressDTO) resourceTopic() Topic       { return TopicIngresses }
-func (EndpointSliceDTO) resourceTopic() Topic { return TopicEndpointSlices }
-func (ConfigMapListDTO) resourceTopic() Topic { return TopicConfigMaps }
+func (PodDTO) resourceTopic() Topic                   { return TopicPods }
+func (EventDTO) resourceTopic() Topic                 { return TopicEvents }
+func (WorkloadDTO) resourceTopic() Topic              { return TopicWorkloads }
+func (ServiceDTO) resourceTopic() Topic               { return TopicServices }
+func (IngressDTO) resourceTopic() Topic               { return TopicIngresses }
+func (EndpointSliceDTO) resourceTopic() Topic         { return TopicEndpointSlices }
+func (ConfigMapListDTO) resourceTopic() Topic         { return TopicConfigMaps }
+func (PersistentVolumeClaimDTO) resourceTopic() Topic { return TopicPVCs }
 
 type WatchKey struct {
 	Generation string
@@ -887,6 +890,12 @@ func topicObjectIdentity(object TopicObject) (string, bool) {
 		if value != nil {
 			return objectIdentity("configmap", value.Namespace, value.Name), true
 		}
+	case PersistentVolumeClaimDTO:
+		return objectIdentity("persistentvolumeclaim", value.Namespace, value.Name), true
+	case *PersistentVolumeClaimDTO:
+		if value != nil {
+			return objectIdentity("persistentvolumeclaim", value.Namespace, value.Name), true
+		}
 	}
 	return "", false
 }
@@ -919,6 +928,8 @@ func resourceRefIdentity(topic Topic, ref *ResourceRef) (string, bool) {
 			kind = "endpointslice"
 		case TopicConfigMaps:
 			kind = "configmap"
+		case TopicPVCs:
+			kind = "persistentvolumeclaim"
 		}
 	}
 	return objectIdentity(kind, ref.Namespace, ref.Name), true

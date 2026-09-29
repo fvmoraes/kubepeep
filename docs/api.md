@@ -2106,6 +2106,22 @@ com componente degradado, sem rollback.
 
 Se a conexão cair depois de uma mutação, o cliente não afirma falha nem repete cegamente; refaz GET do recurso/sessão e apresenta estado desconhecido até reconciliar.
 
+### API local de investigação da Fase 5
+
+As rotas read-only abaixo reutilizam seleção, geração, `no-store`, request ID e
+middlewares locais existentes:
+
+| Rota | Resposta | Limites |
+| --- | --- | --- |
+| `GET /api/v1/local-index` | identidades, contagens por namespace e cobertura por tópico | somente snapshots não filtrados da geração ativa |
+| `GET /api/v1/investigation/{kind}/{namespace}/{name}` | owner chain, Pods, Services, EndpointSlices, ConfigMaps, PVCs e Events | kind allowlisted, nomes DNS e namespace no scope ativo |
+| `GET /api/v1/diagnostics` | percentis, cache, watches, 429, sync, namespaces e cluster | timeout do dashboard, quatro workers e até 200 namespaces medidos |
+
+As respostas são cercadas novamente no momento da publicação. Ausência em
+cache parcial permanece `complete=false`; selector ou GVR/origem faltante não
+produz cobertura completa. O contrato detalhado e os limites de logs agregados
+estão em [investigation-diagnostics.md](investigation-diagnostics.md).
+
 ## 21. Rotas pós-MVP/proibidas
 
 Pós-MVP somente após nova especificação:

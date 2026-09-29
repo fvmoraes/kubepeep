@@ -2,9 +2,9 @@ import { useMutation, useQuery } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router'
 
-import { APIError, getPermissions, getPod, getPodLogs, getPods, getPreferences, getSession, getStatus } from '../api/client'
+import { APIError, getPermissions, getPod, getPodLogs, getPods, getPreferences, getSession, getStatus, getWorkload, getWorkloads } from '../api/client'
 import { streamURL } from '../api/desktop'
-import type { APIErrorPayload, CollectionResult, LogLine, Pod, Preferences, SelectionSummary } from '../api/types'
+import type { APIErrorPayload, CollectionResult, LogLine, Pod, Preferences, SelectionSummary, Workload } from '../api/types'
 import { Badge, Button, Checkbox, Input, Select, type BadgeVariant } from '../components/ui'
 import { ErrorBanner, InfoBanner, WarningBanner } from '../components/ui/Banner'
 import { SavedFilterControls } from './SavedFilterControls'
@@ -27,7 +27,7 @@ function logURL(namespace: string, pod: string, container: string, timestamps: b
   return `/api/v1/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(pod)}/logs/stream?${query.toString()}`
 }
 
-function appendBounded(lines: LogLine[], line: LogLine): LogLine[] {
+function appendBounded<T extends LogLine>(lines: T[], line: T): T[] {
   const encoder = new TextEncoder()
   const next = [...lines, line]
   let bytes = next.reduce((total, value) => total + encoder.encode(JSON.stringify(value)).byteLength, 0)
@@ -226,6 +226,7 @@ export function LogsPage() {
   const status = useQuery({ queryKey: ['local-status'], queryFn: ({ signal }) => getStatus(signal), staleTime: 15_000 })
   const preferences = useQuery({ queryKey: ['preferences'], queryFn: ({ signal }) => getPreferences(signal), staleTime: 60_000 })
   const selection = status.data?.selection ?? null
+	const [mode, setMode] = useState<'pod' | 'workload'>(() => params.has('workload') ? 'workload' : 'pod')
 
   return (
     <div className="flex w-full min-w-0 flex-col gap-4">
@@ -233,14 +234,104 @@ export function LogsPage() {
         <div>
           <h1 className="text-2xl text-kp-text">Logs</h1>
           <p className="mt-0.5 text-sm text-kp-overlay-text">Current, previous and bounded follow logs. Content stays in memory and is never persisted by the UI.</p>
-        </div>
+		</div>
+		<div className="flex gap-2" role="tablist" aria-label="Log target type"><Button size="sm" variant={mode === 'pod' ? 'primary' : 'secondary'} aria-selected={mode === 'pod'} onClick={() => setMode('pod')}>Pod</Button><Button size="sm" variant={mode === 'workload' ? 'primary' : 'secondary'} aria-selected={mode === 'workload'} onClick={() => setMode('workload')}>Workload aggregate</Button></div>
       </header>
       {status.isPending ? <StatePanel kind="loading" title="Loading active selection">The local service is resolving the current generation.</StatePanel>
         : status.isError ? <StatePanel kind="error" title="Selection unavailable">{message(status.error)}</StatePanel>
           : !selection ? <StatePanel kind="empty" title="Choose a Kubernetes context">Select a context and namespace scope before reading logs.</StatePanel>
-            : <PanelErrorBoundary key={selection.generation} name="Logs"><LogsWorkspace selection={selection} params={params} defaults={preferences.data?.logs ?? defaultLogPreferences} preferencesUnavailable={preferences.isError} /></PanelErrorBoundary>}
+			: <PanelErrorBoundary key={`${selection.generation}-${mode}`} name="Logs">{mode === 'pod' ? <LogsWorkspace selection={selection} params={params} defaults={preferences.data?.logs ?? defaultLogPreferences} preferencesUnavailable={preferences.isError} /> : <WorkloadLogsWorkspace selection={selection} params={params} defaults={preferences.data?.logs ?? defaultLogPreferences} />}</PanelErrorBoundary>}
     </div>
   )
+}
+
+const MaximumAggregateStreams = 5
+
+interface AggregatedLogLine extends LogLine { pod: string; container: string }
+
+async function loadWorkloadCatalog(selection: SelectionSummary, signal?: AbortSignal): Promise<{ values: Workload[]; complete: boolean }> {
+	const values: Workload[] = []
+	let complete = true
+	let continueToken: string | undefined
+	do {
+		const page = await getWorkloads({ limit: 500, ...(continueToken ? { continueToken } : {}) }, signal, selection.generation)
+		values.push(...page.items)
+		complete = complete && page.page.complete && !page.page.truncated && (page.coverage === null || page.coverage.deniedNamespaces.length === 0 && page.coverage.failed.length === 0)
+		continueToken = page.page.next || undefined
+		if (values.length >= 4_000 && continueToken) { complete = false; break }
+	} while (continueToken)
+	return { values, complete }
+}
+
+async function consumeAggregateStream(target: { namespace: string; pod: string; container: string }, selection: SelectionSummary, session: { csrfToken: string }, options: { timestamps: boolean; tailLines: number; since: string }, signal: AbortSignal, onLine: (line: AggregatedLogLine) => void) {
+	const response = await fetch(await streamURL(logURL(target.namespace, target.pod, target.container, options.timestamps, options.tailLines, options.since)), { method: 'GET', headers: { Accept: 'text/event-stream', 'X-KubePeep-CSRF': session.csrfToken }, cache: 'no-store', credentials: 'same-origin', signal })
+	if (!response.ok || !response.body) throw new APIError(response.status, { code: 'STREAM_ERROR', message: 'An aggregate log stream could not be opened.' })
+	const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = ''; let metaSeen = false
+	while (true) {
+		const chunk = await reader.read(); if (chunk.done) return
+		buffer += decoder.decode(chunk.value, { stream: true })
+		if (new TextEncoder().encode(buffer).byteLength > 136 * 1_024) throw new APIError(502, { code: 'INVALID_RESPONSE', message: 'An aggregate stream exceeded the bounded event buffer.' })
+		while (true) {
+			const separator = /\r?\n\r?\n/.exec(buffer); if (!separator) break
+			const event = parseSSEBlock(buffer.slice(0, separator.index)); buffer = buffer.slice(separator.index + separator[0].length); if (!event) continue
+			const payload = JSON.parse(event.data) as Record<string, unknown>
+			if (event.event === 'meta') { if (payload.generation !== selection.generation) throw new APIError(409, { code: 'GENERATION_CHANGED', message: 'An aggregate stream belongs to another generation.' }); metaSeen = true }
+			if (event.event === 'line') { if (!metaSeen) throw new APIError(502, { code: 'INVALID_RESPONSE', message: 'An aggregate stream sent data before metadata.' }); onLine({ pod: target.pod, container: target.container, timestamp: typeof payload.timestamp === 'string' ? payload.timestamp : null, text: typeof payload.text === 'string' ? payload.text : '', truncated: payload.truncated === true }) }
+			if (event.event === 'error') throw new APIError(502, { code: String(payload.code ?? 'STREAM_ERROR'), message: String(payload.message ?? 'An aggregate stream ended.') })
+			if (event.event === 'end') return
+		}
+	}
+}
+
+function WorkloadLogsWorkspace({ selection, params, defaults }: { selection: SelectionSummary; params: URLSearchParams; defaults: Preferences['logs'] }) {
+	const [workloadKey, setWorkloadKey] = useState(() => params.get('workload')?.split('/').join('\0') ?? '')
+	const [selectedPods, setSelectedPods] = useState<string[] | null>(null)
+	const [selectedContainers, setSelectedContainers] = useState<string[] | null>(null)
+	const [previous, setPrevious] = useState(false)
+	const [timestamps, setTimestamps] = useState(defaults.timestamps)
+	const [tailLines, setTailLines] = useState(defaults.tailLines)
+	const [since, setSince] = useState('')
+	const [search, setSearch] = useState('')
+	const [regex, setRegex] = useState(false)
+	const [lines, setLines] = useState<AggregatedLogLine[]>([])
+	const [state, setState] = useState<FollowState>({ status: 'idle', message: 'Aggregate follow is stopped.' })
+	const controllerRef = useRef<AbortController | null>(null)
+	const pendingRef = useRef<AggregatedLogLine[]>([])
+	const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+	const workloads = useQuery({ queryKey: ['resources', 'workload-log-catalog', selection.generation], queryFn: ({ signal }) => loadWorkloadCatalog(selection, signal) })
+	const podCatalog = useQuery({ queryKey: ['resources', 'log-target-catalog', selection.generation], queryFn: ({ signal }) => loadLogCatalog(selection, signal) })
+	const selectedWorkload = workloads.data?.values.find((value) => `${value.kind}\0${value.namespace}\0${value.name}` === workloadKey)
+	const detail = useQuery({ queryKey: ['resources', 'workload-log-detail', selection.generation, workloadKey], queryFn: ({ signal }) => getWorkload(selectedWorkload!.kind, selectedWorkload!.namespace, selectedWorkload!.name, signal, selection.generation), enabled: Boolean(selectedWorkload) })
+	const relatedPods = (detail.data?.related ?? []).filter((value) => value.kind === 'Pod' && value.namespace === selectedWorkload?.namespace).map((value) => value.name).filter((name) => podCatalog.data?.pods.some((pod) => pod.namespace === selectedWorkload?.namespace && pod.name === name)).sort()
+	const activePods = (selectedPods ?? relatedPods.slice(0, MaximumAggregateStreams)).filter((name) => relatedPods.includes(name))
+	const podDetails = useQuery({ queryKey: ['resources', 'aggregate-pod-details', selection.generation, selectedWorkload?.namespace, activePods], queryFn: ({ signal }) => Promise.all(activePods.map((name) => getPod(selectedWorkload!.namespace, name, signal, selection.generation))), enabled: Boolean(selectedWorkload && activePods.length > 0) })
+	const containers = [...new Set((podDetails.data ?? []).flatMap((value) => [...value.containers, ...value.initContainers, ...value.ephemeralContainers].map((container) => container.spec.name)))].sort()
+	const activeContainers = (selectedContainers ?? containers.slice(0, 1)).filter((value) => containers.includes(value))
+
+	function flush() { if (timerRef.current) clearTimeout(timerRef.current); timerRef.current=null; const batch=pendingRef.current;pendingRef.current=[];if(batch.length>0)setLines((current)=>batch.reduce((result,line)=>appendBounded(result,line),current)) }
+	function stop(reason='Aggregate follow stopped.') {controllerRef.current?.abort();controllerRef.current=null;flush();setState({status:'ended',message:reason})}
+	useEffect(() => () => {controllerRef.current?.abort();if(timerRef.current)clearTimeout(timerRef.current)}, [])
+	const targets = activePods.flatMap((pod) => activeContainers.map((container) => ({ namespace:selectedWorkload?.namespace ?? '',pod,container }))).slice(0,MaximumAggregateStreams)
+	const targetsTruncated = activePods.length*activeContainers.length>MaximumAggregateStreams
+
+	async function readAggregate() { stop('Starting bounded aggregate read.');setState({status:'connecting',message:'Reading selected streams…'});setLines([]);const controller=new AbortController();controllerRef.current=controller;try{const responses=await Promise.all(targets.map(async(target)=>({target,response:await getPodLogs(target.namespace,target.pod,{container:target.container,previous,timestamps,tailLines,since:since||undefined},controller.signal,selection.generation)})));const next=responses.flatMap(({target,response})=>response.lines.map((line)=>({...line,pod:target.pod,container:target.container})));next.sort((left,right)=>(left.timestamp??'').localeCompare(right.timestamp??''));setLines(next.reduce((result,line)=>appendBounded(result,line),[] as AggregatedLogLine[]));setState({status:'ended',message:`Read ${targets.length} bounded stream${targets.length===1?'':'s'}.`})}catch(error){if(!controller.signal.aborted)setState({status:'error',message:message(error)})}finally{if(controllerRef.current===controller)controllerRef.current=null}}
+	async function followAggregate(){stop('Restarting aggregate follow.');setLines([]);const controller=new AbortController();controllerRef.current=controller;setState({status:'connecting',message:'Authorizing aggregate streams…'});try{const session=await getSession(controller.signal);if(session.generation!==selection.generation)throw new APIError(409,{code:'GENERATION_CHANGED',message:'The active selection changed.'});setState({status:'following',message:`Following ${targets.length} stream${targets.length===1?'':'s'} with 75 ms batching.`});await Promise.all(targets.map((target)=>consumeAggregateStream(target,selection,session,{timestamps,tailLines,since},controller.signal,(line)=>{pendingRef.current=appendBounded(pendingRef.current,line);if(!timerRef.current)timerRef.current=setTimeout(flush,75)})));flush();setState({status:'ended',message:'All aggregate streams ended.'})}catch(error){if(!controller.signal.aborted){flush();setState({status:'error',message:message(error)})}}finally{if(controllerRef.current===controller)controllerRef.current=null}}
+	let expression: RegExp | null=null;let regexError='';if(regex&&search){try{expression=new RegExp(search,'i')}catch{regexError='Invalid regular expression.'}}
+	const visible=search===''?lines:regex?(expression?lines.filter((line)=>expression!.test(line.text)):[]):lines.filter((line)=>line.text.toLocaleLowerCase().includes(search.toLocaleLowerCase()))
+	const ready=Boolean(selectedWorkload&&targets.length>0&&validSince(since)&&tailLines>=1&&tailLines<=2_000)
+	return <div className="grid gap-3">
+		{workloads.data&&!workloads.data.complete?<WarningBanner>Workload catalog coverage is partial; absent workloads may exist outside the loaded pages.</WarningBanner>:null}
+		{podCatalog.data&&!podCatalog.data.complete?<WarningBanner>Only Pods with confirmed logs permission in the bounded catalog are offered.</WarningBanner>:null}
+		<section className="grid gap-3 rounded-xl border border-kp-overlay-0 bg-kp-surface-0 p-3">
+			<label className="grid gap-1"><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Workload</span><Select value={workloadKey} onChange={(event)=>{stop('Aggregate target changed; all streams were canceled.');setLines([]);setSelectedPods(null);setSelectedContainers(null);setWorkloadKey(event.target.value)}}><option value="">Choose a workload</option>{workloads.data?.values.map((value)=><option key={`${value.kind}\0${value.namespace}\0${value.name}`} value={`${value.kind}\0${value.namespace}\0${value.name}`}>{value.kind} · {value.namespace} · {value.name}</option>)}</Select></label>
+			<div><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Pods ({activePods.length}/{relatedPods.length})</span><div className="mt-1 flex flex-wrap gap-2">{relatedPods.map((pod)=><Checkbox key={pod} checked={activePods.includes(pod)} disabled={!activePods.includes(pod)&&activePods.length>=MaximumAggregateStreams} onChange={(event)=>{stop();setSelectedPods(event.target.checked?[...activePods,pod]:activePods.filter((value)=>value!==pod))}}>{pod}</Checkbox>)}</div></div>
+			<div><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Containers</span><div className="mt-1 flex flex-wrap gap-2">{containers.map((container)=><Checkbox key={container} checked={activeContainers.includes(container)} onChange={(event)=>{stop();setSelectedContainers(event.target.checked?[...activeContainers,container]:activeContainers.filter((value)=>value!==container))}}>{container}</Checkbox>)}</div></div>
+			<div className="flex flex-wrap items-end gap-2"><label className="grid gap-1 w-24"><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Tail</span><Input type="number" min="1" max="2000" value={tailLines} onChange={(event)=>setTailLines(Number(event.target.value))}/></label><label className="grid gap-1 w-28"><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Since</span><Input value={since} placeholder="15m" onChange={(event)=>setSince(event.target.value)}/></label><Checkbox checked={previous} onChange={(event)=>{stop();setPrevious(event.target.checked)}}>Previous</Checkbox><Checkbox checked={timestamps} onChange={(event)=>setTimestamps(event.target.checked)}>Timestamps</Checkbox></div>
+			{targetsTruncated?<WarningBanner>Selection creates more than {MaximumAggregateStreams} streams. Only the first {MaximumAggregateStreams} deterministic Pod/container pairs will run.</WarningBanner>:null}
+			<div className="flex gap-2"><Button disabled={!ready} onClick={()=>void readAggregate()}>Read aggregate</Button><Button variant="success" disabled={!ready||previous||state.status==='following'} onClick={()=>void followAggregate()}>Follow aggregate</Button><Button variant="danger" disabled={state.status!=='connecting'&&state.status!=='following'} onClick={()=>stop()}>Stop all</Button></div>
+		</section>
+		<section className="grid gap-2 rounded-xl border border-kp-overlay-0 bg-kp-surface-0 p-3"><header><strong className="text-sm text-kp-text">{state.message}</strong><small className="block text-xs text-kp-overlay-text">{visible.length} visible of {lines.length} bounded in-memory lines.</small></header><div className="flex gap-2"><Input type="search" aria-label="Search aggregate logs" placeholder="Text or regular expression" value={search} onChange={(event)=>setSearch(event.target.value)}/><Checkbox checked={regex} onChange={(event)=>setRegex(event.target.checked)}>Regex</Checkbox></div>{regexError?<p className="text-xs text-kp-red">{regexError}</p>:null}<pre className={`mono min-h-[280px] max-h-[62vh] overflow-auto rounded-lg border border-kp-overlay-0 bg-kp-crust p-3 text-xs ${defaults.wrap?'whitespace-pre-wrap break-words':'whitespace-pre'}`} aria-label="Aggregated log output">{visible.map((line,index)=><span key={`${index}-${line.pod}-${line.container}`}><time className="text-kp-overlay-text">{line.timestamp??'no-timestamp'} </time><strong className="text-kp-mauve">{line.pod}</strong> <span className="text-kp-sky">{line.container}</span> │ {line.text}{line.truncated?' [truncated]':''}{'\n'}</span>)}</pre></section>
+	</div>
 }
 
 function LogsWorkspace({ selection, params, defaults, preferencesUnavailable }: { selection: SelectionSummary; params: URLSearchParams; defaults: Preferences['logs']; preferencesUnavailable: boolean }) {

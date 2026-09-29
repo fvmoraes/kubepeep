@@ -47,6 +47,7 @@ import { StatePanel } from './StatePanel'
 import { PanelErrorBoundary } from './PanelErrorBoundary'
 import { Badge, Button, DataTable, Select, type BadgeVariant } from './ui'
 import { WarningBanner } from './ui/Banner'
+import { useResourceWorkspace } from './workspace/ResourceWorkspaceProvider'
 
 const dashboardQueryDefaults = {
   staleTime: 30_000,
@@ -348,12 +349,27 @@ function severityBadgeVariant(severity: DashboardProblem['severity']): BadgeVari
     case 'critical':
       return 'danger'
     case 'warning':
-    default:
       return 'warning'
+		case 'info':
+		default:
+			return 'info'
   }
 }
 
 function ProblemsTable({ values }: { values: DashboardProblem[] }) {
+	const workspace = useResourceWorkspace()
+	const counts = values.reduce((result, problem) => ({ ...result, [problem.severity]: result[problem.severity] + 1 }), { critical: 0, warning: 0, info: 0 })
+	const targetFor = (problem: DashboardProblem) => {
+		const kind = problem.resource.kind
+		if (kind === 'Pod') return { collection: 'pods', kind, namespace: problem.namespace, name: problem.resource.name }
+		if (['Deployment', 'ReplicaSet', 'StatefulSet', 'DaemonSet', 'Job', 'CronJob'].includes(kind)) return { collection: 'workloads', kind, namespace: problem.namespace, name: problem.resource.name }
+		if (kind === 'PersistentVolumeClaim') return { collection: 'persistent-volume-claims', kind, namespace: problem.namespace, name: problem.resource.name }
+		if (kind === 'Node') return { collection: 'nodes', kind, namespace: null, name: problem.resource.name }
+		return null
+	}
+	const logsPath = (problem: DashboardProblem) => problem.resource.kind === 'Pod'
+		? `/logs?namespace=${encodeURIComponent(problem.namespace)}&pod=${encodeURIComponent(problem.resource.name)}`
+		: `/logs?workload=${encodeURIComponent(`${problem.resource.kind}/${problem.namespace}/${problem.resource.name}`)}`
   const columns = [
     {
       key: 'severity',
@@ -361,14 +377,14 @@ function ProblemsTable({ values }: { values: DashboardProblem[] }) {
       cell: (problem: DashboardProblem) => <Badge variant={severityBadgeVariant(problem.severity)}>{problem.severity}</Badge>,
     },
     {
-      key: 'pod',
-      header: 'Pod',
-      cell: (problem: DashboardProblem) => <><strong className="block text-kp-text">{problem.pod}</strong><small className="block text-xs text-kp-overlay-text">{problem.namespace}{problem.container ? ` · ${problem.container}` : ''}</small></>,
+		key: 'resource',
+		header: 'Resource',
+		cell: (problem: DashboardProblem) => <><strong className="block text-kp-text">{problem.resource.kind} · {problem.resource.name}</strong><small className="block text-xs text-kp-overlay-text">{problem.namespace || 'cluster'}{problem.container ? ` · ${problem.container}` : ''}</small></>,
     },
     {
       key: 'diagnosis',
       header: 'Diagnosis',
-      cell: (problem: DashboardProblem) => <><strong className="block text-kp-text">{problem.reason ?? 'No diagnosis reported'}</strong><small className="block text-xs text-kp-overlay-text">{problem.message ?? `Source: ${problem.source}`}</small></>,
+		cell: (problem: DashboardProblem) => <><strong className="block text-kp-text">{problem.reason ?? 'Observed problem'}</strong><small className="block text-xs text-kp-overlay-text">{problem.summary || problem.message || `Source: ${problem.source}`}</small></>,
     },
     {
       key: 'status',
@@ -376,18 +392,25 @@ function ProblemsTable({ values }: { values: DashboardProblem[] }) {
       cell: (problem: DashboardProblem) => problem.status,
     },
     {
-      key: 'age',
-      header: 'Age',
-      cell: (problem: DashboardProblem) => formatDuration(problem.ageSeconds),
+		key: 'actions',
+		header: 'Actions',
+		cell: (problem: DashboardProblem) => <div className="flex flex-wrap gap-1">{targetFor(problem) ? <Button size="sm" variant="secondary" onClick={() => workspace.openResource(targetFor(problem)!, 'investigation')}>Inspect</Button> : null}{problem.actions.includes('logs') ? <Link className="rounded-md border border-kp-overlay-1 px-2 py-1 text-xs text-kp-sky hover:border-kp-accent-border" to={logsPath(problem)}>Logs</Link> : null}</div>,
     },
   ]
   return (
-    <DataTable
-      caption="At most one prioritized diagnosis per pod"
-      columns={columns}
-      rows={values}
-      getRowKey={(problem) => `${problem.namespace}/${problem.pod}`}
-    />
+		<div className="grid gap-3">
+			<div className="flex flex-wrap gap-2" aria-label="Problem counts by severity">
+				<Badge variant="danger">{counts.critical} critical</Badge>
+				<Badge variant="warning">{counts.warning} warning</Badge>
+				<Badge variant="info">{counts.info} info</Badge>
+			</div>
+			<DataTable
+				caption="Observed problems across Pods, workloads, storage, Nodes and Warning events"
+				columns={columns}
+				rows={values}
+				getRowKey={(problem) => `${problem.namespace}/${problem.resource.kind}/${problem.resource.name}/${problem.reason ?? problem.source}`}
+			/>
+		</div>
   )
 }
 
@@ -708,7 +731,7 @@ function DashboardContent({ selection, cluster }: { selection: SelectionSummary;
       </DashboardSection>
 
       <div className="grid items-start gap-4 lg:grid-cols-2">
-        <DashboardSection id="problems" title="Problem pods" action={<BlockAge response={problems.data as DashboardResponse<unknown> | undefined} />} error={problems.isError} onRetry={() => void problems.refetch()}>
+		<DashboardSection id="problems" title="Problems" action={<BlockAge response={problems.data as DashboardResponse<unknown> | undefined} />} error={problems.isError} onRetry={() => void problems.refetch()}>
           <ResultBody pending={problems.isPending} error={problems.error} response={problems.data} isEmpty={(value) => value.length === 0} emptyCopy="No problematic pod was found in the completed coverage.">
             {(value) => <ProblemsTable values={value} />}
           </ResultBody>

@@ -213,6 +213,7 @@ type EndpointDTO struct {
 type EndpointSliceDTO struct {
 	Namespace   string                 `json:"namespace"`
 	Name        string                 `json:"name"`
+	ServiceName string                 `json:"serviceName,omitempty"`
 	AddressType string                 `json:"addressType"`
 	Ports       []EndpointSlicePortDTO `json:"ports"`
 	Endpoints   []EndpointDTO          `json:"endpoints"`
@@ -246,7 +247,7 @@ func ConvertEndpointSlice(value *discoveryv1.EndpointSlice) EndpointSliceDTO {
 	if addressType != string(discoveryv1.AddressTypeIPv4) && addressType != string(discoveryv1.AddressTypeIPv6) && addressType != string(discoveryv1.AddressTypeFQDN) {
 		addressType = "Unknown"
 	}
-	return EndpointSliceDTO{Namespace: value.Namespace, Name: value.Name, AddressType: addressType, Ports: ports, Endpoints: endpoints}
+	return EndpointSliceDTO{Namespace: value.Namespace, Name: value.Name, ServiceName: value.Labels[discoveryv1.LabelServiceName], AddressType: addressType, Ports: ports, Endpoints: endpoints}
 }
 
 func EndpointSliceDetail(value *discoveryv1.EndpointSlice) EndpointSliceDetailDTO {

@@ -12,27 +12,29 @@ import (
 )
 
 type Dependencies struct {
-	Snapshots    api.SnapshotProvider
-	Sessions     *api.SessionStore
-	Generation   api.GenerationSource
-	Profiles     ClusterProfileService
-	Scopes       NamespaceScopeService
-	Namespaces   NamespaceCatalog
-	Permissions  PermissionMatrixService
-	Selection    SelectionReader
-	Contexts     ContextService
-	Dashboard    DashboardService
-	Resources    ResourceService
-	Preferences  PreferenceService
-	Actions      actionservice.ActionService
-	PortForwards actionservice.PortForwardService
-	Exec         actionservice.ExecService
-	Cursors      *api.CursorCodec
-	CursorStore  *api.CursorStore
-	Origin       string
-	Port         int
-	Build        api.BuildInfo
-	ExtraOrigins []string
+	Snapshots     api.SnapshotProvider
+	Sessions      *api.SessionStore
+	Generation    api.GenerationSource
+	Profiles      ClusterProfileService
+	Scopes        NamespaceScopeService
+	Namespaces    NamespaceCatalog
+	Permissions   PermissionMatrixService
+	Selection     SelectionReader
+	Contexts      ContextService
+	Dashboard     DashboardService
+	Resources     ResourceService
+	Investigation InvestigationService
+	Diagnostics   DiagnosticsService
+	Preferences   PreferenceService
+	Actions       actionservice.ActionService
+	PortForwards  actionservice.PortForwardService
+	Exec          actionservice.ExecService
+	Cursors       *api.CursorCodec
+	CursorStore   *api.CursorStore
+	Origin        string
+	Port          int
+	Build         api.BuildInfo
+	ExtraOrigins  []string
 }
 
 const (
@@ -83,6 +85,9 @@ func Register(applicationRouter *router.Router, dependencies Dependencies) {
 		apiRouter.GET("/dashboard/events", dashboard.Events)
 		apiRouter.POST("/dashboard/log-scan", dashboard.LogScan)
 		apiRouter.GET("/metrics", dashboard.Metrics)
+	}
+	if dependencies.Diagnostics != nil && dependencies.Selection != nil {
+		apiRouter.GET("/diagnostics", NewDiagnostics(dependencies.Diagnostics, dependencies.Selection).Get)
 	}
 	if dependencies.Resources != nil && dependencies.Selection != nil {
 		resourceHandler := NewResources(dependencies.Resources, dependencies.Preferences, dependencies.Selection, dependencies.Cursors).WithCursorStore(dependencies.CursorStore)
@@ -166,6 +171,11 @@ func Register(applicationRouter *router.Router, dependencies Dependencies) {
 		apiRouter.GET("/ingress-classes", resourceHandler.IngressClasses)
 		apiRouter.GET("/ingress-classes/{name}", resourceHandler.IngressClassDetail)
 	}
+	if dependencies.Investigation != nil && dependencies.Selection != nil {
+		investigation := NewInvestigation(dependencies.Investigation, dependencies.Selection)
+		apiRouter.GET("/local-index", investigation.Index)
+		apiRouter.GET("/investigation/{kind}/{namespace}/{name}", investigation.Get)
+	}
 	if dependencies.Preferences != nil {
 		preferenceHandler := NewResources(nil, dependencies.Preferences, dependencies.Selection, dependencies.Cursors)
 		apiRouter.GET("/preferences", preferenceHandler.PreferencesGet)
@@ -226,6 +236,7 @@ func allowedMethods(path string) (string, bool) {
 		apiPrefix + "/dashboard/summary", apiPrefix + "/dashboard/namespace-health",
 		apiPrefix + "/dashboard/problems",
 		apiPrefix + "/dashboard/restarts", apiPrefix + "/dashboard/events", apiPrefix + "/metrics",
+		apiPrefix + "/diagnostics", apiPrefix + "/local-index",
 		apiPrefix + "/port-forwards", apiPrefix + "/workloads", apiPrefix + "/pods",
 		apiPrefix + "/events", apiPrefix + "/services", apiPrefix + "/ingresses",
 		apiPrefix + "/endpoint-slices", apiPrefix + "/configmaps", apiPrefix + "/secrets",
@@ -257,6 +268,11 @@ func allowedMethods(path string) (string, bool) {
 	}
 	if allow, known := resourceAllowedMethods(path); known {
 		return allow, true
+	}
+	investigationPrefix := apiPrefix + "/investigation/"
+	if strings.HasPrefix(path, investigationPrefix) {
+		parts := strings.Split(strings.TrimPrefix(path, investigationPrefix), "/")
+		return "GET, HEAD", len(parts) == 3 && parts[0] != "" && parts[1] != "" && parts[2] != ""
 	}
 	prefix := apiPrefix + "/namespace-scopes/"
 	if !strings.HasPrefix(path, prefix) {

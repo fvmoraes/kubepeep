@@ -24,32 +24,34 @@ import (
 )
 
 type Options struct {
-	Config       *gingerconfig.Config
-	Port         int
-	Build        api.BuildInfo
-	Snapshots    api.SnapshotProvider
-	Generation   api.GenerationSource
-	Sessions     *api.SessionStore
-	Profiles     handlers.ClusterProfileService
-	Scopes       handlers.NamespaceScopeService
-	Namespaces   handlers.NamespaceCatalog
-	Permissions  handlers.PermissionMatrixService
-	Selection    handlers.SelectionReader
-	Contexts     handlers.ContextService
-	Dashboard    handlers.DashboardService
-	Resources    handlers.ResourceService
-	Streams      handlers.ResourceStreamService
-	Preferences  handlers.PreferenceService
-	Actions      actionservice.ActionService
-	PortForwards actionservice.PortForwardService
-	Exec         handlers.ExecBridgeService
-	Cursors      *api.CursorCodec
-	CursorStore  *api.CursorStore
-	SessionTTL   time.Duration
-	Frontend     fs.FS
-	Logger       *gingerlogger.Logger
-	ExtraHosts   []string
-	ExtraOrigins []string
+	Config        *gingerconfig.Config
+	Port          int
+	Build         api.BuildInfo
+	Snapshots     api.SnapshotProvider
+	Generation    api.GenerationSource
+	Sessions      *api.SessionStore
+	Profiles      handlers.ClusterProfileService
+	Scopes        handlers.NamespaceScopeService
+	Namespaces    handlers.NamespaceCatalog
+	Permissions   handlers.PermissionMatrixService
+	Selection     handlers.SelectionReader
+	Contexts      handlers.ContextService
+	Dashboard     handlers.DashboardService
+	Resources     handlers.ResourceService
+	Investigation handlers.InvestigationService
+	Diagnostics   handlers.DiagnosticsService
+	Streams       handlers.ResourceStreamService
+	Preferences   handlers.PreferenceService
+	Actions       actionservice.ActionService
+	PortForwards  actionservice.PortForwardService
+	Exec          handlers.ExecBridgeService
+	Cursors       *api.CursorCodec
+	CursorStore   *api.CursorStore
+	SessionTTL    time.Duration
+	Frontend      fs.FS
+	Logger        *gingerlogger.Logger
+	ExtraHosts    []string
+	ExtraOrigins  []string
 	// Metrics optionally enables the local process metrics endpoint. A nil
 	// registry keeps /metrics unregistered; this is the default.
 	Metrics *observability.Registry
@@ -142,27 +144,29 @@ func New(options Options) (*Application, error) {
 		apiMiddleware.BrowserAPI(security),
 	)
 	handlers.Register(application.Router, handlers.Dependencies{
-		Snapshots:    options.Snapshots,
-		Sessions:     sessions,
-		Generation:   generation,
-		Profiles:     options.Profiles,
-		Scopes:       options.Scopes,
-		Namespaces:   options.Namespaces,
-		Permissions:  options.Permissions,
-		Selection:    options.Selection,
-		Contexts:     options.Contexts,
-		Dashboard:    options.Dashboard,
-		Resources:    options.Resources,
-		Preferences:  options.Preferences,
-		Actions:      options.Actions,
-		PortForwards: options.PortForwards,
-		Exec:         options.Exec,
-		Cursors:      options.Cursors,
-		CursorStore:  options.CursorStore,
-		Origin:       origin,
-		Port:         options.Port,
-		Build:        options.Build,
-		ExtraOrigins: options.ExtraOrigins,
+		Snapshots:     options.Snapshots,
+		Sessions:      sessions,
+		Generation:    generation,
+		Profiles:      options.Profiles,
+		Scopes:        options.Scopes,
+		Namespaces:    options.Namespaces,
+		Permissions:   options.Permissions,
+		Selection:     options.Selection,
+		Contexts:      options.Contexts,
+		Dashboard:     options.Dashboard,
+		Resources:     options.Resources,
+		Investigation: options.Investigation,
+		Diagnostics:   options.Diagnostics,
+		Preferences:   options.Preferences,
+		Actions:       options.Actions,
+		PortForwards:  options.PortForwards,
+		Exec:          options.Exec,
+		Cursors:       options.Cursors,
+		CursorStore:   options.CursorStore,
+		Origin:        origin,
+		Port:          options.Port,
+		Build:         options.Build,
+		ExtraOrigins:  options.ExtraOrigins,
 	})
 	if options.Streams != nil && options.Selection != nil {
 		resourceStreams := handlers.NewResourceStreams(options.Streams, options.Selection, sessions, origin).WithExtraOrigins(options.ExtraOrigins)

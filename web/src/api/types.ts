@@ -252,21 +252,91 @@ export interface DashboardRestart {
   ageSeconds: number
 }
 
-export type ProblemSource = 'podStatus' | 'containerWaiting' | 'containerTerminated' | 'containerStatus' | 'condition' | 'event'
-export type ProblemSeverity = 'warning' | 'critical'
+export type ProblemSource = 'podStatus' | 'containerWaiting' | 'containerTerminated' | 'containerStatus' | 'condition' | 'event' | 'workloadStatus' | 'pvcStatus' | 'nodeCondition'
+export type ProblemSeverity = 'info' | 'warning' | 'critical'
 
 export interface DashboardProblem {
+	resource: ResourceRef
   namespace: string
-  pod: string
+	pod?: string
   owner: ResourceRef | null
   container: string | null
   containerType: ContainerType | null
   status: string
   reason: string | null
   message: string | null
+	summary: string
   source: ProblemSource
   severity: ProblemSeverity
   ageSeconds: number
+	actions: Array<'inspect' | 'logs'>
+}
+
+export interface IndexCoverage {
+	topic: string
+	state: 'FRESH' | 'STALE' | 'REFRESHING' | 'PARTIAL' | 'EXPIRED'
+	complete: boolean
+	loadedNamespaces: string[]
+}
+
+export interface IndexedResource {
+	apiGroup?: string
+	kind: string
+	namespace?: string
+	name: string
+	status?: string
+}
+
+export interface LocalResourceIndex {
+	generation: string
+	collectedAt: string
+	coverage: IndexCoverage[]
+	resources: IndexedResource[]
+	namespaceCounts: Array<{ namespace: string; resources: Record<string, number> }>
+}
+
+export interface Investigation {
+	target: IndexedResource
+	ownerChain: IndexedResource[]
+	pods: IndexedResource[]
+	services: IndexedResource[]
+	endpointSlices: IndexedResource[]
+	configMaps: IndexedResource[]
+	pvcs: IndexedResource[]
+	events: IndexedResource[]
+	coverage: IndexCoverage[]
+}
+
+export interface LatencyPercentiles {
+	p50Milliseconds: number
+	p95Milliseconds: number
+	p99Milliseconds: number
+	maxMilliseconds: number
+	samples: number
+}
+
+export interface Diagnostics {
+	generation: string
+	collectedAt: string
+	performance: {
+		apiServerLatency: LatencyPercentiles
+		cacheHitRatio: number | null
+		activeWatches: number
+		requestsPerMinute: number
+		responses429: number
+		watchReconnects: number
+		resourceSync: Array<{ resource: string; latency: LatencyPercentiles }>
+	}
+	cluster: {
+		kubernetesVersion: string | null
+		namespaces: number
+		totals: Record<string, number>
+		kubepeep: { resourceCacheEntries: number; resourceCacheBytes: number; collectionCacheEntries: number; collectionCacheBytes: number; cursorBytes: number; activeWatches: number }
+	}
+	namespaces: Array<{ namespace: string; resources: Record<string, number>; problems: Record<ProblemSeverity, number>; restarts: number | null; listLatencyMilliseconds: number | null; complete: boolean }>
+	cacheCoverage: IndexCoverage[]
+	complete: boolean
+	errors: DashboardPartialError[]
 }
 
 export interface DashboardEvent {

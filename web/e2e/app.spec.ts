@@ -140,8 +140,9 @@ test('keeps the dashboard useful with partial data and an explicit bounded log s
     else if (path === '/api/v1/session') data = { csrfToken: 'csrf_e2e', origin: 'http://127.0.0.1:4173', generation: 'gen_e2e', expiresAt: '2026-08-10T13:00:00Z' }
     else if (path === '/api/v1/dashboard/summary') data = block(counters, { coverage: null })
     else if (path === '/api/v1/dashboard/problems') data = block([{
+      resource: { kind: 'Pod', namespace: 'allowed', name: 'restart-pod' },
       namespace: 'allowed', pod: 'restart-pod', owner: { kind: 'Deployment', name: 'api' }, container: 'api', containerType: 'regular',
-      status: 'Running', reason: 'CrashLoopBackOff', message: 'back-off restarting failed container', source: 'containerWaiting', severity: 'critical', ageSeconds: 180,
+      status: 'Running', reason: 'CrashLoopBackOff', message: 'back-off restarting failed container', summary: 'Container is repeatedly crashing.', source: 'containerWaiting', severity: 'critical', ageSeconds: 180, actions: ['inspect', 'logs'],
     }])
     else if (path === '/api/v1/dashboard/restarts?limit=10') data = block([{
       namespace: 'allowed', pod: 'restart-pod', owner: { kind: 'Deployment', name: 'api' }, container: 'api', containerType: 'regular',

@@ -4,6 +4,7 @@ import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { DashboardPage } from './Dashboard'
+import { ResourceWorkspaceProvider } from './workspace/ResourceWorkspaceProvider'
 
 function json(data: unknown, meta: Record<string, unknown> = { generation: 'gen_42', collectedAt: '2026-08-10T12:00:00Z' }): Response {
   return new Response(JSON.stringify({ data, meta }), { status: 200, headers: { 'Content-Type': 'application/json' } })
@@ -56,7 +57,7 @@ function renderDashboard() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={client}>
-      <MemoryRouter><DashboardPage /></MemoryRouter>
+      <MemoryRouter><ResourceWorkspaceProvider><DashboardPage /></ResourceWorkspaceProvider></MemoryRouter>
     </QueryClientProvider>,
   )
 }
@@ -125,7 +126,7 @@ describe('progressive dashboard', () => {
     renderDashboard()
     expect(await screen.findByRole('button', { name: 'Retry Pod metrics' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Cluster overview' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Problem pods' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Problems' })).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Retry Pod metrics' }))
     await waitFor(() => expect(metricsCalls).toBe(2))
     expect(screen.queryByRole('button', { name: 'Retry Pod metrics' })).not.toBeInTheDocument()
@@ -136,9 +137,11 @@ describe('progressive dashboard', () => {
       const path = String(input)
       if (path === '/api/v1/dashboard/problems') {
         return Promise.resolve(json(block([{
+          resource: { kind: 'Pod', namespace: 'payments', name: 'api-abc' },
           namespace: 'payments', pod: 'api-abc', owner: { kind: 'Deployment', name: 'api' },
           container: 'api', containerType: 'regular', status: 'Running', reason: 'CrashLoopBackOff',
-          message: 'back-off restarting failed container', source: 'containerWaiting', severity: 'critical', ageSeconds: 180,
+          message: 'back-off restarting failed container', summary: 'Container is repeatedly crashing.', source: 'containerWaiting', severity: 'critical', ageSeconds: 180,
+          actions: ['inspect', 'logs'],
         }], {
           complete: false,
           coverage: { requestedNamespaces: 2, completedNamespaces: 1, deniedNamespaces: ['restricted'], failed: [] },
@@ -170,7 +173,8 @@ describe('progressive dashboard', () => {
     renderDashboard()
 
     expect(await screen.findByRole('heading', { name: 'Cluster overview' })).toBeInTheDocument()
-    expect((await screen.findAllByText('api-abc', { selector: 'strong' })).length).toBeGreaterThanOrEqual(2)
+    expect((await screen.findAllByText('api-abc', { selector: 'strong' })).length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByText('1 critical')).toBeInTheDocument()
     expect(screen.getByText('Coverage: 1 of 2 namespaces. 1 denied.')).toBeInTheDocument()
     expect(screen.getByText('BackOff', { selector: 'strong' })).toBeInTheDocument()
     expect(await screen.findByText('Metrics API is not available. The rest of the dashboard is unaffected.')).toBeInTheDocument()

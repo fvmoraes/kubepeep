@@ -39,9 +39,9 @@ function catalogResponse(path: string): Response | undefined {
   return undefined
 }
 
-function renderLogs() {
+function renderLogs(initialEntry = '/logs?namespace=payments&pod=api-abc&container=api') {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
-  return render(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/logs?namespace=payments&pod=api-abc&container=api']}><LogsPage /></MemoryRouter></QueryClientProvider>)
+  return render(<QueryClientProvider client={client}><MemoryRouter initialEntries={[initialEntry]}><LogsPage /></MemoryRouter></QueryClientProvider>)
 }
 
 afterEach(() => {
@@ -52,6 +52,54 @@ afterEach(() => {
 })
 
 describe('bounded log viewer', () => {
+	it('aggregates at most five workload streams and filters the bounded result with a regular expression', async () => {
+		const pods = Array.from({ length: 6 }, (_, index) => `api-${index}`)
+		const logCalls: string[] = []
+		const streamSignals: AbortSignal[] = []
+		vi.stubGlobal('fetch', vi.fn((input: string | URL | Request, init?: RequestInit) => {
+			const path = String(input)
+			if (path === '/api/v1/status') return Promise.resolve(json(status()))
+			if (path === '/api/v1/preferences') return Promise.resolve(json(preferences()))
+			if (path === '/api/v1/workloads?limit=500') return Promise.resolve(json([{ namespace: 'payments', kind: 'Deployment', name: 'api', status: 'Healthy', ready: 6, desired: 6, available: 6, updated: 6, ageSeconds: 60 }], { page: { limit: 500, next: '', complete: true, truncated: false, filterScope: 'collection' }, coverage: null }))
+			if (path === '/api/v1/pods?limit=500') return Promise.resolve(json(pods.map((name) => ({ namespace: 'payments', name, status: 'Running', ready: { current: 1, desired: 1 }, restarts: 0, node: 'worker-1', ip: null, owner: { kind: 'Deployment', name: 'api' }, ageSeconds: 60, problematic: false })), { page: { limit: 500, next: '', complete: true, truncated: false, filterScope: 'collection' }, coverage: null }))
+			if (path.startsWith('/api/v1/permissions?')) return Promise.resolve(json({ generation, complete: true, truncated: false, errors: [], decisions: pods.map((name) => ({ capabilityId: 'pods.logs.get', namespace: 'payments', resourceName: name, decision: 'allowed' })) }))
+			if (path === '/api/v1/session') return Promise.resolve(json({ csrfToken: 'csrf-aggregate', origin: 'http://127.0.0.1:2748', generation, expiresAt: '2026-09-29T13:00:00Z' }))
+			if (path === '/api/v1/workloads/Deployment/payments/api') return Promise.resolve(json({ metadata: { namespace: 'payments', name: 'api' }, kind: 'Deployment', conditions: [], containers: [], related: pods.map((name) => ({ kind: 'Pod', namespace: 'payments', name })) }))
+			const detail = /^\/api\/v1\/pods\/payments\/(api-\d)$/.exec(path)
+			if (detail) return Promise.resolve(json({ metadata: { namespace: 'payments', name: detail[1] }, summary: { namespace: 'payments', name: detail[1] }, conditions: [], containers: [{ spec: { name: 'api', image: 'example/api:1', ports: [] }, type: 'regular', ready: true, restartCount: 0, state: 'running', reason: null }], initContainers: [], ephemeralContainers: [], relatedEvents: [] }))
+			if (path.includes('/logs/stream?')) {
+				const signal = init?.signal as AbortSignal
+				streamSignals.push(signal)
+				const body = new ReadableStream<Uint8Array>({ start(controller) {
+					controller.enqueue(new TextEncoder().encode(`event: meta\ndata: ${JSON.stringify({ generation, requestId: 'req-aggregate', container: 'api' })}\n\n`))
+					signal.addEventListener('abort', () => controller.error(new DOMException('aborted', 'AbortError')), { once: true })
+				} })
+				return Promise.resolve(new Response(body, { headers: { 'Content-Type': 'text/event-stream' } }))
+			}
+			const logs = /^\/api\/v1\/pods\/payments\/(api-\d)\/logs\?/.exec(path)
+			if (logs) {
+				logCalls.push(logs[1])
+				return Promise.resolve(json({ container: 'api', previous: false, lines: [{ timestamp: `2026-09-29T12:00:0${logs[1].at(-1)}Z`, text: `error-${logs[1].at(-1)}`, truncated: false }], truncated: false }))
+			}
+			throw new Error(`Unexpected request: ${path}`)
+		}))
+
+		const view = renderLogs('/logs?workload=Deployment%2Fpayments%2Fapi')
+		const read = await screen.findByRole('button', { name: 'Read aggregate' })
+		await waitFor(() => expect(read).toBeEnabled())
+		fireEvent.click(read)
+		await waitFor(() => expect(logCalls).toHaveLength(5))
+		expect(logCalls).toEqual(['api-0', 'api-1', 'api-2', 'api-3', 'api-4'])
+		expect(screen.queryByText('error-5')).not.toBeInTheDocument()
+		fireEvent.change(screen.getByRole('searchbox', { name: 'Search aggregate logs' }), { target: { value: 'error-[024]' } })
+		fireEvent.click(screen.getByRole('checkbox', { name: 'Regex' }))
+		expect(screen.getByText(/3 visible of 5 bounded/)).toBeInTheDocument()
+		fireEvent.click(screen.getByRole('button', { name: 'Follow aggregate' }))
+		await waitFor(() => expect(streamSignals).toHaveLength(5))
+		view.unmount()
+		expect(streamSignals.every((signal) => signal.aborted)).toBe(true)
+	})
+
   it('reads current logs with generation fencing and keeps content only in memory', async () => {
     let logInit: RequestInit | undefined
     vi.stubGlobal('fetch', vi.fn((input: string | URL | Request, init?: RequestInit) => {

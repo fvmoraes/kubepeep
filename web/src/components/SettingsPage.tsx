@@ -1,28 +1,63 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 
-import { APIError, getPreferences } from '../api/client'
+import { APIError, getDiagnostics, getPreferences, getStatus } from '../api/client'
 import { mutatePreferences } from '../api/preferences'
 import type { Preferences } from '../api/types'
 import { StatePanel } from './StatePanel'
 import { Button, Card, CardContent, Checkbox, Input, PageHeader, Select } from './ui'
-import { ErrorBanner, SuccessBanner } from './ui/Banner'
+import { ErrorBanner, SuccessBanner, WarningBanner } from './ui/Banner'
 
 function errorMessage(error: unknown): string {
   return error instanceof APIError ? error.message : 'Preferences could not be saved.'
 }
 
 export function SettingsPage() {
-  const preferences = useQuery({ queryKey: ['preferences'], queryFn: ({ signal }) => getPreferences(signal) })
+	const preferences = useQuery({ queryKey: ['preferences'], queryFn: ({ signal }) => getPreferences(signal) })
 
   return (
     <div className="flex w-full min-w-0 flex-col gap-4">
       <PageHeader title="Settings" description="Only allowlisted UI, log, dashboard and saved-filter preferences are stored locally." />
       {preferences.isPending ? <StatePanel kind="loading" title="Loading preferences">Defaults are materialized by the local service.</StatePanel>
         : preferences.isError ? <StatePanel kind="error" title="Preferences unavailable" details={errorMessage(preferences.error)}>{errorMessage(preferences.error)}</StatePanel>
-          : <SettingsForm initial={preferences.data} />}
+		  : <SettingsForm initial={preferences.data} />}
+		<PerformanceDiagnostics />
     </div>
   )
+}
+
+function formatBytes(value: number) {
+	if (value < 1_024) return `${value} B`
+	if (value < 1_024 * 1_024) return `${(value / 1_024).toFixed(1)} KiB`
+	return `${(value / (1_024 * 1_024)).toFixed(1)} MiB`
+}
+
+function PerformanceDiagnostics() {
+	const status = useQuery({ queryKey: ['local-status'], queryFn: ({ signal }) => getStatus(signal), staleTime: 15_000 })
+	const generation = status.data?.selection?.generation
+	const diagnostics = useQuery({ queryKey: ['diagnostics', generation], queryFn: ({ signal }) => getDiagnostics(signal, generation), enabled: Boolean(generation), staleTime: 5_000, retry: false })
+	if (!generation) return <StatePanel kind="empty" title="Diagnostics require an active scope">Select a context and default namespace scope to inspect runtime performance.</StatePanel>
+	if (diagnostics.isPending) return <StatePanel kind="loading" title="Collecting diagnostics">Reading bounded process metrics and the current local resource index.</StatePanel>
+	if (diagnostics.isError) return <StatePanel kind="error" title="Diagnostics unavailable">{errorMessage(diagnostics.error)}</StatePanel>
+	const value = diagnostics.data
+	const latency = value.performance.apiServerLatency
+	return <section aria-labelledby="performance-diagnostics-title" className="grid gap-3 rounded-xl border border-kp-overlay-0 bg-kp-surface-0 p-4">
+		<header><p className="text-2xs uppercase tracking-widest text-kp-mauve">Diagnostics</p><h2 id="performance-diagnostics-title" className="mt-1 text-xl text-kp-text">Performance</h2><p className="mt-1 text-xs text-kp-overlay-text">Process-local metrics contain bounded resource categories only. Namespace timing is returned in this response and is not retained as telemetry.</p></header>
+		{!value.complete ? <WarningBanner>Coverage is partial. Missing or forbidden cache sections stay unknown and are not displayed as zero.</WarningBanner> : null}
+		<div className="grid gap-px overflow-hidden rounded-lg border border-kp-overlay-0 bg-kp-overlay-0 sm:grid-cols-3 lg:grid-cols-6">
+			{[
+				['API p50', `${latency.p50Milliseconds} ms`], ['API p95', `${latency.p95Milliseconds} ms`], ['API p99', `${latency.p99Milliseconds} ms`],
+				['Cache hit', value.performance.cacheHitRatio === null ? 'unknown' : `${(value.performance.cacheHitRatio * 100).toFixed(1)}%`],
+				['Active watches', String(value.performance.activeWatches)], ['429 responses', String(value.performance.responses429)],
+			].map(([label, metric]) => <div key={label} className="bg-kp-surface-1 p-3"><small className="block text-2xs uppercase tracking-wider text-kp-overlay-text">{label}</small><strong className="mt-1 block text-lg text-kp-text">{metric}</strong></div>)}
+		</div>
+		<div className="grid gap-3 lg:grid-cols-2">
+			<div className="overflow-auto rounded-lg border border-kp-overlay-0"><table className="w-full text-left text-xs"><caption className="p-3 text-left text-sm font-semibold text-kp-text">Resource sync latency</caption><thead className="bg-kp-surface-1 text-kp-overlay-text"><tr><th className="p-2">Resource</th><th className="p-2">p50</th><th className="p-2">p95</th><th className="p-2">p99</th></tr></thead><tbody>{value.performance.resourceSync.map((item) => <tr key={item.resource} className="border-t border-kp-overlay-0"><td className="p-2 text-kp-text">{item.resource}</td><td className="p-2">{item.latency.p50Milliseconds} ms</td><td className="p-2">{item.latency.p95Milliseconds} ms</td><td className="p-2">{item.latency.p99Milliseconds} ms</td></tr>)}</tbody></table></div>
+			<div className="rounded-lg border border-kp-overlay-0 p-3"><h3 className="text-sm text-kp-text">Cluster and KubePeep</h3><dl className="mt-2 grid grid-cols-2 gap-2 text-xs"><dt className="text-kp-overlay-text">Kubernetes</dt><dd>{value.cluster.kubernetesVersion ?? 'unknown'}</dd><dt className="text-kp-overlay-text">Namespaces in scope</dt><dd>{value.cluster.namespaces}</dd><dt className="text-kp-overlay-text">Loaded totals</dt><dd>{Object.entries(value.cluster.totals).map(([kind, count]) => `${kind} ${count}`).join(' · ') || 'not synchronized'}</dd><dt className="text-kp-overlay-text">Requests/min</dt><dd>{value.performance.requestsPerMinute.toFixed(1)}</dd><dt className="text-kp-overlay-text">Resource cache</dt><dd>{value.cluster.kubepeep.resourceCacheEntries} · {formatBytes(value.cluster.kubepeep.resourceCacheBytes)}</dd><dt className="text-kp-overlay-text">Page cache</dt><dd>{value.cluster.kubepeep.collectionCacheEntries} · {formatBytes(value.cluster.kubepeep.collectionCacheBytes)}</dd><dt className="text-kp-overlay-text">Cursor memory</dt><dd>{formatBytes(value.cluster.kubepeep.cursorBytes)}</dd></dl></div>
+		</div>
+		<div className="overflow-auto rounded-lg border border-kp-overlay-0"><table className="w-full text-left text-xs"><caption className="p-3 text-left text-sm font-semibold text-kp-text">Namespace diagnostics · slowest measured first</caption><thead className="bg-kp-surface-1 text-kp-overlay-text"><tr><th className="p-2">Namespace</th><th className="p-2">Resources loaded</th><th className="p-2">Problems</th><th className="p-2">Restarts</th><th className="p-2">LIST latency</th></tr></thead><tbody>{value.namespaces.map((item) => <tr key={item.namespace} className="border-t border-kp-overlay-0"><td className="p-2 text-kp-text">{item.namespace}</td><td className="p-2">{Object.entries(item.resources).map(([kind,count]) => `${kind} ${count}`).join(' · ') || 'not synchronized'}</td><td className="p-2">{item.problems.critical} critical · {item.problems.warning} warning · {item.problems.info} info</td><td className="p-2">{item.restarts ?? 'unknown'}</td><td className="p-2">{item.listLatencyMilliseconds === null ? 'unknown' : `${item.listLatencyMilliseconds} ms`}</td></tr>)}</tbody></table></div>
+		<p className="text-xs text-kp-overlay-text">Cache coverage: {value.cacheCoverage.map((item) => `${item.topic} ${item.complete ? item.state.toLowerCase() : 'incomplete'}`).join(' · ')}</p>
+	</section>
 }
 
 function SettingsForm({ initial }: { initial: Preferences }) {

@@ -175,6 +175,19 @@ func (backend *ResourceBackend) memoryStats() ResourceMemoryStats {
 	return stats
 }
 
+func (backend *ResourceBackend) MemoryStats() ResourceMemoryStats { return backend.memoryStats() }
+
+func (backend *ResourceBackend) LocalIndex(generation string, expectedNamespaces []string) resources.LocalIndexSnapshot {
+	if backend == nil || backend.resourceCache == nil {
+		return resources.LocalIndexSnapshot{Generation: generation}
+	}
+	return backend.resourceCache.LocalIndex(generation, expectedNamespaces...)
+}
+
+func (backend *ResourceBackend) Investigation(generation, kind, namespace, name string, expectedNamespaces []string) resources.Investigation {
+	return backend.LocalIndex(generation, expectedNamespaces).Investigate(kind, namespace, name)
+}
+
 func (backend *ResourceBackend) memoryOverBudget(stats ResourceMemoryStats) bool {
 	return backend != nil && backend.memoryBudget > 0 && int64(stats.ResourceBytes+stats.CollectionBytes)+stats.CursorBytes > backend.memoryBudget
 }
@@ -250,6 +263,8 @@ func collectionForTopic(topic resources.Topic) (resources.Collection, bool) {
 		return resources.CollectionEndpointSlices, true
 	case resources.TopicConfigMaps:
 		return resources.CollectionConfigMaps, true
+	case resources.TopicPVCs:
+		return resources.CollectionPersistentVolumeClaims, true
 	default:
 		return "", false
 	}
@@ -271,6 +286,8 @@ func topicForCollection(collection resources.Collection) (resources.Topic, bool)
 		return resources.TopicEndpointSlices, true
 	case resources.CollectionConfigMaps:
 		return resources.TopicConfigMaps, true
+	case resources.CollectionPersistentVolumeClaims:
+		return resources.TopicPVCs, true
 	default:
 		return "", false
 	}
@@ -862,6 +879,7 @@ func observeListDuration(registry *observability.Registry, collection resources.
 		nanoseconds = 1
 	}
 	registry.AddCounter(observability.ResourceListDurationNanosecondsTotalName, map[string]string{"resource": string(collection), "strategy": strategy}, uint64(nanoseconds))
+	registry.ObserveDuration(observability.ResourceListDurationNanosecondsTotalName, map[string]string{"resource": string(collection), "strategy": strategy}, time.Duration(nanoseconds))
 }
 
 // observeList records the per-collection over-fetch counters. Label values are

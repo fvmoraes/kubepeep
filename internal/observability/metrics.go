@@ -11,21 +11,59 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Registry stores monotonically increasing counters and last-value gauges.
 // It is safe for concurrent use.
 type Registry struct {
-	mu       sync.Mutex
-	counters map[string]map[string]uint64
-	gauges   map[string]map[string]int64
+	mu        sync.Mutex
+	counters  map[string]map[string]uint64
+	gauges    map[string]map[string]int64
+	durations map[string]map[string]*durationWindow
+	startedAt time.Time
+}
+
+const maximumDurationSamples = 512
+
+type durationWindow struct {
+	values []int64
+	next   int
+}
+
+// MetricSeries is a cardinality-bounded, safe snapshot of one metric series.
+// Labels are restricted by the same allowlist used by Render.
+type MetricSeries[T int64 | uint64] struct {
+	Labels map[string]string
+	Value  T
+}
+
+type DurationSeries struct {
+	Labels map[string]string
+	Count  int
+	P50    time.Duration
+	P95    time.Duration
+	P99    time.Duration
+	Max    time.Duration
+	// Samples is a copied, bounded window used to merge percentiles across
+	// safe metric series in the local diagnostics endpoint.
+	Samples []time.Duration
+}
+
+type Snapshot struct {
+	StartedAt time.Time
+	Counters  map[string][]MetricSeries[uint64]
+	Gauges    map[string][]MetricSeries[int64]
+	Durations map[string][]DurationSeries
 }
 
 // NewRegistry returns an empty registry.
 func NewRegistry() *Registry {
 	return &Registry{
-		counters: make(map[string]map[string]uint64),
-		gauges:   make(map[string]map[string]int64),
+		counters:  make(map[string]map[string]uint64),
+		gauges:    make(map[string]map[string]int64),
+		durations: make(map[string]map[string]*durationWindow),
+		startedAt: time.Now().UTC(),
 	}
 }
 
@@ -117,6 +155,110 @@ func (registry *Registry) SetGauge(name string, labels map[string]string, value 
 // AddGauge adjusts a concurrent activity gauge without losing updates.
 func (registry *Registry) AddGauge(name string, labels map[string]string, delta int64) {
 	registry.updateGauge(name, labels, delta, true)
+}
+
+// ObserveDuration retains a small rolling window for local diagnostics. Only
+// metrics and labels already admitted by the bounded registry are accepted;
+// resource names, namespaces, selectors and user identities cannot enter it.
+func (registry *Registry) ObserveDuration(name string, labels map[string]string, value time.Duration) {
+	if registry == nil || value <= 0 {
+		return
+	}
+	if name != ResourceListDurationNanosecondsTotalName && name != KubernetesRequestDurationNanosecondsTotalName {
+		return
+	}
+	key := labelKey(labels)
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	bucket := registry.durations[name]
+	if bucket == nil {
+		bucket = make(map[string]*durationWindow)
+		registry.durations[name] = bucket
+	}
+	window := bucket[key]
+	if window == nil {
+		if len(bucket) >= 1024 {
+			return
+		}
+		window = &durationWindow{values: make([]int64, 0, maximumDurationSamples)}
+		bucket[key] = window
+	}
+	nanoseconds := value.Nanoseconds()
+	if len(window.values) < maximumDurationSamples {
+		window.values = append(window.values, nanoseconds)
+		return
+	}
+	window.values[window.next] = nanoseconds
+	window.next = (window.next + 1) % maximumDurationSamples
+}
+
+// Snapshot returns copied aggregate data for the local diagnostics API.
+func (registry *Registry) Snapshot() Snapshot {
+	result := Snapshot{
+		Counters:  make(map[string][]MetricSeries[uint64]),
+		Gauges:    make(map[string][]MetricSeries[int64]),
+		Durations: make(map[string][]DurationSeries),
+	}
+	if registry == nil {
+		return result
+	}
+	registry.mu.Lock()
+	defer registry.mu.Unlock()
+	result.StartedAt = registry.startedAt
+	for name, bucket := range registry.counters {
+		for key, value := range bucket {
+			result.Counters[name] = append(result.Counters[name], MetricSeries[uint64]{Labels: decodeLabelKey(key), Value: value})
+		}
+	}
+	for name, bucket := range registry.gauges {
+		for key, value := range bucket {
+			result.Gauges[name] = append(result.Gauges[name], MetricSeries[int64]{Labels: decodeLabelKey(key), Value: value})
+		}
+	}
+	for name, bucket := range registry.durations {
+		for key, window := range bucket {
+			values := append([]int64(nil), window.values...)
+			if len(values) == 0 {
+				continue
+			}
+			sort.Slice(values, func(left, right int) bool { return values[left] < values[right] })
+			samples := make([]time.Duration, len(values))
+			for index, value := range values {
+				samples[index] = time.Duration(value)
+			}
+			result.Durations[name] = append(result.Durations[name], DurationSeries{
+				Labels: decodeLabelKey(key), Count: len(values),
+				P50: percentileDuration(values, 0.50), P95: percentileDuration(values, 0.95),
+				P99: percentileDuration(values, 0.99), Max: time.Duration(values[len(values)-1]), Samples: samples,
+			})
+		}
+	}
+	return result
+}
+
+func percentileDuration(sorted []int64, percentile float64) time.Duration {
+	if len(sorted) == 0 {
+		return 0
+	}
+	index := int(float64(len(sorted)-1)*percentile + 0.5)
+	if index >= len(sorted) {
+		index = len(sorted) - 1
+	}
+	return time.Duration(sorted[index])
+}
+
+func decodeLabelKey(key string) map[string]string {
+	labels := make(map[string]string)
+	if key == "" {
+		return labels
+	}
+	for _, pair := range strings.Split(key, "\x1f") {
+		name, value, ok := strings.Cut(pair, "=")
+		if ok {
+			labels[name] = value
+		}
+	}
+	return labels
 }
 
 func (registry *Registry) updateGauge(name string, labels map[string]string, value int64, add bool) {

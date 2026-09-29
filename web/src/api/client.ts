@@ -15,6 +15,9 @@ DashboardProblem,
 DashboardResponse,
 DashboardRestart,
 DashboardSummary,
+Diagnostics,
+Investigation,
+LocalResourceIndex,
 Envelope,
 EndpointSliceDetail,
 EndpointSliceResource,
@@ -467,6 +470,24 @@ export function getDashboardMetrics(signal?: AbortSignal, expectedGeneration?: s
 
 export function getDashboardNamespaceHealth(signal?: AbortSignal, expectedGeneration?: string): Promise<DashboardResponse<DashboardNamespaceHealth[]>> {
 	return dashboardRequest<DashboardNamespaceHealth[]>('/api/v1/dashboard/namespace-health', { method: 'GET', signal }, expectedGeneration)
+}
+
+export function getDiagnostics(signal?: AbortSignal, expectedGeneration?: string): Promise<Diagnostics> {
+	return request<Diagnostics>('/api/v1/diagnostics', { method: 'GET', signal }).then((value) => {
+		if (expectedGeneration && value.generation !== expectedGeneration) throw new APIError(409, { code: 'GENERATION_CHANGED', message: 'The diagnostics response belongs to another selection generation.' })
+		return value
+	})
+}
+
+export function getLocalResourceIndex(signal?: AbortSignal, expectedGeneration?: string): Promise<LocalResourceIndex> {
+	return request<LocalResourceIndex>('/api/v1/local-index', { method: 'GET', signal }).then((value) => {
+		if (expectedGeneration && value.generation !== expectedGeneration) throw new APIError(409, { code: 'GENERATION_CHANGED', message: 'The local index belongs to another selection generation.' })
+		return value
+	})
+}
+
+export function getInvestigation(kind: string, namespace: string, name: string, signal?: AbortSignal): Promise<Investigation> {
+	return request<Investigation>(`/api/v1/investigation/${resourcePath(kind)}/${resourcePath(namespace)}/${resourcePath(name)}`, { method: 'GET', signal })
 }
 
 export function getYAMLDiff(collection: string, namespace: string, name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<YAMLDiff> {

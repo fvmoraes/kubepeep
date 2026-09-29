@@ -78,10 +78,10 @@ describe('read-only resource pages', () => {
 
   it('publishes the complete workspace tab catalog for each actionable kind', () => {
     const labels = (collection: string, kind: string | null = null) => tabsFor({ collection, kind, namespace: 'payments', name: 'api', tab: 'overview' }).map((tab) => tab.label)
-    expect(labels('pods', 'Pod')).toEqual(['Overview', 'Logs', 'YAML', 'Events', 'Metrics', 'Containers', 'Actions'])
-    expect(labels('workloads', 'Deployment')).toEqual(['Overview', 'Pods', 'ReplicaSets', 'YAML', 'Events', 'Rollout', 'Actions'])
-    expect(labels('workloads', 'StatefulSet')).toEqual(['Overview', 'Pods', 'PVCs', 'YAML', 'Events', 'Actions'])
-    expect(labels('workloads', 'CronJob')).toEqual(['Overview', 'Jobs', 'YAML', 'Events', 'Actions'])
+    expect(labels('pods', 'Pod')).toEqual(['Overview', 'Investigation', 'Logs', 'YAML', 'Events', 'Metrics', 'Containers', 'Actions'])
+    expect(labels('workloads', 'Deployment')).toEqual(['Overview', 'Investigation', 'Pods', 'ReplicaSets', 'YAML', 'Events', 'Rollout', 'Actions'])
+    expect(labels('workloads', 'StatefulSet')).toEqual(['Overview', 'Investigation', 'Pods', 'PVCs', 'YAML', 'Events', 'Actions'])
+    expect(labels('workloads', 'CronJob')).toEqual(['Overview', 'Investigation', 'Jobs', 'YAML', 'Events', 'Actions'])
     expect(labels('services', 'Service')).toEqual(['Overview', 'Endpoints', 'YAML', 'Events', 'Actions'])
     expect(labels('ingresses', 'Ingress')).toEqual(['Overview', 'Rules', 'Backends', 'YAML', 'Events', 'Actions'])
   })

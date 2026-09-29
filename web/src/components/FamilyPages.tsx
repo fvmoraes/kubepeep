@@ -28,6 +28,7 @@ import type {
 } from '../api/types'
 import { Badge, DataTable, Select, StatusBadge, type DataTableColumn } from './ui'
 import { ResourceListControls } from './ResourceListControls'
+import { ResourceLiveUpdates } from './ResourceLiveUpdates'
 import type { ActiveListFilter, ListSortOrder, ListSortOption } from './ResourceListControls'
 import { CollectionFooter, QueryState, SelectionGate } from './resource/states'
 import { ResourcePage } from './resource/ResourcePage'
@@ -289,7 +290,11 @@ export function StoragePage() {
   const columns = applyColumnVisibility(allColumns, storageColumnState)
 
   return (
-    <ResourcePage title="Storage" description="PersistentVolumes, claims, attachments, classes and CSI objects; claim inspection respects the active scope.">
+    <ResourcePage
+		title="Storage"
+		description="PersistentVolumes, claims, attachments, classes and CSI objects; claim inspection respects the active scope."
+		actions={selection && tab === 'persistent-volume-claims' ? <ResourceLiveUpdates key={`persistent-volume-claims/${generation}`} generation={generation!} topics={['persistent-volume-claims']} queryKeys={[['resources', 'persistent-volume-claims']]} /> : undefined}
+	>
       <ColumnVisibilityControl state={storageColumnState} columns={allColumns} />
       <ResourceTabStrip ariaLabel="Storage resource type" panelId="storage-panel" active={tab} onChange={(value) => navigate(`/storage/${value}`)} tabs={storageTabs.map((id) => ({ id, label: id }))} />
       <FamilyList<StorageRow>

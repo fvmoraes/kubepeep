@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -39,13 +39,14 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('command center global resource search (F7-04)', () => {
+describe('command center local resource search (F5-06)', () => {
   it('resolves resource entries only when the palette opens and navigates on Enter', async () => {
     const getResources = vi.fn(() => resources)
     renderPalette(getResources)
     expect(getResources).not.toHaveBeenCalled()
 
     fireEvent.keyDown(document, { key: 'k', ctrlKey: true })
+    expect(screen.getByText(/absence here does not prove absence in the cluster/i)).toBeInTheDocument()
     expect(getResources).toHaveBeenCalledTimes(1)
 
     const input = screen.getByRole('combobox', { name: 'Search application pages' })
@@ -65,6 +66,23 @@ describe('command center global resource search (F7-04)', () => {
     await waitFor(() => expect(screen.queryByRole('option', { name: /store/ })).not.toBeInTheDocument())
     expect(fetchSpy).not.toHaveBeenCalled()
   })
+
+	it('publishes local resource filtering after 30 ms, below the 100 ms palette budget', async () => {
+		vi.useFakeTimers()
+		try {
+			const fetchSpy = vi.fn()
+			vi.stubGlobal('fetch', fetchSpy)
+			renderPalette(() => resources)
+			fireEvent.keyDown(document, { key: 'k', ctrlKey: true })
+			fireEvent.change(screen.getByRole('combobox', { name: 'Search application pages' }), { target: { value: 'payments pod' } })
+			await act(async () => { await vi.advanceTimersByTimeAsync(30) })
+			expect(screen.getByRole('option', { name: /api-abc/ })).toBeInTheDocument()
+			expect(screen.queryByRole('option', { name: /store/ })).not.toBeInTheDocument()
+			expect(fetchSpy).not.toHaveBeenCalled()
+		} finally {
+			vi.useRealTimers()
+		}
+	})
 
   it('renders saved favorites before pages and resources', () => {
     const favorites: CommandRoute[] = [

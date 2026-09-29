@@ -561,7 +561,7 @@ func filterProblems(block *dashboard.DashboardBlockDTO[[]dashboard.ProblemPodDTO
 				continue
 			}
 		}
-		if query.search != "" && !containsFolded(query.search, item.Pod, optionalString(item.Container), optionalString(item.Reason), optionalString(item.Message)) {
+		if query.search != "" && !containsFolded(query.search, item.Resource.Kind, item.Resource.Name, item.Pod, item.Summary, optionalString(item.Container), optionalString(item.Reason), optionalString(item.Message)) {
 			continue
 		}
 		values = append(values, item)
@@ -595,7 +595,7 @@ func compareProblems(left, right dashboard.ProblemPodDTO, field, order string) i
 		}
 		return comparison
 	}
-	comparison = strings.Compare(left.Namespace+"\x00"+left.Pod+"\x00"+optionalString(left.Container), right.Namespace+"\x00"+right.Pod+"\x00"+optionalString(right.Container))
+	comparison = strings.Compare(left.Namespace+"\x00"+left.Resource.Kind+"\x00"+left.Resource.Name+"\x00"+optionalString(left.Container), right.Namespace+"\x00"+right.Resource.Kind+"\x00"+right.Resource.Name+"\x00"+optionalString(right.Container))
 	if field == "identity" && order == "desc" {
 		return -comparison
 	}
@@ -830,7 +830,7 @@ func paginateDashboardBlock[T any](
 }
 
 func problemCursorIdentity(value dashboard.ProblemPodDTO) string {
-	return strings.Join([]string{value.Namespace, value.Pod, optionalString(value.Container), string(value.Source)}, "\x00")
+	return strings.Join([]string{value.Namespace, value.Resource.Kind, value.Resource.Name, optionalString(value.Container), string(value.Source)}, "\x00")
 }
 
 func eventCursorIdentity(value dashboard.EventDTO) string {

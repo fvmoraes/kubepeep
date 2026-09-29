@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestIncCounterIgnoresUnknownNamesAndLabels(t *testing.T) {
@@ -86,6 +87,31 @@ func TestGaugesTrackConcurrentActivityAndLastValue(t *testing.T) {
 		if !strings.Contains(registry.Render(), want) {
 			t.Fatalf("missing %q: %s", want, registry.Render())
 		}
+	}
+}
+
+func TestDurationSnapshotIsBoundedAndPercentilesAreCopied(t *testing.T) {
+	registry := NewRegistry()
+	labels := map[string]string{"traffic": "unary", "namespace": "must-not-leak"}
+	for index := 1; index <= maximumDurationSamples+8; index++ {
+		registry.ObserveDuration(KubernetesRequestDurationNanosecondsTotalName, labels, time.Duration(index)*time.Millisecond)
+	}
+
+	snapshot := registry.Snapshot()
+	series := snapshot.Durations[KubernetesRequestDurationNanosecondsTotalName]
+	if len(series) != 1 || series[0].Count != maximumDurationSamples {
+		t.Fatalf("unexpected duration snapshot: %#v", series)
+	}
+	if _, leaked := series[0].Labels["namespace"]; leaked {
+		t.Fatal("non-allowlisted namespace label leaked into diagnostics")
+	}
+	if series[0].Labels["traffic"] != "unary" || series[0].P50 <= 0 || series[0].P95 < series[0].P50 || series[0].P99 < series[0].P95 {
+		t.Fatalf("invalid percentiles: %#v", series[0])
+	}
+	series[0].Labels["traffic"] = "mutated"
+	again := registry.Snapshot().Durations[KubernetesRequestDurationNanosecondsTotalName][0]
+	if again.Labels["traffic"] != "unary" {
+		t.Fatal("snapshot labels alias registry state")
 	}
 }
 

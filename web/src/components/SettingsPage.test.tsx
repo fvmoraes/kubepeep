@@ -38,6 +38,29 @@ function queryClient() {
 }
 
 describe('allowlisted settings', () => {
+	it('renders generation-bound performance and namespace diagnostics without inventing missing coverage', async () => {
+		vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+			const path = String(input)
+			if (path === '/api/v1/preferences') return Promise.resolve(json(preferences()))
+			if (path === '/api/v1/status') return Promise.resolve(json({ selection: { generation: 'gen_42' } }))
+			if (path === '/api/v1/diagnostics') return Promise.resolve(json({
+				generation: 'gen_42', collectedAt: '2026-09-29T12:00:00Z', complete: false,
+				performance: { apiServerLatency: { p50Milliseconds: 2, p95Milliseconds: 20, p99Milliseconds: 100, maxMilliseconds: 120, samples: 5 }, cacheHitRatio: 0.75, activeWatches: 3, requestsPerMinute: 12, responses429: 1, watchReconnects: 0, resourceSync: [{ resource: 'pods', latency: { p50Milliseconds: 4, p95Milliseconds: 8, p99Milliseconds: 9, maxMilliseconds: 9, samples: 3 } }] },
+				cluster: { kubernetesVersion: 'v1.35.0', namespaces: 1, totals: { Pod: 5 }, kubepeep: { resourceCacheEntries: 5, resourceCacheBytes: 1024, collectionCacheEntries: 2, collectionCacheBytes: 512, cursorBytes: 64, activeWatches: 3 } },
+				namespaces: [{ namespace: 'payments', resources: { Pod: 5 }, problems: { critical: 1, warning: 0, info: 0 }, restarts: 4, listLatencyMilliseconds: 30, complete: true }],
+				cacheCoverage: [{ topic: 'events', state: 'EXPIRED', complete: false, loadedNamespaces: [] }], errors: [{ code: 'FORBIDDEN', message: 'Event coverage is unavailable.' }],
+			}))
+			throw new Error(`Unexpected request: ${path}`)
+		}))
+		render(<QueryClientProvider client={queryClient()}><SettingsPage /></QueryClientProvider>)
+
+		expect(await screen.findByRole('heading', { name: 'Performance' })).toBeInTheDocument()
+		expect(screen.getByText('100 ms')).toBeInTheDocument()
+		expect(screen.getAllByText('Pod 5')).toHaveLength(2)
+		expect(screen.getByText(/Missing or forbidden cache sections stay unknown/)).toBeInTheDocument()
+		expect(screen.getByText('Namespace diagnostics · slowest measured first')).toBeInTheDocument()
+	})
+
   it('updates only owned sections with CSRF and preserves concurrent/future preference fields', async () => {
     let savedBody: unknown
     let savedInit: RequestInit | undefined

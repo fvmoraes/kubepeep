@@ -459,6 +459,23 @@ func TestNodeDetailAndYAMLRequireOnlyContext(t *testing.T) {
 	}
 }
 
+func TestAllowedMethodsRecognizesPhaseFiveReadRoutes(t *testing.T) {
+	t.Parallel()
+	for _, path := range []string{
+		"/api/v1/diagnostics",
+		"/api/v1/local-index",
+		"/api/v1/investigation/Pod/portal/portal-api",
+	} {
+		allow, known := allowedMethods(path)
+		if !known || allow != "GET, HEAD" {
+			t.Fatalf("allowedMethods(%q) = %q, %v", path, allow, known)
+		}
+	}
+	if allow, known := allowedMethods("/api/v1/investigation/Pod/portal"); known {
+		t.Fatalf("incomplete investigation route = %q, %v", allow, known)
+	}
+}
+
 func resourceListHandler(t *testing.T, service ResourceService, store *api.CursorStore, codec *api.CursorCodec) *Resources {
 	t.Helper()
 	if codec == nil {

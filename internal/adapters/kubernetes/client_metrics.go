@@ -53,6 +53,7 @@ func (transport measuredTransport) RoundTrip(request *http.Request) (*http.Respo
 		duration = 1
 	}
 	transport.registry.AddCounter(observability.KubernetesRequestDurationNanosecondsTotalName, labels, uint64(duration))
+	transport.registry.ObserveDuration(observability.KubernetesRequestDurationNanosecondsTotalName, labels, time.Duration(duration))
 	if response != nil && response.StatusCode == http.StatusTooManyRequests {
 		transport.registry.IncCounter(observability.Kubernetes429TotalName, map[string]string{"traffic": transport.traffic})
 	}

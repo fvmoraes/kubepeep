@@ -22,6 +22,7 @@ import {
   getIngress,
   getIngressClass,
   getIngressYAML,
+  getInvestigation,
   getLease,
   getLeaseYAML,
   getLimitRange,
@@ -64,6 +65,7 @@ import type {
   IngressDetail,
   ServiceDetail,
   SelectionSummary,
+  Investigation,
 } from '../../api/types'
 import { Badge, Button, Input, Select, StatusBadge } from '../ui'
 import { csrfForGeneration } from '../../actions/csrf'
@@ -125,10 +127,11 @@ function refToWorkspaceRef(ref: ResourceRef): { collection: string; kind: string
 export function tabsFor(entry: WorkspaceEntry): ResourceTab[] {
   const tabs: ResourceTab[] = [{ id: 'overview', label: 'Overview' }]
   if (entry.collection === 'pods') {
-    tabs.push({ id: 'logs', label: 'Logs' }, { id: 'yaml', label: 'YAML' }, { id: 'events', label: 'Events' }, { id: 'metrics', label: 'Metrics' }, { id: 'containers', label: 'Containers' }, { id: 'actions', label: 'Actions' })
+		tabs.push({ id: 'investigation', label: 'Investigation' }, { id: 'logs', label: 'Logs' }, { id: 'yaml', label: 'YAML' }, { id: 'events', label: 'Events' }, { id: 'metrics', label: 'Metrics' }, { id: 'containers', label: 'Containers' }, { id: 'actions', label: 'Actions' })
     return tabs
   }
   if (entry.collection === 'workloads') {
+		tabs.push({ id: 'investigation', label: 'Investigation' })
     switch (entry.kind) {
       case 'Deployment':
         tabs.push({ id: 'pods', label: 'Pods' }, { id: 'replicasets', label: 'ReplicaSets' }, { id: 'yaml', label: 'YAML' }, { id: 'events', label: 'Events' }, { id: 'rollout', label: 'Rollout' }, { id: 'actions', label: 'Actions' })
@@ -170,6 +173,22 @@ export function tabsFor(entry: WorkspaceEntry): ResourceTab[] {
   if (yamlCollections.has(entry.collection)) tabs.push({ id: 'yaml', label: 'YAML' })
   if (entry.namespace) tabs.push({ id: 'events', label: 'Events' })
   return tabs
+}
+
+function InvestigationView({ value, onOpen }: { value: Investigation; onOpen: (ref: ResourceRef) => void }) {
+	const groups: Array<[string, Investigation[keyof Pick<Investigation, 'ownerChain' | 'pods' | 'services' | 'endpointSlices' | 'configMaps' | 'pvcs' | 'events'>]]> = [
+		['Owner chain', value.ownerChain], ['Pods', value.pods], ['Services', value.services], ['EndpointSlices', value.endpointSlices], ['ConfigMaps', value.configMaps], ['PersistentVolumeClaims', value.pvcs], ['Events', value.events],
+	]
+	const incomplete = value.coverage.filter((item) => !item.complete)
+	return <div className="grid gap-3">
+		{incomplete.length > 0 ? <p className="rounded-r-md border-l-2 border-kp-yellow-border bg-kp-yellow-bg px-3 py-2 text-xs text-kp-yellow" role="status">Partial local coverage: {incomplete.map((item) => item.topic).join(', ')}. Absence below does not prove absence in the cluster.</p> : null}
+		<div className="grid gap-3 sm:grid-cols-2">
+			{groups.map(([label, resources]) => <section key={label} className="rounded-lg border border-kp-overlay-0 bg-kp-surface-1 p-3"><h3 className="text-sm text-kp-text">{label}</h3>{resources.length === 0 ? <p className="mt-1 text-xs text-kp-overlay-text">No item in the loaded local index.</p> : <ul className="mt-2 grid list-none gap-1 p-0">{resources.map((resource) => {
+				const navigable = resource.kind !== 'Event'
+				return <li key={`${resource.kind}/${resource.namespace ?? ''}/${resource.name}`}><button type="button" disabled={!navigable} className="w-full rounded-md px-2 py-1.5 text-left text-xs text-kp-subtext enabled:hover:bg-kp-surface-2 enabled:hover:text-kp-text disabled:cursor-default" onClick={() => onOpen({ apiGroup: resource.apiGroup, kind: resource.kind, namespace: resource.namespace, name: resource.name })}><strong className="block text-kp-text">{resource.kind} · {resource.name}</strong><span>{resource.namespace ?? 'cluster'}{resource.status ? ` · ${resource.status}` : ''}</span></button></li>
+			})}</ul>}</section>)}
+		</div>
+	</div>
 }
 
 type WorkspaceDetail =
@@ -681,6 +700,12 @@ export function ResourceWorkspaceOverlay() {
     queryFn: ({ signal }) => fetchDetail(entry as WorkspaceEntry, signal, generation),
     enabled: Boolean(workspace.open && entry && generation),
   })
+  const investigation = useQuery({
+    queryKey: ['investigation', generation, entry?.kind, entry?.namespace, entry?.name],
+    queryFn: ({ signal }) => getInvestigation(entry?.kind ?? (entry?.collection === 'pods' ? 'Pod' : ''), entry!.namespace!, entry!.name, signal),
+    enabled: Boolean(workspace.open && entry?.namespace && generation && (entry.collection === 'pods' || entry.collection === 'workloads')),
+    staleTime: 5_000,
+  })
   const yaml = useMutation({
     mutationFn: () => fetchYAML(entry as WorkspaceEntry, new AbortController().signal),
   })
@@ -710,6 +735,11 @@ export function ResourceWorkspaceOverlay() {
   }
 
   function renderTab(tab: string) {
+    if (tab === 'investigation') {
+      if (investigation.isPending) return <p className="text-sm text-kp-overlay-text" role="status">Reading the generation-scoped local relationship index…</p>
+      if (investigation.isError) return <p className="text-sm text-kp-red" role="alert">{errorMessage(investigation.error)}</p>
+      if (investigation.data) return <InvestigationView value={investigation.data} onOpen={openRef} />
+    }
     if (tab === 'overview') {
       if (detail.isPending || detail.isError || !detail.data) return detailFallback()
       const data = detail.data

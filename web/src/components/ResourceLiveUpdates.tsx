@@ -6,7 +6,7 @@ import { streamURL } from '../api/desktop'
 import type { APIErrorPayload } from '../api/types'
 import { Button } from './ui'
 
-export type ResourceTopic = 'pods' | 'events' | 'workloads' | 'services' | 'ingresses' | 'endpoint-slices' | 'configmaps'
+export type ResourceTopic = 'pods' | 'events' | 'workloads' | 'services' | 'ingresses' | 'endpoint-slices' | 'configmaps' | 'persistent-volume-claims'
 
 type LiveMode = 'idle' | 'connecting' | 'live' | 'error'
 
@@ -23,7 +23,7 @@ export interface ResourceStreamProgress {
   requestedNamespaces: number
 }
 
-const topicOrder: ResourceTopic[] = ['pods', 'events', 'workloads', 'services', 'ingresses', 'endpoint-slices', 'configmaps']
+const topicOrder: ResourceTopic[] = ['pods', 'events', 'workloads', 'services', 'ingresses', 'endpoint-slices', 'configmaps', 'persistent-volume-claims']
 
 function appendPreview(current: ResourceStreamProgress | null, next: ResourceStreamProgress): ResourceStreamProgress {
   return current?.snapshotId === next.snapshotId
