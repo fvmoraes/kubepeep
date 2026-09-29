@@ -503,12 +503,26 @@ func (backend *ResourceBackend) listServiceAccountPage(ctx context.Context, bind
 		return result, err
 	}
 	defer cancel()
-	gvr := schema.GroupVersionResource{Version: "v1", Resource: "serviceaccounts"}
-	list, err := clients.metadata.Resource(gvr).Namespace(page.Origin.Namespace).List(requestContext, listOptionsForPage(page))
-	if err != nil {
-		return result, mapMetadataError(err, "ServiceAccount metadata is unavailable.")
-	}
 	now := backend.now().UTC()
+	if !backend.disablePartialMetadata {
+		gvr := schema.GroupVersionResource{Version: "v1", Resource: "serviceaccounts"}
+		list, listErr := clients.metadata.Resource(gvr).Namespace(page.Origin.Namespace).List(requestContext, listOptionsForPage(page))
+		if listErr == nil {
+			for index := range list.Items {
+				item := &list.Items[index]
+				result.Items = append(result.Items, resources.ServiceAccountDTO{Namespace: item.Namespace, Name: item.Name, UID: string(item.UID), AgeSeconds: int64(now.Sub(item.CreationTimestamp.Time) / time.Second)})
+			}
+			result.Continue, result.ResourceVersion = list.Continue, list.ResourceVersion
+			return result, nil
+		}
+		if !shouldFallbackMetadata(listErr) {
+			return result, mapMetadataError(listErr, "ServiceAccount metadata is unavailable.")
+		}
+	}
+	list, err := clients.kubernetes.CoreV1().ServiceAccounts(page.Origin.Namespace).List(requestContext, listOptionsForPage(page))
+	if err != nil {
+		return result, mapResourceError(err)
+	}
 	for index := range list.Items {
 		item := &list.Items[index]
 		result.Items = append(result.Items, resources.ServiceAccountDTO{Namespace: item.Namespace, Name: item.Name, UID: string(item.UID), AgeSeconds: int64(now.Sub(item.CreationTimestamp.Time) / time.Second)})
@@ -1295,10 +1309,23 @@ func (backend *ResourceBackend) listConfigMapPage(ctx context.Context, binding n
 		return result, err
 	}
 	defer cancel()
-	gvr := schema.GroupVersionResource{Version: "v1", Resource: "configmaps"}
-	list, err := clients.metadata.Resource(gvr).Namespace(page.Origin.Namespace).List(requestContext, listOptionsForPage(page))
+	if !backend.disablePartialMetadata {
+		gvr := schema.GroupVersionResource{Version: "v1", Resource: "configmaps"}
+		list, listErr := clients.metadata.Resource(gvr).Namespace(page.Origin.Namespace).List(requestContext, listOptionsForPage(page))
+		if listErr == nil {
+			for index := range list.Items {
+				result.Items = append(result.Items, resources.ConvertConfigMapMetadata(&list.Items[index]))
+			}
+			result.Continue, result.ResourceVersion = list.Continue, list.ResourceVersion
+			return result, nil
+		}
+		if !shouldFallbackMetadata(listErr) {
+			return result, mapMetadataError(listErr, "ConfigMap metadata is unavailable.")
+		}
+	}
+	list, err := clients.kubernetes.CoreV1().ConfigMaps(page.Origin.Namespace).List(requestContext, listOptionsForPage(page))
 	if err != nil {
-		return result, mapMetadataError(err, "ConfigMap metadata is unavailable.")
+		return result, mapResourceError(err)
 	}
 	for index := range list.Items {
 		result.Items = append(result.Items, resources.ConvertConfigMapMetadata(&list.Items[index]))
@@ -1313,6 +1340,9 @@ func (backend *ResourceBackend) listSecretPage(ctx context.Context, binding name
 		return result, err
 	}
 	defer cancel()
+	// Secrets never use the typed client. The metadata client negotiates
+	// PartialObjectMetadata first and application/json second, decoding only
+	// ObjectMeta in either case.
 	gvr := schema.GroupVersionResource{Version: "v1", Resource: "secrets"}
 	list, err := clients.metadata.Resource(gvr).Namespace(page.Origin.Namespace).List(requestContext, listOptionsForPage(page))
 	if err != nil {
@@ -1768,6 +1798,9 @@ func mapMetadataError(err error, message string) error {
 		return resourceDomain(resources.CodeFeatureUnavailable, message, nil)
 	}
 	return mapResourceError(err)
+}
+func shouldFallbackMetadata(err error) bool {
+	return apierrors.IsNotAcceptable(err) || apierrors.IsUnsupportedMediaType(err)
 }
 func mapOptionalResourceError(err error) error {
 	if apierrors.IsNotFound(err) {

@@ -145,14 +145,41 @@ func (port *resourceWatchPort) listWithClients(ctx context.Context, binding name
 		}
 		options := metav1.ListOptions{Limit: limit, Continue: continueToken}
 		if key.Topic == resources.TopicConfigMaps {
-			list, err := clients.metadata.Resource(key.GVR).Namespace(key.Namespace).List(ctx, options)
+			if !port.backend.disablePartialMetadata {
+				list, err := clients.metadata.Resource(key.GVR).Namespace(key.Namespace).List(ctx, options)
+				if err == nil {
+					for index := range list.Items {
+						snapshot.Items = append(snapshot.Items, resources.ConvertConfigMapMetadata(&list.Items[index]))
+					}
+					snapshot.ResourceVersion, continueToken = list.ResourceVersion, list.Continue
+					if len(snapshot.Items) > resources.MaximumSnapshotItems {
+						return resources.WatchSnapshot{}, resourceDomain(resources.CodeLimitExceeded, "The initial snapshot is too large.", nil)
+					}
+					if emit != nil && !emit(snapshot.Items[pageStart:]) {
+						return resources.WatchSnapshot{}, context.Canceled
+					}
+					if continueToken == "" {
+						return snapshot, nil
+					}
+					continue
+				}
+				if continueToken != "" && !restarted && (apierrors.IsResourceExpired(err) || apierrors.IsGone(err)) {
+					snapshot = resources.WatchSnapshot{Items: []resources.TopicObject{}}
+					continueToken, restarted = "", true
+					continue
+				}
+				if !shouldFallbackMetadata(err) {
+					return resources.WatchSnapshot{}, mapMetadataError(err, "ConfigMap metadata watches are unavailable.")
+				}
+			}
+			list, err := clients.kubernetes.CoreV1().ConfigMaps(key.Namespace).List(ctx, options)
 			if err != nil {
 				if continueToken != "" && !restarted && (apierrors.IsResourceExpired(err) || apierrors.IsGone(err)) {
 					snapshot = resources.WatchSnapshot{Items: []resources.TopicObject{}}
 					continueToken, restarted = "", true
 					continue
 				}
-				return resources.WatchSnapshot{}, mapMetadataError(err, "ConfigMap metadata watches are unavailable.")
+				return resources.WatchSnapshot{}, mapResourceError(err)
 			}
 			for index := range list.Items {
 				snapshot.Items = append(snapshot.Items, resources.ConvertConfigMapMetadata(&list.Items[index]))
@@ -216,18 +243,33 @@ func (port *resourceWatchPort) watchWithOptions(ctx context.Context, key resourc
 	}
 	var source kwatch.Interface
 	if key.Topic == resources.TopicConfigMaps {
-		client := lease.Clients.StreamingMetadata()
-		if client == nil {
-			streamContext.Close()
-			return nil, resourceDomain(resources.CodeFeatureUnavailable, "ConfigMap metadata watches are unavailable.", nil)
-		}
-		source, err = client.Resource(key.GVR).Namespace(key.Namespace).Watch(streamContext.Context(), options)
-		if err != nil {
-			streamContext.Close()
-			if options.SendInitialEvents != nil && (apierrors.IsBadRequest(err) || apierrors.IsInvalid(err)) {
-				return nil, resources.ErrStreamingListsUnsupported
+		if !port.backend.disablePartialMetadata {
+			client := lease.Clients.StreamingMetadata()
+			if client != nil {
+				source, err = client.Resource(key.GVR).Namespace(key.Namespace).Watch(streamContext.Context(), options)
 			}
-			return nil, mapMetadataError(err, "ConfigMap metadata watches are unavailable.")
+			if err != nil && !shouldFallbackMetadata(err) {
+				streamContext.Close()
+				if options.SendInitialEvents != nil && (apierrors.IsBadRequest(err) || apierrors.IsInvalid(err)) {
+					return nil, resources.ErrStreamingListsUnsupported
+				}
+				return nil, mapMetadataError(err, "ConfigMap metadata watches are unavailable.")
+			}
+		}
+		if source == nil {
+			client := lease.Clients.StreamingKubernetes()
+			if client == nil {
+				streamContext.Close()
+				return nil, resourceDomain(resources.CodeFeatureUnavailable, "ConfigMap watches are unavailable.", nil)
+			}
+			source, err = client.CoreV1().ConfigMaps(key.Namespace).Watch(streamContext.Context(), options)
+			if err != nil {
+				streamContext.Close()
+				if options.SendInitialEvents != nil && (apierrors.IsBadRequest(err) || apierrors.IsInvalid(err)) {
+					return nil, resources.ErrStreamingListsUnsupported
+				}
+				return nil, mapResourceError(err)
+			}
 		}
 	} else {
 		client := lease.Clients.StreamingDynamic()
@@ -341,8 +383,8 @@ func (stream *resourceWatchStream) run(key resources.WatchKey, port *resourceWat
 
 func (port *resourceWatchPort) convertRuntime(ctx context.Context, key resources.WatchKey, object kruntime.Object) (resources.TopicObject, error) {
 	if key.Topic == resources.TopicConfigMaps {
-		metadataObject, ok := object.(*metav1.PartialObjectMetadata)
-		if !ok {
+		metadataObject, err := meta.Accessor(object)
+		if err != nil {
 			return nil, resourceDomain(resources.CodeFeatureUnavailable, "ConfigMap metadata watches are unavailable.", nil)
 		}
 		return resources.ConvertConfigMapMetadata(metadataObject), nil

@@ -154,7 +154,11 @@ func Compose(ctx context.Context, options Options) (*Platform, error) {
 	if err != nil {
 		return nil, err
 	}
-	clientFactory, err := kubernetes.NewClientFactory(kubernetes.FactoryOptions{Metrics: metricsRegistry})
+	protocol := options.Config.Resources.Protocol
+	clientFactory, err := kubernetes.NewClientFactory(kubernetes.FactoryOptions{
+		Metrics: metricsRegistry, QPS: float32(protocol.QPS), Burst: protocol.Burst,
+		Protobuf: protocol.Protobuf, Compression: protocol.Compression,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -182,10 +186,13 @@ func Compose(ctx context.Context, options Options) (*Platform, error) {
 		redacted, _ := dashboard.Redact(value)
 		return redacted
 	}), kuberuntime.ResourceBackendOptions{
-		ListWindowTimeout: options.Config.Resources.CollectionTimeout.Duration,
-		Metrics:           metricsRegistry,
-		StreamingLists:    os.Getenv("KUBEPEEP_STREAMING_LISTS") == "1",
-		CursorMemory:      cursorStore,
+		ListWindowTimeout:   options.Config.Resources.CollectionTimeout.Duration,
+		Metrics:             metricsRegistry,
+		StreamingLists:      os.Getenv("KUBEPEEP_STREAMING_LISTS") == "1",
+		PartialMetadata:     &protocol.PartialMetadata,
+		AdaptiveConcurrency: protocol.AdaptiveConcurrency,
+		IntelligentPrefetch: protocol.IntelligentPrefetch,
+		CursorMemory:        cursorStore,
 	})
 	if err != nil {
 		return nil, err

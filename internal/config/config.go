@@ -86,7 +86,21 @@ type DashboardConfig struct {
 // budget only extends how long one collection window may keep working across
 // the bounded fan-out before reporting partial coverage.
 type ResourcesConfig struct {
-	CollectionTimeout Duration `yaml:"collectionTimeout"`
+	CollectionTimeout Duration       `yaml:"collectionTimeout"`
+	Protocol          ProtocolConfig `yaml:"protocol"`
+}
+
+// ProtocolConfig keeps every Phase 6 transport optimization explicit and
+// reversible. Defaults reflect only the combinations validated by the
+// protocol benchmark; operators can disable each fast path independently.
+type ProtocolConfig struct {
+	PartialMetadata     bool `yaml:"partialMetadata"`
+	Protobuf            bool `yaml:"protobuf"`
+	Compression         bool `yaml:"compression"`
+	QPS                 int  `yaml:"qps"`
+	Burst               int  `yaml:"burst"`
+	AdaptiveConcurrency bool `yaml:"adaptiveConcurrency"`
+	IntelligentPrefetch bool `yaml:"intelligentPrefetch"`
 }
 
 type ObservabilityConfig struct {
@@ -128,6 +142,15 @@ func Default() Config {
 		},
 		Resources: ResourcesConfig{
 			CollectionTimeout: Duration{Duration: DefaultResourcesCollectionTimeout},
+			Protocol: ProtocolConfig{
+				PartialMetadata:     true,
+				Protobuf:            true,
+				Compression:         false,
+				QPS:                 10,
+				Burst:               20,
+				AdaptiveConcurrency: true,
+				IntelligentPrefetch: true,
+			},
 		},
 		Observability: ObservabilityConfig{OTel: OTelConfig{
 			Protocol: OTelHTTPProtobuf,
@@ -173,6 +196,12 @@ func (c Config) Validate() error {
 	}
 	if c.Resources.CollectionTimeout.Duration < MinResourcesCollectionTimeout || c.Resources.CollectionTimeout.Duration > MaxResourcesCollectionTimeout || c.Resources.CollectionTimeout.Duration%time.Second != 0 {
 		return fmt.Errorf("config: resources.collectionTimeout must be between 5s and 300s")
+	}
+	if c.Resources.Protocol.QPS < 1 || c.Resources.Protocol.QPS > 20 {
+		return fmt.Errorf("config: resources.protocol.qps must be between 1 and 20")
+	}
+	if c.Resources.Protocol.Burst < c.Resources.Protocol.QPS || c.Resources.Protocol.Burst > 40 {
+		return fmt.Errorf("config: resources.protocol.burst must be between qps and 40")
 	}
 
 	return ValidateOTel(c.Observability.OTel)

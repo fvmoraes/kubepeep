@@ -746,6 +746,33 @@ func TestSecretListUsesOnlyMetadataClientAndNeverTypedSecret(t *testing.T) {
 	}
 }
 
+func TestSecretListNeverFallsBackToTypedClientWhenMetadataIsUnsupported(t *testing.T) {
+	t.Parallel()
+	scheme := metadatafake.NewTestScheme()
+	metav1.AddMetaToScheme(scheme)
+	metadataClient := metadatafake.NewSimpleMetadataClient(scheme)
+	metadataClient.PrependReactor("list", "secrets", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewGenericServerResponse(406, "", schema.GroupResource{Resource: "secrets"}, "", "", 0, false)
+	})
+	typedClient := kubefake.NewSimpleClientset(&corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "credentials", UID: "uid-1"},
+		Data:       map[string][]byte{"token": []byte("must-never-be-returned")},
+	})
+	backend := &ResourceBackend{
+		clients:    fixedResourceClientProvider{set: resourceClientSet{kubernetes: typedClient, metadata: metadataClient}},
+		authorizer: &allowResourceAuthorization{}, now: time.Now,
+	}
+	_, err := backend.listSecretPage(t.Context(), namespaces.SelectionBinding{
+		ClusterProfileID: 1, Context: "ctx", Generation: "gen",
+	}, resources.PageRequest{Origin: resources.Origin{Namespace: "default", Version: "v1", Resource: "secrets"}, Limit: 10})
+	if resources.ErrorCodeOf(err) != resources.CodeFeatureUnavailable {
+		t.Fatalf("metadata negotiation error = %v", err)
+	}
+	if actions := typedClient.Actions(); len(actions) != 0 {
+		t.Fatalf("typed Secret client was accessed: %#v", actions)
+	}
+}
+
 func stringPointer(value string) *string { return &value }
 
 func TestListNodesIsClusterScopedWithoutNamespaceCounts(t *testing.T) {

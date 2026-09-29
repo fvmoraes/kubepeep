@@ -23,6 +23,14 @@ type ResourceBackendOptions struct {
 	// StreamingLists enables the optional Kubernetes initial-events watch fast
 	// path. It is off by default and falls back to LIST+WATCH when unsupported.
 	StreamingLists bool
+	// PartialMetadata enables metadata-only LIST/GET calls for views that do
+	// not consume spec or status. Unsupported servers fall back to JSON.
+	PartialMetadata *bool
+	// AdaptiveConcurrency enables bounded AIMD (2..8, starting at 4).
+	AdaptiveConcurrency bool
+	// IntelligentPrefetch warms bounded related Pod/Event pages after a
+	// visible workload page without delaying the visible response.
+	IntelligentPrefetch bool
 	// ListWindowTimeout bounds one collection fan-out window. Zero falls back
 	// to the resources package default; values are clamped to the supported
 	// ceiling.
@@ -60,16 +68,23 @@ type ResourceBackend struct {
 	redactor   resources.TextRedactor
 	now        func() time.Time
 
-	listWindowTimeout time.Duration
-	metrics           *observability.Registry
-	listFanout        int
-	listCoalescerOnce sync.Once
-	listCoalescer     *resources.RequestCoalescer
-	collectionCache   *resources.CollectionCache
-	resourceCache     *resources.ResourceCache
-	scheduler         *resources.RequestScheduler
-	cursorMemory      CursorMemoryStore
-	memoryBudget      int64
+	listWindowTimeout      time.Duration
+	metrics                *observability.Registry
+	listFanout             int
+	listCoalescerOnce      sync.Once
+	listCoalescer          *resources.RequestCoalescer
+	collectionCache        *resources.CollectionCache
+	resourceCache          *resources.ResourceCache
+	scheduler              *resources.RequestScheduler
+	disablePartialMetadata bool
+	intelligentPrefetch    bool
+	cursorMemory           CursorMemoryStore
+	memoryBudget           int64
+	prefetchMu             sync.Mutex
+	prefetchClosed         bool
+	prefetchNextID         uint64
+	prefetchCancels        map[uint64]context.CancelFunc
+	prefetchWG             sync.WaitGroup
 
 	watchMu         sync.Mutex
 	watchManager    *resources.WatchManager
@@ -89,6 +104,10 @@ func NewResourceBackendWithOptions(runtime *Runtime, authorizer resources.Author
 	if memoryBudget <= 0 {
 		memoryBudget = int64(128<<20 + resources.DefaultCollectionCacheMaxBytes + 32<<20)
 	}
+	partialMetadata := true
+	if options.PartialMetadata != nil {
+		partialMetadata = *options.PartialMetadata
+	}
 	resourceCache := resources.NewResourceCache(resources.ResourceCacheConfig{MaxBytes: 128 << 20, Metrics: options.Metrics})
 	backend := &ResourceBackend{
 		runtime: runtime, clients: runtimeResourceClientProvider{runtime: runtime}, authorizer: authorizer, redactor: redactor, now: time.Now,
@@ -98,9 +117,14 @@ func NewResourceBackendWithOptions(runtime *Runtime, authorizer resources.Author
 		watchBindings:     make(map[string]namespaces.SelectionBinding),
 		collectionCache:   resources.NewCollectionCacheWithMetrics(0, 0, 0, nil, options.Metrics),
 		resourceCache:     resourceCache,
-		scheduler:         resources.NewRequestScheduler(8, nil),
-		cursorMemory:      options.CursorMemory,
-		memoryBudget:      memoryBudget,
+		scheduler: resources.NewRequestSchedulerWithConfig(resources.SchedulerConfig{
+			Minimum: 2, Initial: 4, Maximum: 8, Adaptive: options.AdaptiveConcurrency,
+		}, nil),
+		disablePartialMetadata: !partialMetadata,
+		intelligentPrefetch:    options.IntelligentPrefetch,
+		prefetchCancels:        make(map[uint64]context.CancelFunc),
+		cursorMemory:           options.CursorMemory,
+		memoryBudget:           memoryBudget,
 	}
 	backend.watchManager = resources.NewWatchManagerWithConfig(&resourceWatchPort{backend: backend}, resources.WatchManagerConfig{
 		Metrics: options.Metrics, StreamingLists: options.StreamingLists,
@@ -131,6 +155,7 @@ func (backend *ResourceBackend) OnGeneration(next string) {
 }
 
 func (backend *ResourceBackend) Close() {
+	backend.stopPrefetch()
 	backend.watchMu.Lock()
 	manager := backend.watchManager
 	backend.watchManager = nil
@@ -714,9 +739,13 @@ func globalListDecision(ctx context.Context, checker resources.AuthorizationChec
 }
 
 func (backend *ResourceBackend) ListWorkloads(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, options resources.ListOptions, cursor *resources.CompositeCursor[resources.WorkloadDTO]) (resources.ListResult[resources.WorkloadDTO], error) {
-	return collectFilteredResource(ctx, backend, binding, resolution, resources.CollectionWorkloads, options, cursor, workloadIdentityLess, func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[resources.WorkloadDTO], error) {
+	result, err := collectFilteredResource(ctx, backend, binding, resolution, resources.CollectionWorkloads, options, cursor, workloadIdentityLess, func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[resources.WorkloadDTO], error) {
 		return backend.listWorkloadPage(ctx, binding, page)
 	}, filterSortWorkloads)
+	if err == nil && cursor == nil && options.Priority == resources.PriorityVisible && len(result.Items) > 0 {
+		backend.scheduleRelatedPrefetch(ctx, binding, resolution, result.Items[0])
+	}
+	return result, err
 }
 
 func (backend *ResourceBackend) ListPods(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, options resources.ListOptions, cursor *resources.CompositeCursor[resources.PodDTO]) (resources.ListResult[resources.PodDTO], error) {

@@ -72,3 +72,33 @@ func TestRequestSchedulerWaitCancellationAndCongestion(t *testing.T) {
 		t.Fatal("congestion was not observed")
 	}
 }
+
+func TestRequestSchedulerAIMDReducesAndRecoversWithinBounds(t *testing.T) {
+	t.Parallel()
+	scheduler := NewRequestSchedulerWithConfig(SchedulerConfig{
+		Minimum: 2, Initial: 4, Maximum: 8, Adaptive: true, HealthyThreshold: 2,
+	}, nil)
+
+	scheduler.Observe(100*time.Millisecond, true, false)
+	stats := scheduler.Stats()
+	if stats.Limit != 2 || stats.Reductions != 1 || !stats.Adaptive {
+		t.Fatalf("429 reduction = %#v", stats)
+	}
+	scheduler.Observe(100*time.Millisecond, true, false)
+	if stats = scheduler.Stats(); stats.Limit != 2 || stats.Reductions != 1 {
+		t.Fatalf("minimum bound = %#v", stats)
+	}
+
+	for expected := 3; expected <= 8; expected++ {
+		scheduler.Observe(10*time.Millisecond, false, false)
+		scheduler.Observe(10*time.Millisecond, false, false)
+		if stats = scheduler.Stats(); stats.Limit != expected {
+			t.Fatalf("recovery to %d = %#v", expected, stats)
+		}
+	}
+	scheduler.Observe(10*time.Millisecond, false, false)
+	scheduler.Observe(10*time.Millisecond, false, false)
+	if stats = scheduler.Stats(); stats.Limit != 8 || stats.Increases != 6 {
+		t.Fatalf("maximum bound = %#v", stats)
+	}
+}
