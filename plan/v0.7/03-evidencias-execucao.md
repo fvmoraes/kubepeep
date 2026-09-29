@@ -201,9 +201,39 @@ Gates finais: `rtk make verify`, `rtk make test-race`, `rtk git diff --check`, o
 
 ## Fase 4 — Fechamento do refinamento UI/UX e scope default
 
+**Status: FINALIZADA no commit `f318f49` da branch `review/plan-v0.7`.**
+
 | ID | Commit | Evidência | Resultado |
 | --- | --- | --- | --- |
-|  |  |  |  |
+| F4-01 | `f318f49` | `tokens.css`, `styles.css`, `ExecTerminal.tsx`; busca estática por `font-size`, `fontSize` e `text-[…]` | **IMPLEMENTADO:** famílias, escala, pesos, line-height, terminal, superfícies e cores vêm de tokens. Não restou tamanho arbitrário; literais de cor ficam nos tokens e SVGs de marca. |
+| F4-02 | `f318f49` | `phase04.spec.ts`; medições geométricas nos quatro viewports | **IMPLEMENTADO:** controles ocuparam 3,72–5,56% da área útil e o conteúdo 96,27–98,19% da largura, sempre dentro dos limites de aceite. |
+| F4-03 | `f318f49` | `app.spec.ts`, `features.spec.ts`, catálogo/rotas existentes e suíte Playwright completa | **IMPLEMENTADO:** destinos laterais/horizontais, History API, tabs, contexto, filtros e dados foram exercitados sem rota visual inerte. |
+| F4-04 | `f318f49` | migration `0003_namespace_scope_defaults.sql`; `DefaultScopeGate`; testes service/repository/handler/UI | **IMPLEMENTADO:** no máximo um default por profile/contexto; ativação automática no startup/troca, fence de geração, contexto sem default bloqueado, operador sem catálogo de namespaces e exclusão com substituto ou retorno explícito ao setup. |
+| F4-05 | `f318f49` | `ResourceWorkspace.tsx`, `ResourcePages.test.tsx`, `phase04.spec.ts` | **IMPLEMENTADO:** catálogo de tabs por kind completo, incluindo Metrics/Containers de Pod, Endpoints/Actions de Service e Rules/Backends/Actions de Ingress; relacionados preservam o workspace e o histórico. |
+| F4-06 | `f318f49` | `ResourceActions.tsx`, `ResourceWorkspace.tsx`; adapter/service/rota de port-forward | **IMPLEMENTADO:** catálogo existente foi revalidado e Services ganharam port-forward real com resolução de Pod Ready e `targetPort`; Ingress ganhou backends, Open URL e copy host. |
+| F4-07 | `f318f49` | `ResourcePages.tsx` e testes de bulk restart/delete | **IMPLEMENTADO:** toolbar contextual oferece apenas restart/delete compatíveis com toda a seleção, confirma todos os alvos e apresenta sucessos e falhas parciais. |
+| F4-08 | `f318f49` | queries de permissions, `disabledReason`, testes de serviço e Kind RBAC | **IMPLEMENTADO:** UI exige capabilities por alvo e explica bloqueios; backend revalida geração e autorização exata, inclusive `pods/portforward` no Pod resolvido para Service. |
+| F4-09 | `f318f49` | `ConfirmDialog`, testes `ResourceActions`/`ResourcePages` | **IMPLEMENTADO:** restart e delete exibem alvo/namespace/consequência; delete de workload exige digitar o nome; operações em massa listam todos os recursos. |
+| F4-10 | `f318f49` | estados pending/error, toasts e testes de ações | **IMPLEMENTADO:** todas as novas ações expõem progresso e resultado perceptível; falha real da API fecha confirmação e aparece no toast. |
+| F4-11 | `f318f49` | `styles.css`, tabela/chooser de colunas existentes, `phase04.spec.ts` | **IMPLEMENTADO:** conteúdo usa 96,27–98,19% da largura nos viewports de aceite, tabela mantém colunas por kind e não cria overflow global. |
+| F4-12 | `f318f49` | tokens semânticos e inspeção visual dos screenshots Playwright | **IMPLEMENTADO:** azul, verde, vermelho e âmbar permanecem centralizados em tokens, com dark theme e foco visível preservados. |
+| F4-13 | `f318f49` | screenshots e cinco testes de `phase04.spec.ts` | **IMPLEMENTADO:** 1366×768, 1440×900, 1920×1080 e 2560×1440 passaram sem overflow ou sobreposição; espaço extra ampliou a tabela. |
+| F4-14 | `f318f49` | 1.178 testes Go, 147 Vitest, 26 Playwright, `make verify`, `make test-race` e harness Kind | **IMPLEMENTADO:** fetch, filtros, search, sorting, paginação, live updates, scope/default, saved filters, colunas, workspace, ações, RBAC e estados foram exercitados. |
+| F4-15 | `f318f49` | `docs/ui-ux-refinement.md`, `docs/api.md`, `docs/data-model.md`, README e checklist F4 | **IMPLEMENTADO:** decisões finais, contratos, medidas, migração, API, limites deliberados e validação ficaram documentados. |
+
+Validação final em 2026-09-29: `rtk make build`, `rtk make verify`, `rtk make
+test-race`, `rtk go test ./...` (1.178), `rtk npm test -- --run` (147), `rtk
+npm run test:e2e` (26 passados e quatro cenários reais condicionais omitidos),
+`rtk npm run test:e2e -- e2e/phase04.spec.ts` (5/5), `rtk git diff --check`,
+o gate de segurança e `npm audit --omit=dev` passaram. O lint terminou sem erro
+e com oito avisos `react-refresh/only-export-components` já aceitos pelo gate.
+O conjunto de dependências de produção possui zero vulnerabilidades reportadas;
+o `npm ci` informa três moderadas restritas a dependências de desenvolvimento.
+
+O binário do mesmo código passou no harness do cluster Kind `kubepeep-f4`, com
+contexto/scope reais, dashboard, SSE/log, WebSocket exec, revogação e restauração
+de RBAC e modo offline. O cluster foi reutilizado e preservado; ao fim,
+`kubepeep-f4-control-plane` permaneceu `Ready` em Kubernetes v1.35.0.
 
 ## Fase 5 — Investigação: problems, diagnóstico e logs agregados
 
