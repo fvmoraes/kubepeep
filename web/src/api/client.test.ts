@@ -30,6 +30,15 @@ describe('local API client security boundary', () => {
 		expect(fetch.mock.calls[0][1].headers).not.toHaveProperty('X-KubePeep-List-Priority')
 	})
 
+	it('marks unrelated background collection work for the global scheduler', async () => {
+		const fetch = vi.fn().mockResolvedValue(json([]))
+		vi.stubGlobal('fetch', fetch)
+
+		await getPods({ limit: 100, priority: 'unrelated', skipUXTiming: true })
+
+		expect(fetch.mock.calls[0][1].headers).toMatchObject({ 'X-KubePeep-List-Priority': 'unrelated' })
+	})
+
 	it('does not renew a forbidden cursor', async () => {
 		const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ code: 'FORBIDDEN', message: 'Denied' }), { status: 403, headers: { 'Content-Type': 'application/json' } }))
 		vi.stubGlobal('fetch', fetch)

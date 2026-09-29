@@ -20,6 +20,8 @@ import {
   getDashboardProblems,
   getDashboardRestarts,
   getDashboardSummary,
+  getNodes,
+  getPersistentVolumeClaims,
   getSession,
   getStatus,
   scanDashboardLogs,
@@ -36,6 +38,9 @@ import {
   type DashboardSummary,
   type LogScanRequest,
   type MetricRank,
+  type NodeSummary,
+  type PersistentVolumeClaim,
+  type CollectionResult,
   type SelectionSummary,
 } from '../api/client'
 import { StatePanel } from './StatePanel'
@@ -313,6 +318,31 @@ function SummaryCards({ summary, logCounter }: { summary: DashboardSummary; logC
   return <div className="grid grid-cols-2 gap-2.5 md:grid-cols-4">{cards.map(([label, counter, href, icon]) => <CounterCard key={label} label={label} counter={counter} href={href} icon={icon} />)}</div>
 }
 
+interface InfrastructureSnapshot {
+  nodes: CollectionResult<NodeSummary>
+  claims: CollectionResult<PersistentVolumeClaim>
+}
+
+function InfrastructureView({ value }: { value: InfrastructureSnapshot }) {
+  const readyNodes = value.nodes.items.filter((node) => node.ready).length
+  const pendingClaims = value.claims.items.filter((claim) => claim.status !== 'Bound').length
+  const partial = !value.nodes.page.complete || !value.claims.page.complete ||
+    (value.nodes.coverage?.failed.length ?? 0) > 0 || (value.claims.coverage?.failed.length ?? 0) > 0
+  return (
+    <div className="grid gap-3 sm:grid-cols-2">
+      {partial ? <WarningBanner className="sm:col-span-2">Infrastructure totals are bounded to the authorized pages currently available.</WarningBanner> : null}
+      <Link className="grid gap-1 rounded-lg border border-kp-overlay-0 bg-kp-surface-1 p-3 hover:border-kp-overlay-2" to="/nodes">
+        <span className="text-xs text-kp-overlay-text">Node health</span>
+        <strong className="text-xl text-kp-text">{readyNodes}/{value.nodes.items.length} Ready</strong>
+      </Link>
+      <Link className="grid gap-1 rounded-lg border border-kp-overlay-0 bg-kp-surface-1 p-3 hover:border-kp-overlay-2" to="/storage/persistent-volume-claims">
+        <span className="text-xs text-kp-overlay-text">PersistentVolumeClaims</span>
+        <strong className={pendingClaims > 0 ? 'text-xl text-kp-yellow' : 'text-xl text-kp-text'}>{pendingClaims} not Bound</strong>
+      </Link>
+    </div>
+  )
+}
+
 function severityBadgeVariant(severity: DashboardProblem['severity']): BadgeVariant {
   switch (severity) {
     case 'critical':
@@ -570,6 +600,18 @@ function DashboardContent({ selection, cluster }: { selection: SelectionSummary;
 	// Tier 2 cannot occupy network capacity before the core overview settles.
 	const metrics = useQuery({ queryKey: ['dashboard', 'metrics', selection.generation], queryFn: ({ signal }) => getDashboardMetrics(signal, selection.generation), ...dashboardQueryDefaults, enabled: summary.isSuccess, staleTime: 8_000, refetchInterval: 8_000, refetchIntervalInBackground: false })
 	const namespaceHealth = useQuery({ queryKey: ['dashboard', 'namespace-health', selection.generation], queryFn: ({ signal }) => getDashboardNamespaceHealth(signal, selection.generation), ...dashboardQueryDefaults, enabled: summary.isSuccess })
+	const infrastructure = useQuery({
+		queryKey: ['dashboard', 'infrastructure', selection.generation],
+		queryFn: async ({ signal }) => {
+			const [nodes, claims] = await Promise.all([
+				getNodes({ limit: 100, priority: 'unrelated', skipUXTiming: true }, signal, selection.generation),
+				getPersistentVolumeClaims({ limit: 100, priority: 'unrelated', skipUXTiming: true }, signal, selection.generation),
+			])
+			return { nodes, claims }
+		},
+		...dashboardQueryDefaults,
+		enabled: summary.isSuccess,
+	})
   const session = useQuery({ queryKey: ['session', selection.generation], queryFn: ({ signal }) => getSession(signal), staleTime: 5 * 60_000, retry: false })
   const [scanWindow, setScanWindow] = useState<LogScanRequest['window']>('15m')
   const [logScan, setLogScan] = useState<LogScanState>({ kind: 'idle' })
@@ -607,11 +649,12 @@ function DashboardContent({ selection, cluster }: { selection: SelectionSummary;
       restarts.refetch({ cancelRefetch: true }),
       events.refetch({ cancelRefetch: true }),
       metrics.refetch({ cancelRefetch: true }),
-      namespaceHealth.refetch({ cancelRefetch: true }),
+        namespaceHealth.refetch({ cancelRefetch: true }),
+		infrastructure.refetch({ cancelRefetch: true }),
     ])
   }
 
-  const isRefreshing = [summary, problems, restarts, events, metrics, namespaceHealth].some((query) => query.isFetching)
+    const isRefreshing = [summary, problems, restarts, events, metrics, namespaceHealth, infrastructure].some((query) => query.isFetching)
   const logCounter: DashboardCounter = logScan.kind === 'pending'
     ? { state: 'collecting', value: null }
     : logScan.kind === 'success'
@@ -692,11 +735,17 @@ function DashboardContent({ selection, cluster }: { selection: SelectionSummary;
         </DashboardSection>
       </div>
 
-      <DashboardSection id="metrics" title="Pod metrics" action={<BlockAge response={metrics.data as DashboardResponse<unknown> | undefined} />} error={metrics.isError} onRetry={() => void metrics.refetch()}>
+        <DashboardSection id="metrics" title="Pod metrics" action={<BlockAge response={metrics.data as DashboardResponse<unknown> | undefined} />} error={metrics.isError} onRetry={() => void metrics.refetch()}>
         <ResultBody pending={metrics.isPending} error={metrics.error} response={metrics.data} isEmpty={(value) => value.pods.length === 0} emptyCopy="The Metrics API returned no pod metrics for the completed coverage." optional>
           {(value) => <MetricsView value={value} />}
         </ResultBody>
-      </DashboardSection>
+        </DashboardSection>
+
+		<DashboardSection id="infrastructure" title="Infrastructure" error={infrastructure.isError} onRetry={() => void infrastructure.refetch()}>
+			{infrastructure.isPending ? <div className={blockStateBox('loading')} role="status" aria-busy="true"><strong className="text-sm text-kp-text">Loading infrastructure</strong><span className="text-xs text-kp-overlay-text">Node and storage checks run after the core summary.</span></div> : null}
+			{infrastructure.error ? queryFailure(infrastructure.error, false) : null}
+			{infrastructure.data ? <InfrastructureView value={infrastructure.data} /> : null}
+		</DashboardSection>
 
       <DashboardSection
         id="log-scan"

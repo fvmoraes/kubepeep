@@ -19,9 +19,10 @@ import (
 )
 
 type Runtime struct {
-	loader *kubernetes.Loader
-	cache  *kubernetes.ClientCache
-	now    func() time.Time
+	loader  *kubernetes.Loader
+	cache   *kubernetes.ClientCache
+	version *versionCache
+	now     func() time.Time
 
 	mu        sync.RWMutex
 	candidate *candidate
@@ -37,7 +38,7 @@ func New(parent context.Context, loader *kubernetes.Loader, factory *kubernetes.
 	if err != nil {
 		return nil, err
 	}
-	return &Runtime{loader: loader, cache: cache, now: time.Now}, nil
+	return &Runtime{loader: loader, cache: cache, version: newVersionCache(0, nil), now: time.Now}, nil
 }
 
 type candidate struct {
@@ -115,7 +116,12 @@ func (r *Runtime) Activate(ctx context.Context, value contexts.Candidate, bindin
 		return api.ComponentState{}, externalError(err)
 	}
 	defer cancel()
-	result := kubernetes.CheckConnectivity(requestContext, lease.Clients)
+	result, cacheErr := r.version.Check(requestContext, binding, func(loadContext context.Context) kubernetes.ConnectivityResult {
+		return kubernetes.CheckConnectivity(loadContext, lease.Clients)
+	})
+	if cacheErr != nil {
+		return api.ComponentState{}, cacheErr
+	}
 	if !r.matchesBinding(binding) {
 		return api.ComponentState{}, contexts.ErrGenerationChange
 	}
@@ -172,6 +178,7 @@ func sameBinding(current, expected namespaces.SelectionBinding) bool {
 // OnGeneration cancels old Kubernetes work and makes the retained parsed
 // resolution available for a lazy rebuild under the new selection generation.
 func (r *Runtime) OnGeneration(generation string) {
+	r.version.InvalidateAll()
 	r.mu.Lock()
 	var descriptor kubernetes.Descriptor
 	if r.candidate != nil && r.candidate.resolution != nil {
@@ -315,7 +322,10 @@ func (r *Runtime) reviewer(ctx context.Context, generation string) (*authorizati
 	return authorization.NewKubernetesReviewer(lease.Clients.UnaryKubernetes().AuthorizationV1())
 }
 
-func (r *Runtime) Close() error { return r.cache.Close() }
+func (r *Runtime) Close() error {
+	r.version.Close()
+	return r.cache.Close()
+}
 
 func (r *Runtime) invalidateAuthentication(err error) {
 	r.mu.RLock()

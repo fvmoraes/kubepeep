@@ -962,6 +962,8 @@ func decodeResourceListQuery(r *http.Request, collection resourcecore.Collection
 			return resourcecore.ListOptions{}, validationHTTPError("Speculative list priority requires a continuation cursor.", nil)
 		}
 		options.Priority = resourcecore.PriorityLikelyNext
+	case "unrelated":
+		options.Priority = resourcecore.PriorityUnrelated
 	default:
 		return resourcecore.ListOptions{}, validationHTTPError("The list priority is invalid.", nil)
 	}

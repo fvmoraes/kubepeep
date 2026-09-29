@@ -281,6 +281,31 @@ func TestCursorStoreRoundTripsTwoHundredSyntheticOriginsWithinEntryBudget(t *tes
 	}
 }
 
+func TestCursorStorePurgeExpiredReclaimsBytesAndUpdatesMetrics(t *testing.T) {
+	t.Parallel()
+	now := time.Unix(100, 0)
+	metrics := observability.NewRegistry()
+	store := NewCursorStoreWithMetrics(func() time.Time { return now }, metrics)
+	store.ttl = time.Second
+	if _, err := store.Put(map[string]string{"cursor": "state"}); err != nil {
+		t.Fatal(err)
+	}
+	if store.Len() != 1 || store.Bytes() == 0 {
+		t.Fatalf("stored cursor entries=%d bytes=%d", store.Len(), store.Bytes())
+	}
+	now = now.Add(time.Second)
+	if removed := store.PurgeExpired(); removed != 1 {
+		t.Fatalf("removed = %d", removed)
+	}
+	if store.Len() != 0 || store.Bytes() != 0 {
+		t.Fatalf("purged cursor entries=%d bytes=%d", store.Len(), store.Bytes())
+	}
+	rendered := metrics.Render()
+	if !strings.Contains(rendered, observability.CursorExpiredTotalName+" 1") || !strings.Contains(rendered, observability.CursorBytesName+" 0") {
+		t.Fatalf("purge metrics missing:\n%s", rendered)
+	}
+}
+
 // BenchmarkCursorStorePutGet measures the server-side cursor parking cost that
 // replaced serializing buffered DTOs into the signed token. Two hundred
 // origins are an internal stress case, not public restricted fan-out support.

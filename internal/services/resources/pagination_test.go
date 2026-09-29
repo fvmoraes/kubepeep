@@ -175,6 +175,59 @@ func TestLazyMergeLimitsOriginWindow(t *testing.T) {
 	}
 }
 
+type originKeyLister struct {
+	mu    sync.Mutex
+	pages map[string]OriginPage[testListItem]
+	calls []PageRequest
+}
+
+func (lister *originKeyLister) ListPage(_ context.Context, request PageRequest) (OriginPage[testListItem], error) {
+	lister.mu.Lock()
+	defer lister.mu.Unlock()
+	lister.calls = append(lister.calls, request)
+	page := lister.pages[request.Origin.Key()]
+	page.Origin = request.Origin
+	return page, nil
+}
+
+func TestLazyMergeMultiKindKeepsLaterExtremesOutsidePageScope(t *testing.T) {
+	origins, err := OriginsFor(CollectionWorkloads, []string{"a", "b", "c"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pages := make(map[string]OriginPage[testListItem], len(origins))
+	for index, origin := range origins {
+		value := testListItem(fmt.Sprintf("%03d/%s", index, origin.Resource))
+		if index == len(origins)-1 {
+			value = "000/extreme-in-later-origin"
+		}
+		pages[origin.Key()] = OriginPage[testListItem]{Items: []testListItem{value}}
+	}
+	lister := &originKeyLister{pages: pages}
+	result, err := Collect(t.Context(), CollectionRequest[testListItem]{
+		Selection: Selection{Generation: "gen", Context: "ctx", Scope: "scope"},
+		Options:   ListOptions{Limit: 5, Sort: "age", Order: OrderDescending}, Origins: origins,
+		Lister: lister, Authorizer: &fakeAuthorization{decisions: map[string]authorization.Decision{}},
+		Less: func(left, right testListItem) bool { return left < right },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Items) != 5 || result.Page.Complete || result.Page.FilterScope != FilterScopePage {
+		t.Fatalf("multi-kind page contract = %+v items=%v", result.Page, result.Items)
+	}
+	lister.mu.Lock()
+	defer lister.mu.Unlock()
+	if len(lister.calls) >= len(origins) {
+		t.Fatalf("lazy merge fetched all %d origins; calls=%d", len(origins), len(lister.calls))
+	}
+	for _, item := range result.Items {
+		if item == "000/extreme-in-later-origin" {
+			t.Fatal("an unfetched later-origin extreme appeared in the page")
+		}
+	}
+}
+
 type cancelingLister struct {
 	started chan struct{}
 	once    sync.Once

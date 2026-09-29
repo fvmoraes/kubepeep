@@ -135,6 +135,61 @@ func (cache *CollectionCache) Stats() CollectionCacheStats {
 	return CollectionCacheStats{Entries: len(cache.entries), Bytes: cache.bytes}
 }
 
+// PurgeExpired removes pages whose freshness window elapsed. Expired pages
+// are unusable, so reclaiming them is the first collection-cache pressure
+// step and does not discard a valid screen snapshot.
+func (cache *CollectionCache) PurgeExpired() int {
+	if cache == nil {
+		return 0
+	}
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	now := cache.now()
+	removed := 0
+	for key, entry := range cache.entries {
+		if !now.Before(entry.expiresAt) {
+			cache.metrics.IncCounter(observability.CollectionCacheEvictionsTotalName, collectionMetricLabels(entry.collection))
+			cache.removeLocked(key)
+			removed++
+		}
+	}
+	cache.recordGaugesLocked()
+	return removed
+}
+
+// EvictLRU trims valid screen pages to targetBytes. The cache is already
+// generation-bound and authorized on every read; LRU therefore removes only
+// the least recently used local view and never affects Kubernetes state.
+func (cache *CollectionCache) EvictLRU(targetBytes int) int {
+	if cache == nil {
+		return 0
+	}
+	if targetBytes < 0 {
+		targetBytes = 0
+	}
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+	removed := 0
+	for cache.bytes > targetBytes && len(cache.entries) > 0 {
+		oldestKey := ""
+		var oldest time.Time
+		for key, entry := range cache.entries {
+			if oldestKey == "" || entry.lastUsed.Before(oldest) {
+				oldestKey, oldest = key, entry.lastUsed
+			}
+		}
+		if oldestKey == "" {
+			break
+		}
+		entry := cache.entries[oldestKey]
+		cache.metrics.IncCounter(observability.CollectionCacheEvictionsTotalName, collectionMetricLabels(entry.collection))
+		cache.removeLocked(oldestKey)
+		removed++
+	}
+	cache.recordGaugesLocked()
+	return removed
+}
+
 // LoadCollectionPage checks current authorization before returning decoded
 // data. An unknown decision is never treated as a positive cache hit.
 func LoadCollectionPage[T ListItem](ctx context.Context, cache *CollectionCache, key, generation string, checker AuthorizationChecker) (ListResult[T], bool) {

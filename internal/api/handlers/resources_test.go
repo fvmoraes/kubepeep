@@ -159,6 +159,12 @@ func TestResourceListEnvelopeCursorBindingAndNoStore(t *testing.T) {
 }
 
 func TestResourceListPriorityRejectsUnsupportedOrInitialSpeculation(t *testing.T) {
+	unrelated := httptest.NewRequest(http.MethodGet, "/api/v1/pods?limit=25", nil)
+	unrelated.Header.Set("X-KubePeep-List-Priority", "unrelated")
+	options, err := decodeResourceListQuery(unrelated, resourcecore.CollectionPods)
+	if err != nil || options.Priority != resourcecore.PriorityUnrelated {
+		t.Fatalf("unrelated priority options=%#v err=%v", options, err)
+	}
 	for _, test := range []struct {
 		name     string
 		query    string
@@ -175,7 +181,7 @@ func TestResourceListPriorityRejectsUnsupportedOrInitialSpeculation(t *testing.T
 			}
 		})
 	}
-	err := resourceHTTPError(resourcecore.ErrPrefetchDeferred)
+	err = resourceHTTPError(resourcecore.ErrPrefetchDeferred)
 	recorder := httptest.NewRecorder()
 	api.WriteError(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/pods", nil), err)
 	if recorder.Code != http.StatusTooManyRequests || !strings.Contains(recorder.Body.String(), api.CodePrefetchDeferred) {

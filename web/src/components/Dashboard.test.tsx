@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { DashboardPage } from './Dashboard'
 
-function json(data: unknown, meta = { generation: 'gen_42', collectedAt: '2026-08-10T12:00:00Z' }): Response {
+function json(data: unknown, meta: Record<string, unknown> = { generation: 'gen_42', collectedAt: '2026-08-10T12:00:00Z' }): Response {
   return new Response(JSON.stringify({ data, meta }), { status: 200, headers: { 'Content-Type': 'application/json' } })
 }
 
@@ -70,6 +70,8 @@ function defaultResponse(path: string): Response {
   if (path === '/api/v1/dashboard/events') return json(block([]))
   if (path === '/api/v1/dashboard/namespace-health') return json(block([]))
   if (path === '/api/v1/metrics') return json(block({ collectedAt: '2026-08-10T12:00:00Z', windowSeconds: 60, pods: [], topCPU: [], topMemory: [] }))
+	if (path === '/api/v1/nodes?limit=100') return json([], { generation: 'gen_42', collectedAt: '2026-08-10T12:00:00Z', page: { limit: 100, complete: true, truncated: false, filterScope: 'collection' } })
+	if (path === '/api/v1/persistent-volume-claims?limit=100') return json([], { generation: 'gen_42', collectedAt: '2026-08-10T12:00:00Z', page: { limit: 100, complete: true, truncated: false, filterScope: 'collection' } })
   throw new Error(`Unexpected request: ${path}`)
 }
 
@@ -81,6 +83,34 @@ afterEach(() => {
 })
 
 describe('progressive dashboard', () => {
+	it('loads node health and storage after the core summary at unrelated priority', async () => {
+		let summaryResolved = false
+		const fetch = vi.fn((input: string | URL | Request, init?: RequestInit) => {
+			const path = String(input)
+			if (path === '/api/v1/dashboard/summary') {
+				summaryResolved = true
+				return Promise.resolve(defaultResponse(path))
+			}
+			if (path === '/api/v1/nodes?limit=100') {
+				expect(summaryResolved).toBe(true)
+				expect(init?.headers).toMatchObject({ 'X-KubePeep-List-Priority': 'unrelated' })
+				return Promise.resolve(json([{ name: 'worker-1', ready: true, roles: [], version: 'v1', ageSeconds: 10, cpuCapacity: '', memoryCapacity: '', pods: 1 }], { generation: 'gen_42', collectedAt: '2026-08-10T12:00:00Z', page: { limit: 100, complete: true, truncated: false, filterScope: 'collection' } }))
+			}
+			if (path === '/api/v1/persistent-volume-claims?limit=100') {
+				expect(summaryResolved).toBe(true)
+				expect(init?.headers).toMatchObject({ 'X-KubePeep-List-Priority': 'unrelated' })
+				return Promise.resolve(json([{ namespace: 'payments', name: 'data', status: 'Pending', volume: '', capacity: '', accessModes: [], storageClass: '', ageSeconds: 10 }], { generation: 'gen_42', collectedAt: '2026-08-10T12:00:00Z', page: { limit: 100, complete: true, truncated: false, filterScope: 'collection' } }))
+			}
+			return Promise.resolve(defaultResponse(path))
+		})
+		vi.stubGlobal('fetch', fetch)
+
+		renderDashboard()
+
+		expect(await screen.findByText('1/1 Ready')).toBeInTheDocument()
+		expect(screen.getByText('1 not Bound')).toBeInTheDocument()
+	})
+
   it('isolates a failed metrics request and retries only that panel', async () => {
     let metricsCalls = 0
     const fetch = vi.fn((input: string | URL | Request) => {

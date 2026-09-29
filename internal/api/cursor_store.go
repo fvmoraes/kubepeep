@@ -181,6 +181,20 @@ func (store *CursorStore) Len() int {
 	return len(store.entries)
 }
 
+// PurgeExpired eagerly reclaims cursor payloads during aggregate memory
+// pressure. Put also performs this sweep, but exposing it lets the cache
+// coordinator honor the documented eviction order without creating a cursor.
+func (store *CursorStore) PurgeExpired() int {
+	if store == nil {
+		return 0
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	removed := store.purgeLocked()
+	store.observeLocked()
+	return removed
+}
+
 func (store *CursorStore) touchLocked() uint64 {
 	store.clock++
 	return store.clock
@@ -191,15 +205,18 @@ func (store *CursorStore) observeLocked() {
 	store.metrics.SetGauge(observability.CursorBytesName, nil, store.bytes)
 }
 
-func (store *CursorStore) purgeLocked() {
+func (store *CursorStore) purgeLocked() int {
 	now := store.now()
+	removed := 0
 	for reference, entry := range store.entries {
 		if !now.Before(entry.expiresAt) {
 			store.bytes -= int64(len(entry.payload))
 			delete(store.entries, reference)
 			store.metrics.IncCounter(observability.CursorExpiredTotalName, nil)
+			removed++
 		}
 	}
+	return removed
 }
 
 func (store *CursorStore) evictLocked(incoming int64) {

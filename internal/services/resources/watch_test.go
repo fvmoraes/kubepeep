@@ -3,6 +3,9 @@ package resources
 import (
 	"context"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"sync"
@@ -10,7 +13,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fvmoraes/kubepeep/internal/config"
+	"github.com/fvmoraes/kubepeep/internal/observability"
 	"github.com/fvmoraes/kubepeep/internal/services/authorization"
+	collectortrace "go.opentelemetry.io/proto/otlp/collector/trace/v1"
+	"google.golang.org/protobuf/proto"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
@@ -462,6 +469,113 @@ func TestWatchManagerKeepsIdleSourceAndReplaysItsCurrentSnapshot(t *testing.T) {
 	}
 	if lists, watches := port.counts(); lists != 1 || watches != 2 {
 		t.Fatalf("cached watch reopened with LIST: lists=%d watches=%d", lists, watches)
+	}
+}
+
+func TestWatchManagerEvictIdleReleasesWorkerBeforeCachePressure(t *testing.T) {
+	stream := &fakeWatchStream{channel: make(chan WatchChange, 2)}
+	port := &fakeWatchPort{snapshot: WatchSnapshot{ResourceVersion: "1", Items: []TopicObject{PodDTO{Namespace: "payments", Name: "api"}}}, stream: stream}
+	cache := NewResourceCache(ResourceCacheConfig{MaxBytes: 1 << 20, MaxEntries: 8})
+	manager := NewWatchManagerWithConfig(port, WatchManagerConfig{Cache: cache, IdleTimeout: time.Hour})
+	defer manager.Close()
+	subscription, err := manager.Subscribe(t.Context(), podWatchKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if event, nextErr := nextWithin(subscription); nextErr != nil || event.Event != "snapshot" {
+		t.Fatalf("snapshot=%#v err=%v", event, nextErr)
+	}
+	subscription.Close()
+	if manager.SharedWatchCount() != 1 {
+		t.Fatal("worker did not enter idle retention")
+	}
+	if evicted := manager.EvictIdle(); evicted != 1 || manager.SharedWatchCount() != 0 {
+		t.Fatalf("evicted=%d shared=%d", evicted, manager.SharedWatchCount())
+	}
+	if stats := cache.Stats(); stats.Subscriptions != 0 {
+		t.Fatalf("cache subscription retained after idle eviction: %#v", stats)
+	}
+}
+
+func TestWatchCacheOperationsExportSafeOTLPSpans(t *testing.T) {
+	var mu sync.Mutex
+	var requests []*collectortrace.ExportTraceServiceRequest
+	var rawPayloads [][]byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+		if err != nil {
+			http.Error(w, "read failed", http.StatusBadRequest)
+			return
+		}
+		var request collectortrace.ExportTraceServiceRequest
+		if r.URL.Path != "/v1/traces" || r.Header.Get("Content-Type") != "application/x-protobuf" || proto.Unmarshal(body, &request) != nil {
+			http.Error(w, "invalid OTLP request", http.StatusBadRequest)
+			return
+		}
+		mu.Lock()
+		requests = append(requests, &request)
+		rawPayloads = append(rawPayloads, append([]byte(nil), body...))
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/x-protobuf")
+	}))
+	defer server.Close()
+
+	endpoint := server.URL + "/v1/traces"
+	tracing, err := observability.NewTracing(t.Context(), config.OTelConfig{
+		Enabled: true, Endpoint: &endpoint, Protocol: config.OTelHTTPProtobuf, Insecure: true,
+	}, observability.NewRegistry(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := observability.WithTracing(t.Context(), tracing)
+	stream := &fakeWatchStream{channel: make(chan WatchChange, 2)}
+	port := &fakeWatchPort{
+		snapshot: WatchSnapshot{ResourceVersion: "1", Items: []TopicObject{PodDTO{Namespace: "private-namespace", Name: "private-pod"}}},
+		stream:   stream,
+	}
+	manager := NewWatchManager(port)
+	subscription, err := manager.Subscribe(ctx, WatchKey{
+		Generation: "private-generation", Context: "private-context", Scope: "private-scope", Topic: TopicPods,
+		GVR: schema.GroupVersionResource{Version: "v1", Resource: "pods"}, Namespace: "private-namespace",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if event, nextErr := nextWithin(subscription); nextErr != nil || event.Event != "snapshot" {
+		t.Fatalf("snapshot=%#v err=%v", event, nextErr)
+	}
+	stream.channel <- WatchChange{Type: "MODIFIED", ResourceVersion: "2", Object: PodDTO{Namespace: "private-namespace", Name: "private-pod", Status: "Running"}}
+	if event, nextErr := nextWithin(subscription); nextErr != nil || event.Event != "modified" {
+		t.Fatalf("delta=%#v err=%v", event, nextErr)
+	}
+	subscription.Close()
+	manager.Close()
+	if err := tracing.Shutdown(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	names := make(map[string]int)
+	for _, request := range requests {
+		for _, resourceSpans := range request.ResourceSpans {
+			for _, scopeSpans := range resourceSpans.ScopeSpans {
+				for _, span := range scopeSpans.Spans {
+					names[span.Name]++
+				}
+			}
+		}
+	}
+	if names["cache.snapshot"] == 0 || names["cache.apply_event"] == 0 {
+		t.Fatalf("cache spans missing: %#v", names)
+	}
+	for _, payload := range rawPayloads {
+		text := string(payload)
+		for _, sensitive := range []string{"private-generation", "private-context", "private-scope", "private-namespace", "private-pod"} {
+			if strings.Contains(text, sensitive) {
+				t.Fatalf("OTLP payload leaked %q", sensitive)
+			}
+		}
 	}
 }
 

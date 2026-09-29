@@ -126,6 +126,7 @@ observability:
 | CPU/memória do overview | 8 s | somente após Tier 1; suspenso em background |
 | capabilities/RBAC | TTL de 30–60 s (45 s padrão) | 403/revogação e generation exigem revalidação/invalidação |
 | discovery da Metrics API | 10 min | generation troca o cliente e seu cache |
+| versão Kubernetes (`/version`) | 10 min | chave completa de seleção; somente sucesso saudável é retido; generation/contexto invalidam |
 | análise de logs | sob ação explícita | nunca bloqueia Tier 1 nem inicia varredura global |
 
 O botão Refresh consulta o Kubernetes quando não há watch cobrindo
@@ -134,6 +135,11 @@ revalidar a página HTTP; o watch e sua fila fazem coalescing por objeto para
 os tópicos level-driven, preservando Events cronológicos. Páginas completas e
 pequenas são reconstruídas do snapshot local após cada delta; páginas maiores
 ainda usam LIST paginado.
+
+Snapshots de recursos (128 MiB), páginas autorizadas (64 MiB) e cursores
+(32 MiB) também participam de um teto agregado padrão de 224 MiB. Sob pressão,
+o backend encerra watches ociosos, remove cursores e páginas expirados, libera
+snapshots sem referência e só então reduz as páginas menos recentemente usadas.
 
 ### 4.2 Métricas no cliente
 

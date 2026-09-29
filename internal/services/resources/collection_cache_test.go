@@ -110,3 +110,44 @@ func TestCollectionCacheMetricsCountRealEvictionsAndInvalidations(t *testing.T) 
 		}
 	}
 }
+
+func TestCollectionCachePressurePurgesExpiredThenTrimsLeastRecentlyUsed(t *testing.T) {
+	t.Parallel()
+	now := time.Unix(100, 0)
+	cache := NewCollectionCache(1<<20, 8, time.Minute, func() time.Time { return now })
+	checker := &fakeAuthorization{decisions: map[string]authorization.Decision{
+		"old": authorization.DecisionAllowed, "recent": authorization.DecisionAllowed, "expired": authorization.DecisionAllowed,
+	}}
+	store := func(key, namespace string) {
+		t.Helper()
+		result := ListResult[PodDTO]{
+			Items:  []PodDTO{{Namespace: namespace, Name: "api"}},
+			Cursor: &CompositeCursor[PodDTO]{Origins: []OriginCursor[PodDTO]{{Origin: Origin{Namespace: namespace, Version: "v1", Resource: "pods"}}}},
+		}
+		token, ok := cache.Begin("gen", key)
+		if !ok || !StoreCollectionPage(cache, token, CollectionPods, result) {
+			t.Fatalf("store %s failed", key)
+		}
+	}
+	store("expired", "expired")
+	now = now.Add(2 * time.Minute)
+	store("old", "old")
+	now = now.Add(time.Second)
+	store("recent", "recent")
+	if _, ok := LoadCollectionPage[PodDTO](t.Context(), cache, "recent", "gen", checker); !ok {
+		t.Fatal("recent page did not load")
+	}
+	if removed := cache.PurgeExpired(); removed != 1 {
+		t.Fatalf("expired removals = %d", removed)
+	}
+	before := cache.Stats()
+	if removed := cache.EvictLRU(before.Bytes - 1); removed != 1 {
+		t.Fatalf("LRU removals = %d", removed)
+	}
+	if _, ok := LoadCollectionPage[PodDTO](t.Context(), cache, "old", "gen", checker); ok {
+		t.Fatal("oldest page survived pressure")
+	}
+	if _, ok := LoadCollectionPage[PodDTO](t.Context(), cache, "recent", "gen", checker); !ok {
+		t.Fatal("recent page was evicted before older page")
+	}
+}

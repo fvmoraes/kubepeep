@@ -269,7 +269,8 @@ async function collectionRequest<T>(path: string, options: ResourceListQuery = {
     let response: Envelope<T[]>
     let snapshotRenewed = false
     try {
-      response = await requestEnvelope<T[]>(`${path}${resourceQuery(options)}`, { method: 'GET', signal, headers: options.prefetch ? { 'X-KubePeep-List-Priority': 'likely-next' } : undefined })
+        const priority = options.priority ?? (options.prefetch ? 'likely-next' : undefined)
+        response = await requestEnvelope<T[]>(`${path}${resourceQuery(options)}`, { method: 'GET', signal, headers: priority ? { 'X-KubePeep-List-Priority': priority } : undefined })
     } catch (error) {
       if (!options.continueToken || !(error instanceof APIError) || (error.status !== 410 && error.code !== 'CURSOR_EXPIRED') || signal?.aborted) throw error
       // Kubernetes expired the paginated LIST checkpoint. Restart at the

@@ -21,6 +21,19 @@ import (
 	"github.com/fvmoraes/kubepeep/internal/services/resources"
 )
 
+type cursorMemoryStub struct {
+	bytes  int64
+	purged int
+}
+
+func (stub *cursorMemoryStub) Bytes() int64 { return stub.bytes }
+func (stub *cursorMemoryStub) PurgeExpired() int {
+	removed := stub.purged
+	stub.bytes = 0
+	stub.purged = 0
+	return removed
+}
+
 func TestNewResourceBackendRequiresDependenciesAndLifecycle(t *testing.T) {
 	t.Parallel()
 	if _, err := NewResourceBackend(nil, nil, nil); err == nil {
@@ -54,6 +67,54 @@ func TestNewResourceBackendRequiresDependenciesAndLifecycle(t *testing.T) {
 	empty := &ResourceBackend{}
 	empty.OnGeneration("gen")
 	empty.Close()
+}
+
+func TestResourceBackendCoordinatesAggregateMemoryPressureInOrder(t *testing.T) {
+	t.Parallel()
+	resourceCache := resources.NewResourceCache(resources.ResourceCacheConfig{MaxBytes: 1 << 20, MaxEntries: 8})
+	resourceKey := resources.ResourceCacheKey{WatchKey: resources.WatchKey{
+		Generation: "gen", Context: "ctx", Scope: "scope", Topic: resources.TopicPods,
+		GVR: schema.GroupVersionResource{Version: "v1", Resource: "pods"}, Namespace: "ns",
+	}}
+	subscription, err := resourceCache.Subscribe(t.Context(), resourceKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer subscription.Close()
+	refresh, err := subscription.BeginRefresh(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = subscription.Commit(t.Context(), refresh, resources.WatchSnapshot{Items: []resources.TopicObject{resources.PodDTO{Namespace: "ns", Name: "api"}}}, false); err != nil {
+		t.Fatal(err)
+	}
+
+	collectionCache := resources.NewCollectionCache(1<<20, 8, time.Minute, nil)
+	page := resources.ListResult[resources.PodDTO]{
+		Items:  []resources.PodDTO{{Namespace: "ns", Name: "api"}},
+		Cursor: &resources.CompositeCursor[resources.PodDTO]{Origins: []resources.OriginCursor[resources.PodDTO]{{Origin: resources.Origin{Namespace: "ns", Version: "v1", Resource: "pods"}}}},
+	}
+	token, ok := collectionCache.Begin("gen", "page")
+	if !ok || !resources.StoreCollectionPage(collectionCache, token, resources.CollectionPods, page) {
+		t.Fatal("collection page was not stored")
+	}
+	cursor := &cursorMemoryStub{bytes: 256, purged: 1}
+	backend := &ResourceBackend{resourceCache: resourceCache, collectionCache: collectionCache, cursorMemory: cursor}
+	before := backend.memoryStats()
+	backend.memoryBudget = int64(before.ResourceBytes + before.CollectionBytes)
+	afterCursor := backend.enforceMemoryBudget()
+	if afterCursor.ExpiredCursors != 1 || afterCursor.CursorBytes != 0 || afterCursor.ResourceEntries != 1 || afterCursor.CollectionEntries != 1 {
+		t.Fatalf("expired cursor was not reclaimed first: %#v", afterCursor)
+	}
+	if afterCursor.ResourceEvictions != before.ResourceEvictions {
+		t.Fatalf("resource cache was touched after cursor purge resolved pressure: before=%#v after=%#v", before, afterCursor)
+	}
+
+	backend.memoryBudget = int64(afterCursor.ResourceBytes)
+	afterPages := backend.enforceMemoryBudget()
+	if afterPages.ResourceEntries != 1 || afterPages.CollectionEntries != 0 || afterPages.CollectionBytes != 0 {
+		t.Fatalf("active snapshot or LRU page pressure order changed: %#v", afterPages)
+	}
 }
 
 func TestResourceBackendListsNetworkAndStorageCollections(t *testing.T) {

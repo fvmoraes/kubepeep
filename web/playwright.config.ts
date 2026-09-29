@@ -1,6 +1,6 @@
 import { defineConfig, devices } from '@playwright/test'
 
-const externalOrigin = process.env.KUBEPEEP_PHASE03_ORIGIN
+const externalOrigin = process.env.KUBEPEEP_PHASE03_ORIGIN ?? process.env.KUBEPEEP_PHASE02_ORIGIN
 
 export default defineConfig({
   testDir: './e2e',

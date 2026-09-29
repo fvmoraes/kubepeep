@@ -34,6 +34,20 @@ type ResourceBackendOptions struct {
 	// ListFanout is an internal benchmark/rollback knob. Four remains the safe
 	// default; values above eight are clamped.
 	ListFanout int
+	// CursorMemory participates in the process-wide in-memory budget without
+	// exposing cursor payloads to the Kubernetes adapter.
+	CursorMemory CursorMemoryStore
+	// MemoryBudget bounds resource snapshots, authorized screen pages and
+	// cursor payloads together. Zero uses the sum of their default budgets.
+	MemoryBudget int64
+}
+
+// CursorMemoryStore is the narrow lifecycle surface required by aggregate
+// cache pressure. api.CursorStore satisfies it without creating a package
+// dependency from the Kubernetes adapter back to the HTTP layer.
+type CursorMemoryStore interface {
+	Bytes() int64
+	PurgeExpired() int
 }
 
 // ResourceBackend is the Phase 6 application-facing adapter. It owns no
@@ -52,7 +66,10 @@ type ResourceBackend struct {
 	listCoalescerOnce sync.Once
 	listCoalescer     *resources.RequestCoalescer
 	collectionCache   *resources.CollectionCache
+	resourceCache     *resources.ResourceCache
 	scheduler         *resources.RequestScheduler
+	cursorMemory      CursorMemoryStore
+	memoryBudget      int64
 
 	watchMu         sync.Mutex
 	watchManager    *resources.WatchManager
@@ -68,6 +85,11 @@ func NewResourceBackendWithOptions(runtime *Runtime, authorizer resources.Author
 	if runtime == nil || authorizer == nil {
 		return nil, errors.New("resource backend: runtime and authorizer are required")
 	}
+	memoryBudget := options.MemoryBudget
+	if memoryBudget <= 0 {
+		memoryBudget = int64(128<<20 + resources.DefaultCollectionCacheMaxBytes + 32<<20)
+	}
+	resourceCache := resources.NewResourceCache(resources.ResourceCacheConfig{MaxBytes: 128 << 20, Metrics: options.Metrics})
 	backend := &ResourceBackend{
 		runtime: runtime, clients: runtimeResourceClientProvider{runtime: runtime}, authorizer: authorizer, redactor: redactor, now: time.Now,
 		listWindowTimeout: resources.NormalizeListWindowTimeout(options.ListWindowTimeout),
@@ -75,11 +97,14 @@ func NewResourceBackendWithOptions(runtime *Runtime, authorizer resources.Author
 		listFanout:        resources.NormalizeFanout(options.ListFanout),
 		watchBindings:     make(map[string]namespaces.SelectionBinding),
 		collectionCache:   resources.NewCollectionCacheWithMetrics(0, 0, 0, nil, options.Metrics),
+		resourceCache:     resourceCache,
 		scheduler:         resources.NewRequestScheduler(8, nil),
+		cursorMemory:      options.CursorMemory,
+		memoryBudget:      memoryBudget,
 	}
 	backend.watchManager = resources.NewWatchManagerWithConfig(&resourceWatchPort{backend: backend}, resources.WatchManagerConfig{
 		Metrics: options.Metrics, StreamingLists: options.StreamingLists,
-		Cache: resources.NewResourceCache(resources.ResourceCacheConfig{MaxBytes: 128 << 20, Metrics: options.Metrics}),
+		Cache: resourceCache,
 		OnChange: func(key resources.WatchKey) {
 			if collection, ok := collectionForTopic(key.Topic); ok {
 				backend.collectionCache.InvalidateCollection(key.Generation, collection)
@@ -102,6 +127,7 @@ func (backend *ResourceBackend) OnGeneration(next string) {
 	if manager != nil && previous != "" && previous != next {
 		manager.CancelGeneration(previous)
 	}
+	backend.enforceMemoryBudget()
 }
 
 func (backend *ResourceBackend) Close() {
@@ -119,6 +145,85 @@ func (backend *ResourceBackend) activeWatchManager() *resources.WatchManager {
 	backend.watchMu.Lock()
 	defer backend.watchMu.Unlock()
 	return backend.watchManager
+}
+
+type ResourceMemoryStats struct {
+	ResourceBytes      int
+	CollectionBytes    int
+	CursorBytes        int64
+	IdleWatchesEvicted int
+	ExpiredCursors     int
+	ResourceEntries    int
+	CollectionEntries  int
+	ResourceEvictions  uint64
+}
+
+func (backend *ResourceBackend) memoryStats() ResourceMemoryStats {
+	if backend == nil {
+		return ResourceMemoryStats{}
+	}
+	resourceStats := backend.resourceCache.Stats()
+	collectionStats := backend.collectionCache.Stats()
+	stats := ResourceMemoryStats{
+		ResourceBytes: resourceStats.Bytes, CollectionBytes: collectionStats.Bytes,
+		ResourceEntries: resourceStats.Entries, CollectionEntries: collectionStats.Entries,
+		ResourceEvictions: resourceStats.Evictions,
+	}
+	if backend.cursorMemory != nil {
+		stats.CursorBytes = backend.cursorMemory.Bytes()
+	}
+	return stats
+}
+
+func (backend *ResourceBackend) memoryOverBudget(stats ResourceMemoryStats) bool {
+	return backend != nil && backend.memoryBudget > 0 && int64(stats.ResourceBytes+stats.CollectionBytes)+stats.CursorBytes > backend.memoryBudget
+}
+
+// enforceMemoryBudget coordinates the independently bounded stores in the
+// documented pressure order: idle watches, expired cursors, unreferenced
+// resource snapshots, then least-recently-used screen pages.
+func (backend *ResourceBackend) enforceMemoryBudget() ResourceMemoryStats {
+	stats := backend.memoryStats()
+	if !backend.memoryOverBudget(stats) {
+		return stats
+	}
+	idleWatchesEvicted := 0
+	if manager := backend.activeWatchManager(); manager != nil {
+		idleWatchesEvicted = manager.EvictIdle()
+	}
+	stats = backend.memoryStats()
+	if !backend.memoryOverBudget(stats) {
+		stats.IdleWatchesEvicted = idleWatchesEvicted
+		return stats
+	}
+	expiredCursors := 0
+	if backend.cursorMemory != nil {
+		expiredCursors = backend.cursorMemory.PurgeExpired()
+	}
+	stats = backend.memoryStats()
+	if !backend.memoryOverBudget(stats) {
+		stats.IdleWatchesEvicted = idleWatchesEvicted
+		stats.ExpiredCursors = expiredCursors
+		return stats
+	}
+	backend.collectionCache.PurgeExpired()
+	stats = backend.memoryStats()
+	if !backend.memoryOverBudget(stats) {
+		stats.IdleWatchesEvicted = idleWatchesEvicted
+		stats.ExpiredCursors = expiredCursors
+		return stats
+	}
+	backend.resourceCache.EvictInactive(0)
+	stats = backend.memoryStats()
+	if backend.memoryOverBudget(stats) {
+		total := int64(stats.ResourceBytes+stats.CollectionBytes) + stats.CursorBytes
+		target := stats.CollectionBytes - int(total-backend.memoryBudget)
+		backend.collectionCache.EvictLRU(target)
+	}
+	final := backend.memoryStats()
+	final.IdleWatchesEvicted = idleWatchesEvicted
+	final.ExpiredCursors = expiredCursors
+	return final
 }
 
 func resourceSelection(binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution) resources.Selection {
@@ -189,6 +294,7 @@ func collectFilteredResource[T resources.ListItem](
 	list originListerFunc[T],
 	filterSort func([]T, resources.ListOptions) []T,
 ) (resources.ListResult[T], error) {
+	defer backend.enforceMemoryBudget()
 	normalized, err := resources.NormalizeListOptions(collection, options)
 	if err != nil {
 		return resources.ListResult[T]{}, err

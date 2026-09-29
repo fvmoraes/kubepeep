@@ -80,6 +80,7 @@ describe('optional resource SSE', () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const invalidate = vi.spyOn(client, 'invalidateQueries')
     let commits = 0
+    let renderCPU = 0
     let responseController: ReadableStreamDefaultController<Uint8Array> | undefined
     vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
       const path = String(input)
@@ -91,10 +92,11 @@ describe('optional resource SSE', () => {
       throw new Error(`Unexpected request: ${path}`)
     }))
 
-    const view = render(<QueryClientProvider client={client}><Profiler id="live-updates" onRender={() => { commits += 1 }}><ResourceLiveUpdates generation="gen_42" topics={['pods']} queryKeys={[["resources", "pods"]]} /></Profiler></QueryClientProvider>)
+    const view = render(<QueryClientProvider client={client}><Profiler id="live-updates" onRender={(_id, _phase, actualDuration) => { commits += 1; renderCPU += actualDuration }}><ResourceLiveUpdates generation="gen_42" topics={['pods']} queryKeys={[["resources", "pods"]]} /></Profiler></QueryClientProvider>)
     fireEvent.click(screen.getByRole('button', { name: 'Start live updates' }))
     expect(await screen.findByText(/Live updates active for pods/)).toBeInTheDocument()
     const commitsBeforeBurst = commits
+    const renderCPUBeforeBurst = renderCPU
     vi.useFakeTimers()
 
     const event = 'event: modified\ndata: {"generation":"gen_42"}\n\n'
@@ -106,6 +108,7 @@ describe('optional resource SSE', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(150) })
     expect(screen.getByText(/watch changes batched/)).toBeInTheDocument()
     expect(commits - commitsBeforeBurst).toBeLessThan(6)
+    expect(renderCPU - renderCPUBeforeBurst).toBeLessThan(500)
     await vi.advanceTimersByTimeAsync(1_849)
     expect(invalidate).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(1)

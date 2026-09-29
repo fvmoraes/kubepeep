@@ -380,6 +380,8 @@ export interface ResourceListQuery extends PageQuery {
   skipUXTiming?: boolean
   /** Schedules only an automatic next-page fetch behind visible LIST work. */
   prefetch?: boolean
+  /** Internal scheduler intent; unrelated background reads reserve more capacity for visible work. */
+  priority?: 'likely-next' | 'unrelated'
   namespaces?: string[]
   kinds?: string[]
   statuses?: string[]

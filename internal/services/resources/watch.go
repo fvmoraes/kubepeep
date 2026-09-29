@@ -357,6 +357,40 @@ func (manager *WatchManager) SharedWatchCount() int {
 	return len(manager.workers)
 }
 
+// EvictIdle stops workers with no subscribers immediately. Normal navigation
+// keeps them for idleTimeout so returning to a screen is cheap; aggregate
+// memory pressure may call this method before evicting cached snapshots.
+func (manager *WatchManager) EvictIdle() int {
+	if manager == nil {
+		return 0
+	}
+	manager.mu.Lock()
+	workers := make([]*watchWorker, 0)
+	for identity, worker := range manager.workers {
+		if worker.stopping || len(worker.subscribers) != 0 {
+			continue
+		}
+		worker.stopping = true
+		if worker.idleTimer != nil {
+			worker.idleTimer.Stop()
+			worker.idleTimer = nil
+		}
+		delete(manager.workers, identity)
+		workers = append(workers, worker)
+	}
+	manager.mu.Unlock()
+	for _, worker := range workers {
+		if err := worker.flushCache(); err != nil && worker.cacheSubscription != nil {
+			worker.cacheSubscription.MarkStale()
+		}
+		if worker.cacheSubscription != nil {
+			worker.cacheSubscription.Close()
+		}
+		worker.cancel()
+	}
+	return len(workers)
+}
+
 // Covers reports whether every Kubernetes origin of a page has a live local
 // snapshot. Pages without this coverage must revalidate through LIST so a
 // manual refresh cannot be answered by an unwatched stale page cache.

@@ -185,6 +185,7 @@ func Compose(ctx context.Context, options Options) (*Platform, error) {
 		ListWindowTimeout: options.Config.Resources.CollectionTimeout.Duration,
 		Metrics:           metricsRegistry,
 		StreamingLists:    os.Getenv("KUBEPEEP_STREAMING_LISTS") == "1",
+		CursorMemory:      cursorStore,
 	})
 	if err != nil {
 		return nil, err
