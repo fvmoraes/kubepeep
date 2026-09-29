@@ -1657,7 +1657,7 @@ run_synthetic_benchmark() (
 	output_file=$2
 	need go
 	need git
-	generated_target_is_safe "$output_file" '"schema_version": "kubepeep-performance-baseline/v1"'
+	generated_target_is_safe "$output_file" '"schema_version": "kubepeep-performance-baseline/v'
 	output_dir=$(dirname -- "$output_file")
 	mkdir -p -- "$output_dir"
 	temporary_output=$(mktemp "$output_dir/.kubepeep-benchmark.XXXXXX")
@@ -1675,7 +1675,7 @@ run_synthetic_benchmark() (
 	else
 		benchmark_status=$?
 	fi
-	if ! LC_ALL=C grep -Fqm1 '"schema_version": "kubepeep-performance-baseline/v1"' "$temporary_output"; then
+	if ! LC_ALL=C grep -Fqm1 '"schema_version": "kubepeep-performance-baseline/v2"' "$temporary_output"; then
 		fail "$suite synthetic benchmark exited before producing a valid report (status $benchmark_status)"
 	fi
 	chmod 600 "$temporary_output"
