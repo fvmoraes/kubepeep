@@ -1,11 +1,11 @@
 # Avaliação do plano v0.7
 
 > **Atualização de estado — 2026-09-29:** este documento preserva a avaliação
-> inicial feita sobre `d71d488`. Desde então, F0–F4 foram implementadas,
+> inicial feita sobre `d71d488`. Desde então, F0–F7 foram implementadas,
 > validadas e registradas em
-> [03-evidencias-execucao.md](03-evidencias-execucao.md). F5–F7 permanecem
-> pendentes. As afirmações abaixo sobre código inexistente ou execução pendente
-> descrevem o snapshot inicial e não o estado atual da branch.
+> [03-evidencias-execucao.md](03-evidencias-execucao.md). As afirmações abaixo
+> sobre código inexistente ou execução pendente descrevem o snapshot inicial e
+> não o estado atual da branch.
 
 ## Resultado
 
@@ -48,5 +48,5 @@ O escopo alterado é Markdown: validar destinos relativos e diff, além do gate 
 - **IMPLEMENTADO:** avaliação documental e dos contratos destacados, branch dedicada, correção dos links e identificação de versão, preservação das alterações preexistentes do usuário, sem push.
 - **ALTERADO:** a etapa inicial é avaliação documental; não se confunde com a Fase 0 funcional do plano. Contratos conflitantes foram resolvidos documentalmente em C01–C06, sem alteração de código ou aceite funcional.
 - **PENDENTE NO SNAPSHOT INICIAL:** execução F0–F7 conforme os contratos
-  resolvidos. Estado atual: F0–F4 finalizadas; a aprovação da release continua
-  dependente de F5–F7.
+  resolvidos. Estado atual: F0–F7 finalizadas; o candidato local está preparado
+  e tag, push e publicação permanecem decisões externas ao fechamento técnico.

@@ -70,7 +70,8 @@ are in the [desktop build guide](docs/desktop-build.md).
 noreply identity. Publishing requires a separate, explicit user decision.
 
 Start at the [documentation index](docs/README.md) for architecture, API and
-data contracts, or the [v1 plan](plan/README.md) for implementation phases.
+data contracts, or the completed [v0.7 plan](plan/README.md) for implementation
+phases and evidence.
 
 ## Troubleshooting
 

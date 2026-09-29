@@ -148,7 +148,7 @@ func checkConfiguration(layout userdirs.Layout) DoctorCheck {
 		return DoctorCheck{Group: "configuração", Name: "strict_config", Status: DoctorFail, Code: "CONFIG_INVALID", Message: "The local configuration is invalid or cannot be read safely."}
 	}
 	if configuration.Observability.OTel.Enabled {
-		return DoctorCheck{Group: "configuração", Name: "strict_config", Status: DoctorWarn, Code: "OTEL_OPT_IN_DEFERRED", Message: "The configuration is valid; the optional telemetry exporter is not active in this build."}
+		return DoctorCheck{Group: "configuração", Name: "strict_config", Status: DoctorPass, Code: "CONFIG_VALID", Message: "The local configuration is strict and valid; OTLP trace export is enabled and starts with the application."}
 	}
 	return DoctorCheck{Group: "configuração", Name: "strict_config", Status: DoctorPass, Code: "CONFIG_VALID", Message: "The local configuration is strict, valid, and telemetry is disabled."}
 }

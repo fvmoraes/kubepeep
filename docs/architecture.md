@@ -1,8 +1,8 @@
 # Arquitetura do KubePeep
 
 Arquitetura da base atual. O core é composto por `internal/application.Compose`
-e compartilhado pelos runtimes web e desktop. O [plano v1](../plan/README.md)
-controla a expansão funcional; [ADRs](decisions/README.md) preservam decisões
+e compartilhado pelos runtimes web e desktop. O [plano v0.7](../plan/README.md)
+registra a execução atual; [ADRs](decisions/README.md) preservam decisões
 históricas. O [desktop](desktop-architecture.md) complementa o lifecycle web
 abaixo com a janela Wails, bridge JSON e loopback de streaming.
 
@@ -281,11 +281,12 @@ default por regressão local e pode ser ativada para um cenário remoto medido.
 Todos possuem rollback e fallback descritos em
 [protocolo e tuning](protocol-tuning.md). O endpoint OTel é obrigatório somente
 quando `enabled=true`: URL absoluta HTTP(S), máximo 2.048 bytes, sem userinfo,
-query ou fragment; HTTP exige host loopback e `insecure=true`. O schema aceita somente `http/protobuf`; headers/tokens não são configuráveis.
-A exportação OTel ainda não é implementada; aceitar configuração não
-significa iniciar um exporter. Veja [observabilidade](observability.md). Com
-`enabled=false`, endpoint precisa ser null e nenhuma resolução, socket ou
-exporter é iniciado.
+query ou fragment; HTTP exige host loopback e `insecure=true`. O schema aceita
+somente `http/protobuf`; headers/tokens não são configuráveis. Quando
+`enabled=true`, `internal/application.Compose` inicia o exporter OTLP/HTTP com
+fila, timeout e shutdown limitados conforme [observabilidade](observability.md).
+Com `enabled=false`, endpoint precisa ser null e nenhuma resolução, socket ou
+goroutine de exportação é iniciada.
 
 Precedência operacional é `flag CLI explicitamente presente > config.yaml >
 default embutido`. `--port` substitui `server.port`; `--no-browser` força
@@ -644,4 +645,5 @@ exige validação nativa e dos instaladores.
 
 Para adicionar uma família de recursos, estender adapter, serviço/DTO,
 capabilities, API e resource framework, preservando limites e cancelamento.
-As fases e os critérios de aceite estão no [plano v1](../plan/README.md).
+As fases concluídas e os critérios de aceite estão no
+[plano v0.7](../plan/README.md).

@@ -1,8 +1,8 @@
 # Documentação do KubePeep
 
-`docs/` descreve o produto e seus contratos. O trabalho pendente vive no
-[plano v1](../plan/README.md), baseado na
-[referência UI/UX](../plan/v0.7_reference/KUBEPEEP_UI_UX_REFINEMENT_PLAN.md).
+`docs/` descreve o produto e seus contratos. A execução concluída e o backlog
+estão no [plano v0.7](../plan/README.md), baseado nas
+[referências v0.7](../plan/v0.7_reference/).
 
 ## Usar e desenvolver
 
@@ -35,7 +35,7 @@
 - [Pesquisa](research/README.md): fundamentos e métodos de reprodução;
   benchmarks datados não são garantia de compatibilidade atual.
 - [Arquivo](archive/README.md): planejamento MVP e relatos sanitizados de
-  fases concluídas; não são checklists de execução da v1.
+  fases concluídas; não substituem os checklists e evidências da v0.7.
 
 Uma alteração de contrato atualiza o documento correspondente no mesmo commit.
 Novas funcionalidades só são descritas como disponíveis após implementação.

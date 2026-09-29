@@ -1,9 +1,9 @@
 # Estado atual e limites da v0.7
 
-Base atual auditada: branch `review/plan-v0.7`, no commit funcional `b148a60`,
-com Fases 0–7 implementadas. O inventário foi revisado por Codebase MCP,
-leitura da fonte, benchmarks comparativos e gates completos em 29 de setembro
-de 2026.
+Base atual auditada: branch `review/plan-v0.7`, no commit documental `6c431f6`
+(candidato funcional `b148a60`), com Fases 0–7 implementadas. O inventário foi
+revisado por Codebase MCP, leitura da fonte, benchmarks comparativos e gates
+completos em 29 de setembro de 2026.
 O registro verificável está em [03-evidencias-execucao.md](03-evidencias-execucao.md).
 
 | Fase | Estado atual |

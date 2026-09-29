@@ -1,6 +1,6 @@
 # Contrato HTTP e streaming
 
-> **Escopo:** contrato da base atual; rotas explicitamente reservadas não são funcionalidades disponíveis. A execução corrente está no [plano v1](../plan/README.md).
+> **Escopo:** contrato da base atual; rotas explicitamente reservadas não são funcionalidades disponíveis. A execução concluída está no [plano v0.7](../plan/README.md).
 >
 > **Transporte:** origem loopback no modo web; bridge JSON e loopback de streams no [desktop](desktop-architecture.md).
 >

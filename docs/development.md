@@ -43,7 +43,8 @@ Na CI, [release.yml](../.github/workflows/release.yml) organiza os jobs em
 `01 Prepare` → `02 Build` (Linux/Windows/macOS em paralelo) → `03 Publish` →
 `04 Latest`. A publicação consulta o check `build-and-test` de `verify.yml`;
 preservar esse nome, os IDs dos jobs e os nomes dos artifacts ao reorganizar.
-A revisão dos gates e das etapas repetidas está na [Fase 7](../plan/v1/phase-07-release-v1.md).
+A revisão dos gates e das etapas repetidas está na
+[Fase 7 da v0.7](../plan/v0.7/phase-07-validacao-release.md).
 
 | Caminho | Conteúdo |
 | --- | --- |
@@ -51,7 +52,7 @@ A revisão dos gates e das etapas repetidas está na [Fase 7](../plan/v1/phase-0
 | `internal/` | Core Go, adapters, serviços, API, lifecycle, migrations e embed |
 | `web/` | Fonte React, configuração e testes do frontend |
 | `docs/` | Documentação atual; ADRs em `decisions/`, pesquisa em `research/`, histórico em `archive/` |
-| `plan/` | Referência UI/UX e fases executáveis da v1 |
+| `plan/` | Referências, fases e evidências da v0.7; plano anterior arquivado em `plan/v0/` |
 | `scripts/` | Ferramentas de desenvolvimento, segurança, smoke e testes de instaladores |
 | `test/kind/` | Manifests sintéticos e harness de integração |
 | `spikes/phase1/` | Módulo isolado que reproduz decisões históricas de lifecycle |

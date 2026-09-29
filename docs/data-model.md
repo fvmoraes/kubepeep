@@ -1,6 +1,6 @@
 # Modelo de dados local
 
-> **Escopo:** contratos de persistência local; mudanças de schema acompanham a implementação e o [plano v1](../plan/README.md).
+> **Escopo:** contratos de persistência local; mudanças de schema acompanham a implementação e o [plano v0.7](../plan/README.md).
 >
 > **Banco:** SQLite com `modernc.org/sqlite`, versão fixada em `go.mod`,
 > sem dependência de CGO no driver.
@@ -510,4 +510,5 @@ Executar os testes de SQLite, migrations, preferências e seleção junto dos
 da allowlist, atomicidade, recuperação e ausência de marcadores proibidos.
 Lock e comandos de controle também precisam passar em runners nativos antes
 da distribuição. A execução histórica está em [archive/](archive/README.md);
-novas chaves de preferência e migrations são trabalho do [plano v1](../plan/README.md).
+novas chaves de preferência e migrations exigem contrato e atualização do
+[plano ou backlog vigente](../plan/README.md).

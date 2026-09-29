@@ -60,7 +60,7 @@ Após compilar, validar `version` e `--help` usando o caminho do binário gerado
 O smoke isolado de CLI é `make smoke`; uma janela desktop exige também
 validação visual no ambiente gráfico, streams e encerramento das sessões.
 Para a release, repetir os gates nativos e de instalação descritos no
-[plano v1](../plan/README.md). Não tratar cross-compilation como execução nativa.
+[plano v0.7](../plan/README.md). Não tratar cross-compilation como execução nativa.
 
 Transcripts, capturas e pacotes gerados ficam privados. Commit local não
 autoriza publicação: nunca iniciar push ou workflow de release automaticamente.
