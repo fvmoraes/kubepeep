@@ -201,11 +201,19 @@ jobs:
           mv wails.json.tmp wails.json
           grep productVersion wails.json
 
-      - name: Commit version files and push (bot)
+      - name: Record the exact build commit and publish metadata when requested
         id: metadata
-        if: steps.bump.outputs.should_release == 'true' && steps.bump.outputs.dry_run != 'true'
+        if: steps.bump.outputs.should_release == 'true'
+        env:
+          DRY_RUN: ${{ steps.bump.outputs.dry_run }}
         run: |
           set -euo pipefail
+          if [ "$DRY_RUN" = "true" ]; then
+            # Builds check out this immutable source SHA and apply VERSION
+            # locally; candidate mode never commits or pushes metadata.
+            echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add wails.json CHANGELOG.md
@@ -216,12 +224,6 @@ jobs:
             git push origin "HEAD:main"
           fi
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-
-      # Candidate mode (dry_run): builds and validations run against the
-      # SOURCE commit; no metadata commit, tag, Release or latest move.
-      - name: Record the source commit for candidate builds
-        if: steps.bump.outputs.should_release == 'true' && steps.bump.outputs.dry_run == 'true'
-        run: echo "sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
 
       - name: Keep release notes for the publish job
         if: steps.bump.outputs.should_release == 'true'
@@ -275,9 +277,14 @@ jobs:
           cache-dependency-path: web/package-lock.json
 
       - name: Pin npm
+        shell: bash
         run: |
           npm install --global npm@${{ env.NPM_VERSION }}
           test "$(npm --version)" = "${{ env.NPM_VERSION }}"
+
+      - name: Apply the release version to native package metadata
+        shell: bash
+        run: ./scripts/release.sh metadata "$VERSION"
 
       - name: Build the frontend (embedded via go:embed)
         run: make web-build
@@ -424,9 +431,14 @@ jobs:
           cache-dependency-path: web/package-lock.json
 
       - name: Pin npm
+        shell: bash
         run: |
           npm install --global npm@${{ env.NPM_VERSION }}
           test "$(npm --version)" = "${{ env.NPM_VERSION }}"
+
+      - name: Apply the release version to native package metadata
+        shell: bash
+        run: ./scripts/release.sh metadata "$VERSION"
 
       - name: Install Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
@@ -577,9 +589,14 @@ jobs:
           cache-dependency-path: web/package-lock.json
 
       - name: Pin npm
+        shell: bash
         run: |
           npm install --global npm@${{ env.NPM_VERSION }}
           test "$(npm --version)" = "${{ env.NPM_VERSION }}"
+
+      - name: Apply the release version to native package metadata
+        shell: bash
+        run: ./scripts/release.sh metadata "$VERSION"
 
       - name: Build the frontend (embedded via go:embed)
         run: make web-build

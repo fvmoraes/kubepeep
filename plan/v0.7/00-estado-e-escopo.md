@@ -1,9 +1,11 @@
 # Estado atual e limites da v0.7
 
-Base atual auditada: branch `review/plan-v0.7`, no commit funcional `52aa3db`
-(comparativo de performance coletado em `b148a60`), com Fases 0–7
-implementadas. O inventário foi revisado por Codebase MCP, leitura da fonte,
-benchmarks comparativos e gates completos em 29 de setembro de 2026.
+Versão de fechamento escolhida pelo mantenedor: **0.7.0** (tag oficial sem
+prefixo `v`). Base auditada: branch `review/plan-v0.7`, com Fases 0–7
+implementadas e auditoria comportamental em `caaf40a`, incluindo os benchmarks
+repetidos nesse commit. A revisão de fechamento corrigiu também os caminhos
+de candidato, metadados e empacotamento; o histórico detalhado está nas
+evidências de 29 de setembro de 2026.
 O registro verificável está em [03-evidencias-execucao.md](03-evidencias-execucao.md).
 
 | Fase | Estado atual |
@@ -21,8 +23,9 @@ O registro verificável está em [03-evidencias-execucao.md](03-evidencias-execu
 [`../v0.7_reference/`](../v0.7_reference/) foi tratado como trabalho de ajuste,
 melhoria e revisão, independentemente do que já existia na base. As Fases 0–7
 passaram pelos respectivos aceites e possuem evidência própria. O candidato
-está somente em commits locais; tag, push e publicação dependem de decisão
-explícita do mantenedor. Os caminhos abaixo localizam onde cada tema toca o código.
+tem versão e notas preparadas. A publicação oficial depende da integração em
+`main` e dos gates multiplataforma do workflow; os testes locais não substituem
+esses jobs. Os caminhos abaixo localizam onde cada tema toca o código.
 
 ## Onde as referências tocam a base (mapa de trabalho, não lista de concluído)
 

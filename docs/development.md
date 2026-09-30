@@ -47,7 +47,15 @@ pernas `native-runtime (macos-latest)` / `native-runtime (windows-latest)` de
 esses nomes, os IDs dos jobs e os nomes dos artifacts ao reorganizar.
 Os binários e pacotes passam pelo scanner antes dos uploads e novamente antes
 da criação de tag; o build Windows usa Git Bash para o binário e o gate Ubuntu
-extrai o ZIP. `make test-release-gates` testa localmente classificação e scanner.
+extrai o ZIP. `make test-release-gates` testa classificação, scanner,
+versionamento, preservação das notas e metadados nativos.
+
+Em `dry_run`, os jobs recebem o SHA exato de origem e aplicam a versão
+calculada ao `wails.json` antes de empacotar, sem criar commit remoto.
+Uma seção já revisada no `CHANGELOG.md` é preservada nas reexecuções e usada
+como corpo da release. Para reproduzir os binários locais da versão escolhida:
+`rtk make build build-desktop VERSION=0.7.0`; ambos recebem os mesmos ldflags
+de versão, commit e data. Builds de desenvolvimento usam `0.7.0-dev`.
 A revisão dos gates e das etapas repetidas está na
 [Fase 7 da v0.7](../plan/v0.7/phase-07-validacao-release.md).
 
@@ -82,9 +90,11 @@ por `internal/config`. Os destinos `models` e `repositories` de `ginger.yaml`
 são defaults do gerador; a aplicação usa suas camadas existentes. Não criar
 diretórios vazios nem reorganizar serviços para satisfazer esses destinos.
 
-Os cinco scripts de `scripts/` têm funções distintas: `release.sh` calcula
-versões/notas/changelog; `security_check.sh` valida Git; `smoke.sh` verifica
-o ciclo local; `install_test.sh`/`.ps1` testam os instaladores com fixtures.
+Os scripts de `scripts/` têm funções distintas: `release.sh` calcula
+versões/notas/changelog e aplica metadados nativos; `security_check.sh` valida
+Git; `smoke.sh` verifica o ciclo local; `install_test.sh`/`.ps1` testam os
+instaladores com fixtures. `release_test.sh`, `release_gate_harness.sh` e
+`release_artifact_check_test.sh` verificam os contratos de publicação.
 O harness Kubernetes fica com seus manifests em `test/kind/`, e o runner
 Windows do spike fica em `spikes/phase1/scripts/`.
 

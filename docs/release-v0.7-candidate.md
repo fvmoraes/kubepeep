@@ -1,11 +1,11 @@
-# Candidato local da v0.7
+# Fechamento técnico da v0.7.0
 
-**Estado:** pronto para decisão de publicação. O candidato funcional é o commit
-`caaf40a` da branch `review/plan-v0.7`; os benchmarks representativo, matriz e
-protocolo foram repetidos nesse commit, em árvore limpa, após a auditoria
-aprofundada. A comparação histórica permanece em `b148a60`.
-Esta preparação não cria tag, release remota nem push; o nome e a versão final
-dos pacotes continuam sujeitos à decisão do mantenedor.
+**Versão escolhida:** `0.7.0`, conforme decisão do mantenedor. As notas estão
+preparadas no `CHANGELOG.md` e o Wails usa `productVersion: 0.7.0`.
+A auditoria comportamental e os benchmarks representativo, matriz e protocolo
+foram concluídos em `caaf40a`, em árvore limpa; a comparação histórica permanece
+em `b148a60`. A revisão de fechamento da branch `review/plan-v0.7` cobre também
+os contratos de versão e publicação. A tag oficial será `0.7.0`, sem prefixo `v`.
 
 ## Destaques
 
@@ -28,6 +28,11 @@ cancelamento dos logs, starvation do Dashboard, crescimento e cleanup de
 watches e gates de release. Os 224 MiB agora incluem snapshots dos workers;
 o scan inclui o desktop real e pacotes aninhados. O gate de CI exige ambas
 as plataformas nativas e considera a execução mais recente de cada check.
+O candidato agora propaga o SHA exato de origem e a versão dos metadados aos
+três jobs nativos. A configuração de npm no Windows usa Bash explicitamente;
+reexecuções preservam as notas revisadas sem duplicar entradas no changelog.
+Os targets desktop locais recebem versão, commit e data pelos mesmos ldflags
+usados no build CLI.
 
 ## Compatibilidade e segurança
 
@@ -68,8 +73,11 @@ e o registro item a item em
 - Helm, Gateway API, edição arbitrária de YAML, Prometheus e multi-contexto
   simultâneo continuam fora do escopo da v0.7.
 
-## Decisão de publicação
+## Publicação oficial
 
-O repositório está preparado para o mantenedor escolher versão/tag, revisar as
-notas, gerar os pacotes finais e publicar. Até essa decisão, o candidato fica
-somente em commits locais e pode ser descartado sem rollback de ambiente.
+A versão está definida e preparada. A integração da branch em `main` aciona
+`verify.yml` e `release.yml`; o pipeline calcula o incremento minor desde a
+última tag oficial e preserva as notas da `0.7.0`. A tag e a GitHub Release só
+são criadas depois dos quatro checks obrigatórios e dos builds/artefatos
+multiplataforma aprovados. A revisão local não declara esses jobs remotos como
+executados nem substitui o aceite das plataformas Windows/macOS.

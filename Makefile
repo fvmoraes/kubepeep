@@ -9,7 +9,7 @@ DIST_DIR := dist
 BINARY := $(DIST_DIR)/$(APP)
 GO_FILES := $(shell find cmd internal test/kind/benchmark test/kind/protocol -type f -name '*.go' 2>/dev/null)
 GO_PACKAGES := $(shell $(GO) list ./... 2>/dev/null | grep -v '/web/node_modules/')
-VERSION ?= 0.1.0-dev
+VERSION ?= 0.7.0-dev
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 BENCHMARK_OUTPUT ?= test/kind/.state/performance-representative.json
@@ -107,6 +107,7 @@ test-release-artifacts:
 
 test-release-gates: test-release-artifacts
 	./scripts/release_gate_harness.sh
+	./scripts/release_test.sh
 
 cross-build: web-build
 	@set -eu; \
@@ -130,16 +131,16 @@ dev-desktop:
 	$(WAILS) dev $(WAILS_BINDING_FLAGS) -tags "$(DESKTOP_TAGS)"
 
 build-desktop:
-	$(WAILS) build $(WAILS_BINDING_FLAGS) -tags "$(DESKTOP_TAGS)" -clean -o "$(DESKTOP_OUT)/kubePeep"
+	$(WAILS) build $(WAILS_BINDING_FLAGS) -tags "$(DESKTOP_TAGS)" -clean -ldflags "$(LDFLAGS)" -o "$(DESKTOP_OUT)/kubePeep"
 
 build-desktop-linux:
-	$(WAILS) build $(WAILS_BINDING_FLAGS) -tags "$(DESKTOP_TAGS)" -clean -platform linux/amd64 -o "$(DESKTOP_OUT)/linux-amd64/kubePeep"
+	$(WAILS) build $(WAILS_BINDING_FLAGS) -tags "$(DESKTOP_TAGS)" -clean -ldflags "$(LDFLAGS)" -platform linux/amd64 -o "$(DESKTOP_OUT)/linux-amd64/kubePeep"
 
 build-desktop-windows:
-	$(WAILS) build $(WAILS_BINDING_FLAGS) -tags "$(DESKTOP_TAGS)" -clean -platform windows/amd64 -o "$(DESKTOP_OUT)/windows-amd64/kubePeep.exe"
+	$(WAILS) build $(WAILS_BINDING_FLAGS) -tags "$(DESKTOP_TAGS)" -clean -ldflags "$(LDFLAGS)" -platform windows/amd64 -o "$(DESKTOP_OUT)/windows-amd64/kubePeep.exe"
 
 build-desktop-darwin:
-	$(WAILS) build $(WAILS_BINDING_FLAGS) -tags "$(DESKTOP_TAGS)" -clean -platform darwin/amd64 -o "$(DESKTOP_OUT)/darwin-amd64/kubePeep"
+	$(WAILS) build $(WAILS_BINDING_FLAGS) -tags "$(DESKTOP_TAGS)" -clean -ldflags "$(LDFLAGS)" -platform darwin/amd64 -o "$(DESKTOP_OUT)/darwin-amd64/kubePeep"
 
 verify: format-check lint typecheck test test-e2e build smoke verify-ginger test-release-gates
 

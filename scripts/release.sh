@@ -10,6 +10,7 @@
 #   next-version BASE_VERSION TYPE    → próxima versão X.Y.Z
 #   notes   PREVIOUS VERSION TYPE     → corpo da GitHub Release (stdout)
 #   changelog VERSION DATE PREVIOUS   → insere entrada no CHANGELOG.md
+#   metadata VERSION                 → alinha productVersion do Wails
 #
 # Convenções:
 #   feat  → MINOR      fix → PATCH      BREAKING (feat!:/fix!:/rodapé) → MAJOR
@@ -26,11 +27,11 @@ cmd_bump_type() {
 	subjects=$(git log --pretty=%s $range)
 	bodies=$(git log --pretty=%B $range)
 
-	if printf '%s\n' "$bodies" | grep -qE '^[a-zA-Z]+(\([^)]*\))?!:'; then
+	if printf '%s\n' "$bodies" | grep -E '^[a-zA-Z]+(\([^)]*\))?!:' >/dev/null; then
 		echo major
-	elif printf '%s\n' "$bodies" | grep -q '^BREAKING CHANGE:'; then
+	elif printf '%s\n' "$bodies" | grep -E '^BREAKING[ -]CHANGE:' >/dev/null; then
 		echo major
-	elif printf '%s\n' "$subjects" | grep -qE '^feat(\([^)]*\))?:'; then
+	elif printf '%s\n' "$subjects" | grep -E '^feat(\([^)]*\))?:' >/dev/null; then
 		echo minor
 	else
 		echo patch
@@ -53,6 +54,14 @@ EOF
 cmd_notes() {
 	local previous="${1:-}" version="${2:-}" type="${3:-patch}" range=""
 	[ -n "$previous" ] && range="${previous}..HEAD"
+	# Prepared, reviewed notes are authoritative. Re-runs must not replace
+	# them with commit subjects or add a duplicate changelog section.
+	local prepared
+	prepared=$(changelog_body "$version")
+	if [ -n "$prepared" ]; then
+		printf 'KubePeep %s\n\n%s\n' "$version" "$prepared"
+		return
+	fi
 
 	local breaking added changed fixed security
 	breaking=$(git log --pretty=%s $range | grep -E '^[a-zA-Z]+(\([^)]*\))?!:' || true)
@@ -87,9 +96,25 @@ cmd_notes() {
 	fi
 }
 
+changelog_body() {
+	local version="$1"
+	[ -f CHANGELOG.md ] || return 0
+	awk -v heading="## [${version}]" '
+		/^## \[/ {
+			if (found) exit
+			if ($0 == heading || index($0, heading " - ") == 1) found = 1
+			next
+		}
+		found && $0 !~ /^\[[^]]+\]:/ { print }
+	' CHANGELOG.md
+}
+
 cmd_changelog() {
 	local version="${1:?version required}" date="${2:?date required}" previous="${3:-}"
 	local body entry
+	if [ -n "$(changelog_body "$version")" ]; then
+		return
+	fi
 	body=$(cmd_notes "$previous" "$version" patch | tail -n +3)
 	entry="## [${version}] - ${date}
 
@@ -108,8 +133,25 @@ ${body}
 	else
 		{ printf '%s\n' "$entry"; } > CHANGELOG.md
 	fi
-	grep -q "^\[${version}\]:" CHANGELOG.md || \
+	grep -Fq "[${version}]:" CHANGELOG.md || \
 		echo "[${version}]: ${REPO_URL}/releases/tag/${version}" >> CHANGELOG.md
+}
+
+cmd_metadata() {
+	local version="${1:?version required}"
+	# Node is present in every native build job, including Git Bash on Windows.
+	# Passing the version as an argument avoids shell/JavaScript interpolation.
+	node - "$version" <<'NODE'
+const fs = require('node:fs');
+const version = process.argv[2];
+if (!/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.test(version)) {
+  throw new Error('Release version must be X.Y.Z without a v prefix');
+}
+const config = JSON.parse(fs.readFileSync('wails.json', 'utf8'));
+config.info.productVersion = version;
+fs.writeFileSync('wails.json.tmp', JSON.stringify(config, null, 2) + '\n');
+fs.renameSync('wails.json.tmp', 'wails.json');
+NODE
 }
 
 case "${1:-}" in
@@ -117,8 +159,9 @@ case "${1:-}" in
 	next-version) shift; cmd_next_version "$@" ;;
 	notes)        shift; cmd_notes "$@" ;;
 	changelog)    shift; cmd_changelog "$@" ;;
+	metadata)     shift; cmd_metadata "$@" ;;
 	*)
-		echo "usage: release.sh {bump-type [BASE]|next-version BASE TYPE|notes PREV VER TYPE|changelog VER DATE PREV}" >&2
+		echo "usage: release.sh {bump-type [BASE]|next-version BASE TYPE|notes PREV VER TYPE|changelog VER DATE PREV|metadata VER}" >&2
 		exit 2
 		;;
 esac
