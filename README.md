@@ -67,7 +67,8 @@ are in the [desktop build guide](docs/desktop-build.md).
 
 **Golden rule: commit only. Never push automatically.** Run
 `./scripts/security_check.sh HEAD` before committing; use an approved GitHub
-noreply identity. Publishing requires a separate, explicit user decision.
+commit identity as documented in [security](docs/security.md#11-repositório-e-cadeia-de-desenvolvimento).
+Publishing requires a separate, explicit user decision.
 
 Start at the [documentation index](docs/README.md) for architecture, API and
 data contracts, or the completed [v0.7 plan](plan/README.md) for implementation

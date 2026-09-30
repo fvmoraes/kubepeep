@@ -42,14 +42,19 @@ security_tip=$(git rev-parse --verify "${security_object}^{commit}") ||
 security_identity_violations=$(
 	git log "$security_tip" --format='%H%x09%ae%x09%ce' |
 		awk -F '\t' '
-			function safe_identity(value) {
-				return value ~ /@users\.noreply\.github\.com$/ || value == "noreply@github.com"
+			function approved_identity(value) {
+				return value ~ /@users\.noreply\.github\.com$/ ||
+					value == "noreply@github.com" ||
+					value == "eng.fvmoraes@gmail.com"
 			}
-			!safe_identity($2) || !safe_identity($3) { print $1 }
+			# GitHub created this merge before the account email was corrected.
+			# The protected main branch cannot rewrite this exact historical SHA.
+			$1 == "4061a827a76e48c07b8299cfa45d7b238b59891f" { next }
+			!approved_identity($2) || !approved_identity($3) { print $1 }
 		'
 )
 if [ -n "$security_identity_violations" ]; then
-	printf '%s\n' "security-check: commit identities must use GitHub noreply addresses; offending commits:" >&2
+	printf '%s\n' "security-check: commit identities must use approved GitHub addresses; offending commits:" >&2
 	printf '%s\n' "$security_identity_violations" >&2
 	exit 1
 fi
@@ -149,8 +154,8 @@ if [ "$security_object_type" = tag ]; then
 	security_tagger_email=$(git cat-file tag "$security_object" |
 		sed -n 's/^tagger .* <\([^>]*\)> [0-9][0-9]* [+-][0-9][0-9][0-9][0-9]$/\1/p')
 	case "$security_tagger_email" in
-	*@users.noreply.github.com | noreply@github.com) ;;
-	*) security_fail "annotated tags must use a GitHub noreply tagger identity" ;;
+	*@users.noreply.github.com | noreply@github.com | eng.fvmoraes@gmail.com) ;;
+	*) security_fail "annotated tags must use an approved GitHub tagger identity" ;;
 	esac
 
 	security_tag_message=$(git cat-file tag "$security_object" | sed '1,/^$/d')

@@ -137,7 +137,7 @@ release remota ou executar um workflow que publica exige decisão explícita
 da pessoa usuária. Um commit local não autoriza essas ações.
 
 Antes de cada commit, executar `scripts/security_check.sh HEAD`, revisar o
-diff e usar identidade GitHub noreply aprovada. Antes de um push explicitamente
+diff e usar uma identidade GitHub aprovada em [segurança](security.md#11-repositório-e-cadeia-de-desenvolvimento). Antes de um push explicitamente
 autorizado, executar novamente o mesmo gate. Não usar `--no-verify` para
 contornar falhas. A [premissa de segurança](security.md#11-repositório-e-cadeia-de-desenvolvimento)
 define os bloqueios e a resposta a descobertas sensíveis.

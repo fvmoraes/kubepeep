@@ -32,8 +32,12 @@ Nenhum commit, branch, tag, release, artefato ou log de CI pode conter:
 Fixtures precisam ser sintéticas e deliberadamente inválidas. Uma exceção do
 scanner exige valor público/sintético exato, path exato e justificativa em
 `.gitleaks.toml`, ou fingerprint histórico exato em `.gitleaksignore`;
-allowlists amplas são proibidas. Autor, committer e tagger usam somente endereço
-noreply oficial do GitHub.
+allowlists amplas são proibidas. Autor, committer e tagger usam endereço noreply
+oficial do GitHub ou o endereço `eng.fvmoraes@gmail.com`, aprovado pelo mantenedor
+para a conta `fvmoraes`. O merge `4061a827a76e48c07b8299cfa45d7b238b59891f`
+é a única exceção histórica de identidade: foi criado pela interface do GitHub
+antes dessa correção, e a proteção de `main` impede reescrevê-lo. A exceção é
+vinculada ao SHA exato e não se aplica a novos commits.
 
 Todo clone deve ativar `.githooks/pre-commit` e `.githooks/pre-push` com
 `git config --local core.hooksPath .githooks`. O gate

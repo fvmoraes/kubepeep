@@ -82,6 +82,9 @@ func (cache *ClientCache) Activate(ctx context.Context, resolution *Resolution) 
 	if ctx == nil || resolution == nil {
 		return nil, safeError(CodeClientUnavailable, "A Kubernetes client resolution is required.", false)
 	}
+	if err := ctx.Err(); err != nil {
+		return nil, SanitizeError(err)
+	}
 	ctx, end := observability.StartSpan(ctx, "cache.clients")
 	defer func() { end(resultErr) }()
 	observability.CacheOutcome(ctx, "miss")
@@ -89,6 +92,9 @@ func (cache *ClientCache) Activate(ctx context.Context, resolution *Resolution) 
 	key := descriptor.CacheKey()
 	currentFingerprint, err := resolution.CurrentFingerprint(ctx)
 	if err != nil {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return nil, SanitizeError(ctxErr)
+		}
 		cache.invalidateKey(key, errGenerationChanged)
 		return nil, err
 	}
