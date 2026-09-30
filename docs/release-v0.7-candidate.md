@@ -5,7 +5,9 @@ preparadas no `CHANGELOG.md` e o Wails usa `productVersion: 0.7.0`.
 A auditoria comportamental e os benchmarks representativo, matriz e protocolo
 foram concluídos em `caaf40a`, em árvore limpa; a comparação histórica permanece
 em `b148a60`. A revisão de fechamento da branch `review/plan-v0.7` cobre também
-os contratos de versão e publicação. A tag oficial será `0.7.0`, sem prefixo `v`.
+os contratos de versão e publicação, corrigidos no commit `2f2a3b0`.
+CLI e Wails Linux foram recompilados em árvore limpa nesse commit e reportam
+`version=0.7.0 commit=2f2a3b0`. A tag oficial será `0.7.0`, sem prefixo `v`.
 
 ## Destaques
 
@@ -54,6 +56,7 @@ usados no build CLI.
 | Wails nativo + AT-SPI | scope default restaurado; Pods exibiu 9 linhas Kind reais |
 | benchmark representativo/matriz/protocolo | repetido em `caaf40a`, árvore limpa; 10 + 47 cenários e protocolo Kind |
 | segurança, módulos, vulnerabilidades e artefatos | aprovado; zero vulnerabilidade Go alcançável e zero advisory npm |
+| fechamento `2f2a3b0`: verify/race/build desktop, Kind e tooling de release | aprovado; CLI e desktop `0.7.0`, metadados e notas preservados |
 
 O comparativo completo está em [performance-baseline.md](performance-baseline.md)
 e o registro item a item em
@@ -81,3 +84,5 @@ A versão está definida e preparada. A integração da branch em `main` aciona
 são criadas depois dos quatro checks obrigatórios e dos builds/artefatos
 multiplataforma aprovados. A revisão local não declara esses jobs remotos como
 executados nem substitui o aceite das plataformas Windows/macOS.
+A consulta à API do GitHub nesta revisão retornou `401 Bad credentials`;
+o acesso da CLI precisa ser restabelecido para acompanhar esses gates.

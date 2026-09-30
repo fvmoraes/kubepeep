@@ -433,10 +433,54 @@ execução remota da CI. O comando de protocolo exigiu kubeconfig explícito do
 Kind após falhar com a configuração implícita. Artefatos de benchmark seguem
 locais; apenas agregados sanitizados são versionados.
 
-## Decisão externa remanescente
+## Fechamento técnico da v0.7.0 — 2026-09-29
 
-- Escolha da versão/tag, execução dos builds multiplataforma, push e publicação
-  dependem de ação explícita do mantenedor e não reabrem a Fase 7. O pipeline
-  atual usa Wails, nfpm, NSIS e hdiutil; GoReleaser não é um requisito. As notas
-  anteriores sobre sua ausência descrevem o host, sem constituir um bloqueio
-  do pipeline implementado.
+**Status: APROVADO no commit `2f2a3b0`.** O mantenedor escolheu `0.7.0` para
+fechamento. A nova revisão conferiu as correções comportamentais recentes e
+os caminhos completos de versão, candidato, build nativo e publicação.
+Permanecem 79/79 tarefas com evidência, 68/68 entregas sem IDs duplicados e
+zero link local quebrado nos documentos conferidos.
+
+| Achado final | Correção e prova |
+| --- | --- |
+| `dry_run` não emitia o SHA pelo step consumido pelos builds | `prepare.metadata` emite o SHA de origem no candidato e o SHA de metadados no fluxo normal; o script real do YAML foi executado nos dois modos em repositórios Git temporários, comprovando SHA e ausência de push no candidato |
+| candidato perdia `productVersion` ao fazer novo checkout | os três jobs nativos aplicam `release.sh metadata VERSION`; harness verifica versão, preservação dos outros campos e rejeição de versões inválidas |
+| etapa npm do Windows usava sintaxe Bash no shell padrão PowerShell | `shell: bash` explícito; actionlint aprovado; execução Windows permanece gate remoto |
+| retry duplicava changelog e descartava notas revisadas | seção existente é preservada e fornece as notas; testes cobrem repetição, conteúdo literal e exclusão da seção anterior |
+| histórico grande podia degradar MINOR para PATCH por `grep -q`/SIGPIPE | classificação consome a saída completa; regressão com 6 mil mensagens e suporte a `BREAKING-CHANGE` |
+| build desktop local ignorava versão/commit/data do Makefile | os quatro targets desktop recebem `LDFLAGS`; CLI e Wails Linux finais reportam `version=0.7.0 commit=2f2a3b0` |
+
+`wails.json` e `CHANGELOG.md` estão preparados para `0.7.0`; os defaults de
+desenvolvimento são `0.7.0-dev`. O cálculo sobre a última tag oficial local
+(`0.6.1`) confirma incremento minor para `0.7.0`. O novo harness de release
+integra tanto `make verify` quanto `verify.yml`.
+
+| Validação desta revisão | Resultado |
+| --- | --- |
+| `rtk make verify test-race build-desktop VERSION=0.7.0` | aprovado: formato, lint, tipos, Go, Vitest, Playwright, smoke, Ginger, gates de release, race e Wails Linux |
+| recompilação `make build build-desktop VERSION=0.7.0` em árvore limpa `2f2a3b0` | aprovada; ambos os binários reportam versão e commit exatos |
+| smoke do artefato recompilado | aprovado; ciclo local sem Node.js no PATH |
+| Kind `app-e2e ./dist/kubePeep` | aprovado: contexto/scope, dashboard, SSE/log, exec, revogação/restauração e offline; cluster preservado |
+| `make test-release-gates` e actionlint v1.7.12 | aprovados; scanner, seis cenários de checks e nove verificações de tooling |
+| segurança staged/histórico e `go mod verify` | aprovados; zero leak, módulos íntegros |
+| `npm ci` e `make release-artifact-check` | zero vulnerabilidade npm; `dist` e `build/bin` aprovados |
+
+O E2E e a suíte completa validaram o conteúdo antes do commit; a recompilação
+posterior fixa os artefatos no SHA limpo. As mudanças de fechamento não alteram
+coleta/cache/watch nem dependências: os benchmarks e a análise de caminhos Go
+vulneráveis da auditoria `caaf40a` continuam aplicáveis. Os logs ficam nos
+arquivos locais ignorados `test/kind/.state/v070-final-gates.log`,
+`v070-final-kind.log` e `v070-commit-build.log`.
+
+Limites: oito avisos Fast Refresh conhecidos, sem erro; Windows/macOS e a CI
+remota ainda não foram executados nesta revisão. A consulta ao GitHub pela CLI
+retornou `401 Bad credentials`, inclusive sem overrides de token no ambiente.
+Não houve criação de tag nem publicação de release.
+
+## Publicação remanescente
+
+A versão/tag está definida como `0.7.0` (sem prefixo `v` na tag oficial).
+Publicar requer acesso remoto válido, integração em `main` e aprovação dos
+jobs multiplataforma e dos quatro checks obrigatórios; o aceite local não os
+substitui. O pipeline usa Wails, nfpm, NSIS e hdiutil; GoReleaser não é requisito.
+As notas antigas sobre sua ausência descrevem apenas o host.

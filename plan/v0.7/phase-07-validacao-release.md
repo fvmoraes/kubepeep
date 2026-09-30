@@ -2,8 +2,9 @@
 
 **Prioridade:** gate final. **Entrada:** F0–F6. **Matriz:** D35, R01–R03 (regressão), X15/X16, T01–T06; critérios consolidados das referências (§77–79 de performance, §30 de UI/UX).
 
-**Estado:** finalizada em 29 de setembro de 2026; candidato preparado somente
-em commits locais. Evidências em [03-evidencias-execucao.md](03-evidencias-execucao.md)
+**Estado:** finalizada em 29 de setembro de 2026; versão `0.7.0` escolhida
+pelo mantenedor e fechamento técnico validado em `2f2a3b0`. Publicação remota
+depende dos gates de CI. Evidências em [03-evidencias-execucao.md](03-evidencias-execucao.md)
 e notas em [../../docs/release-v0.7-candidate.md](../../docs/release-v0.7-candidate.md).
 
 A v0.7 só fecha com a prova comparativa de que a experiência mudou — e com zero regressão funcional, incluindo os bugs corrigidos na F0.
