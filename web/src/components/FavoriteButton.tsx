@@ -2,26 +2,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Star } from 'lucide-react'
 import { useState } from 'react'
 
-import { APIError, getPreferences, getSession, putPreferences, type FavoriteItem, type FavoriteKind, type Preferences } from '../api/client'
+import { APIError, getPreferences, type FavoriteItem, type FavoriteKind } from '../api/client'
+import { mutatePreferences } from '../api/preferences'
 import { Button } from './ui'
-
-const favoriteDefaults: Preferences = {
-  version: 1,
-  ui: { language: 'en' },
-  logs: { wrap: false, timestamps: true, tailLines: 200 },
-  dashboard: {
-    logScanWindow: '15m',
-    sectionOrder: ['summary', 'problems', 'restarts', 'workloads', 'events', 'logScan', 'metrics'],
-    hiddenSections: [],
-  },
-  filters: {
-    workloads: { version: 1, items: [] },
-    pods: { version: 1, items: [] },
-    events: { version: 1, items: [] },
-    logs: { version: 1, items: [] },
-  },
-  favorites: { version: 1, items: [] },
-}
 
 function favoriteId() {
   const uuid = typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`
@@ -53,17 +36,20 @@ export function FavoriteButton({ kind, namespace, name, generation, label = 'res
   const isFavorite = items.some((item) => matchesFavorite(item, kind, namespace, name))
 
   const toggle = useMutation({
-    mutationFn: async () => {
-      const session = await getSession()
-      if (generation && session.generation !== generation) {
-        throw new APIError(409, { code: 'GENERATION_CHANGED', message: 'The active selection changed before the action.' })
-      }
-      const base = preferences.data ?? favoriteDefaults
-      const nextItems = isFavorite
-        ? items.filter((item) => !matchesFavorite(item, kind, namespace, name))
-        : [...items, { id: favoriteId(), kind, namespace: namespace || undefined, name }].slice(-50)
-      return putPreferences({ ...base, favorites: { version: 1, items: nextItems } }, session.csrfToken)
-    },
+    mutationFn: () => mutatePreferences((current) => {
+      const currentItems = current.favorites?.items ?? []
+      const currentlyFavorite = currentItems.some((item) => matchesFavorite(item, kind, namespace, name))
+      const nextItems = currentlyFavorite
+        ? currentItems.filter((item) => !matchesFavorite(item, kind, namespace, name))
+        : [...currentItems, { id: favoriteId(), kind, namespace: namespace || undefined, name }].slice(-50)
+      return { ...current, favorites: { version: 1, items: nextItems } }
+    }, {
+      validateSession: (session) => {
+        if (generation && session.generation !== generation) {
+          throw new APIError(409, { code: 'GENERATION_CHANGED', message: 'The active selection changed before the action.' })
+        }
+      },
+    }),
     onSuccess: (saved) => {
       setError(null)
       queryClient.setQueryData(['preferences'], saved)

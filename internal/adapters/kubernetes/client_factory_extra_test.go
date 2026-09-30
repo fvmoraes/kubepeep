@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/rest"
 )
 
@@ -43,6 +45,8 @@ func TestNewClientFactoryValidatesAndDefaultsOptions(t *testing.T) {
 		{name: "control character user agent", options: FactoryOptions{UserAgent: "agent\ninjected"}, wantErr: true},
 		{name: "negative qps", options: FactoryOptions{QPS: -1}, wantErr: true},
 		{name: "zero burst", options: FactoryOptions{Burst: -1}, wantErr: true},
+		{name: "excessive rate", options: FactoryOptions{QPS: 100, Burst: 200}, wantErr: true},
+		{name: "burst below qps", options: FactoryOptions{QPS: 10, Burst: 5}, wantErr: true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -111,6 +115,86 @@ func TestClientsAccessorsExposeOnlyGroupInterfaces(t *testing.T) {
 	(&Clients{}).CloseIdleConnections()
 	(&Clients{unary: &clientGroup{}}).CloseIdleConnections()
 	(&Clients{streaming: &clientGroup{}}).CloseIdleConnections()
+}
+
+func TestFactoryScopesProtocolNegotiationByClientFamily(t *testing.T) {
+	t.Parallel()
+	type observedRequest struct {
+		accept   string
+		encoding string
+	}
+	observed := make(chan observedRequest, 3)
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		accept := request.Header.Get("Accept")
+		observed <- observedRequest{accept: accept, encoding: request.Header.Get("Accept-Encoding")}
+		response.Header().Set("Content-Type", kubernetesJSON)
+		switch {
+		case strings.Contains(accept, "PartialObjectMetadataList"):
+			_, _ = response.Write([]byte(`{"apiVersion":"meta.k8s.io/v1","kind":"PartialObjectMetadataList","items":[]}`))
+		case strings.Contains(request.URL.Path, "widgets"):
+			_, _ = response.Write([]byte(`{"apiVersion":"example.test/v1","kind":"WidgetList","items":[]}`))
+		default:
+			_, _ = response.Write([]byte(`{"apiVersion":"v1","kind":"PodList","items":[]}`))
+		}
+	}))
+	defer server.Close()
+
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	writeTestKubeconfig(t, path, testKubeconfig(server.URL, "current"))
+	resolution, err := NewLoader(LoaderOptions{}).Resolve(t.Context(), ResolveRequest{ExplicitPath: &path, FirstReconcile: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	factory, err := NewClientFactory(FactoryOptions{Protobuf: true, Compression: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	clients, err := factory.Build(t.Context(), resolution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clients.CloseIdleConnections()
+	if _, err := clients.UnaryKubernetes().CoreV1().Pods("").List(t.Context(), metav1.ListOptions{Limit: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := clients.UnaryDynamic().Resource(schema.GroupVersionResource{Group: "example.test", Version: "v1", Resource: "widgets"}).List(t.Context(), metav1.ListOptions{Limit: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := clients.UnaryMetadata().Resource(schema.GroupVersionResource{Version: "v1", Resource: "pods"}).List(t.Context(), metav1.ListOptions{Limit: 1}); err != nil {
+		t.Fatal(err)
+	}
+
+	typed, dynamic, metadata := <-observed, <-observed, <-observed
+	if !strings.HasPrefix(typed.accept, kubernetesProtobuf) || !strings.Contains(typed.accept, kubernetesJSON) {
+		t.Fatalf("typed accept = %q", typed.accept)
+	}
+	if dynamic.accept != kubernetesJSON {
+		t.Fatalf("dynamic accept = %q", dynamic.accept)
+	}
+	if !strings.Contains(metadata.accept, "PartialObjectMetadataList") || !strings.Contains(metadata.accept, kubernetesJSON) {
+		t.Fatalf("metadata accept = %q", metadata.accept)
+	}
+	for name, request := range map[string]observedRequest{"typed": typed, "dynamic": dynamic, "metadata": metadata} {
+		if request.encoding != "gzip" {
+			t.Fatalf("%s compression header = %q", name, request.encoding)
+		}
+	}
+	if clients.unaryConfigCopy().DisableCompression {
+		t.Fatal("configured compression was disabled")
+	}
+
+	defaultFactory, err := NewClientFactory(FactoryOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defaultClients, err := defaultFactory.Build(t.Context(), resolution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer defaultClients.CloseIdleConnections()
+	if !defaultClients.unaryConfigCopy().DisableCompression {
+		t.Fatal("compression must remain disabled without explicit activation")
+	}
 }
 
 func TestClientsConfigCopiesGuardNilGroups(t *testing.T) {

@@ -238,6 +238,9 @@ func (service *Service) Delete(ctx context.Context, id int64, request ScopeDelet
 	if request.ExpectedGeneration == "" {
 		return SelectionResult{}, fieldError("expectedGeneration", "is required")
 	}
+	if request.ReturnToSetup && request.ReplacementScopeID > 0 {
+		return SelectionResult{}, fieldError("replacementScopeId", "cannot be combined with returnToSetup")
+	}
 	if service.coordinator == nil {
 		return SelectionResult{}, ErrGenerationChanged
 	}
@@ -249,6 +252,12 @@ func (service *Service) Delete(ctx context.Context, id int64, request ScopeDelet
 		}
 		if !scopeMatchesBinding(existing, binding) {
 			return nil, ErrSelectionMismatch
+		}
+		if existing.IsDefault && request.ReplacementScopeID <= 0 && !request.ReturnToSetup {
+			return nil, fieldError("replacementScopeId", "must identify a replacement default or explicitly return to setup")
+		}
+		if binding.ActiveScopeID == id && !existing.IsDefault && request.ReplacementScopeID <= 0 {
+			return nil, fieldError("replacementScopeId", "must identify another scope in the active origin")
 		}
 
 		var preparedReplacement Scope
@@ -272,14 +281,14 @@ func (service *Service) Delete(ctx context.Context, id int64, request ScopeDelet
 			if !scopeMatchesBinding(currentScope, current) {
 				return SelectionMutation{}, ErrSelectionMismatch
 			}
-			if current.ActiveScopeID != id {
-				if err := service.repository.Delete(commitContext, id, request.Version); err != nil {
+			if request.ReplacementScopeID <= 0 {
+				if err := service.repository.Delete(commitContext, id, request.Version, 0); err != nil {
 					return SelectionMutation{}, err
 				}
+				if current.ActiveScopeID == id {
+					return SelectionMutation{PublishGeneration: true, Activation: &ScopeResolution{}}, nil
+				}
 				return SelectionMutation{}, nil
-			}
-			if request.ReplacementScopeID <= 0 || request.ReplacementScopeID == id {
-				return SelectionMutation{}, fieldError("replacementScopeId", "must identify another scope in the active origin")
 			}
 			if replacementErr != nil {
 				return SelectionMutation{}, replacementErr
@@ -294,8 +303,15 @@ func (service *Service) Delete(ctx context.Context, id int64, request ScopeDelet
 			if replacement.Version != preparedReplacement.Version {
 				return SelectionMutation{}, ErrConflict
 			}
-			if err := service.repository.Delete(commitContext, id, request.Version); err != nil {
+			replacementDefaultID := int64(0)
+			if currentScope.IsDefault {
+				replacementDefaultID = replacement.ID
+			}
+			if err := service.repository.Delete(commitContext, id, request.Version, replacementDefaultID); err != nil {
 				return SelectionMutation{}, err
+			}
+			if current.ActiveScopeID != id {
+				return SelectionMutation{}, nil
 			}
 			resolution := resolutionFor(replacement, allNamespaces)
 			return SelectionMutation{PublishGeneration: true, Activation: &resolution}, nil
@@ -304,6 +320,16 @@ func (service *Service) Delete(ctx context.Context, id int64, request ScopeDelet
 }
 
 func (service *Service) Select(ctx context.Context, id int64, request ScopeSelectRequest) (ScopeResolution, SelectionResult, error) {
+	return service.selectScope(ctx, id, request, false)
+}
+
+// SetDefault stores exactly one default for the active profile/context and
+// activates that scope in the same generation-fenced local commit.
+func (service *Service) SetDefault(ctx context.Context, id int64, request ScopeSelectRequest) (ScopeResolution, SelectionResult, error) {
+	return service.selectScope(ctx, id, request, true)
+}
+
+func (service *Service) selectScope(ctx context.Context, id int64, request ScopeSelectRequest, setDefault bool) (ScopeResolution, SelectionResult, error) {
 	if id <= 0 {
 		return ScopeResolution{}, SelectionResult{}, ErrNotFound
 	}
@@ -339,6 +365,12 @@ func (service *Service) Select(ctx context.Context, id int64, request ScopeSelec
 			}
 			if scope.Version != preparedScope.Version {
 				return SelectionMutation{}, ErrConflict
+			}
+			if setDefault {
+				scope, err = service.repository.SetDefault(commitContext, id)
+				if err != nil {
+					return SelectionMutation{}, err
+				}
 			}
 			resolution := resolutionFor(scope, allNamespaces)
 			return SelectionMutation{PublishGeneration: true, Activation: &resolution}, nil

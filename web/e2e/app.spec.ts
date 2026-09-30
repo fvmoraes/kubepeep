@@ -2,10 +2,10 @@ import { expect, test } from '@playwright/test'
 
 // Enabled destinations of the Kubernetes navigation tree, in sidebar order.
 const navCatalog = [
-  ['/', 'Overview', 'The local API returned an error'],
+  ['/', 'Overview', 'Cluster overview'],
   ['/nodes', 'Nodes', 'Nodes'],
   ['/events', 'Events', 'Events'],
-  ['/namespaces', 'Namespaces', 'Namespace scopes are offline'],
+  ['/namespaces', 'Namespaces', 'Create a namespace scope'],
   ['/leases', 'Leases', 'Leases'],
   ['/workloads', 'Overview', 'Workloads'],
   ['/workloads/kind/deployments', 'Deployments', 'Workloads'],
@@ -39,7 +39,7 @@ const navCatalog = [
   ['/access/role-bindings', 'RoleBindings', 'Access Control'],
   ['/access/cluster-roles', 'ClusterRoles', 'Access Control'],
   ['/access/cluster-role-bindings', 'ClusterRoleBindings', 'Access Control'],
-  ['/permissions', 'Permissions', 'Permissions are offline'],
+  ['/permissions', 'Permissions', 'Permission matrix'],
   ['/logs', 'Logs', 'Logs'],
   ['/administration/customresourcedefinitions', 'CustomResourceDefinitions', 'Administration'],
   ['/administration/priority-classes', 'PriorityClasses', 'Administration'],
@@ -59,11 +59,33 @@ async function expandSidebarGroups(page: import('@playwright/test').Page) {
 
 test('serves the application shell and preserves History API navigation', async ({ page }) => {
   test.setTimeout(90_000)
+  // Navigation is exercised with a resolved scope. Resource routes must not
+  // mount while the initial status/default-scope decision is still pending.
+  await page.route('**/api/v1/status', async (route) => {
+    const components = Object.fromEntries(['application', 'sqlite', 'kubeconfig', 'context', 'cluster', 'metrics'].map((name) => [name, {
+      status: name === 'application' || name === 'cluster' ? 'healthy' : 'unknown', code: 'TEST', message: 'ready', checkedAt: null,
+    }]))
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({
+        data: {
+          version: 'test', commit: 'test', buildDate: 'test', port: 2748, components,
+          selection: {
+            clusterProfileId: 1, context: 'development', cluster: 'kind-kubepeep', scopeId: 1,
+            scopeName: 'Restricted', scopeMode: 'list', scopeSource: 'saved', defaultNamespace: 'allowed',
+            namespaceCount: 1, generation: 'gen_navigation',
+          },
+        },
+        meta: { generation: 'gen_navigation', collectedAt: '2026-09-29T12:00:00Z' },
+      }),
+    })
+  })
   await page.goto('/')
 
   await expect(page.getByLabel('Primary navigation')).toBeVisible()
   await expect(page.getByRole('img', { name: 'KubePeep' })).toBeVisible()
-  await expect(page.getByRole('heading', { name: 'The local API returned an error' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Cluster overview' })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Open command center' })).toBeVisible()
   // Sidebar groups start collapsed (F6 default); expand every group so the
   // full catalog is mounted.
@@ -140,8 +162,9 @@ test('keeps the dashboard useful with partial data and an explicit bounded log s
     else if (path === '/api/v1/session') data = { csrfToken: 'csrf_e2e', origin: 'http://127.0.0.1:4173', generation: 'gen_e2e', expiresAt: '2026-08-10T13:00:00Z' }
     else if (path === '/api/v1/dashboard/summary') data = block(counters, { coverage: null })
     else if (path === '/api/v1/dashboard/problems') data = block([{
+      resource: { kind: 'Pod', namespace: 'allowed', name: 'restart-pod' },
       namespace: 'allowed', pod: 'restart-pod', owner: { kind: 'Deployment', name: 'api' }, container: 'api', containerType: 'regular',
-      status: 'Running', reason: 'CrashLoopBackOff', message: 'back-off restarting failed container', source: 'containerWaiting', severity: 'critical', ageSeconds: 180,
+      status: 'Running', reason: 'CrashLoopBackOff', message: 'back-off restarting failed container', summary: 'Container is repeatedly crashing.', source: 'containerWaiting', severity: 'critical', ageSeconds: 180, actions: ['inspect', 'logs'],
     }])
     else if (path === '/api/v1/dashboard/restarts?limit=10') data = block([{
       namespace: 'allowed', pod: 'restart-pod', owner: { kind: 'Deployment', name: 'api' }, container: 'api', containerType: 'regular',
@@ -244,11 +267,11 @@ test('filters Pods, persists allowlisted saved filters and builds the Logs catal
 
   const requestsBeforeClear = podRequests.length
   await page.getByRole('button', { name: 'Clear filters' }).click()
-  await expect.poll(() => podRequests.slice(requestsBeforeClear).some((value) => {
+  await expect(page.getByText('None')).toBeVisible()
+  expect(podRequests.slice(requestsBeforeClear).every((value) => {
     const query = new URL(value, 'http://127.0.0.1').searchParams
     return !query.has('namespace') && !query.has('search') && !query.has('sort') && !query.has('order') && !query.has('continue')
   })).toBe(true)
-  await expect(page.getByText('None')).toBeVisible()
 
   await page.getByRole('combobox', { name: 'Saved filter', exact: true }).selectOption('saved-worker')
   await page.getByRole('button', { name: 'Apply saved filter' }).click()

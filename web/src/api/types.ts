@@ -84,6 +84,7 @@ export interface NamespaceScope {
   mode: NamespaceScopeMode
   namespaces: string[]
   defaultNamespace: string | null
+  isDefault: boolean
   version: number
   createdAt: string
   updatedAt: string
@@ -132,6 +133,7 @@ export interface NamespaceScopeDeleteRequest {
   confirmed: true
   version: number
   replacementScopeId?: number
+  returnToSetup?: boolean
   expectedGeneration: string
 }
 
@@ -250,21 +252,91 @@ export interface DashboardRestart {
   ageSeconds: number
 }
 
-export type ProblemSource = 'podStatus' | 'containerWaiting' | 'containerTerminated' | 'containerStatus' | 'condition' | 'event'
-export type ProblemSeverity = 'warning' | 'critical'
+export type ProblemSource = 'podStatus' | 'containerWaiting' | 'containerTerminated' | 'containerStatus' | 'condition' | 'event' | 'workloadStatus' | 'pvcStatus' | 'nodeCondition'
+export type ProblemSeverity = 'info' | 'warning' | 'critical'
 
 export interface DashboardProblem {
+	resource: ResourceRef
   namespace: string
-  pod: string
+	pod?: string
   owner: ResourceRef | null
   container: string | null
   containerType: ContainerType | null
   status: string
   reason: string | null
   message: string | null
+	summary: string
   source: ProblemSource
   severity: ProblemSeverity
   ageSeconds: number
+	actions: Array<'inspect' | 'logs'>
+}
+
+export interface IndexCoverage {
+	topic: string
+	state: 'FRESH' | 'STALE' | 'REFRESHING' | 'PARTIAL' | 'EXPIRED'
+	complete: boolean
+	loadedNamespaces: string[]
+}
+
+export interface IndexedResource {
+	apiGroup?: string
+	kind: string
+	namespace?: string
+	name: string
+	status?: string
+}
+
+export interface LocalResourceIndex {
+	generation: string
+	collectedAt: string
+	coverage: IndexCoverage[]
+	resources: IndexedResource[]
+	namespaceCounts: Array<{ namespace: string; resources: Record<string, number> }>
+}
+
+export interface Investigation {
+	target: IndexedResource
+	ownerChain: IndexedResource[]
+	pods: IndexedResource[]
+	services: IndexedResource[]
+	endpointSlices: IndexedResource[]
+	configMaps: IndexedResource[]
+	pvcs: IndexedResource[]
+	events: IndexedResource[]
+	coverage: IndexCoverage[]
+}
+
+export interface LatencyPercentiles {
+	p50Milliseconds: number
+	p95Milliseconds: number
+	p99Milliseconds: number
+	maxMilliseconds: number
+	samples: number
+}
+
+export interface Diagnostics {
+	generation: string
+	collectedAt: string
+	performance: {
+		apiServerLatency: LatencyPercentiles
+		cacheHitRatio: number | null
+		activeWatches: number
+		requestsPerMinute: number
+		responses429: number
+		watchReconnects: number
+		resourceSync: Array<{ resource: string; latency: LatencyPercentiles }>
+	}
+	cluster: {
+		kubernetesVersion: string | null
+		namespaces: number
+		totals: Record<string, number>
+		kubepeep: { resourceCacheEntries: number; resourceCacheBytes: number; collectionCacheEntries: number; collectionCacheBytes: number; cursorBytes: number; activeWatches: number }
+	}
+	namespaces: Array<{ namespace: string; resources: Record<string, number>; problems: Record<ProblemSeverity, number>; restarts: number | null; listLatencyMilliseconds: number | null; complete: boolean }>
+	cacheCoverage: IndexCoverage[]
+	complete: boolean
+	errors: DashboardPartialError[]
 }
 
 export interface DashboardEvent {
@@ -370,9 +442,18 @@ export interface CollectionResult<T> {
   coverage: DashboardCoverage | null
   generation?: string
   collectedAt?: string
+  snapshotRenewed?: boolean
 }
 
 export interface ResourceListQuery extends PageQuery {
+  /** Ephemeral client-only UX correlation; never serialized into the request. */
+  uxInteractionId?: string
+  /** Speculative shell reads do not create a visible-row timing sample. */
+  skipUXTiming?: boolean
+  /** Schedules only an automatic next-page fetch behind visible LIST work. */
+  prefetch?: boolean
+  /** Internal scheduler intent; unrelated background reads reserve more capacity for visible work. */
+  priority?: 'likely-next' | 'unrelated'
   namespaces?: string[]
   kinds?: string[]
   statuses?: string[]
@@ -385,6 +466,8 @@ export interface ResourceListQuery extends PageQuery {
   objectKind?: string
   reason?: string
   addressType?: string
+  labelSelector?: string
+  fieldSelector?: string
 }
 
 export interface ResourceMetadata {
@@ -488,6 +571,7 @@ export interface PodDetail {
 }
 
 export interface EventResource {
+	name?: string
   timestamp: string | null
   namespace: string
   objectKind: string
@@ -1065,7 +1149,7 @@ export interface ActionTarget {
   clusterProfileId: number
   context: string
   namespace: string
-  kind: ActionWorkloadKind | 'Pod'
+  kind: ActionWorkloadKind | 'Pod' | 'Service'
   name: string
 }
 
@@ -1118,7 +1202,7 @@ export interface PortForwardCreateRequest extends ConfirmedAction {
   remotePort: number
   localPort: number | null
   action: 'portForward'
-  consequenceCode: 'EXPOSE_POD_PORT_LOCALLY'
+  consequenceCode: 'EXPOSE_POD_PORT_LOCALLY' | 'EXPOSE_SERVICE_PORT_LOCALLY'
 }
 
 export interface ExecInit extends ConfirmedAction {

@@ -47,14 +47,17 @@ afterEach(() => {
 })
 
 describe('application shell', () => {
-  it('renders the accessible loading state while bootstrap is pending', () => {
+  it('renders the accessible loading state while bootstrap is pending', async () => {
     vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => undefined)))
     renderApp()
 
-    const heading = screen.getByRole('heading', { name: 'Preparing the local workspace' })
+    const heading = await screen.findByRole('heading', { name: 'Preparing the local workspace' })
     const panel = heading.closest('section')
     expect(panel).toHaveAttribute('aria-live', 'polite')
     expect(panel).toHaveAttribute('aria-busy', 'true')
+    expect(screen.getByRole('navigation', { name: 'Primary navigation' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Open command center' }))
+    expect(screen.getByRole('dialog', { name: 'Command center' })).toBeInTheDocument()
   })
 
   it('shows the empty context state without persisting remote data', async () => {
@@ -112,16 +115,16 @@ describe('application shell', () => {
     expect(screen.queryByRole('heading', { name: 'The local API is unavailable' })).not.toBeInTheDocument()
   })
 
-  it('renders every placeholder route on a direct deep link', () => {
+  it('renders every placeholder route on a direct deep link', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('offline')))
     for (const [path, title] of placeholderRoutes) {
       const view = renderApp(path)
-      expect(screen.getByRole('heading', { name: title })).toBeInTheDocument()
+      expect(await screen.findByRole('heading', { name: title })).toBeInTheDocument()
       view.unmount()
     }
   })
 
-  it('exposes the exact static application routes in the topbar command center', () => {
+  it('exposes the exact static application routes in the topbar command center', async () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('offline')))
     renderApp()
 
@@ -178,7 +181,7 @@ describe('application shell', () => {
 
     fireEvent.change(screen.getByRole('combobox', { name: 'Search application pages' }), { target: { value: 'rbac' } })
     expect(screen.getByRole('option', { name: /Permissions/ })).toBeInTheDocument()
-    expect(screen.queryByRole('option', { name: /Overview/ })).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByRole('option', { name: /Overview/ })).not.toBeInTheDocument())
   })
 
   it('globally refreshes only explicitly allowlisted active read queries', async () => {

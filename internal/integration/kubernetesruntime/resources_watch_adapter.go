@@ -27,8 +27,9 @@ type resourceWatchPort struct{ backend *ResourceBackend }
 const maximumWatchFanout = 100
 
 func (backend *ResourceBackend) AuthorizeTopics(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, topics []resources.Topic) (namespaces.ScopeResolution, error) {
-	if resolution.PreferGlobal {
+	if resolution.PreferGlobal || len(resolution.Namespaces) > 1 {
 		global := resolution
+		global.PreferGlobal = true
 		global.Namespaces = []string{metav1.NamespaceAll}
 		if err := resources.AuthorizeTopics(ctx, backend.authorizer, resourceSelection(binding, global), topics); err == nil {
 			return global, nil
@@ -79,7 +80,10 @@ func (backend *ResourceBackend) Subscribe(ctx context.Context, binding namespace
 		return nil, resourceDomain(resources.CodeFeatureUnavailable, "Resource watches are unavailable.", nil)
 	}
 	selection := resourceSelection(binding, resolution)
-	return manager.Subscribe(ctx, resources.WatchKey{Generation: binding.Generation, Context: binding.Context, Scope: selection.Scope, Topic: topic, GVR: gvr, Namespace: namespace})
+	return manager.Subscribe(ctx, resources.WatchKey{
+		Generation: binding.Generation, Context: binding.Context, Scope: selection.Scope,
+		Topic: topic, GVR: gvr, Namespace: namespace, EffectiveOrigins: resolution.Namespaces,
+	})
 }
 
 func (port *resourceWatchPort) binding(generation string) (namespaces.SelectionBinding, error) {
@@ -96,6 +100,14 @@ func (port *resourceWatchPort) binding(generation string) (namespaces.SelectionB
 }
 
 func (port *resourceWatchPort) List(ctx context.Context, key resources.WatchKey) (resources.WatchSnapshot, error) {
+	return port.list(ctx, key, nil)
+}
+
+func (port *resourceWatchPort) ListProgress(ctx context.Context, key resources.WatchKey, emit func([]resources.TopicObject) bool) (resources.WatchSnapshot, error) {
+	return port.list(ctx, key, emit)
+}
+
+func (port *resourceWatchPort) list(ctx context.Context, key resources.WatchKey, emit func([]resources.TopicObject) bool) (resources.WatchSnapshot, error) {
 	binding, err := port.binding(key.Generation)
 	if err != nil {
 		return resources.WatchSnapshot{}, err
@@ -108,12 +120,12 @@ func (port *resourceWatchPort) List(ctx context.Context, key resources.WatchKey)
 	if key.Topic != resources.TopicConfigMaps && clients.dynamic == nil {
 		return resources.WatchSnapshot{}, resourceDomain(resources.CodeFeatureUnavailable, "Resource watches are unavailable.", nil)
 	}
-	return port.listWithClients(requestContext, binding, clients, key)
+	return port.listWithClients(requestContext, binding, clients, key, emit)
 }
 
 // Go interfaces cannot express client-go's covariant NamespaceableResource
 // return type. Keep the actual list implementations concrete and small.
-func (port *resourceWatchPort) listWithClients(ctx context.Context, binding namespaces.SelectionBinding, clients resourceClientSet, key resources.WatchKey) (resources.WatchSnapshot, error) {
+func (port *resourceWatchPort) listWithClients(ctx context.Context, binding namespaces.SelectionBinding, clients resourceClientSet, key resources.WatchKey, emit func([]resources.TopicObject) bool) (resources.WatchSnapshot, error) {
 	snapshot := resources.WatchSnapshot{Items: []resources.TopicObject{}}
 	var cronJobs []batchv1.Job
 	cronHistoryComplete := false
@@ -121,12 +133,53 @@ func (port *resourceWatchPort) listWithClients(ctx context.Context, binding name
 		cronJobs, cronHistoryComplete = port.backend.cronJobHistory(ctx, binding, clients.kubernetes, key.Namespace)
 	}
 	continueToken := ""
+	restarted := false
 	for {
-		options := metav1.ListOptions{Limit: 500, Continue: continueToken}
+		pageStart := len(snapshot.Items)
+		limit := int64(500)
+		if emit != nil {
+			limit = 100
+			if continueToken == "" {
+				limit = 20
+			}
+		}
+		options := metav1.ListOptions{Limit: limit, Continue: continueToken}
 		if key.Topic == resources.TopicConfigMaps {
-			list, err := clients.metadata.Resource(key.GVR).Namespace(key.Namespace).List(ctx, options)
+			if !port.backend.disablePartialMetadata {
+				list, err := clients.metadata.Resource(key.GVR).Namespace(key.Namespace).List(ctx, options)
+				if err == nil {
+					for index := range list.Items {
+						snapshot.Items = append(snapshot.Items, resources.ConvertConfigMapMetadata(&list.Items[index]))
+					}
+					snapshot.ResourceVersion, continueToken = list.ResourceVersion, list.Continue
+					if len(snapshot.Items) > resources.MaximumSnapshotItems {
+						return resources.WatchSnapshot{}, resourceDomain(resources.CodeLimitExceeded, "The initial snapshot is too large.", nil)
+					}
+					if emit != nil && !emit(snapshot.Items[pageStart:]) {
+						return resources.WatchSnapshot{}, context.Canceled
+					}
+					if continueToken == "" {
+						return snapshot, nil
+					}
+					continue
+				}
+				if continueToken != "" && !restarted && (apierrors.IsResourceExpired(err) || apierrors.IsGone(err)) {
+					snapshot = resources.WatchSnapshot{Items: []resources.TopicObject{}}
+					continueToken, restarted = "", true
+					continue
+				}
+				if !shouldFallbackMetadata(err) {
+					return resources.WatchSnapshot{}, mapMetadataError(err, "ConfigMap metadata watches are unavailable.")
+				}
+			}
+			list, err := clients.kubernetes.CoreV1().ConfigMaps(key.Namespace).List(ctx, options)
 			if err != nil {
-				return resources.WatchSnapshot{}, mapMetadataError(err, "ConfigMap metadata watches are unavailable.")
+				if continueToken != "" && !restarted && (apierrors.IsResourceExpired(err) || apierrors.IsGone(err)) {
+					snapshot = resources.WatchSnapshot{Items: []resources.TopicObject{}}
+					continueToken, restarted = "", true
+					continue
+				}
+				return resources.WatchSnapshot{}, mapResourceError(err)
 			}
 			for index := range list.Items {
 				snapshot.Items = append(snapshot.Items, resources.ConvertConfigMapMetadata(&list.Items[index]))
@@ -135,6 +188,11 @@ func (port *resourceWatchPort) listWithClients(ctx context.Context, binding name
 		} else {
 			list, err := clients.dynamic.Resource(key.GVR).Namespace(key.Namespace).List(ctx, options)
 			if err != nil {
+				if continueToken != "" && !restarted && (apierrors.IsResourceExpired(err) || apierrors.IsGone(err)) {
+					snapshot = resources.WatchSnapshot{Items: []resources.TopicObject{}}
+					continueToken, restarted = "", true
+					continue
+				}
 				return resources.WatchSnapshot{}, mapResourceError(err)
 			}
 			for index := range list.Items {
@@ -149,6 +207,9 @@ func (port *resourceWatchPort) listWithClients(ctx context.Context, binding name
 		if len(snapshot.Items) > resources.MaximumSnapshotItems {
 			return resources.WatchSnapshot{}, resourceDomain(resources.CodeLimitExceeded, "The initial snapshot is too large.", nil)
 		}
+		if emit != nil && len(snapshot.Items) > pageStart && !emit(snapshot.Items[pageStart:]) {
+			return resources.WatchSnapshot{}, context.Canceled
+		}
 		if continueToken == "" {
 			return snapshot, nil
 		}
@@ -156,6 +217,18 @@ func (port *resourceWatchPort) listWithClients(ctx context.Context, binding name
 }
 
 func (port *resourceWatchPort) Watch(ctx context.Context, key resources.WatchKey, resourceVersion string, timeoutSeconds int64, bookmarks bool) (resources.WatchStream, error) {
+	return port.watchWithOptions(ctx, key, metav1.ListOptions{ResourceVersion: resourceVersion, TimeoutSeconds: &timeoutSeconds, AllowWatchBookmarks: bookmarks})
+}
+
+func (port *resourceWatchPort) WatchInitial(ctx context.Context, key resources.WatchKey, timeoutSeconds int64) (resources.WatchStream, error) {
+	enabled := true
+	return port.watchWithOptions(ctx, key, metav1.ListOptions{
+		ResourceVersion: "", ResourceVersionMatch: metav1.ResourceVersionMatchNotOlderThan,
+		TimeoutSeconds: &timeoutSeconds, AllowWatchBookmarks: true, SendInitialEvents: &enabled,
+	})
+}
+
+func (port *resourceWatchPort) watchWithOptions(ctx context.Context, key resources.WatchKey, options metav1.ListOptions) (resources.WatchStream, error) {
 	binding, err := port.binding(key.Generation)
 	if err != nil {
 		return nil, err
@@ -164,22 +237,39 @@ func (port *resourceWatchPort) Watch(ctx context.Context, key resources.WatchKey
 	if err != nil {
 		return nil, mapResourceError(err)
 	}
-	streamContext, err := lease.Generation.Stream(ctx, time.Duration(timeoutSeconds+30)*time.Second)
+	streamContext, err := lease.Generation.Stream(ctx, time.Duration(*options.TimeoutSeconds+30)*time.Second)
 	if err != nil {
 		return nil, mapResourceError(err)
 	}
-	options := metav1.ListOptions{ResourceVersion: resourceVersion, TimeoutSeconds: &timeoutSeconds, AllowWatchBookmarks: bookmarks}
 	var source kwatch.Interface
 	if key.Topic == resources.TopicConfigMaps {
-		client := lease.Clients.StreamingMetadata()
-		if client == nil {
-			streamContext.Close()
-			return nil, resourceDomain(resources.CodeFeatureUnavailable, "ConfigMap metadata watches are unavailable.", nil)
+		if !port.backend.disablePartialMetadata {
+			client := lease.Clients.StreamingMetadata()
+			if client != nil {
+				source, err = client.Resource(key.GVR).Namespace(key.Namespace).Watch(streamContext.Context(), options)
+			}
+			if err != nil && !shouldFallbackMetadata(err) {
+				streamContext.Close()
+				if options.SendInitialEvents != nil && (apierrors.IsBadRequest(err) || apierrors.IsInvalid(err)) {
+					return nil, resources.ErrStreamingListsUnsupported
+				}
+				return nil, mapMetadataError(err, "ConfigMap metadata watches are unavailable.")
+			}
 		}
-		source, err = client.Resource(key.GVR).Namespace(key.Namespace).Watch(streamContext.Context(), options)
-		if err != nil {
-			streamContext.Close()
-			return nil, mapMetadataError(err, "ConfigMap metadata watches are unavailable.")
+		if source == nil {
+			client := lease.Clients.StreamingKubernetes()
+			if client == nil {
+				streamContext.Close()
+				return nil, resourceDomain(resources.CodeFeatureUnavailable, "ConfigMap watches are unavailable.", nil)
+			}
+			source, err = client.CoreV1().ConfigMaps(key.Namespace).Watch(streamContext.Context(), options)
+			if err != nil {
+				streamContext.Close()
+				if options.SendInitialEvents != nil && (apierrors.IsBadRequest(err) || apierrors.IsInvalid(err)) {
+					return nil, resources.ErrStreamingListsUnsupported
+				}
+				return nil, mapResourceError(err)
+			}
 		}
 	} else {
 		client := lease.Clients.StreamingDynamic()
@@ -190,10 +280,13 @@ func (port *resourceWatchPort) Watch(ctx context.Context, key resources.WatchKey
 		source, err = client.Resource(key.GVR).Namespace(key.Namespace).Watch(streamContext.Context(), options)
 		if err != nil {
 			streamContext.Close()
+			if options.SendInitialEvents != nil && (apierrors.IsBadRequest(err) || apierrors.IsInvalid(err)) {
+				return nil, resources.ErrStreamingListsUnsupported
+			}
 			return nil, mapResourceError(err)
 		}
 	}
-	result := &resourceWatchStream{ctx: streamContext.Context(), source: source, cancel: streamContext.Close, results: make(chan resources.WatchChange, 64)}
+	result := &resourceWatchStream{ctx: streamContext.Context(), source: source, cancel: streamContext.Close, results: make(chan resources.WatchChange, 64), initial: options.SendInitialEvents != nil}
 	go result.run(key, port)
 	return result, nil
 }
@@ -204,34 +297,70 @@ type resourceWatchStream struct {
 	cancel  func()
 	results chan resources.WatchChange
 	once    sync.Once
+	initial bool
 }
 
 func (stream *resourceWatchStream) ResultChan() <-chan resources.WatchChange { return stream.results }
 func (stream *resourceWatchStream) Stop() {
-	stream.once.Do(func() { stream.source.Stop(); stream.cancel() })
+	stream.once.Do(func() { stream.cancel(); stream.source.Stop() })
+}
+
+func (stream *resourceWatchStream) send(change resources.WatchChange) bool {
+	select {
+	case <-stream.ctx.Done():
+		return false
+	case stream.results <- change:
+		return true
+	}
 }
 
 func (stream *resourceWatchStream) run(key resources.WatchKey, port *resourceWatchPort) {
 	defer close(stream.results)
 	defer stream.Stop()
-	for event := range stream.source.ResultChan() {
-		change := resources.WatchChange{Type: string(event.Type)}
+	for {
+		var event kwatch.Event
+		select {
+		case <-stream.ctx.Done():
+			return
+		case next, ok := <-stream.source.ResultChan():
+			if !ok {
+				return
+			}
+			event = next
+		}
+		change := resources.WatchChange{Type: string(event.Type), ReceivedAt: time.Now()}
 		if event.Type == kwatch.Bookmark {
+			accessor, err := meta.Accessor(event.Object)
+			if err != nil {
+				change.Err = resourceDomain(resources.CodeClusterUnavailable, "The Kubernetes bookmark is invalid.", err)
+				stream.send(change)
+				return
+			}
+			change.ResourceVersion = accessor.GetResourceVersion()
+			if stream.initial && accessor.GetAnnotations()["k8s.io/initial-events-end"] == "true" {
+				change.InitialEventsEnd = true
+				stream.initial = false
+			}
+			if change.ResourceVersion != "" && !stream.send(change) {
+				return
+			}
 			continue
 		}
 		if event.Type == kwatch.Error {
 			if apierrors.IsResourceExpired(apierrors.FromObject(event.Object)) || apierrors.IsGone(apierrors.FromObject(event.Object)) {
 				change.Err = resources.ErrResourceExpired
+			} else if stream.initial && (apierrors.IsBadRequest(apierrors.FromObject(event.Object)) || apierrors.IsInvalid(apierrors.FromObject(event.Object))) {
+				change.Err = resources.ErrStreamingListsUnsupported
 			} else {
 				change.Err = mapResourceError(apierrors.FromObject(event.Object))
 			}
-			stream.results <- change
+			stream.send(change)
 			return
 		}
 		accessor, err := meta.Accessor(event.Object)
 		if err != nil {
 			change.Err = resourceDomain(resources.CodeClusterUnavailable, "The Kubernetes watch returned an invalid object.", err)
-			stream.results <- change
+			stream.send(change)
 			return
 		}
 		change.ResourceVersion = accessor.GetResourceVersion()
@@ -241,19 +370,21 @@ func (stream *resourceWatchStream) run(key resources.WatchKey, port *resourceWat
 			object, convertErr := port.convertRuntime(stream.ctx, key, event.Object)
 			if convertErr != nil {
 				change.Err = convertErr
-				stream.results <- change
+				stream.send(change)
 				return
 			}
 			change.Object = object
 		}
-		stream.results <- change
+		if !stream.send(change) {
+			return
+		}
 	}
 }
 
 func (port *resourceWatchPort) convertRuntime(ctx context.Context, key resources.WatchKey, object kruntime.Object) (resources.TopicObject, error) {
 	if key.Topic == resources.TopicConfigMaps {
-		metadataObject, ok := object.(*metav1.PartialObjectMetadata)
-		if !ok {
+		metadataObject, err := meta.Accessor(object)
+		if err != nil {
 			return nil, resourceDomain(resources.CodeFeatureUnavailable, "ConfigMap metadata watches are unavailable.", nil)
 		}
 		return resources.ConvertConfigMapMetadata(metadataObject), nil
@@ -341,6 +472,12 @@ func (port *resourceWatchPort) convertWithCronHistory(key resources.WatchKey, ob
 			return nil, mapResourceError(err)
 		}
 		return resources.ConvertEndpointSlice(&value), nil
+	case "persistentvolumeclaims":
+		var value corev1.PersistentVolumeClaim
+		if err := kruntime.DefaultUnstructuredConverter.FromUnstructured(object.Object, &value); err != nil {
+			return nil, mapResourceError(err)
+		}
+		return resources.ConvertPersistentVolumeClaim(&value, now), nil
 	default:
 		return nil, resourceDomain(resources.CodeValidationFailed, "The watch resource is invalid.", nil)
 	}
@@ -370,6 +507,8 @@ func kindForGVR(gvr schema.GroupVersionResource) string {
 		return "EndpointSlice"
 	case "configmaps":
 		return "ConfigMap"
+	case "persistentvolumeclaims":
+		return "PersistentVolumeClaim"
 	default:
 		return "Unknown"
 	}

@@ -6,6 +6,60 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 versions follow [Semantic Versioning](https://semver.org/) **without the `v`
 prefix** (official tags: `1.4.2`, `1.4.3`, …), and entries are generated
 automatically from Conventional Commits by `.github/workflows/release.yml`.
+
+## [0.7.0] - 2026-09-29
+
+### Added
+
+- Progressive, virtualized resource lists with bounded server-side cursors,
+  cancellation, request coalescing, and demand-driven resource watches.
+- Resource workspaces with contextual actions, bulk operations, and visible
+  RBAC feedback; an explicit default namespace scope is restored per context.
+- Problems Engine, workload investigation, aggregated container logs, local
+  resource search, and diagnostics without persisting Kubernetes content.
+
+### Changed
+
+- Cache, live snapshots, pages, and cursor payloads share a bounded 224 MiB
+  budget; idle resources can be reclaimed and generation changes fence data.
+- PartialObjectMetadata, Protobuf, adaptive concurrency, and related prefetch
+  are enabled on the measured paths. Compression and streaming lists remain
+  opt-in, with JSON/classic LIST fallbacks preserved.
+- Desktop startup defers resource work until the shell and required namespace
+  scope are ready. Lists preserve useful content during refresh.
+- Release validation scans native binaries and nested packages, requires both
+  native CI platforms, and preserves reviewed notes across retries. Candidate
+  builds use an explicit source commit and consistent native version metadata.
+
+### Fixed
+
+- Empty Pod views and inactive navigation/action controls covered by the final
+  UI regression inventory.
+- Default-scope activation retries, including expired sessions and defaults
+  beyond the first page of saved scopes.
+- Retry-After handling, Dashboard prefetch starvation, watch snapshot growth
+  and rejected-subscription cleanup.
+- Selector matching for missing labels, current and previous OOM diagnostics,
+  and cancellation/container selection for aggregated logs.
+- Windows npm setup and version propagation to local desktop builds.
+
+### Compatibility
+
+- Secrets remain metadata-only. Resource caches and cursors stay in memory;
+  backend authorization, CSRF, generation checks, and loopback bindings remain
+  enforced.
+- Helm, Gateway API, arbitrary YAML editing, Prometheus integration, and
+  simultaneous multi-context operation remain outside this release.
+
+### Download
+
+Installers are available after publication through the
+[download guide](https://github.com/fvmoraes/kubepeep/blob/main/docs/download.md).
+
+### Full Changelog
+
+[Changes since the previous official tag](https://github.com/fvmoraes/kubepeep/compare/0.6.1...0.7.0).
+
 ## [0.6.2] - 2026-09-08
 
 ## Changed

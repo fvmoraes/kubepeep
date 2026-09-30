@@ -77,6 +77,35 @@ func TestInvokePreservesSecurityHeadersAndEnvelope(t *testing.T) {
 	}
 }
 
+func TestInvokeCancelablePropagatesCancellationToHandler(t *testing.T) {
+	started := make(chan struct{})
+	finished := make(chan error, 1)
+	bridge := NewBridge(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(started)
+		<-r.Context().Done()
+		finished <- r.Context().Err()
+	}), "http://127.0.0.1:2748", "http://127.0.0.1:2748")
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = bridge.InvokeCancelable("request-1", "GET", "/api/v1/pods", nil, "")
+	}()
+	<-started
+	bridge.Cancel("request-1")
+	select {
+	case err := <-finished:
+		if err != context.Canceled {
+			t.Fatalf("handler cancellation = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("desktop cancellation did not reach the handler")
+	}
+	<-done
+	if _, err := bridge.InvokeCancelable("invalid/request", "GET", "/api/v1/status", nil, ""); err == nil {
+		t.Fatal("invalid request id was accepted")
+	}
+}
+
 func TestPlatformInfoIsSanitized(t *testing.T) {
 	bridge := NewBridge(http.NotFoundHandler(), "http://127.0.0.1:2748", "http://127.0.0.1:2748")
 	info := bridge.PlatformInfo()

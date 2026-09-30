@@ -17,6 +17,7 @@ var preferenceKeys = map[string]struct{}{
 	"ui.language": {}, "logs.wrap": {}, "logs.timestamps": {}, "logs.tail_lines": {},
 	"dashboard.log_scan_window": {}, "dashboard.section_order": {}, "dashboard.hidden_sections": {},
 	"filters.workloads": {}, "filters.pods": {}, "filters.events": {}, "filters.logs": {},
+	"favorites": {}, "shell.sidebar_compact": {}, "shell.collapsed_groups": {}, "columns.hidden": {}, "recent": {},
 }
 
 type PreferenceRepository struct {

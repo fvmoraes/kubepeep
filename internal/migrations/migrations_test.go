@@ -10,13 +10,18 @@ func TestEmbeddedMigrationsAreOrderedAndChecksummed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(loaded) != 1 || loaded[0].Version != 1 || loaded[0].Name != "initial" {
+	if len(loaded) != 3 || loaded[0].Version != 1 || loaded[0].Name != "initial" || loaded[1].Version != 2 || loaded[1].Name != "expand_preferences" || loaded[2].Version != 3 || loaded[2].Name != "namespace_scope_defaults" {
 		t.Fatalf("unexpected migrations: %#v", loaded)
 	}
-	if !regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(loaded[0].Checksum) {
-		t.Fatalf("invalid checksum: %q", loaded[0].Checksum)
+	for _, migration := range loaded {
+		if !regexp.MustCompile(`^[0-9a-f]{64}$`).MatchString(migration.Checksum) {
+			t.Fatalf("invalid checksum: %q", migration.Checksum)
+		}
 	}
 	if loaded[0].Destructive {
 		t.Fatal("initial migration must not be destructive")
+	}
+	if !loaded[1].Destructive {
+		t.Fatal("preference table replacement requires a verified backup")
 	}
 }

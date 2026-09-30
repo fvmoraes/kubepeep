@@ -20,6 +20,8 @@ import {
   getDashboardProblems,
   getDashboardRestarts,
   getDashboardSummary,
+  getNodes,
+  getPersistentVolumeClaims,
   getSession,
   getStatus,
   scanDashboardLogs,
@@ -36,11 +38,16 @@ import {
   type DashboardSummary,
   type LogScanRequest,
   type MetricRank,
+  type NodeSummary,
+  type PersistentVolumeClaim,
+  type CollectionResult,
   type SelectionSummary,
 } from '../api/client'
 import { StatePanel } from './StatePanel'
+import { PanelErrorBoundary } from './PanelErrorBoundary'
 import { Badge, Button, DataTable, Select, type BadgeVariant } from './ui'
 import { WarningBanner } from './ui/Banner'
+import { useResourceWorkspace } from './workspace/ResourceWorkspaceProvider'
 
 const dashboardQueryDefaults = {
   staleTime: 30_000,
@@ -252,14 +259,14 @@ function NamespaceHealthTable({ values }: { values: DashboardNamespaceHealth[] }
   )
 }
 
-function DashboardSection({ id, title, action, children }: { id: string; title: string; action?: ReactNode; children: ReactNode }) {
+function DashboardSection({ id, title, action, children, error = false, onRetry }: { id: string; title: string; action?: ReactNode; children: ReactNode; error?: boolean; onRetry?: () => void }) {
   return (
     <section id={id} aria-labelledby={`${id}-title`} className="rounded-xl border border-kp-overlay-0 bg-kp-surface-0 p-4">
       <div className="mb-3 flex items-center justify-between gap-4">
         <h2 id={`${id}-title`} className="text-base text-kp-text">{title}</h2>
-        {action}
+        <div className="flex items-center gap-2">{action}{error && onRetry ? <Button variant="secondary" size="sm" onClick={onRetry}>Retry {title}</Button> : null}</div>
       </div>
-      {children}
+      <PanelErrorBoundary name={title} onRetry={onRetry}>{children}</PanelErrorBoundary>
     </section>
   )
 }
@@ -312,17 +319,57 @@ function SummaryCards({ summary, logCounter }: { summary: DashboardSummary; logC
   return <div className="grid grid-cols-2 gap-2.5 md:grid-cols-4">{cards.map(([label, counter, href, icon]) => <CounterCard key={label} label={label} counter={counter} href={href} icon={icon} />)}</div>
 }
 
+interface InfrastructureSnapshot {
+  nodes: CollectionResult<NodeSummary>
+  claims: CollectionResult<PersistentVolumeClaim>
+}
+
+function InfrastructureView({ value }: { value: InfrastructureSnapshot }) {
+  const readyNodes = value.nodes.items.filter((node) => node.ready).length
+  const pendingClaims = value.claims.items.filter((claim) => claim.status !== 'Bound').length
+  const partial = !value.nodes.page.complete || !value.claims.page.complete ||
+    (value.nodes.coverage?.failed.length ?? 0) > 0 || (value.claims.coverage?.failed.length ?? 0) > 0
+  return (
+    <div className="grid gap-3 sm:grid-cols-2">
+      {partial ? <WarningBanner className="sm:col-span-2">Infrastructure totals are bounded to the authorized pages currently available.</WarningBanner> : null}
+      <Link className="grid gap-1 rounded-lg border border-kp-overlay-0 bg-kp-surface-1 p-3 hover:border-kp-overlay-2" to="/nodes">
+        <span className="text-xs text-kp-overlay-text">Node health</span>
+        <strong className="text-xl text-kp-text">{readyNodes}/{value.nodes.items.length} Ready</strong>
+      </Link>
+      <Link className="grid gap-1 rounded-lg border border-kp-overlay-0 bg-kp-surface-1 p-3 hover:border-kp-overlay-2" to="/storage/persistent-volume-claims">
+        <span className="text-xs text-kp-overlay-text">PersistentVolumeClaims</span>
+        <strong className={pendingClaims > 0 ? 'text-xl text-kp-yellow' : 'text-xl text-kp-text'}>{pendingClaims} not Bound</strong>
+      </Link>
+    </div>
+  )
+}
+
 function severityBadgeVariant(severity: DashboardProblem['severity']): BadgeVariant {
   switch (severity) {
     case 'critical':
       return 'danger'
     case 'warning':
-    default:
       return 'warning'
+		case 'info':
+		default:
+			return 'info'
   }
 }
 
 function ProblemsTable({ values }: { values: DashboardProblem[] }) {
+	const workspace = useResourceWorkspace()
+	const counts = values.reduce((result, problem) => ({ ...result, [problem.severity]: result[problem.severity] + 1 }), { critical: 0, warning: 0, info: 0 })
+	const targetFor = (problem: DashboardProblem) => {
+		const kind = problem.resource.kind
+		if (kind === 'Pod') return { collection: 'pods', kind, namespace: problem.namespace, name: problem.resource.name }
+		if (['Deployment', 'ReplicaSet', 'StatefulSet', 'DaemonSet', 'Job', 'CronJob'].includes(kind)) return { collection: 'workloads', kind, namespace: problem.namespace, name: problem.resource.name }
+		if (kind === 'PersistentVolumeClaim') return { collection: 'persistent-volume-claims', kind, namespace: problem.namespace, name: problem.resource.name }
+		if (kind === 'Node') return { collection: 'nodes', kind, namespace: null, name: problem.resource.name }
+		return null
+	}
+	const logsPath = (problem: DashboardProblem) => problem.resource.kind === 'Pod'
+		? `/logs?namespace=${encodeURIComponent(problem.namespace)}&pod=${encodeURIComponent(problem.resource.name)}`
+		: `/logs?workload=${encodeURIComponent(`${problem.resource.kind}/${problem.namespace}/${problem.resource.name}`)}`
   const columns = [
     {
       key: 'severity',
@@ -330,14 +377,14 @@ function ProblemsTable({ values }: { values: DashboardProblem[] }) {
       cell: (problem: DashboardProblem) => <Badge variant={severityBadgeVariant(problem.severity)}>{problem.severity}</Badge>,
     },
     {
-      key: 'pod',
-      header: 'Pod',
-      cell: (problem: DashboardProblem) => <><strong className="block text-kp-text">{problem.pod}</strong><small className="block text-xs text-kp-overlay-text">{problem.namespace}{problem.container ? ` · ${problem.container}` : ''}</small></>,
+		key: 'resource',
+		header: 'Resource',
+		cell: (problem: DashboardProblem) => <><strong className="block text-kp-text">{problem.resource.kind} · {problem.resource.name}</strong><small className="block text-xs text-kp-overlay-text">{problem.namespace || 'cluster'}{problem.container ? ` · ${problem.container}` : ''}</small></>,
     },
     {
       key: 'diagnosis',
       header: 'Diagnosis',
-      cell: (problem: DashboardProblem) => <><strong className="block text-kp-text">{problem.reason ?? 'No diagnosis reported'}</strong><small className="block text-xs text-kp-overlay-text">{problem.message ?? `Source: ${problem.source}`}</small></>,
+		cell: (problem: DashboardProblem) => <><strong className="block text-kp-text">{problem.reason ?? 'Observed problem'}</strong><small className="block text-xs text-kp-overlay-text">{problem.summary || problem.message || `Source: ${problem.source}`}</small></>,
     },
     {
       key: 'status',
@@ -345,18 +392,25 @@ function ProblemsTable({ values }: { values: DashboardProblem[] }) {
       cell: (problem: DashboardProblem) => problem.status,
     },
     {
-      key: 'age',
-      header: 'Age',
-      cell: (problem: DashboardProblem) => formatDuration(problem.ageSeconds),
+		key: 'actions',
+		header: 'Actions',
+		cell: (problem: DashboardProblem) => <div className="flex flex-wrap gap-1">{targetFor(problem) ? <Button size="sm" variant="secondary" onClick={() => workspace.openResource(targetFor(problem)!, 'investigation')}>Inspect</Button> : null}{problem.actions.includes('logs') ? <Link className="rounded-md border border-kp-overlay-1 px-2 py-1 text-xs text-kp-sky hover:border-kp-accent-border" to={logsPath(problem)}>Logs</Link> : null}</div>,
     },
   ]
   return (
-    <DataTable
-      caption="At most one prioritized diagnosis per pod"
-      columns={columns}
-      rows={values}
-      getRowKey={(problem) => `${problem.namespace}/${problem.pod}`}
-    />
+		<div className="grid gap-3">
+			<div className="flex flex-wrap gap-2" aria-label="Problem counts by severity">
+				<Badge variant="danger">{counts.critical} critical</Badge>
+				<Badge variant="warning">{counts.warning} warning</Badge>
+				<Badge variant="info">{counts.info} info</Badge>
+			</div>
+			<DataTable
+				caption="Observed problems across Pods, workloads, storage, Nodes and Warning events"
+				columns={columns}
+				rows={values}
+				getRowKey={(problem) => `${problem.namespace}/${problem.resource.kind}/${problem.resource.name}/${problem.reason ?? problem.source}`}
+			/>
+		</div>
   )
 }
 
@@ -566,8 +620,21 @@ function DashboardContent({ selection, cluster }: { selection: SelectionSummary;
 	const problems = useQuery({ queryKey: ['dashboard', 'problems', selection.generation], queryFn: ({ signal }) => getDashboardProblems(signal, selection.generation), ...dashboardQueryDefaults })
 	const restarts = useQuery({ queryKey: ['dashboard', 'restarts', selection.generation, 10], queryFn: ({ signal }) => getDashboardRestarts(10, signal, selection.generation), ...dashboardQueryDefaults })
 	const events = useQuery({ queryKey: ['dashboard', 'events', selection.generation], queryFn: ({ signal }) => getDashboardEvents(signal, selection.generation), ...dashboardQueryDefaults })
-	const metrics = useQuery({ queryKey: ['dashboard', 'metrics', selection.generation], queryFn: ({ signal }) => getDashboardMetrics(signal, selection.generation), ...dashboardQueryDefaults })
-	const namespaceHealth = useQuery({ queryKey: ['dashboard', 'namespace-health', selection.generation], queryFn: ({ signal }) => getDashboardNamespaceHealth(signal, selection.generation), ...dashboardQueryDefaults })
+	// Tier 2 cannot occupy network capacity before the core overview settles.
+	const metrics = useQuery({ queryKey: ['dashboard', 'metrics', selection.generation], queryFn: ({ signal }) => getDashboardMetrics(signal, selection.generation), ...dashboardQueryDefaults, enabled: summary.isSuccess, staleTime: 8_000, refetchInterval: 8_000, refetchIntervalInBackground: false })
+	const namespaceHealth = useQuery({ queryKey: ['dashboard', 'namespace-health', selection.generation], queryFn: ({ signal }) => getDashboardNamespaceHealth(signal, selection.generation), ...dashboardQueryDefaults, enabled: summary.isSuccess })
+	const infrastructure = useQuery({
+		queryKey: ['dashboard', 'infrastructure', selection.generation],
+		queryFn: async ({ signal }) => {
+			// A cold scheduler admits one unrelated read while reserving capacity
+			// for visible work. Keep this background panel inside that allowance.
+			const nodes = await getNodes({ limit: 100, priority: 'unrelated', skipUXTiming: true }, signal, selection.generation)
+			const claims = await getPersistentVolumeClaims({ limit: 100, priority: 'unrelated', skipUXTiming: true }, signal, selection.generation)
+			return { nodes, claims }
+		},
+		...dashboardQueryDefaults,
+		enabled: summary.isSuccess,
+	})
   const session = useQuery({ queryKey: ['session', selection.generation], queryFn: ({ signal }) => getSession(signal), staleTime: 5 * 60_000, retry: false })
   const [scanWindow, setScanWindow] = useState<LogScanRequest['window']>('15m')
   const [logScan, setLogScan] = useState<LogScanState>({ kind: 'idle' })
@@ -605,11 +672,12 @@ function DashboardContent({ selection, cluster }: { selection: SelectionSummary;
       restarts.refetch({ cancelRefetch: true }),
       events.refetch({ cancelRefetch: true }),
       metrics.refetch({ cancelRefetch: true }),
-      namespaceHealth.refetch({ cancelRefetch: true }),
+        namespaceHealth.refetch({ cancelRefetch: true }),
+		infrastructure.refetch({ cancelRefetch: true }),
     ])
   }
 
-  const isRefreshing = [summary, problems, restarts, events, metrics, namespaceHealth].some((query) => query.isFetching)
+    const isRefreshing = [summary, problems, restarts, events, metrics, namespaceHealth, infrastructure].some((query) => query.isFetching)
   const logCounter: DashboardCounter = logScan.kind === 'pending'
     ? { state: 'collecting', value: null }
     : logScan.kind === 'success'
@@ -650,7 +718,7 @@ function DashboardContent({ selection, cluster }: { selection: SelectionSummary;
         <div className="flex items-center justify-center gap-3 bg-kp-surface-1 px-3 py-2.5 text-xs"><Link className="text-kp-mauve hover:underline" to="/namespaces">Edit scope</Link><Link className="text-kp-mauve hover:underline" to="/permissions">View RBAC</Link></div>
       </div>
 
-      <DashboardSection id="summary" title="Summary" action={<BlockAge response={summary.data as DashboardResponse<unknown> | undefined} />}>
+      <DashboardSection id="summary" title="Summary" action={<BlockAge response={summary.data as DashboardResponse<unknown> | undefined} />} error={summary.isError} onRetry={() => void summary.refetch()}>
         <ResultBody
           pending={summary.isPending}
           error={summary.error}
@@ -663,13 +731,13 @@ function DashboardContent({ selection, cluster }: { selection: SelectionSummary;
       </DashboardSection>
 
       <div className="grid items-start gap-4 lg:grid-cols-2">
-        <DashboardSection id="problems" title="Problem pods" action={<BlockAge response={problems.data as DashboardResponse<unknown> | undefined} />}>
+		<DashboardSection id="problems" title="Problems" action={<BlockAge response={problems.data as DashboardResponse<unknown> | undefined} />} error={problems.isError} onRetry={() => void problems.refetch()}>
           <ResultBody pending={problems.isPending} error={problems.error} response={problems.data} isEmpty={(value) => value.length === 0} emptyCopy="No problematic pod was found in the completed coverage.">
             {(value) => <ProblemsTable values={value} />}
           </ResultBody>
         </DashboardSection>
 
-        <DashboardSection id="restarts" title="Container restarts" action={<BlockAge response={restarts.data as DashboardResponse<unknown> | undefined} />}>
+        <DashboardSection id="restarts" title="Container restarts" action={<BlockAge response={restarts.data as DashboardResponse<unknown> | undefined} />} error={restarts.isError} onRetry={() => void restarts.refetch()}>
           <ResultBody pending={restarts.isPending} error={restarts.error} response={restarts.data} isEmpty={(value) => value.length === 0} emptyCopy="No container restart was found in the completed coverage.">
             {(value) => <RestartsTable values={value} />}
           </ResultBody>
@@ -677,28 +745,36 @@ function DashboardContent({ selection, cluster }: { selection: SelectionSummary;
       </div>
 
       <div className="grid items-start gap-4 lg:grid-cols-2">
-        <DashboardSection id="warning-events" title="Warning events" action={<BlockAge response={events.data as DashboardResponse<unknown> | undefined} />}>
+        <DashboardSection id="warning-events" title="Warning events" action={<BlockAge response={events.data as DashboardResponse<unknown> | undefined} />} error={events.isError} onRetry={() => void events.refetch()}>
           <ResultBody pending={events.isPending} error={events.error} response={events.data} isEmpty={(value) => value.length === 0} emptyCopy="No Warning event was found in the completed coverage.">
             {(value) => <EventsTable values={value} />}
           </ResultBody>
         </DashboardSection>
 
-        <DashboardSection id="namespace-health" title="Namespace health" action={<BlockAge response={namespaceHealth.data as DashboardResponse<unknown> | undefined} />}>
+        <DashboardSection id="namespace-health" title="Namespace health" action={<BlockAge response={namespaceHealth.data as DashboardResponse<unknown> | undefined} />} error={namespaceHealth.isError} onRetry={() => void namespaceHealth.refetch()}>
           <ResultBody pending={namespaceHealth.isPending} error={namespaceHealth.error} response={namespaceHealth.data} isEmpty={(value) => value.length === 0} emptyCopy="No namespace health was collected for the active scope.">
             {(value) => <NamespaceHealthTable values={value} />}
           </ResultBody>
         </DashboardSection>
       </div>
 
-      <DashboardSection id="metrics" title="Pod metrics" action={<BlockAge response={metrics.data as DashboardResponse<unknown> | undefined} />}>
+        <DashboardSection id="metrics" title="Pod metrics" action={<BlockAge response={metrics.data as DashboardResponse<unknown> | undefined} />} error={metrics.isError} onRetry={() => void metrics.refetch()}>
         <ResultBody pending={metrics.isPending} error={metrics.error} response={metrics.data} isEmpty={(value) => value.pods.length === 0} emptyCopy="The Metrics API returned no pod metrics for the completed coverage." optional>
           {(value) => <MetricsView value={value} />}
         </ResultBody>
-      </DashboardSection>
+        </DashboardSection>
+
+		<DashboardSection id="infrastructure" title="Infrastructure" error={infrastructure.isError} onRetry={() => void infrastructure.refetch()}>
+			{infrastructure.isPending ? <div className={blockStateBox('loading')} role="status" aria-busy="true"><strong className="text-sm text-kp-text">Loading infrastructure</strong><span className="text-xs text-kp-overlay-text">Node and storage checks run after the core summary.</span></div> : null}
+			{infrastructure.error ? queryFailure(infrastructure.error, false) : null}
+			{infrastructure.data ? <InfrastructureView value={infrastructure.data} /> : null}
+		</DashboardSection>
 
       <DashboardSection
         id="log-scan"
         title="Possible errors in logs"
+        error={logScan.kind === 'error'}
+        onRetry={() => void runLogScan()}
         action={(
           <div className="flex items-end justify-end gap-2">
             <label className="grid gap-1">

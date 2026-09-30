@@ -15,6 +15,9 @@ DashboardProblem,
 DashboardResponse,
 DashboardRestart,
 DashboardSummary,
+Diagnostics,
+Investigation,
+LocalResourceIndex,
 Envelope,
 EndpointSliceDetail,
 EndpointSliceResource,
@@ -91,6 +94,7 @@ Workload,
 WorkloadDetail,
 PriorityClass,
 } from './types'
+import { cancelListRequest, associateListRequestRows, beginListRequest, completeListRequest } from '../observability/uxMetrics'
 import { desktopRequest } from './desktop'
 
 export type * from './types'
@@ -170,7 +174,7 @@ async function transport(path: string, init: RequestInit): Promise<ResponseLike>
       headers[name] = value
     }
   }
-  const desktop = await desktopRequest(method, path, headers, init.body ? String(init.body) : undefined)
+  const desktop = await desktopRequest(method, path, headers, init.body ? String(init.body) : undefined, init.signal)
   if (desktop) return desktop
   return fetch(path, {
     ...init,
@@ -253,6 +257,8 @@ function resourceQuery(options: ResourceListQuery = {}): string {
     ['objectKind', options.objectKind],
     ['reason', options.reason],
     ['addressType', options.addressType],
+    ['labelSelector', options.labelSelector],
+    ['fieldSelector', options.fieldSelector],
   ]
   for (const namespace of options.namespaces ?? []) entries.push(['namespace', namespace])
   for (const kind of options.kinds ?? []) entries.push(['kind', kind])
@@ -261,25 +267,47 @@ function resourceQuery(options: ResourceListQuery = {}): string {
 }
 
 async function collectionRequest<T>(path: string, options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<T>> {
-  const response = await requestEnvelope<T[]>(`${path}${resourceQuery(options)}`, { method: 'GET', signal })
-  if (!Array.isArray(response.data)) {
-    throw new APIError(502, { code: 'INVALID_RESPONSE', message: 'The resource collection returned an invalid response.' })
-  }
-  if (expectedGeneration && response.meta?.generation !== expectedGeneration) {
-    throw new APIError(409, { code: 'GENERATION_CHANGED', message: 'The resource response belongs to another selection generation.' })
-  }
-  return {
-    items: response.data,
-    page: response.meta?.page ?? {
-      limit: options.limit ?? response.data.length,
-      next: '',
-      complete: false,
-      truncated: true,
-      filterScope: 'page',
-    },
-    coverage: response.meta?.coverage ?? null,
-    generation: response.meta?.generation,
-    collectedAt: response.meta?.collectedAt,
+  const uxRequestId = options.skipUXTiming ? null : beginListRequest({ interactionId: options.uxInteractionId })
+  try {
+    let response: Envelope<T[]>
+    let snapshotRenewed = false
+    try {
+        const priority = options.priority ?? (options.prefetch ? 'likely-next' : undefined)
+        response = await requestEnvelope<T[]>(`${path}${resourceQuery(options)}`, { method: 'GET', signal, headers: priority ? { 'X-KubePeep-List-Priority': priority } : undefined })
+    } catch (error) {
+      if (!options.continueToken || !(error instanceof APIError) || (error.status !== 410 && error.code !== 'CURSOR_EXPIRED') || signal?.aborted) throw error
+      // Kubernetes expired the paginated LIST checkpoint. Restart at the
+      // first page with the same filters instead of surfacing a fatal error.
+      response = await requestEnvelope<T[]>(`${path}${resourceQuery({ ...options, continueToken: undefined })}`, { method: 'GET', signal })
+      snapshotRenewed = true
+    }
+    if (!Array.isArray(response.data)) {
+      throw new APIError(502, { code: 'INVALID_RESPONSE', message: 'The resource collection returned an invalid response.' })
+    }
+    if (expectedGeneration && response.meta?.generation !== expectedGeneration) {
+      throw new APIError(409, { code: 'GENERATION_CHANGED', message: 'The resource response belongs to another selection generation.' })
+    }
+    if (uxRequestId) {
+      associateListRequestRows(uxRequestId, response.data)
+      completeListRequest(uxRequestId, response.data.length > 0)
+    }
+    return {
+      items: response.data,
+      page: response.meta?.page ?? {
+        limit: options.limit ?? response.data.length,
+        next: '',
+        complete: false,
+        truncated: true,
+        filterScope: 'page',
+      },
+      coverage: response.meta?.coverage ?? null,
+      generation: response.meta?.generation,
+      collectedAt: response.meta?.collectedAt,
+      snapshotRenewed,
+    }
+  } catch (error) {
+    if (uxRequestId) cancelListRequest(uxRequestId)
+    throw error
   }
 }
 
@@ -373,6 +401,20 @@ export function getNamespaceScopes(page: PageQuery = {}, signal?: AbortSignal): 
   return request<NamespaceScope[]>(`/api/v1/namespace-scopes${query}`, { method: 'GET', signal })
 }
 
+export async function getDefaultNamespaceScope(signal?: AbortSignal): Promise<{ scope: NamespaceScope | null; hasScopes: boolean }> {
+  let continueToken = ''
+  let hasScopes = false
+  do {
+    const query = queryString([['limit', 100], ['continue', continueToken || undefined]])
+    const result = await requestEnvelope<NamespaceScope[]>(`/api/v1/namespace-scopes${query}`, { method: 'GET', signal })
+    hasScopes ||= result.data.length > 0
+    const scope = result.data.find((item) => item.isDefault)
+    if (scope) return { scope, hasScopes }
+    continueToken = result.meta?.page?.next ?? ''
+  } while (continueToken)
+  return { scope: null, hasScopes }
+}
+
 export function getNamespaceScope(id: number, signal?: AbortSignal): Promise<NamespaceScope> {
   return request<NamespaceScope>(`/api/v1/namespace-scopes/${id}`, { method: 'GET', signal })
 }
@@ -395,6 +437,10 @@ export function deleteNamespaceScope(id: number, body: NamespaceScopeDeleteReque
 
 export function selectNamespaceScope(id: number, body: SelectNamespaceScopeRequest, csrfToken: string, signal?: AbortSignal): Promise<SelectionData> {
   return mutation<SelectionData>(`/api/v1/namespace-scopes/${id}/select`, 'POST', body, csrfToken, signal)
+}
+
+export function setDefaultNamespaceScope(id: number, body: SelectNamespaceScopeRequest, csrfToken: string, signal?: AbortSignal): Promise<SelectionData> {
+  return mutation<SelectionData>(`/api/v1/namespace-scopes/${id}/default`, 'PUT', body, csrfToken, signal)
 }
 
 export async function getPermissions(options: PermissionQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CapabilityMatrix> {
@@ -438,6 +484,24 @@ export function getDashboardMetrics(signal?: AbortSignal, expectedGeneration?: s
 
 export function getDashboardNamespaceHealth(signal?: AbortSignal, expectedGeneration?: string): Promise<DashboardResponse<DashboardNamespaceHealth[]>> {
 	return dashboardRequest<DashboardNamespaceHealth[]>('/api/v1/dashboard/namespace-health', { method: 'GET', signal }, expectedGeneration)
+}
+
+export function getDiagnostics(signal?: AbortSignal, expectedGeneration?: string): Promise<Diagnostics> {
+	return request<Diagnostics>('/api/v1/diagnostics', { method: 'GET', signal }).then((value) => {
+		if (expectedGeneration && value.generation !== expectedGeneration) throw new APIError(409, { code: 'GENERATION_CHANGED', message: 'The diagnostics response belongs to another selection generation.' })
+		return value
+	})
+}
+
+export function getLocalResourceIndex(signal?: AbortSignal, expectedGeneration?: string): Promise<LocalResourceIndex> {
+	return request<LocalResourceIndex>('/api/v1/local-index', { method: 'GET', signal }).then((value) => {
+		if (expectedGeneration && value.generation !== expectedGeneration) throw new APIError(409, { code: 'GENERATION_CHANGED', message: 'The local index belongs to another selection generation.' })
+		return value
+	})
+}
+
+export function getInvestigation(kind: string, namespace: string, name: string, signal?: AbortSignal): Promise<Investigation> {
+	return request<Investigation>(`/api/v1/investigation/${resourcePath(kind)}/${resourcePath(namespace)}/${resourcePath(name)}`, { method: 'GET', signal })
 }
 
 export function getYAMLDiff(collection: string, namespace: string, name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<YAMLDiff> {
@@ -824,6 +888,15 @@ export function triggerCronJob(namespace: string, name: string, body: CronJobTri
 
 export function createPortForward(namespace: string, name: string, body: PortForwardCreateRequest, csrfToken: string, idempotencyKey: string, signal?: AbortSignal): Promise<PortForward> {
   return request<PortForward>(`/api/v1/pods/${resourcePath(namespace)}/${resourcePath(name)}/port-forward`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-KubePeep-CSRF': csrfToken, 'Idempotency-Key': idempotencyKey },
+    body: JSON.stringify(body),
+    signal,
+  })
+}
+
+export function createServicePortForward(namespace: string, name: string, body: PortForwardCreateRequest, csrfToken: string, idempotencyKey: string, signal?: AbortSignal): Promise<PortForward> {
+  return request<PortForward>(`/api/v1/services/${resourcePath(namespace)}/${resourcePath(name)}/port-forward`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'X-KubePeep-CSRF': csrfToken, 'Idempotency-Key': idempotencyKey },
     body: JSON.stringify(body),

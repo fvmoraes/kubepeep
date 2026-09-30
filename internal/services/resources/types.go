@@ -3,12 +3,14 @@ package resources
 import "time"
 
 const (
-	DefaultListLimit   = 100
-	MaximumListLimit   = 500
-	MaximumNamespaces  = 100
-	MaximumSearchBytes = 256
-	MaximumCursorBytes = 16 << 10
-	MaximumFanout      = 4
+	DefaultListLimit          = 100
+	MaximumListLimit          = 500
+	MaximumNamespaces         = 100
+	MaximumSearchBytes        = 256
+	MaximumCursorBytes        = 16 << 10
+	MaximumFanout             = 4 // compatibility name for the safe default
+	DefaultFanout             = 4
+	MaximumConfigurableFanout = 8
 )
 
 type Collection string

@@ -37,6 +37,9 @@ func TestLoadCreatesPrivateDefaultsAndReopens(t *testing.T) {
 	if first.Dashboard.BlockTimeout.Duration != DefaultDashboardBlockTimeout {
 		t.Fatalf("unexpected dashboard defaults: %#v", first.Dashboard)
 	}
+	if !first.Resources.Protocol.PartialMetadata || !first.Resources.Protocol.Protobuf || first.Resources.Protocol.Compression || first.Resources.Protocol.QPS != 10 || first.Resources.Protocol.Burst != 20 || !first.Resources.Protocol.AdaptiveConcurrency || !first.Resources.Protocol.IntelligentPrefetch {
+		t.Fatalf("unexpected protocol defaults: %#v", first.Resources.Protocol)
+	}
 	info, err := os.Stat(path)
 	if err != nil {
 		t.Fatal(err)
@@ -155,6 +158,10 @@ func TestValidationMatrix(t *testing.T) {
 		"long shutdown":     func(c *Config) { c.Server.ShutdownTimeout.Duration = 31 * time.Second },
 		"short block":       func(c *Config) { c.Dashboard.BlockTimeout.Duration = 0 },
 		"long block":        func(c *Config) { c.Dashboard.BlockTimeout.Duration = 61 * time.Second },
+		"zero qps":          func(c *Config) { c.Resources.Protocol.QPS = 0 },
+		"excessive qps":     func(c *Config) { c.Resources.Protocol.QPS = 21 },
+		"burst below qps":   func(c *Config) { c.Resources.Protocol.Burst = 9 },
+		"excessive burst":   func(c *Config) { c.Resources.Protocol.Burst = 41 },
 		"protocol":          func(c *Config) { c.Observability.OTel.Protocol = "grpc" },
 		"disabled endpoint": func(c *Config) { c.Observability.OTel.Endpoint = ptr("https://localhost") },
 		"missing endpoint":  func(c *Config) { c.Observability.OTel.Enabled = true },

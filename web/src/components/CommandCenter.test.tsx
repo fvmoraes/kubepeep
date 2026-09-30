@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, useLocation } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -166,7 +166,7 @@ describe('CommandCenter', () => {
     expect(fireEvent.keyDown(document.body, { key: 'b', ctrlKey: true })).toBe(true)
   })
 
-  it('filters only the supplied static routes without issuing a request', () => {
+  it('filters only the supplied static routes without issuing a request', async () => {
     const fetchSpy = vi.fn()
     vi.stubGlobal('fetch', fetchSpy)
     renderCommandCenter()
@@ -177,10 +177,10 @@ describe('CommandCenter', () => {
 
     fireEvent.change(search, { target: { value: 'deployment' } })
     expect(screen.getByRole('option', { name: /Workloads/ })).toBeInTheDocument()
-    expect(screen.queryByRole('option', { name: /Pods/ })).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByRole('option', { name: /Pods/ })).not.toBeInTheDocument())
 
     fireEvent.change(search, { target: { value: 'cluster credential secret' } })
-    expect(screen.getByText('No application page matches this search.')).toBeInTheDocument()
+    expect(await screen.findByText('No application page matches this search.')).toBeInTheDocument()
     expect(fetchSpy).not.toHaveBeenCalled()
     expect(window.localStorage).toHaveLength(0)
     expect(window.sessionStorage).toHaveLength(0)

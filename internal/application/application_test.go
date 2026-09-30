@@ -37,6 +37,17 @@ func composeOptions(t *testing.T) Options {
 	}
 }
 
+func cleanupPlatform(t *testing.T, platform *Platform) {
+	t.Helper()
+	// CleanupRegistry invokes hooks in reverse registration order.
+	for index := len(platform.Cleanups) - 1; index >= 0; index-- {
+		cleanup := platform.Cleanups[index]
+		if err := cleanup.Func(t.Context()); err != nil {
+			t.Errorf("cleanup %s failed: %v", cleanup.Name, err)
+		}
+	}
+}
+
 func TestComposeRejectsMissingLayoutRoot(t *testing.T) {
 	options := composeOptions(t)
 	options.Layout.Root = ""
@@ -99,11 +110,7 @@ func TestComposeBuildsServingPlatformAndCleanup(t *testing.T) {
 		t.Fatalf("sqlite component = %q", payload.Data.Components["sqlite"].Status)
 	}
 
-	for _, cleanup := range platform.Cleanups {
-		if err := cleanup.Func(context.Background()); err != nil {
-			t.Fatalf("cleanup %s failed: %v", cleanup.Name, err)
-		}
-	}
+	cleanupPlatform(t, platform)
 }
 
 func TestComposeWithoutKubeconfigStillServesLocalHealth(t *testing.T) {
@@ -121,7 +128,22 @@ func TestComposeWithoutKubeconfigStillServesLocalHealth(t *testing.T) {
 	if recorder.Code != http.StatusOK {
 		t.Fatalf("/health status = %d", recorder.Code)
 	}
-	for _, cleanup := range platform.Cleanups {
-		_ = cleanup.Func(context.Background())
+	cleanupPlatform(t, platform)
+}
+
+func TestComposeAsyncBootstrapServesLocalHealthAndStops(t *testing.T) {
+	options := composeOptions(t)
+	options.BootstrapAsync = true
+	options.Kubeconfig = filepath.Join(t.TempDir(), "missing.kubeconfig")
+	options.KubeconfigSet = true
+	platform, err := Compose(t.Context(), options)
+	if err != nil {
+		t.Fatal(err)
 	}
+	recorder := httptest.NewRecorder()
+	platform.Handler.ServeHTTP(recorder, healthRequest(options.Port))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("/health before bootstrap completion = %d", recorder.Code)
+	}
+	cleanupPlatform(t, platform)
 }

@@ -439,6 +439,29 @@ def select_scope(client: Client, status: dict[str, Any], scope: dict[str, Any]) 
     return refreshed
 
 
+def set_default_scope(client: Client, status: dict[str, Any], scope: dict[str, Any]) -> dict[str, Any]:
+    scope_id = scope.get("id")
+    if type(scope_id) is not int or scope_id <= 0:
+        raise E2EFailure("namespace scope selected as default omitted its id")
+    selected = client.data(
+        "PUT",
+        f"/api/v1/namespace-scopes/{scope_id}/default",
+        body={"expectedGeneration": status["selection"]["generation"]},
+        csrf=True,
+    )
+    if not isinstance(selected, dict) or selected.get("scopeId") != scope_id:
+        raise E2EFailure("setting the default did not activate the selected scope")
+    refreshed, _ = client.bootstrap()
+    scopes = client.data("GET", "/api/v1/namespace-scopes?limit=100")
+    defaults = [
+        item for item in scopes
+        if isinstance(item, dict) and item.get("context") == refreshed["selection"]["context"] and item.get("isDefault") is True
+    ] if isinstance(scopes, list) else []
+    if len(defaults) != 1 or defaults[0].get("id") != scope_id:
+        raise E2EFailure("context does not expose exactly the persisted default scope")
+    return refreshed
+
+
 def assert_dashboard_full(client: Client) -> None:
     block = client.data("GET", "/api/v1/dashboard/summary")
     if not isinstance(block, dict) or block.get("complete") is not True or block.get("errors") != []:
@@ -492,6 +515,24 @@ def exercise_manual_scopes(client: Client, status: dict[str, Any]) -> dict[str, 
     if selection.get("scopeMode") != "list" or selection.get("namespaceCount") != 2:
         raise E2EFailure("list namespace scope resolved incorrectly")
     assert_dashboard_partial(client)
+
+    # F7/R03: marking a default activates it immediately. After the same
+    # context is reopened, the client must discover and activate the one
+    # persisted default before issuing resource reads, without assuming All.
+    status = set_default_scope(client, status, listed)
+    reopened = select_context(client, status)
+    scopes = client.data("GET", "/api/v1/namespace-scopes?limit=100")
+    defaults = [
+        item for item in scopes
+        if isinstance(item, dict)
+        and item.get("context") == reopened["selection"]["context"]
+        and item.get("isDefault") is True
+    ] if isinstance(scopes, list) else []
+    if len(defaults) != 1 or defaults[0].get("id") != listed.get("id"):
+        raise E2EFailure("context reopen did not expose its persisted default scope")
+    status = select_scope(client, reopened, defaults[0])
+    if status["selection"].get("scopeId") != listed.get("id") or status["selection"].get("scopeName") != listed.get("name"):
+        raise E2EFailure("context reopen did not activate its persisted default scope")
     status = select_scope(client, status, single)
     _, denied = client.request(
         "POST",
@@ -951,7 +992,12 @@ def check_allowed(client: Client, status: dict[str, Any], args: argparse.Namespa
         f"/api/v1/endpoint-slices/{namespace}/kp-service-v1",
     )
     for path in detail_paths:
-        metadata(client.data("GET", path))
+        detail = client.data("GET", path)
+        metadata(detail)
+        if path.startswith("/api/v1/pods/"):
+            for field in ("conditions", "containers", "initContainers", "ephemeralContainers", "relatedEvents"):
+                if not isinstance(detail.get(field), list):
+                    raise E2EFailure("Pod detail returned a non-array collection")
         client.request("GET", path + "/yaml", accept="application/yaml, text/yaml")
     config_path = f"/api/v1/configmaps/{namespace}/kp-config"
     config = client.data("GET", config_path)

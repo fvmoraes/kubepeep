@@ -87,6 +87,7 @@ type ScopeDeleteRequest struct {
 	Confirmed          bool   `json:"confirmed"`
 	Version            int64  `json:"version"`
 	ReplacementScopeID int64  `json:"replacementScopeId"`
+	ReturnToSetup      bool   `json:"returnToSetup"`
 	ExpectedGeneration string `json:"expectedGeneration"`
 }
 
@@ -102,6 +103,7 @@ type ScopeDTO struct {
 	Mode             ScopeMode `json:"mode"`
 	Namespaces       []string  `json:"namespaces"`
 	DefaultNamespace *string   `json:"defaultNamespace"`
+	IsDefault        bool      `json:"isDefault"`
 	Version          int64     `json:"version"`
 	CreatedAt        string    `json:"createdAt"`
 	UpdatedAt        string    `json:"updatedAt"`
@@ -118,6 +120,7 @@ func NewScopeDTO(scope Scope) ScopeDTO {
 		Mode:             scope.Mode,
 		Namespaces:       items,
 		DefaultNamespace: copyStringPointer(scope.DefaultNamespace),
+		IsDefault:        scope.IsDefault,
 		Version:          scope.Version,
 		CreatedAt:        scope.CreatedAt.UTC().Format(time.RFC3339Nano),
 		UpdatedAt:        scope.UpdatedAt.UTC().Format(time.RFC3339Nano),

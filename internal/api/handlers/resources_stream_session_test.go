@@ -35,6 +35,25 @@ type handlerWatchPort struct {
 	streams           map[string]*handlerWatchStream
 	created           chan string
 	itemsPerNamespace int
+	globalItems       []resourcecore.TopicObject
+}
+
+type progressiveHandlerWatchPort struct {
+	*handlerWatchPort
+	release chan struct{}
+}
+
+func (port *progressiveHandlerWatchPort) ListProgress(ctx context.Context, key resourcecore.WatchKey, emit func([]resourcecore.TopicObject) bool) (resourcecore.WatchSnapshot, error) {
+	items := []resourcecore.TopicObject{resourcecore.PodDTO{Namespace: key.Namespace, Name: "early", Status: "Running"}}
+	if !emit(items) {
+		return resourcecore.WatchSnapshot{}, context.Canceled
+	}
+	select {
+	case <-port.release:
+	case <-ctx.Done():
+		return resourcecore.WatchSnapshot{}, ctx.Err()
+	}
+	return resourcecore.WatchSnapshot{ResourceVersion: "rv-final", Items: items}, nil
 }
 
 func newHandlerWatchPort() *handlerWatchPort {
@@ -42,6 +61,9 @@ func newHandlerWatchPort() *handlerWatchPort {
 }
 
 func (port *handlerWatchPort) List(_ context.Context, key resourcecore.WatchKey) (resourcecore.WatchSnapshot, error) {
+	if key.Namespace == "" && port.globalItems != nil {
+		return resourcecore.WatchSnapshot{ResourceVersion: "rv-global", Items: port.globalItems}, nil
+	}
 	count := port.itemsPerNamespace
 	if count <= 0 {
 		count = 1
@@ -227,6 +249,12 @@ func TestResourceStreamPublishesOneTransactionalSnapshotPerTopic(t *testing.T) {
 	done := make(chan struct{})
 	go func() { handler.Resources(recorder, request); close(done) }()
 	body := recorder.waitContains(t, "event: snapshot", `"namespace":"alpha"`, `"namespace":"beta"`, `"final":true`)
+	if progress, snapshot := strings.Index(body, "event: progress"), strings.Index(body, "event: snapshot"); progress < 0 || progress >= snapshot {
+		t.Fatalf("the bounded preview must precede the authoritative snapshot: %s", body)
+	}
+	if !strings.Contains(body, `"completedNamespaces":1`) || !strings.Contains(body, `"completedNamespaces":2`) || !strings.Contains(body, `"requestedNamespaces":2`) {
+		t.Fatalf("progress did not count completed namespaces: %s", body)
+	}
 	if count := strings.Count(body, "event: snapshot"); count != 1 {
 		t.Fatalf("snapshot was published per origin instead of per topic: count=%d body=%s", count, body)
 	}
@@ -238,8 +266,40 @@ func TestResourceStreamPublishesOneTransactionalSnapshotPerTopic(t *testing.T) {
 	}
 }
 
+func TestResourceStreamPublishesListPageBeforeTransactionalSnapshot(t *testing.T) {
+	port := &progressiveHandlerWatchPort{handlerWatchPort: newHandlerWatchPort(), release: make(chan struct{})}
+	manager := resourcecore.NewWatchManager(port)
+	defer manager.Close()
+	service := &liveResourceStreamService{manager: manager}
+	handler, _, origin, csrf := streamHandlerFixture(t, service, []string{"alpha"})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	recorder := newLiveResponseRecorder()
+	done := make(chan struct{})
+	go func() { handler.Resources(recorder, newAuthorizedStreamRequest(ctx, origin, csrf, "")); close(done) }()
+	body := recorder.waitContains(t, "event: progress", `"name":"early"`)
+	if strings.Contains(body, "event: snapshot") {
+		t.Fatalf("snapshot published before the full LIST completed: %s", body)
+	}
+	close(port.release)
+	body = recorder.waitContains(t, "event: snapshot", `"final":true`)
+	if strings.Index(body, "event: progress") >= strings.Index(body, "event: snapshot") {
+		t.Fatalf("preview did not precede snapshot: %s", body)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("progressive stream did not stop")
+	}
+}
+
 func TestResourceStreamUsesEffectiveGlobalScopeReturnedByAuthorization(t *testing.T) {
 	port := newHandlerWatchPort()
+	port.globalItems = []resourcecore.TopicObject{
+		resourcecore.PodDTO{Namespace: "alpha", Name: "allowed", Status: "Running"},
+		resourcecore.PodDTO{Namespace: "outside", Name: "excluded", Status: "Running"},
+	}
 	manager := resourcecore.NewWatchManager(port)
 	defer manager.Close()
 	effective := namespaces.ScopeResolution{ScopeName: "scope", Namespaces: []string{""}, PreferGlobal: true}
@@ -250,7 +310,10 @@ func TestResourceStreamUsesEffectiveGlobalScopeReturnedByAuthorization(t *testin
 	recorder := newLiveResponseRecorder()
 	done := make(chan struct{})
 	go func() { handler.Resources(recorder, request); close(done) }()
-	recorder.waitContains(t, "event: snapshot", `"namespace":"cluster-result"`)
+	body := recorder.waitContains(t, "event: snapshot", `"namespace":"alpha"`, `"requestedNamespaces":2`)
+	if strings.Contains(body, `"namespace":"outside"`) || strings.Contains(body, "excluded") {
+		t.Fatalf("global watch leaked an object outside the explicit scope: %s", body)
+	}
 	select {
 	case namespace := <-port.created:
 		if namespace != "" {
@@ -261,6 +324,12 @@ func TestResourceStreamUsesEffectiveGlobalScopeReturnedByAuthorization(t *testin
 	}
 	if manager.SharedWatchCount() != 1 || len(port.created) != 0 {
 		t.Fatalf("shared=%d queued watch creations=%d", manager.SharedWatchCount(), len(port.created))
+	}
+	port.stream("").changes <- resourcecore.WatchChange{Type: "ADDED", ResourceVersion: "rv-new", Object: resourcecore.PodDTO{Namespace: "outside", Name: "excluded-delta", Status: "Running"}}
+	port.stream("").changes <- resourcecore.WatchChange{Type: "ADDED", ResourceVersion: "rv-newer", Object: resourcecore.PodDTO{Namespace: "beta", Name: "allowed-delta", Status: "Running"}}
+	body = recorder.waitContains(t, "allowed-delta")
+	if strings.Contains(body, "excluded-delta") {
+		t.Fatalf("global watch leaked an out-of-scope delta: %s", body)
 	}
 	cancel()
 	select {
@@ -361,7 +430,7 @@ func TestResourceStreamReplaysMissedEventsWithinLiveRingWithoutSnapshot(t *testi
 	secondDone := make(chan struct{})
 	go func() { handler.Resources(secondRecorder, secondRequest); close(secondDone) }()
 	secondBody := secondRecorder.waitContains(t, "event: modified", `"resourceVersion":"rv-2"`)
-	if strings.Contains(secondBody, "event: snapshot") || strings.Contains(secondBody, "resume_unavailable") {
+	if strings.Contains(secondBody, "event: snapshot") || strings.Contains(secondBody, "event: progress") || strings.Contains(secondBody, "resume_unavailable") {
 		t.Fatalf("resume unexpectedly snapshotted/reset: %s", secondBody)
 	}
 	if !strings.Contains(secondBody, "id: "+replayedID) {

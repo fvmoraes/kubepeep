@@ -1,8 +1,8 @@
 # Documentação do KubePeep
 
-`docs/` descreve o produto e seus contratos. O trabalho pendente vive no
-[plano v1](../plan/README.md), baseado na
-[referência UI/UX](../plan/reference/KubePeep_UI_UX_Design_System_e_Recursos_Kubernetes.md).
+`docs/` descreve o produto e seus contratos. A execução concluída e o backlog
+estão no [plano v0.7](../plan/README.md), baseado nas
+[referências v0.7](../plan/v0.7_reference/).
 
 ## Usar e desenvolver
 
@@ -25,6 +25,8 @@
 | [Segurança](security.md) | Loopback, CSRF, RBAC, redaction e conteúdo proibido |
 | [RBAC](rbac-requirements.md) | Capabilities e operações Kubernetes |
 | [Observabilidade](observability.md) | Logs operacionais, métricas e diagnóstico |
+| [Protocolo e tuning](protocol-tuning.md) | Benchmarks, decisões e rollback da Fase 6 |
+| [Candidato v0.7](release-v0.7-candidate.md) | Notas, gates, limitações e decisão de publicação |
 
 ## Decisões e histórico
 
@@ -33,7 +35,7 @@
 - [Pesquisa](research/README.md): fundamentos e métodos de reprodução;
   benchmarks datados não são garantia de compatibilidade atual.
 - [Arquivo](archive/README.md): planejamento MVP e relatos sanitizados de
-  fases concluídas; não são checklists de execução da v1.
+  fases concluídas; não substituem os checklists e evidências da v0.7.
 
 Uma alteração de contrato atualiza o documento correspondente no mesmo commit.
 Novas funcionalidades só são descritas como disponíveis após implementação.

@@ -7,11 +7,17 @@ GINGER ?= $(shell $(GO) env GOPATH)/bin/ginger
 WEB_DIR := web
 DIST_DIR := dist
 BINARY := $(DIST_DIR)/$(APP)
-GO_FILES := $(shell find cmd internal -type f -name '*.go' 2>/dev/null)
+GO_FILES := $(shell find cmd internal test/kind/benchmark test/kind/protocol -type f -name '*.go' 2>/dev/null)
 GO_PACKAGES := $(shell $(GO) list ./... 2>/dev/null | grep -v '/web/node_modules/')
-VERSION ?= 0.1.0-dev
+VERSION ?= 0.7.0-dev
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 BUILD_DATE ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
+BENCHMARK_OUTPUT ?= test/kind/.state/performance-representative.json
+BENCHMARK_MATRIX_OUTPUT ?= test/kind/.state/performance-matrix.json
+PROTOCOL_BENCHMARK_OUTPUT ?= test/kind/.state/performance-protocol.json
+BENCHMARK_NAMESPACES ?= 10
+BENCHMARK_PODS_PER_NAMESPACE ?= 100
+BENCHMARK_DATASET_OUTPUT ?= test/kind/.state/dataset-$(BENCHMARK_NAMESPACES)x$(BENCHMARK_PODS_PER_NAMESPACE).yaml
 LDFLAGS := -s -w \
 	-X github.com/fvmoraes/kubepeep/internal/buildinfo.Version=$(VERSION) \
 	-X github.com/fvmoraes/kubepeep/internal/buildinfo.Commit=$(COMMIT) \
@@ -19,8 +25,8 @@ LDFLAGS := -s -w \
 
 .PHONY: format format-check lint typecheck test-unit test-integration test-race \
 	test-e2e test web-install web-build build smoke cross-build verify-ginger \
-	verify clean dev-desktop build-desktop build-desktop-linux \
-	build-desktop-windows build-desktop-darwin
+	verify clean benchmark benchmark-matrix benchmark-protocol benchmark-dataset dev-desktop build-desktop build-desktop-linux \
+	build-desktop-windows build-desktop-darwin release-artifact-check test-release-artifacts test-release-gates
 
 WAILS ?= $(shell $(GO) env GOPATH)/bin/wails
 # WebKitGTK: prefer 4.0 (upstream default); fall back to 4.1 via Wails'
@@ -55,13 +61,26 @@ test-unit: web-build
 	cd $(WEB_DIR) && $(NPM) test
 
 test-integration: web-build
-	$(GO) test $(GO_PACKAGES) -run Integration
+	$(GO) test ./internal/integration/...
 
 test-race: web-build
 	CGO_ENABLED=1 $(GO) test -race $(GO_PACKAGES)
 
 test-e2e: web-build
 	cd $(WEB_DIR) && $(NPM) run test:e2e
+
+benchmark:
+	./test/kind/harness.sh benchmark "$(BENCHMARK_OUTPUT)"
+
+benchmark-matrix:
+	./test/kind/harness.sh benchmark-matrix "$(BENCHMARK_MATRIX_OUTPUT)"
+
+benchmark-protocol:
+	$(GO) run ./test/kind/protocol --commit "$$(git rev-parse HEAD)" --output "$(PROTOCOL_BENCHMARK_OUTPUT)"
+
+benchmark-dataset:
+	./test/kind/harness.sh benchmark-dataset "$(BENCHMARK_DATASET_OUTPUT)" \
+		"$(BENCHMARK_NAMESPACES)" "$(BENCHMARK_PODS_PER_NAMESPACE)"
 
 test: test-unit test-integration
 
@@ -77,6 +96,18 @@ build: web-build
 
 smoke: build
 	./scripts/smoke.sh $(BINARY)
+
+release-artifact-check:
+	@set -- "$(DIST_DIR)"; \
+	if [ -d "build/bin" ]; then set -- "$$@" "build/bin"; fi; \
+	./scripts/release_artifact_check.sh "$$@"
+
+test-release-artifacts:
+	./scripts/release_artifact_check_test.sh
+
+test-release-gates: test-release-artifacts
+	./scripts/release_gate_harness.sh
+	./scripts/release_test.sh
 
 cross-build: web-build
 	@set -eu; \
@@ -100,18 +131,18 @@ dev-desktop:
 	$(WAILS) dev $(WAILS_BINDING_FLAGS) -tags "$(DESKTOP_TAGS)"
 
 build-desktop:
-	$(WAILS) build $(WAILS_BINDING_FLAGS) -tags "$(DESKTOP_TAGS)" -clean -o "$(DESKTOP_OUT)/kubePeep"
+	$(WAILS) build $(WAILS_BINDING_FLAGS) -tags "$(DESKTOP_TAGS)" -clean -ldflags "$(LDFLAGS)" -o "$(DESKTOP_OUT)/kubePeep"
 
 build-desktop-linux:
-	$(WAILS) build $(WAILS_BINDING_FLAGS) -tags "$(DESKTOP_TAGS)" -clean -platform linux/amd64 -o "$(DESKTOP_OUT)/linux-amd64/kubePeep"
+	$(WAILS) build $(WAILS_BINDING_FLAGS) -tags "$(DESKTOP_TAGS)" -clean -ldflags "$(LDFLAGS)" -platform linux/amd64 -o "$(DESKTOP_OUT)/linux-amd64/kubePeep"
 
 build-desktop-windows:
-	$(WAILS) build $(WAILS_BINDING_FLAGS) -tags "$(DESKTOP_TAGS)" -clean -platform windows/amd64 -o "$(DESKTOP_OUT)/windows-amd64/kubePeep.exe"
+	$(WAILS) build $(WAILS_BINDING_FLAGS) -tags "$(DESKTOP_TAGS)" -clean -ldflags "$(LDFLAGS)" -platform windows/amd64 -o "$(DESKTOP_OUT)/windows-amd64/kubePeep.exe"
 
 build-desktop-darwin:
-	$(WAILS) build $(WAILS_BINDING_FLAGS) -tags "$(DESKTOP_TAGS)" -clean -platform darwin/amd64 -o "$(DESKTOP_OUT)/darwin-amd64/kubePeep"
+	$(WAILS) build $(WAILS_BINDING_FLAGS) -tags "$(DESKTOP_TAGS)" -clean -ldflags "$(LDFLAGS)" -platform darwin/amd64 -o "$(DESKTOP_OUT)/darwin-amd64/kubePeep"
 
-verify: format-check lint typecheck test test-e2e build smoke verify-ginger
+verify: format-check lint typecheck test test-e2e build smoke verify-ginger test-release-gates
 
 clean:
 	rm -f $(BINARY)

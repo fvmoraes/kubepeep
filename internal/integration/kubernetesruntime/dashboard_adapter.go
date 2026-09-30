@@ -69,6 +69,7 @@ type dashboardAdapter struct {
 	clients       dashboardClientProvider
 	authorization authorization.AuthorizationService
 	binding       namespaces.SelectionBinding
+	discovery     *metricsDiscoveryCache
 }
 
 func (adapter *dashboardAdapter) ListPods(ctx context.Context, namespace string, page dashboard.PageRequest) (dashboard.PodPage, error) {
@@ -255,19 +256,32 @@ func (adapter *dashboardAdapter) Available(ctx context.Context) (bool, error) {
 	if err := requestContext.Err(); err != nil {
 		return false, toDashboardError(err)
 	}
+	available, err := adapter.discovery.Available(requestContext, adapter.binding, func(discoveryContext context.Context) (bool, error) {
+		return discoverPodMetrics(discoveryContext, clients.kubernetes)
+	})
+	if err != nil {
+		return false, err
+	}
+	return available && clients.metrics != nil, nil
+}
+
+func discoverPodMetrics(ctx context.Context, client kubeclient.Interface) (bool, error) {
 	type discoveryResult struct {
 		resources *metav1.APIResourceList
 		err       error
 	}
 	discovered := make(chan discoveryResult, 1)
 	go func() {
-		resources, discoveryErr := clients.kubernetes.Discovery().ServerResourcesForGroupVersion("metrics.k8s.io/v1beta1")
+		resources, discoveryErr := client.Discovery().ServerResourcesForGroupVersion("metrics.k8s.io/v1beta1")
 		discovered <- discoveryResult{resources: resources, err: discoveryErr}
 	}()
-	var resources *metav1.APIResourceList
+	var (
+		resources *metav1.APIResourceList
+		err       error
+	)
 	select {
-	case <-requestContext.Done():
-		return false, toDashboardError(requestContext.Err())
+	case <-ctx.Done():
+		return false, toDashboardError(ctx.Err())
 	case result := <-discovered:
 		resources, err = result.resources, result.err
 	}
@@ -282,7 +296,7 @@ func (adapter *dashboardAdapter) Available(ctx context.Context) (bool, error) {
 	}
 	for _, resource := range resources.APIResources {
 		if resource.Name == "pods" {
-			return clients.metrics != nil, nil
+			return true, nil
 		}
 	}
 	return false, nil
@@ -307,6 +321,9 @@ func (adapter *dashboardAdapter) ListPodMetrics(ctx context.Context, namespace s
 		return listErr
 	})
 	if err != nil {
+		if apierrors.IsNotFound(err) || apierrors.IsGone(err) {
+			adapter.discovery.InvalidateAll()
+		}
 		return dashboard.MetricsPage{}, err
 	}
 	window := time.Duration(0)

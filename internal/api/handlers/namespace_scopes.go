@@ -24,6 +24,7 @@ type NamespaceScopeService interface {
 	Update(context.Context, int64, namespaces.ScopeWriteRequest) (namespaces.Scope, namespaces.SelectionResult, error)
 	Delete(context.Context, int64, namespaces.ScopeDeleteRequest) (namespaces.SelectionResult, error)
 	Select(context.Context, int64, namespaces.ScopeSelectRequest) (namespaces.ScopeResolution, namespaces.SelectionResult, error)
+	SetDefault(context.Context, int64, namespaces.ScopeSelectRequest) (namespaces.ScopeResolution, namespaces.SelectionResult, error)
 }
 
 type NamespaceCatalog interface {
@@ -383,6 +384,14 @@ func (h *NamespaceScopes) Delete(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *NamespaceScopes) Select(w http.ResponseWriter, r *http.Request) {
+	h.activateScope(w, r, false)
+}
+
+func (h *NamespaceScopes) SetDefault(w http.ResponseWriter, r *http.Request) {
+	h.activateScope(w, r, true)
+}
+
+func (h *NamespaceScopes) activateScope(w http.ResponseWriter, r *http.Request, setDefault bool) {
 	id, err := scopeID(r)
 	if err != nil {
 		api.WriteError(w, r, err)
@@ -393,14 +402,19 @@ func (h *NamespaceScopes) Select(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, r, namespaceHTTPError(err))
 		return
 	}
-	_, result, err := h.service.Select(r.Context(), id, request)
+	var result namespaces.SelectionResult
+	if setDefault {
+		_, result, err = h.service.SetDefault(r.Context(), id, request)
+	} else {
+		_, result, err = h.service.Select(r.Context(), id, request)
+	}
 	if err != nil {
 		api.WriteError(w, r, namespaceHTTPError(err))
 		return
 	}
 	dto, summary := h.selectionResult(r.Context(), result)
 	if !h.publishSelection(result.Binding, summary) {
-		api.WriteError(w, r, api.NewHTTPError(http.StatusConflict, api.CodeGenerationChanged, "The active selection changed after this scope selection.", nil, nil))
+		api.WriteError(w, r, api.NewHTTPError(http.StatusConflict, api.CodeGenerationChanged, "The active selection changed after this scope activation.", nil, nil))
 		return
 	}
 	noStore(w)

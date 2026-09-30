@@ -176,6 +176,23 @@ func (remote *generationRemoteExec) Close() error {
 
 type PortForwardBackend struct{ runtime *Runtime }
 
+func (backend *PortForwardBackend) ResolveService(ctx context.Context, target actions.MutationTarget, servicePort int) (actions.ResolvedServicePort, error) {
+	if backend == nil || backend.runtime == nil {
+		return actions.ResolvedServicePort{}, errors.New("kubernetes runtime actions: port-forward backend is unavailable")
+	}
+	lease, err := backend.runtime.leaseFor(ctx, bindingForActionTarget(target))
+	if err != nil {
+		return actions.ResolvedServicePort{}, err
+	}
+	client, err := lease.Clients.ActionClient()
+	if err != nil {
+		return actions.ResolvedServicePort{}, err
+	}
+	requestContext, cancel := context.WithTimeout(ctx, actions.DefaultActionTimeout)
+	defer cancel()
+	return client.ResolveServicePort(requestContext, target, servicePort)
+}
+
 func (backend *PortForwardBackend) Start(setup context.Context, lifetime context.Context, command actions.PortForwardCommand, listener net.Listener) (actions.PortForwardHandle, error) {
 	if backend == nil || backend.runtime == nil {
 		return nil, errors.New("kubernetes runtime actions: port-forward backend is unavailable")

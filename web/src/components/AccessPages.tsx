@@ -1,3 +1,4 @@
+import { useGenerationCursor } from './resource/useListCursor'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router'
@@ -32,6 +33,7 @@ import { ResourceTabStrip } from './resource/ResourceTabStrip'
 import { TableLink } from './resource/TableLink'
 import { age } from './resource/format'
 import { effectiveNamespaces, useGlobalNamespace } from '../context/GlobalNamespace'
+import { bindListInteraction, listInteractionFor } from '../observability/uxMetrics'
 import { useResourceWorkspace } from './workspace/ResourceWorkspaceProvider'
 
 interface ListState {
@@ -63,7 +65,10 @@ interface TabbedFamilyProps {
   columns: DataTableColumn<unknown>[]
   rowKey: (row: unknown) => string
   onTabChange: (tab: string) => void
+  currentCursor: string
   onCursor: (value: string) => void
+  onApply: (interactionId: string) => void
+  onClear: () => void
   draft: ListState
   applied: ListState
   onDraft: (next: ListState) => void
@@ -78,12 +83,12 @@ function TabbedFamilyPage(props: TabbedFamilyProps) {
   return (
     <ResourcePage title={props.title} description={props.description}>
       <ResourceTabStrip ariaLabel={props.ariaLabel} panelId={`${props.ariaLabel}-panel`} active={props.tab} onChange={props.onTabChange} tabs={props.tabs.map((id) => ({ id, label: id }))} />
-      <ResourceListControls search={props.draft.search} appliedSearch={props.applied.search} onSearchChange={(value) => props.onDraft({ ...props.draft, search: value })} onApply={() => props.onCursor('')} onRefresh={() => queryClient.invalidateQueries({ queryKey: props.queryKeys })} onClear={() => props.onDraft({ ...initialListState })} activeFilters={props.applied.search ? [{ id: 'search', label: 'Search', value: props.applied.search }] : []} sort={props.draft.sort} order={props.draft.order} appliedSort={props.applied.sort} appliedOrder={props.applied.order} defaultSort="identity" defaultOrder="asc" hasPendingChanges={props.draft.search !== props.applied.search || props.draft.sort !== props.applied.sort || props.draft.order !== props.applied.order} sortOptions={identityNameSorts} onSortChange={(value) => props.onDraft({ ...props.draft, sort: value })} onOrderChange={(value) => props.onDraft({ ...props.draft, order: value })} />
+      <ResourceListControls search={props.draft.search} appliedSearch={props.applied.search} onSearchChange={(value) => props.onDraft({ ...props.draft, search: value })} onApply={props.onApply} onRefresh={() => queryClient.invalidateQueries({ queryKey: props.queryKeys })} onClear={props.onClear} sort={props.draft.sort} order={props.draft.order} appliedSort={props.applied.sort} appliedOrder={props.applied.order} defaultSort="identity" defaultOrder="asc" hasPendingChanges={props.draft.search !== props.applied.search || props.draft.sort !== props.applied.sort || props.draft.order !== props.applied.order} sortOptions={identityNameSorts} onSortChange={(value) => props.onDraft({ ...props.draft, sort: value })} onOrderChange={(value) => props.onDraft({ ...props.draft, order: value })} />
       <SelectionGate pending={status.isPending} error={status.error} selected={Boolean(selection)}>
         <QueryState pending={props.listQuery.isPending} error={props.listQuery.error} empty={props.result?.items.length === 0}>
           <div className="min-w-0 overflow-x-auto rounded-xl border border-kp-overlay-0 bg-kp-surface-0">
             <DataTable caption={`Authorized ${props.tab} page`} rows={props.result?.items ?? []} getRowKey={props.rowKey} columns={props.columns} stickyHeader />
-            {props.result ? <CollectionFooter result={props.result} onNext={props.onCursor} onRestart={() => props.onCursor('')} /> : null}
+            {props.result ? <CollectionFooter result={props.result} currentCursor={props.currentCursor} onNext={props.onCursor} onRestart={() => props.onCursor('')} /> : null}
           </div>
         </QueryState>
       </SelectionGate>
@@ -111,9 +116,9 @@ export function AccessControlPage() {
   const tab = useMemo(() => accessTabFromParams(tabParam ?? '') ?? 'roles', [tabParam])
   const [draft, setDraft] = useState<ListState>(initialListState)
   const [applied, setApplied] = useState<ListState>(initialListState)
-  const [cursor, setCursor] = useState('')
   const namespacedTab = tab === 'roles' || tab === 'role-bindings'
-  const options = { limit: 100, search: applied.search || undefined, continueToken: cursor || undefined, namespaces: namespacedTab ? effectiveNamespaces(globalNamespace.value, []) : undefined, sort: applied.sort === 'identity' ? undefined : applied.sort, order: applied.sort === 'identity' && applied.order === 'asc' ? undefined : applied.order }
+  const [cursor, setCursor] = useGenerationCursor(generation, JSON.stringify([tab, namespacedTab ? globalNamespace.value : '']))
+  const options = { limit: 100, uxInteractionId: listInteractionFor(applied), search: applied.search || undefined, continueToken: cursor || undefined, namespaces: namespacedTab ? effectiveNamespaces(globalNamespace.value, []) : undefined, sort: applied.sort === 'identity' ? undefined : applied.sort, order: applied.sort === 'identity' && applied.order === 'asc' ? undefined : applied.order }
 
   // Deep links open the Resource Workspace (cluster tabs use 3 segments,
   // namespaced tabs 4).
@@ -123,8 +128,8 @@ export function AccessControlPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only react to route param changes
   }, [tab, namespace, name, generation])
 
-  const roles = useQuery({ queryKey: ['resources', 'roles', generation, applied, cursor], queryFn: ({ signal }) => getRoles(options, signal, generation), enabled: Boolean(selection && tab === 'roles') })
-  const roleBindings = useQuery({ queryKey: ['resources', 'role-bindings', generation, applied, cursor], queryFn: ({ signal }) => getRoleBindings(options, signal, generation), enabled: Boolean(selection && tab === 'role-bindings') })
+  const roles = useQuery({ queryKey: ['resources', 'roles', generation, globalNamespace.value, applied, cursor], queryFn: ({ signal }) => getRoles(options, signal, generation), enabled: Boolean(selection && tab === 'roles') })
+  const roleBindings = useQuery({ queryKey: ['resources', 'role-bindings', generation, globalNamespace.value, applied, cursor], queryFn: ({ signal }) => getRoleBindings(options, signal, generation), enabled: Boolean(selection && tab === 'role-bindings') })
   const clusterRoles = useQuery({ queryKey: ['resources', 'cluster-roles', generation, applied, cursor], queryFn: ({ signal }) => getClusterRoles(options, signal, generation), enabled: Boolean(selection && tab === 'cluster-roles') })
   const clusterRoleBindings = useQuery({ queryKey: ['resources', 'cluster-role-bindings', generation, applied, cursor], queryFn: ({ signal }) => getClusterRoleBindings(options, signal, generation), enabled: Boolean(selection && tab === 'cluster-role-bindings') })
 
@@ -150,7 +155,10 @@ export function AccessControlPage() {
       queryKeys={['resources', tab]} listQuery={activeQuery} result={active}
       columns={columns} rowKey={(row) => { const value = row as { namespace?: string; name: string }; return `${value.namespace ?? ''}/${value.name}` }}
       onTabChange={(value) => { setDraft(initialListState); setApplied(initialListState); setCursor(''); navigate(`/access/${value}`) }}
+      currentCursor={cursor}
       onCursor={setCursor}
+      onApply={(interactionId) => { setApplied(bindListInteraction({ ...draft }, interactionId)); setCursor('') }}
+      onClear={() => { setDraft(initialListState); setApplied(initialListState); setCursor('') }}
       draft={draft} applied={applied} onDraft={setDraft}
     />
   )
@@ -172,8 +180,8 @@ export function AdministrationPage() {
   const tab = useMemo(() => administrationTabFromParams(tabParam ?? '') ?? 'customresourcedefinitions', [tabParam])
   const [draft, setDraft] = useState<ListState>(initialListState)
   const [applied, setApplied] = useState<ListState>(initialListState)
-  const [cursor, setCursor] = useState('')
-  const options = { limit: 100, search: applied.search || undefined, continueToken: cursor || undefined, sort: applied.sort === 'identity' ? undefined : applied.sort, order: applied.sort === 'identity' && applied.order === 'asc' ? undefined : applied.order }
+  const [cursor, setCursor] = useGenerationCursor(generation, tab)
+  const options = { limit: 100, uxInteractionId: listInteractionFor(applied), search: applied.search || undefined, continueToken: cursor || undefined, sort: applied.sort === 'identity' ? undefined : applied.sort, order: applied.sort === 'identity' && applied.order === 'asc' ? undefined : applied.order }
 
   useEffect(() => {
     if (!name || !generation || !tab) return
@@ -231,7 +239,10 @@ export function AdministrationPage() {
       queryKeys={['resources', tab]} listQuery={activeQuery} result={active}
       columns={columns} rowKey={(row) => (row as { name: string }).name}
       onTabChange={(value) => { setDraft(initialListState); setApplied(initialListState); setCursor(''); navigate(`/administration/${value}`) }}
+      currentCursor={cursor}
       onCursor={setCursor}
+      onApply={(interactionId) => { setApplied(bindListInteraction({ ...draft }, interactionId)); setCursor('') }}
+      onClear={() => { setDraft(initialListState); setApplied(initialListState); setCursor('') }}
       draft={draft} applied={applied} onDraft={setDraft}
     />
   )

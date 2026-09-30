@@ -126,6 +126,38 @@ func TestProductionDoctorSanitizesInvalidConfig(t *testing.T) {
 	}
 }
 
+func TestConfigurationDoctorReportsEnabledOTLPExporter(t *testing.T) {
+	layout, err := userdirs.ForRoot(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := layout.EnsureDirectories(); err != nil {
+		t.Fatal(err)
+	}
+	configuration := []byte(`version: 1
+server:
+  port: null
+  openBrowser: false
+  shutdownTimeout: 10s
+observability:
+  otel:
+    enabled: true
+    endpoint: http://127.0.0.1:4318/v1/traces
+    protocol: http/protobuf
+    insecure: true
+`)
+	if err := os.WriteFile(layout.Config, configuration, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	check := checkConfiguration(layout)
+	if check.Status != DoctorPass || check.Code != "CONFIG_VALID" {
+		t.Fatalf("enabled OTLP exporter was reported incorrectly: %#v", check)
+	}
+	if !strings.Contains(check.Message, "OTLP trace export is enabled") {
+		t.Fatalf("enabled exporter is missing from the diagnostic: %#v", check)
+	}
+}
+
 func TestPermissionDoctorInspectsExistingObjects(t *testing.T) {
 	layout, err := userdirs.ForRoot(t.TempDir())
 	if err != nil {

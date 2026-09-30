@@ -18,3 +18,7 @@ export interface PlatformInfoDTO {
 export function PlatformInfo(): Promise<PlatformInfoDTO>;
 
 export function Invoke(method: string, path: string, headers: { [key: string]: string }, body: string): Promise<InvokeResult>;
+
+export function InvokeCancelable(requestID: string, method: string, path: string, headers: { [key: string]: string }, body: string): Promise<InvokeResult>;
+
+export function Cancel(requestID: string): Promise<void>;

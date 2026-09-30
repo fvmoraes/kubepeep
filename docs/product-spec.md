@@ -1,8 +1,8 @@
 # Produto e experiência
 
-Este documento descreve a base implementada. A entrega da versão 1, seus
-recursos pendentes e critérios de aceite estão no [plano v1](../plan/README.md).
-A [referência UI/UX](../plan/reference/KubePeep_UI_UX_Design_System_e_Recursos_Kubernetes.md)
+Este documento descreve a base implementada. As entregas, evidências e o
+backlog da v0.7 estão no [plano v0.7](../plan/README.md).
+A [referência UI/UX](../plan/v0_reference/KubePeep_UI_UX_Design_System_e_Recursos_Kubernetes.md)
 define a direção; um item desenhado no menu não significa uma funcionalidade entregue.
 
 ## Propósito
@@ -22,30 +22,32 @@ sem poder listar namespaces ou administrar o cluster. Cadastrar namespaces
 **em lote** como escopo local é uma jornada essencial: informar vários nomes,
 revisar e salvar o conjunto, sem cadastro obrigatório um a um. Isso não cria
 objetos Namespace no Kubernetes. Descoberta global é opcional; acesso efetivo
-continua sujeito ao RBAC de cada recurso e namespace. A [Fase 0 da v1](../plan/v1/phase-00-acesso-restrito-e-lote.md)
-protege esse comportamento e planeja os refinamentos da experiência existente.
+continua sujeito ao RBAC de cada recurso e namespace. A
+[fase histórica de acesso restrito](../plan/v0/phase-00-acesso-restrito-e-lote.md)
+protege esse comportamento; a v0.7 preserva o contrato.
 
 ## Base disponível
 
 | Área | Comportamento implementado |
 | --- | --- |
 | Runtime | Desktop Wails e web `serve`, frontend embutido, diagnósticos, controle da instância web, instalação e atualização explícitas |
-| Seleção | Profiles de kubeconfig, contexto ativo e escopos de namespaces `single`, `list` e `all`; importação validada de listas |
+| Seleção | Profiles de kubeconfig, contexto ativo e escopos `single`, `list` e `all`; importação validada e scope default obrigatório por contexto |
+| Leitura | Paginação estratégica, cursor opaco, cancelamento, cache e watches sob demanda com limites de memória e autorização |
 | Overview | Blocos independentes de saúde, problemas, restarts, workloads, eventos, scan limitado de logs e métricas opcionais |
 | Workloads | Deployments, StatefulSets, DaemonSets, Jobs e CronJobs; Pods em lista e detalhe próprios |
 | Network | Services, Ingresses, EndpointSlices e sessões de port-forward |
 | Configuration | ConfigMaps e metadados allowlisted de Secrets |
-| Operação | Events, logs atuais/anteriores/follow, YAML permitido somente leitura, restart de Deployment, scale de Deployment/StatefulSet, delete de Pod e exec |
-| Interface | Tokens e componentes compartilhados, tabelas/detalhes com resource framework, grupos de navegação, paleta, favoritos/recentes e preferências allowlisted |
+| Operação | Events, logs atuais/anteriores/follow, YAML permitido somente leitura, ações por kind, ações em massa compatíveis, exec e port-forward |
+| Investigação | Problems Engine, relações locais, logs agregados por workload, busca local e diagnósticos de performance/cluster/namespace |
+| Interface | Tokens e componentes compartilhados, tabelas virtualizadas, workspace por recurso, paleta, favoritos/recentes e preferências allowlisted |
 
 O código de referência é a árvore de navegação em
 [`web/src/navigation/tree.tsx`](../web/src/navigation/tree.tsx), com rotas em
 [`App.tsx`](../web/src/App.tsx), e o [contrato da API](api.md).
-Itens sem `path` permanecem indisponíveis. As famílias adicionais de Cluster,
-Storage, Access Control e Administration, junto das lacunas de Workloads,
-Network e Configuration, pertencem ao plano v1. Helm e Gateway API são
-extensões condicionais, não promessas da base atual. Agregação simultânea de
-contextos não é funcionalidade entregue nem bloqueio da v1.
+Itens sem `path` permanecem indisponíveis. Cluster, Storage, Access Control,
+Administration, Workloads, Network e Configuration possuem rotas atuais;
+Helm e Gateway API continuam extensões condicionais no backlog. Agregação
+simultânea de contextos não é funcionalidade entregue pela v0.7.
 
 ## Jornadas essenciais
 
@@ -94,8 +96,8 @@ Access Control, Observability e Administration, com Settings separado. Grupos
 podem conter recursos ainda indisponíveis. Tokens, semântica de cores,
 tipografia e componentes estão no [design system](design-system.md).
 
-A imagem KubePeep.png fornecida pelo usuário define o estilo desejado para a
-v1, registrado na [direção visual aprovada](../plan/reference/direcao-visual-e-premissa-de-acesso.md).
+A imagem KubePeep.png fornecida pelo usuário define o estilo aprovado,
+registrado na [direção visual](../plan/v0_reference/direcao-visual-e-premissa-de-acesso.md).
 A seleção All namespaces e os dados ilustrados não representam permissões
 presumidas nem devem substituir a cobertura real do escopo consultado.
 

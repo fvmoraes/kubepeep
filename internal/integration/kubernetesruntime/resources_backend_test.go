@@ -20,6 +20,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	kubefake "k8s.io/client-go/kubernetes/fake"
 	metadatafake "k8s.io/client-go/metadata/fake"
+	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/fvmoraes/kubepeep/internal/services/authorization"
 	"github.com/fvmoraes/kubepeep/internal/services/namespaces"
@@ -135,6 +136,124 @@ func TestResourceErrorMappingKeepsPublicClassification(t *testing.T) {
 	if err := mapResourceError(forbidden); !errors.As(err, &domain) || domain.Code != resources.CodeForbidden || domain.Message != "Access to this resource was denied." {
 		t.Fatalf("forbidden mapping: %#v", err)
 	}
+	rateLimited := apierrors.NewTooManyRequests("sensitive upstream detail", 3)
+	if err := mapResourceError(rateLimited); !errors.As(err, &domain) || domain.Code != resources.CodeRateLimited || domain.RetryAfter() != 3*time.Second {
+		t.Fatalf("rate limit mapping: %#v", err)
+	}
+}
+
+func TestCollectionRequestKeyIncludesSelectionQueryAndPageIdentity(t *testing.T) {
+	binding := namespaces.SelectionBinding{ClusterProfileID: 1, Context: "dev", Cluster: "cluster-a", ActiveScopeID: 7, Generation: "gen-1"}
+	resolution := namespaces.ScopeResolution{ScopeName: "payments", Namespaces: []string{"payments"}}
+	options := resources.ListOptions{Limit: 50, Search: "api", Sort: "identity", Order: resources.OrderAscending, LabelSelector: "app=api"}
+	cursor := &resources.CompositeCursor[resources.PodDTO]{Version: 1, Origins: []resources.OriginCursor[resources.PodDTO]{{Origin: resources.Origin{Namespace: "payments", Version: "v1", Resource: "pods"}}}}
+	base, err := collectionRequestKey(binding, resolution, resources.CollectionPods, options, cursor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	same, err := collectionRequestKey(binding, resolution, resources.CollectionPods, options, cursor)
+	if err != nil || same != base {
+		t.Fatalf("stable key = %q, err = %v", same, err)
+	}
+	prioritized := options
+	prioritized.Priority = resources.PriorityLikelyNext
+	same, err = collectionRequestKey(binding, resolution, resources.CollectionPods, prioritized, cursor)
+	if err != nil || same != base {
+		t.Fatalf("priority changed cache identity: key=%q err=%v", same, err)
+	}
+
+	changedBinding := binding
+	changedBinding.Context = "prod"
+	changedOptions := options
+	changedOptions.FieldSelector = "spec.nodeName=worker-1"
+	changedCursor := *cursor
+	changedCursor.Origins = append([]resources.OriginCursor[resources.PodDTO](nil), cursor.Origins...)
+	changedCursor.Origins[0].Continue = "next"
+	variants := []string{}
+	for _, candidate := range []struct {
+		binding    namespaces.SelectionBinding
+		resolution namespaces.ScopeResolution
+		options    resources.ListOptions
+		cursor     *resources.CompositeCursor[resources.PodDTO]
+	}{
+		{changedBinding, resolution, options, cursor},
+		{binding, namespaces.ScopeResolution{ScopeName: "ops", Namespaces: []string{"ops"}}, options, cursor},
+		{binding, resolution, changedOptions, cursor},
+		{binding, resolution, options, &changedCursor},
+	} {
+		key, keyErr := collectionRequestKey(candidate.binding, candidate.resolution, resources.CollectionPods, candidate.options, candidate.cursor)
+		if keyErr != nil {
+			t.Fatal(keyErr)
+		}
+		variants = append(variants, key)
+	}
+	for _, variant := range variants {
+		if variant == base {
+			t.Fatalf("distinct request shared key %q", base)
+		}
+	}
+}
+
+func TestVisibleListDoesNotJoinSpeculativeCollectionWork(t *testing.T) {
+	backend := &ResourceBackend{
+		authorizer:      &allowResourceAuthorization{},
+		collectionCache: resources.NewCollectionCache(1<<20, 10, time.Minute, nil),
+		scheduler:       resources.NewRequestScheduler(3, nil),
+	}
+	binding := namespaces.SelectionBinding{ClusterProfileID: 1, Context: "ctx", Generation: "gen"}
+	resolution := namespaces.ScopeResolution{ScopeName: "scope", Namespaces: []string{"default"}}
+	entered := make(chan struct{})
+	releaseSpeculative := make(chan struct{})
+	defer func() {
+		select {
+		case <-releaseSpeculative:
+		default:
+			close(releaseSpeculative)
+		}
+	}()
+	var calls atomic.Int32
+	lister := originListerFunc[resources.PodDTO](func(ctx context.Context, request resources.PageRequest) (resources.OriginPage[resources.PodDTO], error) {
+		if calls.Add(1) == 1 {
+			close(entered)
+			select {
+			case <-releaseSpeculative:
+			case <-ctx.Done():
+				return resources.OriginPage[resources.PodDTO]{}, ctx.Err()
+			}
+		}
+		return resources.OriginPage[resources.PodDTO]{Origin: request.Origin, Items: []resources.PodDTO{{Namespace: "default", Name: "api", Status: "Running"}}}, nil
+	})
+	less := func(left, right resources.PodDTO) bool { return left.Name < right.Name }
+	collect := func(ctx context.Context, priority resources.RequestPriority) error {
+		_, err := collectFilteredResource(ctx, backend, binding, resolution, resources.CollectionPods, resources.ListOptions{Limit: 100, Priority: priority}, nil, less, lister, filterSortPods)
+		return err
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	speculativeDone := make(chan error, 1)
+	go func() { speculativeDone <- collect(ctx, resources.PriorityLikelyNext) }()
+	select {
+	case <-entered:
+	case <-ctx.Done():
+		t.Fatal("speculative LIST did not start")
+	}
+	visibleDone := make(chan error, 1)
+	go func() { visibleDone <- collect(ctx, resources.PriorityVisible) }()
+	select {
+	case err := <-visibleDone:
+		if err != nil {
+			t.Fatalf("visible LIST failed: %v", err)
+		}
+	case <-ctx.Done():
+		t.Fatal("visible LIST waited for speculative work")
+	}
+	close(releaseSpeculative)
+	if err := <-speculativeDone; err != nil {
+		t.Fatalf("speculative LIST failed: %v", err)
+	}
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("LIST calls=%d, want separate visible and speculative calls", got)
+	}
 }
 
 func TestWatchFanoutFallsBackToHTTPBeforeAuthorization(t *testing.T) {
@@ -142,7 +261,7 @@ func TestWatchFanoutFallsBackToHTTPBeforeAuthorization(t *testing.T) {
 	for index := range names {
 		names[index] = "namespace-" + string(rune('a'+index%26)) + string(rune('a'+index/26))
 	}
-	backend := &ResourceBackend{}
+	backend := &ResourceBackend{authorizer: &namespaceAwareResourceAuthorization{globalDecision: authorization.DecisionDenied}}
 	_, err := backend.AuthorizeTopics(context.Background(), namespaces.SelectionBinding{Generation: "gen"}, namespaces.ScopeResolution{Namespaces: names}, []resources.Topic{resources.TopicWorkloads})
 	var domain *resources.DomainError
 	if !errors.As(err, &domain) || domain.Code != resources.CodeLimitExceeded {
@@ -150,18 +269,39 @@ func TestWatchFanoutFallsBackToHTTPBeforeAuthorization(t *testing.T) {
 	}
 }
 
-func TestAllScopeUsesAuthorizedClusterWideListBeyondFanoutLimit(t *testing.T) {
+func TestAuthorizedGlobalWatchAvoidsExplicitScopeFanout(t *testing.T) {
+	names := make([]string, 51)
+	for index := range names {
+		names[index] = "namespace-" + string(rune('a'+index%26)) + string(rune('a'+index/26))
+	}
+	authorizer := &allowResourceAuthorization{}
+	backend := &ResourceBackend{authorizer: authorizer}
+	effective, err := backend.AuthorizeTopics(context.Background(), namespaces.SelectionBinding{Generation: "gen"}, namespaces.ScopeResolution{Namespaces: names}, []resources.Topic{resources.TopicWorkloads})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !effective.PreferGlobal || len(effective.Namespaces) != 1 || effective.Namespaces[0] != "" {
+		t.Fatalf("effective watch scope=%#v", effective)
+	}
+	for _, key := range authorizer.keys {
+		if key.Namespace != "" {
+			t.Fatalf("unexpected namespace watch authorization: %#v", key)
+		}
+	}
+}
+
+func TestAllScopeUsesAuthorizedClusterWideListAcrossTwoHundredNamespacesAtPageOneHundred(t *testing.T) {
 	client := kubefake.NewSimpleClientset(
 		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "alpha", Name: "api"}},
 		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "omega", Name: "worker"}},
 	)
 	authorizer := &allowResourceAuthorization{}
 	backend := &ResourceBackend{clients: fixedResourceClientProvider{set: resourceClientSet{kubernetes: client}}, authorizer: authorizer, now: time.Now}
-	names := make([]string, resources.MaximumNamespaces+25)
+	names := make([]string, 200)
 	for index := range names {
 		names[index] = "namespace-" + string(rune('a'+index%26)) + string(rune('a'+index/26))
 	}
-	result, err := backend.ListPods(context.Background(), namespaces.SelectionBinding{ClusterProfileID: 1, Context: "ctx", Generation: "gen"}, namespaces.ScopeResolution{ScopeName: "all", Namespaces: names, PreferGlobal: true}, resources.ListOptions{Limit: 10}, nil)
+	result, err := backend.ListPods(context.Background(), namespaces.SelectionBinding{ClusterProfileID: 1, Context: "ctx", Generation: "gen"}, namespaces.ScopeResolution{ScopeName: "all", Namespaces: names, PreferGlobal: true}, resources.ListOptions{Limit: 100}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,6 +312,111 @@ func TestAllScopeUsesAuthorizedClusterWideListBeyondFanoutLimit(t *testing.T) {
 		if key.Namespace != "" || key.Verb != "list" || key.Resource != "pods" {
 			t.Fatalf("non-global authorization key=%#v", key)
 		}
+	}
+}
+
+func TestExplicitPodScopeUsesAuthorizedGlobalListAndFiltersOutsideNamespaces(t *testing.T) {
+	client := kubefake.NewSimpleClientset(
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "alpha", Name: "api"}},
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "beta", Name: "worker"}},
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "outside", Name: "hidden"}},
+	)
+	requestNamespaces := []string{}
+	client.PrependReactor("list", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		requestNamespaces = append(requestNamespaces, action.GetNamespace())
+		return false, nil, nil
+	})
+	authorizer := &allowResourceAuthorization{}
+	backend := &ResourceBackend{clients: fixedResourceClientProvider{set: resourceClientSet{kubernetes: client}}, authorizer: authorizer, now: time.Now}
+	result, err := backend.ListPods(t.Context(), namespaces.SelectionBinding{ClusterProfileID: 1, Context: "ctx", Generation: "gen"}, namespaces.ScopeResolution{ScopeName: "scope", Namespaces: []string{"alpha", "beta"}}, resources.ListOptions{Limit: 100}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Items) != 2 || result.Coverage.RequestedNamespaces != 2 || result.Coverage.CompletedNamespaces != 2 {
+		t.Fatalf("items=%#v coverage=%#v", result.Items, result.Coverage)
+	}
+	if len(requestNamespaces) != 1 || requestNamespaces[0] != "" {
+		t.Fatalf("LIST namespaces=%#v, want one authorized global LIST", requestNamespaces)
+	}
+	if len(result.Cursor.Origins) != 1 || result.Cursor.Origins[0].Origin.Namespace != "" {
+		t.Fatalf("cursor did not retain the global LIST origin: %#v", result.Cursor)
+	}
+}
+
+func TestExplicitPodScopeSingleNamespaceFilterUsesNamespacedList(t *testing.T) {
+	client := kubefake.NewSimpleClientset(
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "alpha", Name: "api"}},
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "beta", Name: "worker"}},
+	)
+	requestNamespaces := []string{}
+	client.PrependReactor("list", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		requestNamespaces = append(requestNamespaces, action.GetNamespace())
+		return false, nil, nil
+	})
+	authorizer := &allowResourceAuthorization{}
+	backend := &ResourceBackend{clients: fixedResourceClientProvider{set: resourceClientSet{kubernetes: client}}, authorizer: authorizer, now: time.Now}
+	result, err := backend.ListPods(t.Context(), namespaces.SelectionBinding{ClusterProfileID: 1, Context: "ctx", Generation: "gen"}, namespaces.ScopeResolution{ScopeName: "scope", Namespaces: []string{"alpha", "beta"}}, resources.ListOptions{Limit: 20, Namespaces: []string{"alpha"}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Items) != 1 || result.Items[0].Namespace != "alpha" || len(requestNamespaces) != 1 || requestNamespaces[0] != "alpha" {
+		t.Fatalf("items=%#v LIST namespaces=%#v", result.Items, requestNamespaces)
+	}
+	for _, key := range authorizer.keys {
+		if key.Namespace != "alpha" {
+			t.Fatalf("unexpected authorization namespace: %#v", key)
+		}
+	}
+}
+
+func TestExplicitPodScopeGlobalPageSkipsOutsideNamespacesAcrossNativeChunks(t *testing.T) {
+	calls := []string{}
+	lister := func(_ context.Context, page resources.PageRequest) (resources.OriginPage[resources.PodDTO], error) {
+		calls = append(calls, page.Continue)
+		if page.Continue == "" {
+			return resources.OriginPage[resources.PodDTO]{Origin: page.Origin, Items: []resources.PodDTO{{Namespace: "aardvark", Name: "hidden"}, {Namespace: "alpha", Name: "a"}}, Continue: "next", ResourceVersion: "rv"}, nil
+		}
+		return resources.OriginPage[resources.PodDTO]{Origin: page.Origin, Items: []resources.PodDTO{{Namespace: "beta", Name: "b"}}, ResourceVersion: "rv"}, nil
+	}
+	page, err := listGlobalPodPageInScope(t.Context(), resources.PageRequest{Limit: 2}, lister, map[string]struct{}{"alpha": {}, "beta": {}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 2 || page.Items[0].Name != "a" || page.Items[1].Name != "b" || page.Continue != "" || len(calls) != 2 {
+		t.Fatalf("page=%#v calls=%#v", page, calls)
+	}
+}
+
+func TestExplicitPodScopeGlobalPageDoesNotLookAheadBeforeLastNamespace(t *testing.T) {
+	calls := 0
+	lister := func(_ context.Context, page resources.PageRequest) (resources.OriginPage[resources.PodDTO], error) {
+		calls++
+		return resources.OriginPage[resources.PodDTO]{Origin: page.Origin, Items: []resources.PodDTO{{Namespace: "alpha", Name: "a"}, {Namespace: "alpha", Name: "b"}}, Continue: "next", ResourceVersion: "rv"}, nil
+	}
+	page, err := listGlobalPodPageInScope(t.Context(), resources.PageRequest{Limit: 2}, lister, map[string]struct{}{"alpha": {}, "beta": {}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 2 || page.Continue != "next" || calls != 1 {
+		t.Fatalf("page=%#v calls=%d", page, calls)
+	}
+}
+
+func TestExplicitPodScopeGlobalPageClosesExactLimitWithoutEmptyCursorPage(t *testing.T) {
+	calls := 0
+	lister := func(_ context.Context, page resources.PageRequest) (resources.OriginPage[resources.PodDTO], error) {
+		calls++
+		if page.Continue == "" {
+			return resources.OriginPage[resources.PodDTO]{Origin: page.Origin, Items: []resources.PodDTO{{Namespace: "alpha", Name: "a"}, {Namespace: "alpha", Name: "b"}}, Continue: "maybe-more", ResourceVersion: "rv"}, nil
+		}
+		return resources.OriginPage[resources.PodDTO]{Origin: page.Origin, Items: []resources.PodDTO{{Namespace: "outside", Name: "hidden"}}, Continue: "later", ResourceVersion: "rv"}, nil
+	}
+	page, err := listGlobalPodPageInScope(t.Context(), resources.PageRequest{Limit: 2}, lister, map[string]struct{}{"alpha": {}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 2 || page.Continue != "" || calls != 2 {
+		t.Fatalf("page=%#v calls=%d", page, calls)
 	}
 }
 
@@ -498,6 +743,33 @@ func TestSecretListUsesOnlyMetadataClientAndNeverTypedSecret(t *testing.T) {
 	actions := metadataClient.Actions()
 	if len(actions) != 2 || actions[0].GetVerb() != "list" || actions[1].GetVerb() != "get" || actions[0].GetResource().Resource != "secrets" || actions[1].GetResource().Resource != "secrets" {
 		t.Fatalf("metadata actions=%#v", actions)
+	}
+}
+
+func TestSecretListNeverFallsBackToTypedClientWhenMetadataIsUnsupported(t *testing.T) {
+	t.Parallel()
+	scheme := metadatafake.NewTestScheme()
+	metav1.AddMetaToScheme(scheme)
+	metadataClient := metadatafake.NewSimpleMetadataClient(scheme)
+	metadataClient.PrependReactor("list", "secrets", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewGenericServerResponse(406, "", schema.GroupResource{Resource: "secrets"}, "", "", 0, false)
+	})
+	typedClient := kubefake.NewSimpleClientset(&corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "default", Name: "credentials", UID: "uid-1"},
+		Data:       map[string][]byte{"token": []byte("must-never-be-returned")},
+	})
+	backend := &ResourceBackend{
+		clients:    fixedResourceClientProvider{set: resourceClientSet{kubernetes: typedClient, metadata: metadataClient}},
+		authorizer: &allowResourceAuthorization{}, now: time.Now,
+	}
+	_, err := backend.listSecretPage(t.Context(), namespaces.SelectionBinding{
+		ClusterProfileID: 1, Context: "ctx", Generation: "gen",
+	}, resources.PageRequest{Origin: resources.Origin{Namespace: "default", Version: "v1", Resource: "secrets"}, Limit: 10})
+	if resources.ErrorCodeOf(err) != resources.CodeFeatureUnavailable {
+		t.Fatalf("metadata negotiation error = %v", err)
+	}
+	if actions := typedClient.Actions(); len(actions) != 0 {
+		t.Fatalf("typed Secret client was accessed: %#v", actions)
 	}
 }
 

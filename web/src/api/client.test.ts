@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { getContexts, getDashboardRestarts, getDashboardSummary, getPermissions, scanDashboardLogs, selectContext } from './client'
+import { getContexts, getDashboardRestarts, getDashboardSummary, getPermissions, getPods, scanDashboardLogs, selectContext } from './client'
 
 function json(data: unknown): Response {
   return new Response(JSON.stringify({ data }), { status: 200, headers: { 'Content-Type': 'application/json; charset=utf-8' } })
@@ -9,6 +9,53 @@ function json(data: unknown): Response {
 afterEach(() => vi.unstubAllGlobals())
 
 describe('local API client security boundary', () => {
+	it('renews an expired list cursor once without changing filters or generation', async () => {
+		const fetch = vi.fn()
+			.mockResolvedValueOnce(new Response(JSON.stringify({ code: 'CURSOR_EXPIRED', message: 'Expired' }), { status: 410, headers: { 'Content-Type': 'application/json' } }))
+			.mockResolvedValueOnce(new Response(JSON.stringify({ data: [], meta: { generation: 'gen', page: { limit: 25, next: '', complete: true, truncated: false, filterScope: 'page' } } }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+		vi.stubGlobal('fetch', fetch)
+
+		const result = await getPods({ limit: 25, search: 'api', continueToken: 'old', prefetch: true }, undefined, 'gen')
+
+		expect(result.snapshotRenewed).toBe(true)
+		expect(fetch.mock.calls.map((call) => call[0])).toEqual(['/api/v1/pods?limit=25&continue=old&search=api', '/api/v1/pods?limit=25&search=api'])
+		expect(fetch.mock.calls[0][1].headers).toMatchObject({ 'X-KubePeep-List-Priority': 'likely-next' })
+		expect(fetch.mock.calls[1][1].headers).not.toHaveProperty('X-KubePeep-List-Priority')
+	})
+
+	it('keeps an explicit next-page request visible', async () => {
+		const fetch = vi.fn().mockResolvedValue(json([]))
+		vi.stubGlobal('fetch', fetch)
+		await getPods({ limit: 100, continueToken: 'next' })
+		expect(fetch.mock.calls[0][1].headers).not.toHaveProperty('X-KubePeep-List-Priority')
+	})
+
+	it('marks unrelated background collection work for the global scheduler', async () => {
+		const fetch = vi.fn().mockResolvedValue(json([]))
+		vi.stubGlobal('fetch', fetch)
+
+		await getPods({ limit: 100, priority: 'unrelated', skipUXTiming: true })
+
+		expect(fetch.mock.calls[0][1].headers).toMatchObject({ 'X-KubePeep-List-Priority': 'unrelated' })
+	})
+
+	it('does not renew a forbidden cursor', async () => {
+		const fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ code: 'FORBIDDEN', message: 'Denied' }), { status: 403, headers: { 'Content-Type': 'application/json' } }))
+		vi.stubGlobal('fetch', fetch)
+
+		await expect(getPods({ continueToken: 'old' })).rejects.toMatchObject({ status: 403, code: 'FORBIDDEN' })
+		expect(fetch).toHaveBeenCalledTimes(1)
+	})
+	it('encodes normalized resource selectors without dropping cancellation', async () => {
+		const controller = new AbortController()
+		const fetch = vi.fn().mockResolvedValue(json([]))
+		vi.stubGlobal('fetch', fetch)
+
+		await getPods({ limit: 25, labelSelector: 'app=api', fieldSelector: 'spec.nodeName=worker-1' }, controller.signal)
+
+		expect(fetch).toHaveBeenCalledWith('/api/v1/pods?limit=25&labelSelector=app%3Dapi&fieldSelector=spec.nodeName%3Dworker-1', expect.objectContaining({ signal: controller.signal }))
+	})
+
   it('uses no-store, same-origin credentials, and forwards cancellation', async () => {
     const controller = new AbortController()
     const fetch = vi.fn().mockResolvedValue(json([]))

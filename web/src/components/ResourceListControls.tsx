@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { RefreshCw, Search } from 'lucide-react'
 
+import { beginListInteraction, type ListInteractionID } from '../observability/uxMetrics'
 import { Button, Input, Select } from './ui'
 
 export type ListSortOrder = 'asc' | 'desc'
@@ -20,7 +21,7 @@ interface ResourceListControlsProps {
   search: string
   appliedSearch: string
   onSearchChange: (value: string) => void
-  onApply: () => void
+  onApply: (interactionId: ListInteractionID) => void
   onRefresh: () => void
   onClear: () => void
   activeFilters?: ActiveListFilter[]
@@ -73,7 +74,11 @@ export function ResourceListControls({
     <section aria-label="Resource list controls" className="min-w-0">
       <form
         className="list-controls-form flex flex-wrap items-center gap-1.5 rounded-xl border border-kp-overlay-0 bg-kp-surface-0"
-        onSubmit={(event) => { event.preventDefault(); onApply() }}
+        onSubmit={(event) => {
+          event.preventDefault()
+          const interactionId = beginListInteraction(sort !== appliedSort || order !== appliedOrder ? 'sort' : 'filter')
+          onApply(interactionId)
+        }}
       >
         <div className="relative min-w-[170px] flex-1">
           <Search size={13} aria-hidden="true" className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-kp-overlay-text" />
@@ -93,9 +98,9 @@ export function ResourceListControls({
         <Select aria-label="Sort this bounded page" className="!h-7 !w-auto max-w-[11rem] pr-6 text-sm" value={sort} onChange={(event) => onSortChange(event.target.value)}>{sortOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</Select>
         <Select aria-label="Order" className="!h-7 !w-[6.5rem] pr-6 text-sm" value={order} onChange={(event) => onOrderChange(event.target.value as ListSortOrder)}><option value="asc">Ascending</option><option value="desc">Descending</option></Select>
         <div className="flex items-center gap-1.5">
-          <Button type="submit" size="sm">Apply filters</Button>
+          <Button type="submit" size="sm" disabled={!hasPendingChanges} disabledReason="Change a filter, sort field, or order before applying.">Apply filters</Button>
           <Button variant="secondary" size="sm" aria-keyshortcuts="Control+R Meta+R" onClick={onRefresh} data-tip="Refresh this page"><RefreshCw size={12} aria-hidden="true" /> Refresh</Button>
-          <Button variant="ghost" size="sm" disabled={!canClear} onClick={onClear}>Clear filters</Button>
+          <Button variant="ghost" size="sm" disabled={!canClear} disabledReason="No filters or ordering changes are available to clear." onClick={onClear}>Clear filters</Button>
         </div>
       </form>
       <div className={`flex flex-wrap items-center gap-x-3 gap-y-1 px-1 text-xs text-kp-overlay-text ${appliedFilters.length > 0 || hasPendingChanges ? 'list-controls-chips py-1' : ''}`} aria-label="Applied resource list state" aria-live="polite">

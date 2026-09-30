@@ -8,25 +8,35 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/fvmoraes/kubepeep/internal/observability"
 	"github.com/fvmoraes/kubepeep/internal/services/authorization"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
 const (
-	WatchTimeoutSeconds      = int64(300)
-	MaximumStreams           = 8
-	MaximumStreamEventBytes  = 64 << 10
-	MaximumSnapshotItems     = 10000
-	MaximumSnapshotBytes     = 10 << 20
-	MaximumStreamQueueBytes  = 1 << 20
-	MaximumStreamQueueEvents = 1000
-	streamSSEEnvelopeReserve = 64
+	WatchTimeoutSeconds       = int64(300)
+	MaximumStreams            = 8
+	MaximumStreamEventBytes   = 64 << 10
+	MaximumSnapshotItems      = 10000
+	MaximumSnapshotBytes      = 10 << 20
+	DefaultWatchSnapshotBytes = 32 << 20
+	MaximumStreamQueueBytes   = 1 << 20
+	MaximumStreamQueueEvents  = 1000
+	DefaultWatchIdleTimeout   = 45 * time.Second
+	InitialWatchSyncTimeout   = 10 * time.Second
+	streamSSEEnvelopeReserve  = 64
+	// A single slow scope must not serialize hundreds of SAR requests, while
+	// concurrent streams must not create an unbounded authorization burst.
+	maximumConcurrentStreamAuthorizations = 16
 )
+
+var streamAuthorizationSlots = make(chan struct{}, maximumConcurrentStreamAuthorizations)
 
 type Topic string
 
@@ -38,18 +48,20 @@ const (
 	TopicIngresses      Topic = "ingresses"
 	TopicEndpointSlices Topic = "endpoint-slices"
 	TopicConfigMaps     Topic = "configmaps"
+	TopicPVCs           Topic = "persistent-volume-claims"
 )
 
-var topicOrder = []Topic{TopicPods, TopicEvents, TopicWorkloads, TopicServices, TopicIngresses, TopicEndpointSlices, TopicConfigMaps}
+var topicOrder = []Topic{TopicPods, TopicEvents, TopicWorkloads, TopicServices, TopicIngresses, TopicEndpointSlices, TopicConfigMaps, TopicPVCs}
 var topicGVRs = map[Topic][]schema.GroupVersionResource{
 	TopicPods: {{Group: "", Version: "v1", Resource: "pods"}}, TopicEvents: {{Group: "", Version: "v1", Resource: "events"}},
 	TopicWorkloads: {{Group: "apps", Version: "v1", Resource: "deployments"}, {Group: "apps", Version: "v1", Resource: "statefulsets"}, {Group: "apps", Version: "v1", Resource: "daemonsets"}, {Group: "batch", Version: "v1", Resource: "jobs"}, {Group: "batch", Version: "v1", Resource: "cronjobs"}},
 	TopicServices:  {{Group: "", Version: "v1", Resource: "services"}}, TopicIngresses: {{Group: "networking.k8s.io", Version: "v1", Resource: "ingresses"}}, TopicEndpointSlices: {{Group: "discovery.k8s.io", Version: "v1", Resource: "endpointslices"}}, TopicConfigMaps: {{Group: "", Version: "v1", Resource: "configmaps"}},
+	TopicPVCs: {{Group: "", Version: "v1", Resource: "persistentvolumeclaims"}},
 }
 
 func ValidateTopics(values []Topic) ([]Topic, error) {
-	if len(values) < 1 || len(values) > 7 {
-		return nil, validationError("topic cardinality must be between 1 and 7")
+	if len(values) < 1 || len(values) > len(topicOrder) {
+		return nil, validationError("topic cardinality must be between 1 and 8")
 	}
 	seen := map[Topic]struct{}{}
 	for _, value := range values {
@@ -77,13 +89,14 @@ func TopicGVRs(topic Topic) []schema.GroupVersionResource {
 // intentionally cannot be placed in a watch snapshot or event.
 type TopicObject interface{ resourceTopic() Topic }
 
-func (PodDTO) resourceTopic() Topic           { return TopicPods }
-func (EventDTO) resourceTopic() Topic         { return TopicEvents }
-func (WorkloadDTO) resourceTopic() Topic      { return TopicWorkloads }
-func (ServiceDTO) resourceTopic() Topic       { return TopicServices }
-func (IngressDTO) resourceTopic() Topic       { return TopicIngresses }
-func (EndpointSliceDTO) resourceTopic() Topic { return TopicEndpointSlices }
-func (ConfigMapListDTO) resourceTopic() Topic { return TopicConfigMaps }
+func (PodDTO) resourceTopic() Topic                   { return TopicPods }
+func (EventDTO) resourceTopic() Topic                 { return TopicEvents }
+func (WorkloadDTO) resourceTopic() Topic              { return TopicWorkloads }
+func (ServiceDTO) resourceTopic() Topic               { return TopicServices }
+func (IngressDTO) resourceTopic() Topic               { return TopicIngresses }
+func (EndpointSliceDTO) resourceTopic() Topic         { return TopicEndpointSlices }
+func (ConfigMapListDTO) resourceTopic() Topic         { return TopicConfigMaps }
+func (PersistentVolumeClaimDTO) resourceTopic() Topic { return TopicPVCs }
 
 type WatchKey struct {
 	Generation string
@@ -93,10 +106,14 @@ type WatchKey struct {
 	GVR        schema.GroupVersionResource
 	Namespace  string
 	Selector   string
+	// EffectiveOrigins contains the canonical scope resolution used to build
+	// this watch. It prevents sharing when the named scope is unchanged but its
+	// resolved namespace set differs.
+	EffectiveOrigins []string
 }
 
 func (key WatchKey) identity() string {
-	return key.Generation + "\x00" + key.Context + "\x00" + key.Scope + "\x00" + string(key.Topic) + "\x00" + key.GVR.String() + "\x00" + key.Namespace + "\x00" + key.Selector
+	return key.Generation + "\x00" + key.Context + "\x00" + key.Scope + "\x00" + string(key.Topic) + "\x00" + key.GVR.String() + "\x00" + key.Namespace + "\x00" + key.Selector + "\x00" + strings.Join(canonicalCacheStrings(key.EffectiveOrigins), "\x1e")
 }
 
 type WatchSnapshot struct {
@@ -104,11 +121,13 @@ type WatchSnapshot struct {
 	Items           []TopicObject
 }
 type WatchChange struct {
-	Type            string
-	ResourceVersion string
-	Object          TopicObject
-	Deleted         *ResourceRef
-	Err             error
+	ReceivedAt       time.Time
+	Type             string
+	ResourceVersion  string
+	Object           TopicObject
+	Deleted          *ResourceRef
+	InitialEventsEnd bool
+	Err              error
 }
 type WatchStream interface {
 	ResultChan() <-chan WatchChange
@@ -119,42 +138,107 @@ type WatchPort interface {
 	Watch(context.Context, WatchKey, string, int64, bool) (WatchStream, error)
 }
 
+// ProgressiveListPort may emit bounded, non-authoritative pages while the
+// initial LIST is still running. The complete snapshot remains transactional.
+type ProgressiveListPort interface {
+	ListProgress(context.Context, WatchKey, func([]TopicObject) bool) (WatchSnapshot, error)
+}
+
+// InitialWatchPort is optional. Clusters that do not implement streaming
+// lists continue to use the classic LIST+WATCH path.
+type InitialWatchPort interface {
+	WatchInitial(context.Context, WatchKey, int64) (WatchStream, error)
+}
+
+var ErrStreamingListsUnsupported = errors.New("streaming lists unsupported")
+
 type StreamEvent struct {
-	Event           string        `json:"event"`
-	Topic           Topic         `json:"topic,omitempty"`
-	Generation      string        `json:"generation"`
-	ResourceVersion string        `json:"resourceVersion,omitempty"`
-	Items           []TopicObject `json:"items,omitempty"`
-	Object          TopicObject   `json:"object,omitempty"`
-	Deleted         *ResourceRef  `json:"deleted,omitempty"`
-	Reason          string        `json:"reason,omitempty"`
-	RefetchRequired bool          `json:"refetchRequired,omitempty"`
-	Final           bool          `json:"final,omitempty"`
-	Chunk           int           `json:"chunk,omitempty"`
-	ObservedAt      string        `json:"observedAt,omitempty"`
+	Event               string        `json:"event"`
+	Topic               Topic         `json:"topic,omitempty"`
+	Generation          string        `json:"generation"`
+	ResourceVersion     string        `json:"resourceVersion,omitempty"`
+	Items               []TopicObject `json:"items,omitempty"`
+	Object              TopicObject   `json:"object,omitempty"`
+	Deleted             *ResourceRef  `json:"deleted,omitempty"`
+	Reason              string        `json:"reason,omitempty"`
+	RefetchRequired     bool          `json:"refetchRequired,omitempty"`
+	Final               bool          `json:"final,omitempty"`
+	Chunk               int           `json:"chunk,omitempty"`
+	CompletedNamespaces int           `json:"completedNamespaces,omitempty"`
+	RequestedNamespaces int           `json:"requestedNamespaces,omitempty"`
+	ObservedAt          string        `json:"observedAt,omitempty"`
 }
 
 type WatchManager struct {
-	port    WatchPort
-	mu      sync.Mutex
-	workers map[string]*watchWorker
-	closed  bool
+	metrics              *observability.Registry
+	port                 WatchPort
+	cache                *ResourceCache
+	idleTimeout          time.Duration
+	maxSnapshotBytes     int
+	streamingLists       bool
+	streamingUnsupported map[string]bool
+	onChange             func(WatchKey)
+	mu                   sync.Mutex
+	workers              map[string]*watchWorker
+	closed               bool
 }
 type watchWorker struct {
-	manager     *WatchManager
-	key         WatchKey
-	ctx         context.Context
-	cancel      context.CancelFunc
-	subscribers map[*Subscription]struct{}
-	initial     []StreamEvent
+	manager           *WatchManager
+	key               WatchKey
+	ctx               context.Context
+	cancel            context.CancelFunc
+	subscribers       map[*Subscription]struct{}
+	initial           []StreamEvent
+	snapshot          WatchSnapshot
+	snapshotBytes     int
+	snapshotReady     bool
+	connected         bool
+	cacheFresh        bool
+	cacheSubscription *CacheSubscription
+	idleTimer         *time.Timer
+	stopping          bool
+}
+
+type WatchManagerConfig struct {
+	Metrics     *observability.Registry
+	Cache       *ResourceCache
+	IdleTimeout time.Duration
+	// MaxSnapshotBytes bounds the sum retained by all workers, independently
+	// of the resource cache's own copies and each worker's per-snapshot limit.
+	MaxSnapshotBytes int
+	StreamingLists   bool
+	OnChange         func(WatchKey)
 }
 
 func NewWatchManager(port WatchPort) *WatchManager {
-	return &WatchManager{port: port, workers: map[string]*watchWorker{}}
+	return NewWatchManagerWithMetrics(port, nil)
+}
+
+func NewWatchManagerWithMetrics(port WatchPort, metrics *observability.Registry) *WatchManager {
+	return NewWatchManagerWithConfig(port, WatchManagerConfig{Metrics: metrics})
+}
+
+func NewWatchManagerWithConfig(port WatchPort, config WatchManagerConfig) *WatchManager {
+	if config.Cache == nil {
+		config.Cache = NewResourceCache(ResourceCacheConfig{Metrics: config.Metrics})
+	}
+	if config.IdleTimeout <= 0 {
+		config.IdleTimeout = DefaultWatchIdleTimeout
+	}
+	if config.MaxSnapshotBytes <= 0 {
+		config.MaxSnapshotBytes = DefaultWatchSnapshotBytes
+	}
+	return &WatchManager{
+		port: port, workers: map[string]*watchWorker{}, metrics: config.Metrics,
+		cache: config.Cache, idleTimeout: config.IdleTimeout,
+		maxSnapshotBytes: config.MaxSnapshotBytes,
+		streamingLists:   config.StreamingLists, streamingUnsupported: make(map[string]bool),
+		onChange: config.OnChange,
+	}
 }
 func (manager *WatchManager) Subscribe(ctx context.Context, key WatchKey) (*Subscription, error) {
 	if ctx == nil {
-		ctx = context.Background()
+		ctx = context.TODO()
 	}
 	if manager == nil || manager.port == nil {
 		return nil, domainError(CodeFeatureUnavailable, "Resource watches are unavailable.", nil)
@@ -162,8 +246,8 @@ func (manager *WatchManager) Subscribe(ctx context.Context, key WatchKey) (*Subs
 	if key.Generation == "" || key.Context == "" || key.Scope == "" {
 		return nil, validationError("watch binding is incomplete")
 	}
-	if _, ok := topicGVRs[key.Topic]; !ok {
-		return nil, validationError("watch topic is invalid")
+	if !slices.Contains(topicGVRs[key.Topic], key.GVR) {
+		return nil, validationError("watch topic and resource do not match")
 	}
 	subscription := newSubscription(ctx)
 	manager.mu.Lock()
@@ -175,27 +259,75 @@ func (manager *WatchManager) Subscribe(ctx context.Context, key WatchKey) (*Subs
 	worker := manager.workers[identity]
 	created := false
 	if worker == nil {
-		workerContext, cancel := context.WithCancel(context.Background())
-		worker = &watchWorker{manager: manager, key: key, ctx: workerContext, cancel: cancel, subscribers: map[*Subscription]struct{}{}}
+		workerContext, cancel := context.WithCancel(observability.DetachedTracing(ctx))
+		cacheSubscription, cacheErr := manager.cache.Subscribe(workerContext, ResourceCacheKey{WatchKey: key})
+		if cacheErr != nil {
+			cancel()
+			manager.mu.Unlock()
+			return nil, cacheErr
+		}
+		worker = &watchWorker{
+			manager: manager, key: key, ctx: workerContext, cancel: cancel,
+			subscribers: map[*Subscription]struct{}{}, cacheSubscription: cacheSubscription,
+		}
+		if cached, ok := cacheSubscription.Load(ctx); ok && cached.State != CacheStateExpired {
+			events, snapshotErr := SnapshotEvents(key.Generation, key.Topic, cached.Snapshot)
+			if snapshotErr == nil {
+				if err := worker.installSnapshotLocked(cached.Snapshot, events); err != nil {
+					cacheSubscription.Close()
+					cancel()
+					manager.mu.Unlock()
+					return nil, err
+				}
+				worker.cacheFresh = cached.State == CacheStateFresh
+			} else {
+				if invalidateErr := manager.cache.Invalidate(ResourceCacheKey{WatchKey: key}); invalidateErr != nil {
+					cacheSubscription.Close()
+					cancel()
+					manager.mu.Unlock()
+					return nil, invalidateErr
+				}
+			}
+		}
 		manager.workers[identity] = worker
 		created = true
+	}
+	if worker.idleTimer != nil {
+		worker.idleTimer.Stop()
+		worker.idleTimer = nil
+	}
+	if worker.snapshotReady && len(worker.initial) == 0 {
+		events, snapshotErr := SnapshotEvents(key.Generation, key.Topic, worker.snapshot)
+		if snapshotErr != nil {
+			manager.mu.Unlock()
+			return nil, snapshotErr
+		}
+		worker.initial = events
 	}
 	worker.subscribers[subscription] = struct{}{}
 	initial := append([]StreamEvent(nil), worker.initial...)
 	subscription.closeFn = func() { worker.remove(subscription) }
+	for _, event := range initial {
+		if !subscription.push(event) {
+			subscription.forceTerminal(StreamEvent{Event: "reset", Topic: key.Topic, Generation: key.Generation, Reason: "slow_consumer", RefetchRequired: true})
+			if created {
+				delete(manager.workers, identity)
+				worker.stopping = true
+			}
+			manager.mu.Unlock()
+			if created {
+				// run has not started, so its deferred cleanup cannot release
+				// the cache subscription or stop this rejected worker.
+				worker.finish()
+			} else {
+				worker.remove(subscription)
+			}
+			return subscription, nil
+		}
+	}
 	manager.mu.Unlock()
 	if created {
 		go worker.run()
-	} else if len(initial) > 0 {
-		go func() {
-			for _, event := range initial {
-				if !subscription.push(event) {
-					subscription.forceTerminal(StreamEvent{Event: "reset", Topic: key.Topic, Generation: key.Generation, Reason: "slow_consumer", RefetchRequired: true})
-					worker.remove(subscription)
-					return
-				}
-			}
-		}()
 	}
 	go func() {
 		select {
@@ -207,7 +339,13 @@ func (manager *WatchManager) Subscribe(ctx context.Context, key WatchKey) (*Subs
 	return subscription, nil
 }
 func (manager *WatchManager) CancelGeneration(generation string) {
+	manager.cache.InvalidateGeneration(generation)
 	manager.mu.Lock()
+	for key := range manager.streamingUnsupported {
+		if strings.HasPrefix(key, generation+"\x00") {
+			delete(manager.streamingUnsupported, key)
+		}
+	}
 	workers := make([]*watchWorker, 0)
 	for identity, worker := range manager.workers {
 		if worker.key.Generation == generation {
@@ -245,40 +383,196 @@ func (manager *WatchManager) SharedWatchCount() int {
 	return len(manager.workers)
 }
 
-func (worker *watchWorker) run() {
-	defer worker.finish()
-	snapshot, err := worker.manager.port.List(worker.ctx, worker.key)
-	if err != nil {
-		worker.fail(err)
-		return
+func (manager *WatchManager) SnapshotBytes() int {
+	if manager == nil {
+		return 0
 	}
-	events, err := SnapshotEvents(worker.key.Generation, worker.key.Topic, snapshot)
-	if err != nil {
-		worker.terminal("snapshot_too_large")
-		return
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	total := 0
+	for _, worker := range manager.workers {
+		total += worker.snapshotBytes
 	}
-	worker.manager.mu.Lock()
-	worker.initial = append([]StreamEvent(nil), events...)
-	worker.manager.mu.Unlock()
-	for _, event := range events {
-		if !worker.broadcast(event) {
-			return
+	return total
+}
+
+func (worker *watchWorker) snapshotFitsLocked(size int) bool {
+	limit := worker.manager.maxSnapshotBytes
+	if limit <= 0 {
+		limit = DefaultWatchSnapshotBytes
+	}
+	total := size
+	for _, other := range worker.manager.workers {
+		if other != worker {
+			total += other.snapshotBytes
 		}
 	}
-	rv := snapshot.ResourceVersion
+	return total <= limit
+}
+
+func (worker *watchWorker) installSnapshotLocked(snapshot WatchSnapshot, events []StreamEvent) error {
+	if worker.stopping || worker.manager.closed || worker.ctx.Err() != nil {
+		return context.Canceled
+	}
+	encoded, err := json.Marshal(snapshot.Items)
+	if err != nil {
+		return err
+	}
+	if len(snapshot.Items) > MaximumSnapshotItems || len(encoded) > MaximumSnapshotBytes || !worker.snapshotFitsLocked(len(encoded)) {
+		return domainError(CodeLimitExceeded, "The resource watch snapshot memory budget was reached.", nil)
+	}
+	worker.snapshot = snapshot
+	worker.snapshotBytes = len(encoded)
+	worker.snapshotReady = true
+	worker.initial = append([]StreamEvent(nil), events...)
+	return nil
+}
+
+// EvictIdle stops workers with no subscribers immediately. Normal navigation
+// keeps them for idleTimeout so returning to a screen is cheap; aggregate
+// memory pressure may call this method before evicting cached snapshots.
+func (manager *WatchManager) EvictIdle() int {
+	if manager == nil {
+		return 0
+	}
+	manager.mu.Lock()
+	workers := make([]*watchWorker, 0)
+	for identity, worker := range manager.workers {
+		if worker.stopping || len(worker.subscribers) != 0 {
+			continue
+		}
+		worker.stopping = true
+		if worker.idleTimer != nil {
+			worker.idleTimer.Stop()
+			worker.idleTimer = nil
+		}
+		delete(manager.workers, identity)
+		workers = append(workers, worker)
+	}
+	manager.mu.Unlock()
+	for _, worker := range workers {
+		if err := worker.flushCache(); err != nil && worker.cacheSubscription != nil {
+			worker.cacheSubscription.MarkStale()
+		}
+		if worker.cacheSubscription != nil {
+			worker.cacheSubscription.Close()
+		}
+		worker.cancel()
+	}
+	return len(workers)
+}
+
+// Covers reports whether every Kubernetes origin of a page has a live local
+// snapshot. Pages without this coverage must revalidate through LIST so a
+// manual refresh cannot be answered by an unwatched stale page cache.
+func (manager *WatchManager) Covers(selection Selection, topic Topic, origins []Origin) bool {
+	if manager == nil || len(origins) == 0 {
+		return false
+	}
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	for _, origin := range origins {
+		if manager.coveringWorkerLocked(selection, topic, origin) == nil {
+			return false
+		}
+	}
+	return true
+}
+
+// SnapshotsFor returns one current, connected snapshot for every origin under
+// the exact resolved selection. Callers must still reauthorize every origin;
+// watch coverage alone never grants LIST permission.
+func (manager *WatchManager) SnapshotsFor(selection Selection, topic Topic, origins []Origin) (map[string]WatchSnapshot, bool) {
+	if manager == nil || len(origins) == 0 {
+		return nil, false
+	}
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	snapshots := make(map[string]WatchSnapshot, len(origins))
+	for _, origin := range origins {
+		worker := manager.coveringWorkerLocked(selection, topic, origin)
+		if worker == nil {
+			return nil, false
+		}
+		snapshots[origin.Key()] = WatchSnapshot{ResourceVersion: worker.snapshot.ResourceVersion, Items: append([]TopicObject(nil), worker.snapshot.Items...)}
+	}
+	return snapshots, true
+}
+
+func (manager *WatchManager) coveringWorkerLocked(selection Selection, topic Topic, origin Origin) *watchWorker {
+	for _, worker := range manager.workers {
+		key := worker.key
+		if worker.stopping || !worker.connected || !worker.snapshotReady || key.Selector != "" || key.Generation != selection.Generation || key.Context != selection.Context || key.Scope != selection.Scope || key.Topic != topic || !slices.Equal(canonicalCacheStrings(key.EffectiveOrigins), canonicalCacheStrings(selection.Namespaces)) {
+			continue
+		}
+		if key.GVR.Group == origin.APIGroup && key.GVR.Version == origin.Version && key.GVR.Resource == origin.Resource && key.Namespace == origin.Namespace {
+			return worker
+		}
+	}
+	return nil
+}
+
+func (worker *watchWorker) run() {
+	defer worker.finish()
+	labels := map[string]string{"resource": string(worker.key.Topic)}
+	metrics := worker.manager.metrics
+	metrics.AddGauge(observability.WatchActiveName, labels, 1)
+	defer metrics.AddGauge(observability.WatchActiveName, labels, -1)
+	rv := worker.snapshot.ResourceVersion
+	var initialStream WatchStream
+	if !worker.snapshotReady {
+		initialStream, rv = worker.tryInitialWatch()
+	}
+	if !worker.cacheFresh || rv == "" {
+		if initialStream == nil {
+			var err error
+			rv, err = worker.relist()
+			if err != nil {
+				worker.fail(err)
+				return
+			}
+		}
+	}
 	backoff := 250 * time.Millisecond
+	attempted := false
 	for {
-		stream, watchErr := worker.manager.port.Watch(worker.ctx, worker.key, rv, WatchTimeoutSeconds, true)
+		spanName := "watch.connect"
+		if attempted {
+			spanName = "watch.reconnect"
+			metrics.IncCounter(observability.WatchReconnectsTotalName, labels)
+		}
+		attempted = true
+		var stream WatchStream
+		var watchErr error
+		if initialStream != nil {
+			stream, initialStream = initialStream, nil
+		} else {
+			_, endConnect := observability.StartSpan(worker.ctx, spanName)
+			stream, watchErr = worker.manager.port.Watch(worker.ctx, worker.key, rv, WatchTimeoutSeconds, true)
+			endConnect(watchErr)
+		}
 		if watchErr != nil {
 			if errors.Is(watchErr, ErrResourceExpired) {
-				// A 410 at watch creation means this resourceVersion can never
-				// succeed. End with reset so the next connection performs a fresh
-				// LIST instead of backing off around an obsolete RV forever.
-				worker.terminal("resource_version_expired")
-				return
+				metrics.IncCounter(observability.WatchExpiredTotalName, labels)
+				if invalidateErr := worker.invalidateCache(); invalidateErr != nil {
+					worker.fail(invalidateErr)
+					return
+				}
+				worker.broadcast(StreamEvent{Event: "refreshed", Topic: worker.key.Topic, Generation: worker.key.Generation, Reason: "resource_version_expired", RefetchRequired: true})
+				rv, watchErr = worker.relist()
+				if watchErr != nil {
+					worker.fail(watchErr)
+					return
+				}
+				backoff = 250 * time.Millisecond
+				continue
 			}
 			code := ErrorCodeOf(sanitizePortError(watchErr))
 			if code == CodeForbidden || code == CodeAuthorizationUnavailable {
+				if invalidateErr := worker.invalidateCache(); invalidateErr != nil {
+					worker.fail(invalidateErr)
+					return
+				}
 				worker.fail(watchErr)
 				return
 			}
@@ -288,10 +582,12 @@ func (worker *watchWorker) run() {
 			backoff = min(backoff*2, 10*time.Second)
 			continue
 		}
+		worker.setConnected(true)
 		stable := time.NewTimer(60 * time.Second)
 		for {
 			select {
 			case <-worker.ctx.Done():
+				worker.setConnected(false)
 				stable.Stop()
 				stream.Stop()
 				return
@@ -300,6 +596,7 @@ func (worker *watchWorker) run() {
 				stable.Reset(60 * time.Second)
 			case change, ok := <-stream.ResultChan():
 				if !ok {
+					worker.setConnected(false)
 					stable.Stop()
 					stream.Stop()
 					if !worker.wait(jitterDuration(backoff)) {
@@ -309,19 +606,53 @@ func (worker *watchWorker) run() {
 					goto reconnect
 				}
 				if errors.Is(change.Err, ErrResourceExpired) {
+					worker.setConnected(false)
+					metrics.IncCounter(observability.WatchExpiredTotalName, labels)
 					stable.Stop()
 					stream.Stop()
-					worker.terminal("resource_version_expired")
-					return
+					if invalidateErr := worker.invalidateCache(); invalidateErr != nil {
+						worker.fail(invalidateErr)
+						return
+					}
+					worker.broadcast(StreamEvent{Event: "refreshed", Topic: worker.key.Topic, Generation: worker.key.Generation, Reason: "resource_version_expired", RefetchRequired: true})
+					var relistErr error
+					rv, relistErr = worker.relist()
+					if relistErr != nil {
+						worker.fail(relistErr)
+						return
+					}
+					backoff = 250 * time.Millisecond
+					goto reconnect
 				}
 				if change.Err != nil {
+					worker.setConnected(false)
 					stable.Stop()
 					stream.Stop()
+					code := ErrorCodeOf(sanitizePortError(change.Err))
+					if code == CodeForbidden || code == CodeAuthorizationUnavailable {
+						if invalidateErr := worker.invalidateCache(); invalidateErr != nil {
+							worker.fail(invalidateErr)
+							return
+						}
+					}
 					worker.fail(change.Err)
 					return
 				}
+				if strings.EqualFold(change.Type, "BOOKMARK") {
+					if change.ResourceVersion != "" {
+						rv = change.ResourceVersion
+						worker.manager.mu.Lock()
+						if worker.snapshotReady {
+							worker.snapshot.ResourceVersion = rv
+							worker.initial = nil
+						}
+						worker.manager.mu.Unlock()
+					}
+					continue
+				}
 				event, convertErr := watchChangeEvent(worker.key, change)
 				if convertErr != nil {
+					worker.setConnected(false)
 					stable.Stop()
 					stream.Stop()
 					worker.terminal("event_too_large")
@@ -330,7 +661,22 @@ func (worker *watchWorker) run() {
 				if change.ResourceVersion != "" {
 					rv = change.ResourceVersion
 				}
+				if !worker.updateSnapshot(event) {
+					worker.setConnected(false)
+					stable.Stop()
+					stream.Stop()
+					return
+				}
+				worker.cacheSubscription.MarkStale()
+				if worker.manager.onChange != nil {
+					worker.manager.onChange(worker.key)
+				}
+				metrics.IncCounter(observability.WatchEventsTotalName, labels)
+				if !change.ReceivedAt.IsZero() {
+					metrics.SetGauge(observability.WatchLagMillisecondsName, labels, max(0, time.Since(change.ReceivedAt).Milliseconds()))
+				}
 				if !worker.broadcast(event) {
+					worker.setConnected(false)
 					stable.Stop()
 					stream.Stop()
 					return
@@ -340,6 +686,399 @@ func (worker *watchWorker) run() {
 	reconnect:
 	}
 }
+
+func (worker *watchWorker) setConnected(connected bool) {
+	worker.manager.mu.Lock()
+	worker.connected = connected
+	stopping := worker.stopping
+	worker.manager.mu.Unlock()
+	// An intentional idle shutdown retains its last RV as a safe reconnect
+	// checkpoint. An unexpected disconnect still makes the cache stale.
+	if !connected && !stopping && worker.cacheSubscription != nil {
+		worker.cacheSubscription.MarkStale()
+	}
+}
+
+func (worker *watchWorker) tryInitialWatch() (WatchStream, string) {
+	port, ok := worker.manager.port.(InitialWatchPort)
+	if !ok || !worker.manager.streamingLists {
+		return nil, ""
+	}
+	capabilityKey := worker.key.Generation + "\x00" + worker.key.GVR.String()
+	worker.manager.mu.Lock()
+	unsupported := worker.manager.streamingUnsupported[capabilityKey]
+	worker.manager.mu.Unlock()
+	if unsupported {
+		return nil, ""
+	}
+	stream, err := port.WatchInitial(worker.ctx, worker.key, WatchTimeoutSeconds)
+	if err != nil {
+		worker.markInitialUnsupported(capabilityKey, err)
+		return nil, ""
+	}
+	ready := false
+	defer func() {
+		if !ready {
+			stream.Stop()
+		}
+	}()
+	timer := time.NewTimer(InitialWatchSyncTimeout)
+	defer timer.Stop()
+	snapshot := WatchSnapshot{Items: []TopicObject{}}
+	bytes := 0
+	for {
+		select {
+		case <-worker.ctx.Done():
+			return nil, ""
+		case <-timer.C:
+			return nil, ""
+		case change, open := <-stream.ResultChan():
+			if !open {
+				return nil, ""
+			}
+			if change.Err != nil {
+				worker.markInitialUnsupported(capabilityKey, change.Err)
+				return nil, ""
+			}
+			if strings.EqualFold(change.Type, "BOOKMARK") && change.InitialEventsEnd {
+				snapshot.ResourceVersion = change.ResourceVersion
+				if snapshot.ResourceVersion == "" {
+					return nil, ""
+				}
+				events, snapshotErr := SnapshotEvents(worker.key.Generation, worker.key.Topic, snapshot)
+				if snapshotErr != nil {
+					return nil, ""
+				}
+				token, tokenErr := worker.cacheSubscription.BeginRefresh(worker.ctx)
+				if tokenErr == nil {
+					if commitErr := worker.cacheSubscription.Commit(worker.ctx, token, snapshot, false); commitErr != nil {
+						worker.cacheSubscription.AbortRefresh(token)
+					}
+				}
+				worker.manager.mu.Lock()
+				installErr := worker.installSnapshotLocked(snapshot, events)
+				worker.manager.mu.Unlock()
+				if installErr != nil {
+					return nil, ""
+				}
+				if worker.manager.onChange != nil {
+					worker.manager.onChange(worker.key)
+				}
+				for _, event := range events {
+					if !worker.broadcast(event) {
+						return nil, ""
+					}
+				}
+				ready = true
+				return stream, snapshot.ResourceVersion
+			}
+			if !strings.EqualFold(change.Type, "ADDED") || change.Object == nil || change.Object.resourceTopic() != worker.key.Topic {
+				return nil, ""
+			}
+			encoded, encodeErr := json.Marshal(change.Object)
+			if encodeErr != nil || len(snapshot.Items) >= MaximumSnapshotItems || bytes+len(encoded) > MaximumSnapshotBytes {
+				return nil, ""
+			}
+			bytes += len(encoded)
+			snapshot.Items = append(snapshot.Items, change.Object)
+		}
+	}
+}
+
+func (worker *watchWorker) markInitialUnsupported(key string, err error) {
+	if !errors.Is(err, ErrStreamingListsUnsupported) {
+		return
+	}
+	worker.manager.mu.Lock()
+	worker.manager.streamingUnsupported[key] = true
+	worker.manager.mu.Unlock()
+}
+
+// relist creates a new consistent LIST checkpoint after a cold start or a
+// resourceVersion expiration. It never publishes a partial list.
+func (worker *watchWorker) relist() (string, error) {
+	token, err := worker.cacheSubscription.BeginRefresh(worker.ctx)
+	if err != nil {
+		return "", err
+	}
+	var snapshot WatchSnapshot
+	if port, ok := worker.manager.port.(ProgressiveListPort); ok {
+		previewed := 0
+		snapshot, err = port.ListProgress(worker.ctx, worker.key, func(items []TopicObject) bool {
+			if previewed >= 500 {
+				return true
+			}
+			if remaining := 500 - previewed; len(items) > remaining {
+				items = items[:remaining]
+			}
+			previewed += len(items)
+			if len(items) == 0 {
+				return true
+			}
+			return worker.broadcast(StreamEvent{Event: "progress", Topic: worker.key.Topic, Generation: worker.key.Generation, Items: append([]TopicObject(nil), items...)})
+		})
+	} else {
+		snapshot, err = worker.manager.port.List(worker.ctx, worker.key)
+	}
+	if err != nil {
+		worker.cacheSubscription.AbortRefresh(token)
+		code := ErrorCodeOf(sanitizePortError(err))
+		if code == CodeForbidden || code == CodeAuthorizationUnavailable {
+			if invalidateErr := worker.invalidateCache(); invalidateErr != nil {
+				return "", errors.Join(err, invalidateErr)
+			}
+		}
+		return "", err
+	}
+	events, err := SnapshotEvents(worker.key.Generation, worker.key.Topic, snapshot)
+	if err != nil {
+		worker.cacheSubscription.AbortRefresh(token)
+		return "", err
+	}
+	if cacheErr := worker.cacheSubscription.Commit(worker.ctx, token, snapshot, false); cacheErr != nil {
+		worker.cacheSubscription.AbortRefresh(token)
+		if errors.Is(cacheErr, ErrCacheWriteFenced) {
+			return "", cacheErr
+		}
+		// Cache pressure must not break the established LIST+WATCH path.
+		if invalidateErr := worker.invalidateCache(); invalidateErr != nil {
+			return "", errors.Join(cacheErr, invalidateErr)
+		}
+	}
+	worker.manager.mu.Lock()
+	installErr := worker.installSnapshotLocked(snapshot, events)
+	worker.manager.mu.Unlock()
+	if installErr != nil {
+		return "", installErr
+	}
+	if worker.manager.onChange != nil {
+		worker.manager.onChange(worker.key)
+	}
+	for _, event := range events {
+		if !worker.broadcast(event) {
+			return "", context.Canceled
+		}
+	}
+	return snapshot.ResourceVersion, nil
+}
+
+func (worker *watchWorker) updateSnapshot(event StreamEvent) bool {
+	worker.manager.mu.Lock()
+	if worker.stopping || !worker.snapshotReady {
+		active := !worker.stopping
+		worker.manager.mu.Unlock()
+		return active
+	}
+	_, end := observability.StartSpan(worker.ctx, "cache.apply_event")
+	defer end(nil)
+	if worker.snapshotBytes == 0 {
+		encoded, _ := json.Marshal(worker.snapshot.Items)
+		worker.snapshotBytes = len(encoded)
+		if len(worker.snapshot.Items) == 0 {
+			worker.snapshotBytes = 2 // Empty arrays have no item or separator bytes.
+		}
+	}
+	next := applyStreamEventToSnapshot(worker.key.Topic, worker.snapshot, event)
+	delta, err := snapshotEventSizeDelta(worker.key.Topic, worker.snapshot, event)
+	if err != nil || len(next.Items) > MaximumSnapshotItems || worker.snapshotBytes+delta > MaximumSnapshotBytes || !worker.snapshotFitsLocked(worker.snapshotBytes+delta) {
+		// A stream can grow beyond its bounded initial LIST. Drop the now
+		// incomplete level state before any reader can reuse or cache it.
+		worker.snapshot = WatchSnapshot{}
+		worker.snapshotBytes = 0
+		worker.snapshotReady = false
+		worker.initial = nil
+		worker.stopping = true
+		worker.manager.mu.Unlock()
+		if invalidateErr := worker.invalidateCache(); invalidateErr != nil {
+			worker.fail(invalidateErr)
+		} else {
+			worker.terminal("snapshot_limit_exceeded")
+		}
+		return false
+	}
+	worker.snapshot = next
+	worker.snapshotBytes += delta
+	worker.initial = nil
+	worker.manager.mu.Unlock()
+	return true
+}
+
+// snapshotEventSizeDelta accounts only for the changed object and its array
+// separator; serializing the entire collection on every delta would turn a
+// bounded watch into repeated multi-megabyte allocations.
+func snapshotEventSizeDelta(topic Topic, snapshot WatchSnapshot, event StreamEvent) (int, error) {
+	var identity string
+	var ok bool
+	newBytes := 0
+	switch event.Event {
+	case "added", "modified":
+		identity, ok = topicObjectIdentity(event.Object)
+		if ok {
+			encoded, err := json.Marshal(event.Object)
+			if err != nil {
+				return 0, err
+			}
+			newBytes = len(encoded)
+		}
+	case "deleted":
+		identity, ok = resourceRefIdentity(topic, event.Deleted)
+	}
+	if !ok {
+		return 0, nil
+	}
+	for _, item := range snapshot.Items {
+		if candidate, valid := topicObjectIdentity(item); valid && candidate == identity {
+			encoded, err := json.Marshal(item)
+			if err != nil {
+				return 0, err
+			}
+			delta := newBytes - len(encoded)
+			if newBytes == 0 && len(snapshot.Items) > 1 {
+				delta--
+			}
+			return delta, nil
+		}
+	}
+	if newBytes > 0 && len(snapshot.Items) > 0 {
+		newBytes++
+	}
+	return newBytes, nil
+}
+
+func (worker *watchWorker) invalidateCache() error {
+	err := worker.manager.cache.Invalidate(ResourceCacheKey{WatchKey: worker.key})
+	if worker.manager.onChange != nil {
+		worker.manager.onChange(worker.key)
+	}
+	return err
+}
+
+func applyStreamEventToSnapshot(topic Topic, snapshot WatchSnapshot, event StreamEvent) WatchSnapshot {
+	result := WatchSnapshot{ResourceVersion: event.ResourceVersion, Items: append([]TopicObject(nil), snapshot.Items...)}
+	if result.ResourceVersion == "" {
+		result.ResourceVersion = snapshot.ResourceVersion
+	}
+	switch event.Event {
+	case "added", "modified":
+		identity, ok := topicObjectIdentity(event.Object)
+		if !ok {
+			return result
+		}
+		for index, item := range result.Items {
+			if candidate, candidateOK := topicObjectIdentity(item); candidateOK && candidate == identity {
+				result.Items[index] = event.Object
+				return result
+			}
+		}
+		result.Items = append(result.Items, event.Object)
+	case "deleted":
+		identity, ok := resourceRefIdentity(topic, event.Deleted)
+		if !ok {
+			return result
+		}
+		for index, item := range result.Items {
+			if candidate, candidateOK := topicObjectIdentity(item); candidateOK && candidate == identity {
+				result.Items = append(result.Items[:index], result.Items[index+1:]...)
+				return result
+			}
+		}
+	}
+	return result
+}
+
+func topicObjectIdentity(object TopicObject) (string, bool) {
+	switch value := object.(type) {
+	case PodDTO:
+		return objectIdentity("pod", value.Namespace, value.Name), true
+	case *PodDTO:
+		if value != nil {
+			return objectIdentity("pod", value.Namespace, value.Name), true
+		}
+	case EventDTO:
+		return eventObjectIdentity(value), true
+	case *EventDTO:
+		if value != nil {
+			return eventObjectIdentity(*value), true
+		}
+	case WorkloadDTO:
+		return objectIdentity(value.Kind, value.Namespace, value.Name), true
+	case *WorkloadDTO:
+		if value != nil {
+			return objectIdentity(value.Kind, value.Namespace, value.Name), true
+		}
+	case ServiceDTO:
+		return objectIdentity("service", value.Namespace, value.Name), true
+	case *ServiceDTO:
+		if value != nil {
+			return objectIdentity("service", value.Namespace, value.Name), true
+		}
+	case IngressDTO:
+		return objectIdentity("ingress", value.Namespace, value.Name), true
+	case *IngressDTO:
+		if value != nil {
+			return objectIdentity("ingress", value.Namespace, value.Name), true
+		}
+	case EndpointSliceDTO:
+		return objectIdentity("endpointslice", value.Namespace, value.Name), true
+	case *EndpointSliceDTO:
+		if value != nil {
+			return objectIdentity("endpointslice", value.Namespace, value.Name), true
+		}
+	case ConfigMapListDTO:
+		return objectIdentity("configmap", value.Namespace, value.Name), true
+	case *ConfigMapListDTO:
+		if value != nil {
+			return objectIdentity("configmap", value.Namespace, value.Name), true
+		}
+	case PersistentVolumeClaimDTO:
+		return objectIdentity("persistentvolumeclaim", value.Namespace, value.Name), true
+	case *PersistentVolumeClaimDTO:
+		if value != nil {
+			return objectIdentity("persistentvolumeclaim", value.Namespace, value.Name), true
+		}
+	}
+	return "", false
+}
+
+func eventObjectIdentity(event EventDTO) string {
+	if event.Name != "" {
+		return objectIdentity("event", event.Namespace, event.Name)
+	}
+	timestamp := ""
+	if event.Timestamp != nil {
+		timestamp = *event.Timestamp
+	}
+	return strings.Join([]string{"event", event.Namespace, event.ObjectKind, event.ObjectName, event.Reason, timestamp}, "\x00")
+}
+
+func resourceRefIdentity(topic Topic, ref *ResourceRef) (string, bool) {
+	if ref == nil {
+		return "", false
+	}
+	kind := ref.Kind
+	if kind == "" {
+		switch topic {
+		case TopicPods:
+			kind = "pod"
+		case TopicServices:
+			kind = "service"
+		case TopicIngresses:
+			kind = "ingress"
+		case TopicEndpointSlices:
+			kind = "endpointslice"
+		case TopicConfigMaps:
+			kind = "configmap"
+		case TopicPVCs:
+			kind = "persistentvolumeclaim"
+		}
+	}
+	return objectIdentity(kind, ref.Namespace, ref.Name), true
+}
+
+func objectIdentity(kind, namespace, name string) string {
+	return strings.ToLower(strings.TrimSpace(kind)) + "\x00" + namespace + "\x00" + name
+}
+
 func (worker *watchWorker) wait(duration time.Duration) bool {
 	timer := time.NewTimer(duration)
 	defer timer.Stop()
@@ -356,9 +1095,10 @@ func (worker *watchWorker) broadcast(event StreamEvent) bool {
 	for subscription := range worker.subscribers {
 		subscribers = append(subscribers, subscription)
 	}
+	stopping := worker.stopping
 	worker.manager.mu.Unlock()
 	if len(subscribers) == 0 {
-		return false
+		return !stopping
 	}
 	for _, subscription := range subscribers {
 		if !subscription.push(event) {
@@ -379,18 +1119,91 @@ func (worker *watchWorker) remove(subscription *Subscription) {
 	worker.manager.mu.Lock()
 	delete(worker.subscribers, subscription)
 	empty := len(worker.subscribers) == 0
-	if empty {
-		delete(worker.manager.workers, worker.key.identity())
+	immediate := false
+	if empty && worker.idleTimer == nil {
+		current := worker.manager.workers[worker.key.identity()] == worker
+		if !current || worker.manager.idleTimeout <= 0 {
+			if current {
+				delete(worker.manager.workers, worker.key.identity())
+			}
+			worker.stopping = true
+			immediate = true
+		} else {
+			worker.idleTimer = time.AfterFunc(worker.manager.idleTimeout, worker.stopIfIdle)
+		}
 	}
 	worker.manager.mu.Unlock()
-	if empty {
+	if immediate {
+		if err := worker.flushCache(); err != nil && worker.cacheSubscription != nil {
+			worker.cacheSubscription.MarkStale()
+		}
 		worker.cancel()
 	}
 }
+
+func (worker *watchWorker) stopIfIdle() {
+	worker.manager.mu.Lock()
+	if worker.manager.workers[worker.key.identity()] != worker || len(worker.subscribers) != 0 {
+		worker.idleTimer = nil
+		worker.manager.mu.Unlock()
+		return
+	}
+	worker.stopping = true
+	err := worker.flushSnapshot(worker.snapshot, worker.snapshotReady)
+	if (err != nil || !worker.connected) && worker.cacheSubscription != nil {
+		worker.cacheSubscription.MarkStale()
+	}
+	delete(worker.manager.workers, worker.key.identity())
+	worker.idleTimer = nil
+	worker.manager.mu.Unlock()
+	worker.cancel()
+}
+
+func (worker *watchWorker) flushCache() error {
+	if worker.cacheSubscription == nil {
+		return nil
+	}
+	worker.manager.mu.Lock()
+	if !worker.snapshotReady {
+		worker.manager.mu.Unlock()
+		return nil
+	}
+	snapshot := worker.snapshot
+	ready := worker.snapshotReady
+	connected := worker.connected
+	worker.manager.mu.Unlock()
+	err := worker.flushSnapshot(snapshot, ready)
+	if (err != nil || !connected) && worker.cacheSubscription != nil {
+		worker.cacheSubscription.MarkStale()
+	}
+	return err
+}
+
+func (worker *watchWorker) flushSnapshot(snapshot WatchSnapshot, ready bool) error {
+	if worker.cacheSubscription == nil || !ready {
+		return nil
+	}
+	token, err := worker.cacheSubscription.BeginRefresh(worker.ctx)
+	if err != nil {
+		return err
+	}
+	if err = worker.cacheSubscription.Commit(worker.ctx, token, snapshot, false); err != nil {
+		worker.cacheSubscription.AbortRefresh(token)
+		return err
+	}
+	return nil
+}
+
 func (worker *watchWorker) finish() {
+	worker.cancel()
 	worker.manager.mu.Lock()
 	if worker.manager.workers[worker.key.identity()] == worker {
 		delete(worker.manager.workers, worker.key.identity())
+	}
+	worker.stopping = true
+	if worker.idleTimer != nil {
+		worker.idleTimer.Stop()
+		worker.idleTimer = nil
 	}
 	subscribers := make([]*Subscription, 0, len(worker.subscribers))
 	for subscription := range worker.subscribers {
@@ -398,6 +1211,9 @@ func (worker *watchWorker) finish() {
 	}
 	worker.subscribers = map[*Subscription]struct{}{}
 	worker.manager.mu.Unlock()
+	if worker.cacheSubscription != nil {
+		worker.cacheSubscription.Close()
+	}
 	for _, subscription := range subscribers {
 		subscription.Close()
 	}
@@ -459,7 +1275,27 @@ func (subscription *Subscription) push(event StreamEvent) bool {
 	}
 	subscription.mu.Lock()
 	defer subscription.mu.Unlock()
-	if subscription.closed || len(subscription.queue) >= MaximumStreamQueueEvents || subscription.bytes+wireBytes > MaximumStreamQueueBytes {
+	if subscription.closed {
+		return false
+	}
+	// Resource lists are level-driven: replace an undelivered delta for the
+	// same object with its latest state. Event streams remain chronological.
+	if identity, ok := streamEventIdentity(event); ok {
+		for index := len(subscription.queue) - 1; index >= 0; index-- {
+			if subscription.queue[index].event.Event == "snapshot" && subscription.queue[index].event.Topic == event.Topic {
+				break
+			}
+			if previous, previousOK := streamEventIdentity(subscription.queue[index].event); previousOK && previous == identity {
+				if subscription.bytes-subscription.queue[index].bytes+wireBytes > MaximumStreamQueueBytes {
+					return false
+				}
+				subscription.bytes += wireBytes - subscription.queue[index].bytes
+				subscription.queue[index] = queuedEvent{event: event, bytes: wireBytes}
+				return true
+			}
+		}
+	}
+	if len(subscription.queue) >= MaximumStreamQueueEvents || subscription.bytes+wireBytes > MaximumStreamQueueBytes {
 		return false
 	}
 	subscription.queue = append(subscription.queue, queuedEvent{event: event, bytes: wireBytes})
@@ -469,6 +1305,24 @@ func (subscription *Subscription) push(event StreamEvent) bool {
 	default:
 	}
 	return true
+}
+
+func streamEventIdentity(event StreamEvent) (string, bool) {
+	if event.Topic == "" || event.Topic == TopicEvents {
+		return "", false
+	}
+	var identity string
+	var ok bool
+	switch event.Event {
+	case "added", "modified":
+		identity, ok = topicObjectIdentity(event.Object)
+	case "deleted":
+		identity, ok = resourceRefIdentity(event.Topic, event.Deleted)
+	}
+	if !ok {
+		return "", false
+	}
+	return string(event.Topic) + "\x00" + identity, true
 }
 func (subscription *Subscription) forceTerminal(event StreamEvent) {
 	encoded, _ := json.Marshal(event)
@@ -588,6 +1442,36 @@ func authorizeTopics(ctx context.Context, checker AuthorizationChecker, selectio
 	if selection.Generation == "" || len(selection.Namespaces) == 0 {
 		return validationError("stream selection is incomplete")
 	}
+	if len(selection.Namespaces) > 1 {
+		// A cluster-wide grant is stronger than every requested namespace grant.
+		// A denied/unknown global probe is never used as a denial: restricted
+		// identities still get the complete per-origin capability check below.
+		globalAllowed := true
+		for _, topic := range canonical {
+			for _, gvr := range topicGVRs[topic] {
+				for _, verb := range []string{"list", "watch"} {
+					capability := authorizationCapability(ctx, checker, authorization.Key{Generation: selection.Generation, APIGroup: gvr.Group, Resource: gvr.Resource, Verb: verb}, refresh)
+					if capability.Decision != authorization.DecisionAllowed {
+						globalAllowed = false
+						break
+					}
+				}
+				if !globalAllowed {
+					break
+				}
+			}
+			if !globalAllowed {
+				break
+			}
+		}
+		if globalAllowed {
+			return nil
+		}
+		return authorizeTopicsConcurrently(ctx, checker, selection, canonical, refresh)
+	}
+	if selection.Namespaces[0] == "" {
+		return authorizeTopicsConcurrently(ctx, checker, selection, canonical, refresh)
+	}
 	for _, topic := range canonical {
 		for _, gvr := range topicGVRs[topic] {
 			for _, namespace := range selection.Namespaces {
@@ -603,6 +1487,73 @@ func authorizeTopics(ctx context.Context, checker AuthorizationChecker, selectio
 				}
 			}
 		}
+	}
+	return nil
+}
+
+func authorizeTopicsConcurrently(ctx context.Context, checker AuthorizationChecker, selection Selection, topics []Topic, refresh bool) error {
+	keys := make([]authorization.Key, 0, len(selection.Namespaces)*len(topics)*2)
+	for _, topic := range topics {
+		for _, gvr := range topicGVRs[topic] {
+			for _, namespace := range selection.Namespaces {
+				for _, verb := range []string{"list", "watch"} {
+					keys = append(keys, authorization.Key{Generation: selection.Generation, Namespace: namespace, APIGroup: gvr.Group, Resource: gvr.Resource, Verb: verb})
+				}
+			}
+		}
+	}
+	workCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	jobs := make(chan authorization.Key)
+	producerDone := make(chan struct{})
+	go func() {
+		defer close(producerDone)
+		defer close(jobs)
+		for _, key := range keys {
+			select {
+			case jobs <- key:
+			case <-workCtx.Done():
+				return
+			}
+		}
+	}()
+	var workers sync.WaitGroup
+	var resultMu sync.Mutex
+	denied, unavailable := false, false
+	for range min(maximumConcurrentStreamAuthorizations, len(keys)) {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			for key := range jobs {
+				select {
+				case streamAuthorizationSlots <- struct{}{}:
+				case <-workCtx.Done():
+					return
+				}
+				capability := authorizationCapability(workCtx, checker, key, refresh)
+				<-streamAuthorizationSlots
+				if capability.Decision == authorization.DecisionAllowed {
+					continue
+				}
+				resultMu.Lock()
+				if capability.Decision == authorization.DecisionDenied {
+					denied = true
+				} else {
+					unavailable = true
+				}
+				resultMu.Unlock()
+				cancel()
+				return
+			}
+		}()
+	}
+	workers.Wait()
+	<-producerDone
+	if denied {
+		return domainError(CodeForbidden, "Access to the requested resource stream was denied.", nil)
+	}
+	if unavailable || ctx.Err() != nil {
+		return domainError(CodeAuthorizationUnavailable, "Authorization could not be confirmed.", nil)
 	}
 	return nil
 }

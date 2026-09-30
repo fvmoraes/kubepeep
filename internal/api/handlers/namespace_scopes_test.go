@@ -56,6 +56,12 @@ func (f *fakeNamespaceService) Select(context.Context, int64, namespaces.ScopeSe
 	}
 	return f.selected, f.result, f.err
 }
+func (f *fakeNamespaceService) SetDefault(context.Context, int64, namespaces.ScopeSelectRequest) (namespaces.ScopeResolution, namespaces.SelectionResult, error) {
+	if f.onSelect != nil {
+		f.onSelect()
+	}
+	return f.selected, f.result, f.err
+}
 
 func firstScope(scopes []namespaces.Scope) namespaces.Scope {
 	if len(scopes) == 0 {

@@ -47,15 +47,16 @@ const (
 type ConsequenceCode string
 
 const (
-	ConsequenceRecreateWorkloadPods   ConsequenceCode = "RECREATE_WORKLOAD_PODS"
-	ConsequenceChangeReplicaCount     ConsequenceCode = "CHANGE_REPLICA_COUNT"
-	ConsequenceDeletePod              ConsequenceCode = "DELETE_POD"
-	ConsequenceExposePodPortLocally   ConsequenceCode = "EXPOSE_POD_PORT_LOCALLY"
-	ConsequenceOpenInteractiveProcess ConsequenceCode = "OPEN_INTERACTIVE_PROCESS"
-	ConsequenceDeleteResource         ConsequenceCode = "DELETE_RESOURCE"
-	ConsequenceSuspendCronJob         ConsequenceCode = "SUSPEND_CRONJOB"
-	ConsequenceResumeCronJob          ConsequenceCode = "RESUME_CRONJOB"
-	ConsequenceCreateJobFromCronJob   ConsequenceCode = "CREATE_JOB_FROM_CRONJOB"
+	ConsequenceRecreateWorkloadPods     ConsequenceCode = "RECREATE_WORKLOAD_PODS"
+	ConsequenceChangeReplicaCount       ConsequenceCode = "CHANGE_REPLICA_COUNT"
+	ConsequenceDeletePod                ConsequenceCode = "DELETE_POD"
+	ConsequenceExposePodPortLocally     ConsequenceCode = "EXPOSE_POD_PORT_LOCALLY"
+	ConsequenceExposeServicePortLocally ConsequenceCode = "EXPOSE_SERVICE_PORT_LOCALLY"
+	ConsequenceOpenInteractiveProcess   ConsequenceCode = "OPEN_INTERACTIVE_PROCESS"
+	ConsequenceDeleteResource           ConsequenceCode = "DELETE_RESOURCE"
+	ConsequenceSuspendCronJob           ConsequenceCode = "SUSPEND_CRONJOB"
+	ConsequenceResumeCronJob            ConsequenceCode = "RESUME_CRONJOB"
+	ConsequenceCreateJobFromCronJob     ConsequenceCode = "CREATE_JOB_FROM_CRONJOB"
 )
 
 // ActionTargetDTO is repeated in every action request and must match both the
@@ -257,6 +258,14 @@ type PortForwardCommand struct {
 	RemotePort int
 }
 
+// ResolvedServicePort identifies the concrete Pod and container port selected
+// behind a Service. Resolution stays inside the Kubernetes adapter so service
+// selectors and Pod objects never cross the action boundary.
+type ResolvedServicePort struct {
+	Target     MutationTarget
+	RemotePort int
+}
+
 // PortForwardHandle owns only the upstream transport. The service owns the
 // loopback listener and closes both sides on every terminal path.
 type PortForwardHandle interface {
@@ -265,6 +274,7 @@ type PortForwardHandle interface {
 }
 
 type PortForwardAdapter interface {
+	ResolveService(context.Context, MutationTarget, int) (ResolvedServicePort, error)
 	Start(setup context.Context, lifetime context.Context, command PortForwardCommand, listener net.Listener) (PortForwardHandle, error)
 }
 
@@ -301,6 +311,7 @@ type PortForwardDTO struct {
 
 type PortForwardService interface {
 	Create(context.Context, namespaces.SelectionBinding, RouteTarget, string, PortForwardCreateRequest) (PortForwardDTO, bool, error)
+	CreateService(context.Context, namespaces.SelectionBinding, RouteTarget, string, PortForwardCreateRequest) (PortForwardDTO, bool, error)
 	List(namespaces.SelectionBinding) ([]PortForwardDTO, error)
 	Close(context.Context, namespaces.SelectionBinding, string, PortForwardDeleteRequest) error
 	OnGeneration(string)

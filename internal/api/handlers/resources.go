@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/fvmoraes/kubepeep/internal/api"
+	"github.com/fvmoraes/kubepeep/internal/observability"
 	"github.com/fvmoraes/kubepeep/internal/services/namespaces"
 	resourcecore "github.com/fvmoraes/kubepeep/internal/services/resources"
 	"k8s.io/apimachinery/pkg/util/validation"
@@ -264,6 +265,9 @@ func handleClusterList[T resourcecore.ListItem](handler *Resources, w http.Respo
 }
 
 func writeListResult[T resourcecore.ListItem](handler *Resources, w http.ResponseWriter, r *http.Request, collection resourcecore.Collection, options resourcecore.ListOptions, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, call listCall[T]) {
+	ctx, end := observability.StartSpan(r.Context(), "resources.list")
+	defer end(nil)
+	r = r.WithContext(ctx)
 	queryOptions := options
 	queryOptions.Continue = ""
 	queryJSON, _ := json.Marshal(queryOptions)
@@ -282,7 +286,7 @@ func writeListResult[T resourcecore.ListItem](handler *Resources, w http.Respons
 					return
 				}
 			} else if reference.Ref != "" {
-				if err := handler.store.Get(reference.Ref, decoded); err != nil {
+				if err := handler.store.GetContext(r.Context(), reference.Ref, decoded); err != nil {
 					api.WriteError(w, r, err)
 					return
 				}
@@ -303,7 +307,7 @@ func writeListResult[T resourcecore.ListItem](handler *Resources, w http.Respons
 	}
 	result.Page.Next = ""
 	if result.Cursor != nil && !result.Cursor.Complete() {
-		token, encodeErr := handler.encodeListCursor(cursorBinding, result.Cursor)
+		token, encodeErr := handler.encodeListCursor(r.Context(), cursorBinding, result.Cursor)
 		if encodeErr != nil {
 			api.WriteError(w, r, api.NewHTTPError(http.StatusTooManyRequests, api.CodeLimitExceeded, "The resource cursor exceeded its safe limit.", nil, encodeErr))
 			return
@@ -314,9 +318,9 @@ func writeListResult[T resourcecore.ListItem](handler *Resources, w http.Respons
 	handler.writeJSONIfCurrent(w, r, binding, envelope)
 }
 
-func (handler *Resources) encodeListCursor(binding api.CursorBinding, cursor any) (string, error) {
+func (handler *Resources) encodeListCursor(ctx context.Context, binding api.CursorBinding, cursor any) (string, error) {
 	if handler.store != nil {
-		reference, err := handler.store.Put(cursor)
+		reference, err := handler.store.PutContext(ctx, cursor)
 		if err != nil {
 			return "", err
 		}
@@ -920,7 +924,7 @@ func decodeResourceListQuery(r *http.Request, collection resourcecore.Collection
 	if err != nil {
 		return resourcecore.ListOptions{}, validationHTTPError("The resource query is invalid.", nil)
 	}
-	allowed := map[string]bool{"limit": true, "continue": true, "search": true, "namespace": true, "status": true, "sort": true, "order": true}
+	allowed := map[string]bool{"limit": true, "continue": true, "search": true, "namespace": true, "status": true, "sort": true, "order": true, "labelSelector": true, "fieldSelector": true}
 	switch collection {
 	case resourcecore.CollectionWorkloads:
 		allowed["kind"] = true
@@ -949,7 +953,20 @@ func decodeResourceListQuery(r *http.Request, collection resourcecore.Collection
 			}
 		}
 	}
-	options := resourcecore.ListOptions{Continue: first(values, "continue"), Search: first(values, "search"), Namespaces: values["namespace"], Statuses: values["status"], Sort: first(values, "sort"), Order: resourcecore.SortOrder(first(values, "order")), Workload: first(values, "workload"), Node: first(values, "node"), Restarts: resourcecore.RestartFilter(first(values, "restarts")), ObjectKind: first(values, "objectKind"), Reason: first(values, "reason"), AddressType: first(values, "addressType")}
+	options := resourcecore.ListOptions{Continue: first(values, "continue"), Search: first(values, "search"), Namespaces: values["namespace"], Statuses: values["status"], Sort: first(values, "sort"), Order: resourcecore.SortOrder(first(values, "order")), Workload: first(values, "workload"), Node: first(values, "node"), Restarts: resourcecore.RestartFilter(first(values, "restarts")), ObjectKind: first(values, "objectKind"), Reason: first(values, "reason"), AddressType: first(values, "addressType"), LabelSelector: first(values, "labelSelector"), FieldSelector: first(values, "fieldSelector")}
+	switch r.Header.Get("X-KubePeep-List-Priority") {
+	case "":
+		options.Priority = resourcecore.PriorityVisible
+	case "likely-next":
+		if options.Continue == "" {
+			return resourcecore.ListOptions{}, validationHTTPError("Speculative list priority requires a continuation cursor.", nil)
+		}
+		options.Priority = resourcecore.PriorityLikelyNext
+	case "unrelated":
+		options.Priority = resourcecore.PriorityUnrelated
+	default:
+		return resourcecore.ListOptions{}, validationHTTPError("The list priority is invalid.", nil)
+	}
 	for _, kind := range values["kind"] {
 		options.Kinds = append(options.Kinds, resourcecore.WorkloadKind(kind))
 	}
@@ -1066,6 +1083,9 @@ func resourceHTTPError(err error) error {
 	if errors.As(err, &httpError) {
 		return err
 	}
+	if errors.Is(err, resourcecore.ErrPrefetchDeferred) {
+		return api.NewHTTPError(http.StatusTooManyRequests, api.CodePrefetchDeferred, "Speculative loading was deferred while visible requests have priority.", nil, err)
+	}
 	code := resourcecore.ErrorCodeOf(err)
 	message := resourcecore.PublicMessage(err)
 	switch code {
@@ -1081,6 +1101,8 @@ func resourceHTTPError(err error) error {
 		return api.NewHTTPError(http.StatusConflict, api.CodeGenerationChanged, message, nil, err)
 	case resourcecore.CodeLimitExceeded:
 		return api.NewHTTPError(http.StatusTooManyRequests, api.CodeLimitExceeded, message, nil, err)
+	case resourcecore.CodeRateLimited:
+		return api.NewHTTPError(http.StatusTooManyRequests, api.CodeRateLimited, message, nil, err)
 	case resourcecore.CodePreferenceSensitive:
 		return api.NewHTTPError(http.StatusBadRequest, api.CodePreferenceSensitive, message, nil, err)
 	case resourcecore.CodeFeatureUnavailable:

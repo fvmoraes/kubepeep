@@ -8,3 +8,11 @@ export function PlatformInfo() {
 export function Invoke(arg1, arg2, arg3, arg4) {
   return window['go']['desktop']['Bridge']['Invoke'](arg1, arg2, arg3, arg4);
 }
+
+export function InvokeCancelable(arg1, arg2, arg3, arg4, arg5) {
+  return window['go']['desktop']['Bridge']['InvokeCancelable'](arg1, arg2, arg3, arg4, arg5);
+}
+
+export function Cancel(arg1) {
+  return window['go']['desktop']['Bridge']['Cancel'](arg1);
+}

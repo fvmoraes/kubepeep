@@ -7,6 +7,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -17,6 +18,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/httpstream"
 	remotecommandconsts "k8s.io/apimachinery/pkg/util/remotecommand"
@@ -654,6 +657,79 @@ func (client *ActionClient) StartPortForward(setup context.Context, lifetime con
 	}
 	handle := newClientGoPortForward(lifetime, connection, listener, command.RemotePort)
 	return handle, nil
+}
+
+func (client *ActionClient) ResolveServicePort(ctx context.Context, target actions.MutationTarget, servicePort int) (actions.ResolvedServicePort, error) {
+	if client == nil || client.unary == nil || target.Namespace == "" || target.Name == "" || servicePort < 1 || servicePort > 65535 {
+		return actions.ResolvedServicePort{}, errActionsClientUnavailable
+	}
+	service, err := client.unary.CoreV1().Services(target.Namespace).Get(ctx, target.Name, metav1.GetOptions{})
+	if err != nil {
+		return actions.ResolvedServicePort{}, err
+	}
+	var selectedPort *corev1.ServicePort
+	for index := range service.Spec.Ports {
+		candidate := &service.Spec.Ports[index]
+		if candidate.Port == int32(servicePort) && candidate.Protocol == corev1.ProtocolTCP {
+			selectedPort = candidate
+			break
+		}
+	}
+	if selectedPort == nil || len(service.Spec.Selector) == 0 {
+		return actions.ResolvedServicePort{}, apierrors.NewNotFound(schema.GroupResource{Resource: "service backends"}, target.Name)
+	}
+	pods, err := client.unary.CoreV1().Pods(target.Namespace).List(ctx, metav1.ListOptions{
+		LabelSelector: labels.SelectorFromSet(service.Spec.Selector).String(),
+		Limit:         100,
+	})
+	if err != nil {
+		return actions.ResolvedServicePort{}, err
+	}
+	sort.SliceStable(pods.Items, func(left, right int) bool { return pods.Items[left].Name < pods.Items[right].Name })
+	for index := range pods.Items {
+		pod := &pods.Items[index]
+		if pod.DeletionTimestamp != nil || pod.Status.Phase != corev1.PodRunning || !podReady(pod) {
+			continue
+		}
+		remotePort := int(selectedPort.TargetPort.IntVal)
+		if selectedPort.TargetPort.StrVal != "" {
+			remotePort = 0
+			for _, container := range pod.Spec.Containers {
+				for _, port := range container.Ports {
+					if port.Name == selectedPort.TargetPort.StrVal && port.Protocol == selectedPort.Protocol {
+						remotePort = int(port.ContainerPort)
+						break
+					}
+				}
+				if remotePort > 0 {
+					break
+				}
+			}
+			if remotePort == 0 {
+				continue
+			}
+		}
+		if remotePort == 0 {
+			remotePort = int(selectedPort.Port)
+		}
+		if remotePort < 1 || remotePort > 65535 {
+			continue
+		}
+		podTarget := target
+		podTarget.Kind = "Pod"
+		podTarget.Name = pod.Name
+		return actions.ResolvedServicePort{Target: podTarget, RemotePort: remotePort}, nil
+	}
+	return actions.ResolvedServicePort{}, apierrors.NewNotFound(schema.GroupResource{Resource: "service backends"}, target.Name)
+}
+
+func podReady(pod *corev1.Pod) bool {
+	for _, condition := range pod.Status.Conditions {
+		if condition.Type == corev1.PodReady {
+			return condition.Status == corev1.ConditionTrue
+		}
+	}
+	return false
 }
 
 type clientGoPortForward struct {

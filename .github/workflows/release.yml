@@ -201,11 +201,19 @@ jobs:
           mv wails.json.tmp wails.json
           grep productVersion wails.json
 
-      - name: Commit version files and push (bot)
+      - name: Record the exact build commit and publish metadata when requested
         id: metadata
-        if: steps.bump.outputs.should_release == 'true' && steps.bump.outputs.dry_run != 'true'
+        if: steps.bump.outputs.should_release == 'true'
+        env:
+          DRY_RUN: ${{ steps.bump.outputs.dry_run }}
         run: |
           set -euo pipefail
+          if [ "$DRY_RUN" = "true" ]; then
+            # Builds check out this immutable source SHA and apply VERSION
+            # locally; candidate mode never commits or pushes metadata.
+            echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add wails.json CHANGELOG.md
@@ -216,12 +224,6 @@ jobs:
             git push origin "HEAD:main"
           fi
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-
-      # Candidate mode (dry_run): builds and validations run against the
-      # SOURCE commit; no metadata commit, tag, Release or latest move.
-      - name: Record the source commit for candidate builds
-        if: steps.bump.outputs.should_release == 'true' && steps.bump.outputs.dry_run == 'true'
-        run: echo "sha=${{ github.sha }}" >> "$GITHUB_OUTPUT"
 
       - name: Keep release notes for the publish job
         if: steps.bump.outputs.should_release == 'true'
@@ -275,9 +277,14 @@ jobs:
           cache-dependency-path: web/package-lock.json
 
       - name: Pin npm
+        shell: bash
         run: |
           npm install --global npm@${{ env.NPM_VERSION }}
           test "$(npm --version)" = "${{ env.NPM_VERSION }}"
+
+      - name: Apply the release version to native package metadata
+        shell: bash
+        run: ./scripts/release.sh metadata "$VERSION"
 
       - name: Build the frontend (embedded via go:embed)
         run: make web-build
@@ -376,6 +383,9 @@ jobs:
           tar -czf "dist/kubepeep-linux-${{ matrix.arch }}.tar.gz" -C dist/staging kubePeep README.md LICENSE NOTICE THIRD_PARTY_NOTICES.md
           rm -rf dist/staging
 
+      - name: Scan Linux desktop binaries and packages
+        run: ./scripts/release_artifact_check.sh build/bin dist
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -421,9 +431,14 @@ jobs:
           cache-dependency-path: web/package-lock.json
 
       - name: Pin npm
+        shell: bash
         run: |
           npm install --global npm@${{ env.NPM_VERSION }}
           test "$(npm --version)" = "${{ env.NPM_VERSION }}"
+
+      - name: Apply the release version to native package metadata
+        shell: bash
+        run: ./scripts/release.sh metadata "$VERSION"
 
       - name: Install Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
@@ -517,6 +532,11 @@ jobs:
           Compress-Archive -Path (Join-Path $staging '*') -DestinationPath .\dist\kubepeep-$env:VERSION-windows-amd64.zip
           Get-ChildItem .\dist
 
+      - name: Scan Windows desktop binaries and installers
+        shell: bash
+        # The ZIP payload is also extracted by the central Ubuntu gate.
+        run: ./scripts/release_artifact_check.sh build/bin
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -569,9 +589,14 @@ jobs:
           cache-dependency-path: web/package-lock.json
 
       - name: Pin npm
+        shell: bash
         run: |
           npm install --global npm@${{ env.NPM_VERSION }}
           test "$(npm --version)" = "${{ env.NPM_VERSION }}"
+
+      - name: Apply the release version to native package metadata
+        shell: bash
+        run: ./scripts/release.sh metadata "$VERSION"
 
       - name: Build the frontend (embedded via go:embed)
         run: make web-build
@@ -614,6 +639,9 @@ jobs:
           cp dist/kubepeep-darwin-${{ matrix.arch }}.dmg "dist/kubepeep-${VERSION}-darwin-${{ matrix.arch }}.dmg"
           ls -la dist
 
+      - name: Scan macOS app bundles and archives
+        run: ./scripts/release_artifact_check.sh build/bin dist
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -638,12 +666,19 @@ jobs:
     timeout-minutes: 75
     permissions:
       contents: write
+      checks: read
     env:
       VERSION: ${{ needs.prepare.outputs.version }}
       TAG: ${{ needs.prepare.outputs.tag }}
       METADATA_SHA: ${{ needs.prepare.outputs.sha }}
       DRY_RUN: ${{ needs.prepare.outputs.dry_run }}
     steps:
+      - name: Check out the release metadata commit
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
+
       - name: Require successful verification of the originating commit
         shell: bash
         env:
@@ -661,88 +696,42 @@ jobs:
           # Falha/cancelamento/timeout só abortam após 3 leituras seguidas
           # sem recuperação; ausência/pending aguardam até o deadline.
           # native-runtime é um job de matriz: as pernas se chamam
-          # "native-runtime (macos-latest)" e "native-runtime (windows-latest)",
-          # então o gate exige TODAS as pernas encontradas pelo prefixo.
-          required_checks="build-and-test restricted-kind"
-          native_prefix='^native-runtime \\('
+          # "native-runtime (macos-latest)" e "native-runtime (windows-latest)".
+          # O helper exige os dois nomes e usa o maior id de cada check.
           deadline=$(( $(date +%s) + 45 * 60 ))
           failure_streak=0
           while :; do
             runs=$(gh api --paginate \
               "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/check-runs?per_page=100" \
               --jq '.check_runs[] | [.id, .name, (.conclusion // "pending")] | @tsv' 2>/dev/null | sort -n -k1,1) || runs=""
-            pending_checks=""
-            failed_checks=""
-            for check in $required_checks; do
-              latest=$(printf '%s\n' "$runs" | awk -F'\t' -v c="$check" '$2 == c { concl = $3 } END { print concl }')
-              case "$latest" in
-                success) ;;
-                failure|cancelled|timed_out|action_required)
-                  failed_checks="$failed_checks $check=$latest"
-                  ;;
-                *)
-                  pending_checks="$pending_checks $check=${latest:-none}"
-                  ;;
-              esac
-            done
-            native_conclusions=$(printf '%s\n' "$runs" | awk -F'\t' -v p="$native_prefix" '$2 ~ p { print $3 }')
-            if [ -z "$native_conclusions" ]; then
-              pending_checks="$pending_checks native-runtime=none"
-            else
-              case "$native_conclusions" in
-                *failure*|*cancelled*|*timed_out*|*action_required*)
-                  failed_checks="$failed_checks native-runtime=failed-leg"
-                  ;;
-                *pending*|*queued*|*)
-                  # Presença de qualquer leitura não-success mantém a espera.
-                  if printf '%s\n' "$native_conclusions" | grep -qv '^success$'; then
-                    pending_checks="$pending_checks native-runtime=running"
-                  fi
-                  ;;
-              esac
-            fi
-            if [ -z "$pending_checks" ] && [ -z "$failed_checks" ]; then
+            if check_state=$(printf '%s\n' "$runs" | ./scripts/release_check_status.sh); then
               echo "verify.yml (build-and-test, restricted-kind, native-runtime matrix) concluded successfully for ${GITHUB_SHA}."
               break
+            else
+              check_status=$?
             fi
-            if [ -n "$failed_checks" ]; then
+            if [ "$check_status" -eq 1 ]; then
               failure_streak=$((failure_streak + 1))
               if [ "$failure_streak" -ge 3 ]; then
-                echo "::error::verify.yml did not succeed for ${GITHUB_SHA} (failed:$failed_checks, $failure_streak consecutive readings). Release aborted — no tag was created."
+                echo "::error::verify.yml did not succeed for ${GITHUB_SHA} ($check_state, $failure_streak consecutive readings). Release aborted — no tag was created."
                 exit 1
               fi
-              echo "verify.yml state failed:$failed_checks (reading ${failure_streak}); re-checking for re-runs..."
+              echo "verify.yml state $check_state (reading ${failure_streak}); re-checking for re-runs..."
               sleep 45
               continue
             fi
-            failure_streak=0
-            if [ "$(date +%s)" -ge "$deadline" ]; then
-              echo "::error::Timed out waiting for verify.yml on ${GITHUB_SHA} (pending:$pending_checks)."
+            if [ "$check_status" -ne 2 ]; then
+              echo "::error::Could not evaluate verification checks."
               exit 1
             fi
-            echo "Waiting for verify.yml on ${GITHUB_SHA} (pending:$pending_checks)..."
+            failure_streak=0
+            if [ "$(date +%s)" -ge "$deadline" ]; then
+              echo "::error::Timed out waiting for verify.yml on ${GITHUB_SHA} ($check_state)."
+              exit 1
+            fi
+            echo "Waiting for verify.yml on ${GITHUB_SHA} ($check_state)..."
             sleep 60
           done
-
-      - name: Check out the release metadata commit
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          ref: ${{ needs.prepare.outputs.sha }}
-          persist-credentials: false
-
-      - name: Create the immutable release tag
-        if: env.DRY_RUN != 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          if git ls-remote --tags origin "refs/tags/${TAG}" | grep -q "refs/tags/${TAG}"; then
-            echo "::error::Tag ${TAG} already exists on origin — refusing to overwrite."
-            exit 1
-          fi
-          gh api -X POST "repos/${GITHUB_REPOSITORY}/git/refs" \
-            -f ref="refs/tags/${TAG}" -f sha="${METADATA_SHA}" > /dev/null
-          echo "Tag ${TAG} → ${METADATA_SHA:0:7}"
 
       - name: Download all validated build artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -789,6 +778,9 @@ jobs:
           if [ -n "$extra" ]; then echo "::error::unexpected files in dist: $extra"; exit 1; fi
           echo "All ${#expected[@]} expected assets present."
 
+      - name: Scan downloaded release artifacts before creating a tag
+        run: ./scripts/release_artifact_check.sh dist
+
       - name: Smoke the release candidate binary
         run: |
           staging=$(mktemp -d)
@@ -813,6 +805,20 @@ jobs:
         run: |
           syft scan dir:. --source-name "kubepeep" \
             -o spdx-json > "dist/kubepeep-${{ env.VERSION }}.spdx.json"
+
+      - name: Create the immutable release tag
+        if: env.DRY_RUN != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if git ls-remote --tags origin "refs/tags/${TAG}" | grep -q "refs/tags/${TAG}"; then
+            echo "::error::Tag ${TAG} already exists on origin — refusing to overwrite."
+            exit 1
+          fi
+          gh api -X POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+            -f ref="refs/tags/${TAG}" -f sha="${METADATA_SHA}" > /dev/null
+          echo "Tag ${TAG} → ${METADATA_SHA:0:7}"
 
       - name: Create the GitHub Release (Latest) from the immutable tag
         if: env.DRY_RUN != 'true'

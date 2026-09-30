@@ -1,9 +1,10 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 
-import { APIError, createIdempotencyKey, getPreferences, getSession, putPreferences } from '../api/client'
+import { APIError, createIdempotencyKey, getPreferences } from '../api/client'
+import { mutatePreferences } from '../api/preferences'
 import { Button, Input, Select } from './ui'
-import type { Preferences, SavedFilterCollection } from '../api/types'
+import type { SavedFilterCollection } from '../api/types'
 
 function errorMessage(error: unknown): string {
   if (error instanceof APIError) return `${error.code}: ${error.message}`
@@ -43,29 +44,34 @@ export function SavedFilterControls({
 
   const save = useMutation({
     mutationFn: async () => {
-      const current = preferences.data
-      if (!current) throw new Error('Preferences are unavailable.')
+      if (!preferences.data) throw new Error('Preferences are unavailable.')
       const controller = new AbortController()
       activeRequest.current?.abort()
       activeRequest.current = controller
       try {
-        const session = await getSession(controller.signal)
-        if (session.generation !== generation) {
-          throw new APIError(409, { code: 'GENERATION_CHANGED', message: 'The active selection changed before the filter was saved.' })
-        }
         const id = createIdempotencyKey()
-        const currentItems = current.filters?.[collection]?.items ?? []
-        const next: Preferences = {
-          ...current,
-          filters: {
-            ...current.filters,
-            [collection]: {
-              version: 1,
-              items: [...currentItems, { id, name: trimmedName, query: structuredClone(currentQuery) }],
+        const saved = await mutatePreferences((current) => {
+          const currentItems = current.filters?.[collection]?.items ?? []
+          if (currentItems.length >= 50) throw new Error('This collection already has the maximum 50 saved filters.')
+          return {
+            ...current,
+            filters: {
+              ...current.filters,
+              [collection]: {
+                version: 1,
+                items: [...currentItems, { id, name: trimmedName, query: structuredClone(currentQuery) }],
+              },
             },
+          }
+        }, {
+          signal: controller.signal,
+          validateSession: (session) => {
+            if (session.generation !== generation) {
+              throw new APIError(409, { code: 'GENERATION_CHANGED', message: 'The active selection changed before the filter was saved.' })
+            }
           },
-        }
-        return { id, preferences: await putPreferences(next, session.csrfToken, controller.signal) }
+        })
+        return { id, preferences: saved }
       } finally {
         if (activeRequest.current === controller) activeRequest.current = null
       }

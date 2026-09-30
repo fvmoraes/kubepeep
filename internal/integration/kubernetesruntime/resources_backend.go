@@ -2,7 +2,10 @@ package kubernetesruntime
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -17,6 +20,17 @@ import (
 
 // ResourceBackendOptions carries production wiring for the resource backend.
 type ResourceBackendOptions struct {
+	// StreamingLists enables the optional Kubernetes initial-events watch fast
+	// path. It is off by default and falls back to LIST+WATCH when unsupported.
+	StreamingLists bool
+	// PartialMetadata enables metadata-only LIST/GET calls for views that do
+	// not consume spec or status. Unsupported servers fall back to JSON.
+	PartialMetadata *bool
+	// AdaptiveConcurrency enables bounded AIMD (2..8, starting at 4).
+	AdaptiveConcurrency bool
+	// IntelligentPrefetch warms bounded related Pod/Event pages after a
+	// visible workload page without delaying the visible response.
+	IntelligentPrefetch bool
 	// ListWindowTimeout bounds one collection fan-out window. Zero falls back
 	// to the resources package default; values are clamped to the supported
 	// ceiling.
@@ -25,6 +39,23 @@ type ResourceBackendOptions struct {
 	// from Kubernetes versus items returned to the UI). A nil registry keeps
 	// collection uninstrumented; this is the default.
 	Metrics *observability.Registry
+	// ListFanout is an internal benchmark/rollback knob. Four remains the safe
+	// default; values above eight are clamped.
+	ListFanout int
+	// CursorMemory participates in the process-wide in-memory budget without
+	// exposing cursor payloads to the Kubernetes adapter.
+	CursorMemory CursorMemoryStore
+	// MemoryBudget bounds cached and live watch snapshots, screen pages and
+	// cursor payloads together. Zero uses the sum of their default budgets.
+	MemoryBudget int64
+}
+
+// CursorMemoryStore is the narrow lifecycle surface required by aggregate
+// cache pressure. api.CursorStore satisfies it without creating a package
+// dependency from the Kubernetes adapter back to the HTTP layer.
+type CursorMemoryStore interface {
+	Bytes() int64
+	PurgeExpired() int
 }
 
 // ResourceBackend is the Phase 6 application-facing adapter. It owns no
@@ -37,8 +68,23 @@ type ResourceBackend struct {
 	redactor   resources.TextRedactor
 	now        func() time.Time
 
-	listWindowTimeout time.Duration
-	metrics           *observability.Registry
+	listWindowTimeout      time.Duration
+	metrics                *observability.Registry
+	listFanout             int
+	listCoalescerOnce      sync.Once
+	listCoalescer          *resources.RequestCoalescer
+	collectionCache        *resources.CollectionCache
+	resourceCache          *resources.ResourceCache
+	scheduler              *resources.RequestScheduler
+	disablePartialMetadata bool
+	intelligentPrefetch    bool
+	cursorMemory           CursorMemoryStore
+	memoryBudget           int64
+	prefetchMu             sync.Mutex
+	prefetchClosed         bool
+	prefetchNextID         uint64
+	prefetchCancels        map[uint64]context.CancelFunc
+	prefetchWG             sync.WaitGroup
 
 	watchMu         sync.Mutex
 	watchManager    *resources.WatchManager
@@ -54,17 +100,48 @@ func NewResourceBackendWithOptions(runtime *Runtime, authorizer resources.Author
 	if runtime == nil || authorizer == nil {
 		return nil, errors.New("resource backend: runtime and authorizer are required")
 	}
+	memoryBudget := options.MemoryBudget
+	if memoryBudget <= 0 {
+		memoryBudget = int64(128<<20 + resources.DefaultCollectionCacheMaxBytes + 32<<20)
+	}
+	partialMetadata := true
+	if options.PartialMetadata != nil {
+		partialMetadata = *options.PartialMetadata
+	}
+	// Reserve 32 MiB of the previous 128 MiB snapshot allowance for live
+	// workers, which retain DTO copies independently of the resource cache.
+	resourceCache := resources.NewResourceCache(resources.ResourceCacheConfig{MaxBytes: (128 << 20) - resources.DefaultWatchSnapshotBytes, Metrics: options.Metrics})
 	backend := &ResourceBackend{
 		runtime: runtime, clients: runtimeResourceClientProvider{runtime: runtime}, authorizer: authorizer, redactor: redactor, now: time.Now,
 		listWindowTimeout: resources.NormalizeListWindowTimeout(options.ListWindowTimeout),
 		metrics:           options.Metrics,
+		listFanout:        resources.NormalizeFanout(options.ListFanout),
 		watchBindings:     make(map[string]namespaces.SelectionBinding),
+		collectionCache:   resources.NewCollectionCacheWithMetrics(0, 0, 0, nil, options.Metrics),
+		resourceCache:     resourceCache,
+		scheduler: resources.NewRequestSchedulerWithConfig(resources.SchedulerConfig{
+			Minimum: 2, Initial: 4, Maximum: 8, Adaptive: options.AdaptiveConcurrency,
+		}, nil),
+		disablePartialMetadata: !partialMetadata,
+		intelligentPrefetch:    options.IntelligentPrefetch,
+		prefetchCancels:        make(map[uint64]context.CancelFunc),
+		cursorMemory:           options.CursorMemory,
+		memoryBudget:           memoryBudget,
 	}
-	backend.watchManager = resources.NewWatchManager(&resourceWatchPort{backend: backend})
+	backend.watchManager = resources.NewWatchManagerWithConfig(&resourceWatchPort{backend: backend}, resources.WatchManagerConfig{
+		Metrics: options.Metrics, StreamingLists: options.StreamingLists,
+		Cache: resourceCache,
+		OnChange: func(key resources.WatchKey) {
+			if collection, ok := collectionForTopic(key.Topic); ok {
+				backend.collectionCache.InvalidateCollection(key.Generation, collection)
+			}
+		},
+	})
 	return backend, nil
 }
 
 func (backend *ResourceBackend) OnGeneration(next string) {
+	backend.collectionCache.SwitchGeneration(next)
 	backend.watchMu.Lock()
 	previous := backend.watchGeneration
 	backend.watchGeneration = next
@@ -76,9 +153,11 @@ func (backend *ResourceBackend) OnGeneration(next string) {
 	if manager != nil && previous != "" && previous != next {
 		manager.CancelGeneration(previous)
 	}
+	backend.enforceMemoryBudget()
 }
 
 func (backend *ResourceBackend) Close() {
+	backend.stopPrefetch()
 	backend.watchMu.Lock()
 	manager := backend.watchManager
 	backend.watchManager = nil
@@ -86,6 +165,109 @@ func (backend *ResourceBackend) Close() {
 	if manager != nil {
 		manager.Close()
 	}
+	backend.requestCoalescer().Close()
+}
+
+func (backend *ResourceBackend) activeWatchManager() *resources.WatchManager {
+	backend.watchMu.Lock()
+	defer backend.watchMu.Unlock()
+	return backend.watchManager
+}
+
+type ResourceMemoryStats struct {
+	ResourceBytes      int
+	WatchBytes         int
+	CollectionBytes    int
+	CursorBytes        int64
+	IdleWatchesEvicted int
+	ExpiredCursors     int
+	ResourceEntries    int
+	CollectionEntries  int
+	ResourceEvictions  uint64
+}
+
+func (backend *ResourceBackend) memoryStats() ResourceMemoryStats {
+	if backend == nil {
+		return ResourceMemoryStats{}
+	}
+	resourceStats := backend.resourceCache.Stats()
+	collectionStats := backend.collectionCache.Stats()
+	stats := ResourceMemoryStats{
+		ResourceBytes: resourceStats.Bytes, CollectionBytes: collectionStats.Bytes,
+		ResourceEntries: resourceStats.Entries, CollectionEntries: collectionStats.Entries,
+		ResourceEvictions: resourceStats.Evictions,
+	}
+	if backend.cursorMemory != nil {
+		stats.CursorBytes = backend.cursorMemory.Bytes()
+	}
+	if manager := backend.activeWatchManager(); manager != nil {
+		stats.WatchBytes = manager.SnapshotBytes()
+	}
+	return stats
+}
+
+func (backend *ResourceBackend) MemoryStats() ResourceMemoryStats { return backend.memoryStats() }
+
+func (backend *ResourceBackend) LocalIndex(generation string, expectedNamespaces []string) resources.LocalIndexSnapshot {
+	if backend == nil || backend.resourceCache == nil {
+		return resources.LocalIndexSnapshot{Generation: generation}
+	}
+	return backend.resourceCache.LocalIndex(generation, expectedNamespaces...)
+}
+
+func (backend *ResourceBackend) Investigation(generation, kind, namespace, name string, expectedNamespaces []string) resources.Investigation {
+	return backend.LocalIndex(generation, expectedNamespaces).Investigate(kind, namespace, name)
+}
+
+func (backend *ResourceBackend) memoryOverBudget(stats ResourceMemoryStats) bool {
+	return backend != nil && backend.memoryBudget > 0 && int64(stats.ResourceBytes+stats.WatchBytes+stats.CollectionBytes)+stats.CursorBytes > backend.memoryBudget
+}
+
+// enforceMemoryBudget coordinates the independently bounded stores in the
+// documented pressure order: idle watches, expired cursors, unreferenced
+// resource snapshots, then least-recently-used screen pages.
+func (backend *ResourceBackend) enforceMemoryBudget() ResourceMemoryStats {
+	stats := backend.memoryStats()
+	if !backend.memoryOverBudget(stats) {
+		return stats
+	}
+	idleWatchesEvicted := 0
+	if manager := backend.activeWatchManager(); manager != nil {
+		idleWatchesEvicted = manager.EvictIdle()
+	}
+	stats = backend.memoryStats()
+	if !backend.memoryOverBudget(stats) {
+		stats.IdleWatchesEvicted = idleWatchesEvicted
+		return stats
+	}
+	expiredCursors := 0
+	if backend.cursorMemory != nil {
+		expiredCursors = backend.cursorMemory.PurgeExpired()
+	}
+	stats = backend.memoryStats()
+	if !backend.memoryOverBudget(stats) {
+		stats.IdleWatchesEvicted = idleWatchesEvicted
+		stats.ExpiredCursors = expiredCursors
+		return stats
+	}
+	backend.collectionCache.PurgeExpired()
+	stats = backend.memoryStats()
+	if !backend.memoryOverBudget(stats) {
+		stats.IdleWatchesEvicted = idleWatchesEvicted
+		stats.ExpiredCursors = expiredCursors
+		return stats
+	}
+	backend.resourceCache.EvictInactive(0)
+	stats = backend.memoryStats()
+	if backend.memoryOverBudget(stats) {
+		total := int64(stats.ResourceBytes+stats.WatchBytes+stats.CollectionBytes) + stats.CursorBytes
+		target := stats.CollectionBytes - int(total-backend.memoryBudget)
+		backend.collectionCache.EvictLRU(target)
+	}
+	final := backend.memoryStats()
+	final.IdleWatchesEvicted = idleWatchesEvicted
+	final.ExpiredCursors = expiredCursors
+	return final
 }
 
 func resourceSelection(binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution) resources.Selection {
@@ -94,6 +276,52 @@ func resourceSelection(binding namespaces.SelectionBinding, resolution namespace
 		scope = resolution.ScopeSource
 	}
 	return resources.Selection{Generation: binding.Generation, Context: binding.Context, Scope: scope, Namespaces: append([]string(nil), resolution.Namespaces...)}
+}
+
+func collectionForTopic(topic resources.Topic) (resources.Collection, bool) {
+	switch topic {
+	case resources.TopicPods:
+		return resources.CollectionPods, true
+	case resources.TopicEvents:
+		return resources.CollectionEvents, true
+	case resources.TopicWorkloads:
+		return resources.CollectionWorkloads, true
+	case resources.TopicServices:
+		return resources.CollectionServices, true
+	case resources.TopicIngresses:
+		return resources.CollectionIngresses, true
+	case resources.TopicEndpointSlices:
+		return resources.CollectionEndpointSlices, true
+	case resources.TopicConfigMaps:
+		return resources.CollectionConfigMaps, true
+	case resources.TopicPVCs:
+		return resources.CollectionPersistentVolumeClaims, true
+	default:
+		return "", false
+	}
+}
+
+func topicForCollection(collection resources.Collection) (resources.Topic, bool) {
+	switch collection {
+	case resources.CollectionPods:
+		return resources.TopicPods, true
+	case resources.CollectionEvents:
+		return resources.TopicEvents, true
+	case resources.CollectionWorkloads:
+		return resources.TopicWorkloads, true
+	case resources.CollectionServices:
+		return resources.TopicServices, true
+	case resources.CollectionIngresses:
+		return resources.TopicIngresses, true
+	case resources.CollectionEndpointSlices:
+		return resources.TopicEndpointSlices, true
+	case resources.CollectionConfigMaps:
+		return resources.TopicConfigMaps, true
+	case resources.CollectionPersistentVolumeClaims:
+		return resources.TopicPVCs, true
+	default:
+		return "", false
+	}
 }
 
 type originListerFunc[T resources.ListItem] func(context.Context, resources.PageRequest) (resources.OriginPage[T], error)
@@ -114,15 +342,188 @@ func collectFilteredResource[T resources.ListItem](
 	list originListerFunc[T],
 	filterSort func([]T, resources.ListOptions) []T,
 ) (resources.ListResult[T], error) {
+	defer backend.enforceMemoryBudget()
 	normalized, err := resources.NormalizeListOptions(collection, options)
 	if err != nil {
 		return resources.ListResult[T]{}, err
 	}
-	result, err := collectResource(ctx, backend, binding, resolution, collection, normalized, cursor, less, list)
-	if err == nil {
-		result.Items = filterSort(result.Items, normalized)
+	key, err := collectionRequestKey(binding, resolution, collection, normalized, cursor)
+	if err != nil {
+		return resources.ListResult[T]{}, err
+	}
+	coalescingKey := key
+	if normalized.Priority != resources.PriorityVisible {
+		coalescingKey += ":speculative"
+	}
+	value, err := backend.requestCoalescer().Do(ctx, coalescingKey, func(shared context.Context) (any, error) {
+		topic, mapped := topicForCollection(collection)
+		if mapped {
+			if cached, ok := resources.LoadCollectionPage[T](shared, backend.collectionCache, key, binding.Generation, backend.authorizer); ok && cached.Cursor != nil {
+				origins := make([]resources.Origin, 0, len(cached.Cursor.Origins))
+				for _, state := range cached.Cursor.Origins {
+					origins = append(origins, state.Origin)
+				}
+				if manager := backend.activeWatchManager(); manager != nil && manager.Covers(watchCoverageSelection(binding, resolution, origins), topic, origins) {
+					backend.metrics.IncCounter(observability.CollectionCacheHitsTotalName, map[string]string{"resource": string(collection)})
+					return cached, nil
+				}
+			}
+			backend.metrics.IncCounter(observability.CollectionCacheMissesTotalName, map[string]string{"resource": string(collection)})
+		}
+		var token resources.CollectionCacheToken
+		cacheable := false
+		if mapped {
+			token, cacheable = backend.collectionCache.Begin(binding.Generation, key)
+			if cacheable && cursor == nil {
+				if local, ok := collectFromWatchSnapshots(shared, backend, binding, resolution, collection, topic, normalized, filterSort); ok {
+					if cacheable {
+						resources.StoreCollectionPage(backend.collectionCache, token, collection, local)
+					}
+					return local, nil
+				}
+			}
+		}
+		release, scheduleErr := backend.scheduler.Acquire(shared, normalized.Priority)
+		if scheduleErr != nil {
+			return resources.ListResult[T]{}, scheduleErr
+		}
+		started := time.Now()
+		result, collectErr := collectResource(shared, backend, binding, resolution, collection, normalized, cursor, less, list)
+		if cursor == nil && resources.ErrorCodeOf(collectErr) == resources.CodeCursorExpired && shared.Err() == nil {
+			result, collectErr = collectResource(shared, backend, binding, resolution, collection, normalized, nil, less, list)
+		}
+		backend.scheduler.Observe(time.Since(started), resources.ErrorCodeOf(collectErr) == resources.CodeRateLimited, resources.ErrorCodeOf(collectErr) == resources.CodeUpstreamTimeout || errors.Is(collectErr, context.DeadlineExceeded))
+		release()
+		if collectErr == nil {
+			result.Items = filterSort(result.Items, normalized)
+			markCollectionScope(&result, cursor == nil)
+			if cacheable {
+				resources.StoreCollectionPage(backend.collectionCache, token, collection, result)
+			}
+		} else if resources.ErrorCodeOf(collectErr) == resources.CodeForbidden {
+			backend.collectionCache.InvalidateCollection(binding.Generation, collection)
+		}
+		return result, collectErr
+	})
+	result, ok := value.(resources.ListResult[T])
+	if err == nil && !ok {
+		return resources.ListResult[T]{}, resourceDomain(resources.CodeClusterUnavailable, "The resource request could not be completed.", nil)
 	}
 	return result, err
+}
+
+// A complete, authorized watch snapshot can satisfy a bounded first page
+// without another Kubernetes LIST. Larger or incomplete snapshots keep the
+// established paginated LIST path and its cursor semantics.
+func collectFromWatchSnapshots[T resources.ListItem](ctx context.Context, backend *ResourceBackend, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, collection resources.Collection, topic resources.Topic, options resources.ListOptions, filterSort func([]T, resources.ListOptions) []T) (resources.ListResult[T], bool) {
+	manager := backend.activeWatchManager()
+	if manager == nil {
+		return resources.ListResult[T]{}, false
+	}
+	var origins []resources.Origin
+	var err error
+	if resolution.PreferGlobal && len(options.Namespaces) == 0 {
+		origins, err = resources.GlobalOriginsFor(collection, options.Kinds)
+	} else {
+		var names []string
+		names, err = resources.ResolveNamespaces(resolution.Namespaces, options.Namespaces)
+		if err == nil {
+			origins, err = resources.OriginsFor(collection, names, options.Kinds)
+		}
+	}
+	if err != nil || len(origins) == 0 {
+		return resources.ListResult[T]{}, false
+	}
+	snapshots, covered := manager.SnapshotsFor(watchCoverageSelection(binding, resolution, origins), topic, origins)
+	if !covered {
+		return resources.ListResult[T]{}, false
+	}
+	items := make([]T, 0)
+	snapshotBytes := 0
+	cursor := resources.NewCompositeCursor[T](origins)
+	for index := range cursor.Origins {
+		origin := cursor.Origins[index].Origin
+		capability := backend.authorizer.Check(ctx, authorization.Key{Generation: binding.Generation, Namespace: origin.Namespace, APIGroup: origin.APIGroup, Resource: origin.Resource, Verb: "list"})
+		if capability.Decision != authorization.DecisionAllowed {
+			return resources.ListResult[T]{}, false
+		}
+		snapshot := snapshots[origin.Key()]
+		if len(items)+len(snapshot.Items) > resources.MaximumSnapshotItems {
+			return resources.ListResult[T]{}, false
+		}
+		encoded, encodeErr := json.Marshal(snapshot.Items)
+		if encodeErr != nil || snapshotBytes+len(encoded) > resources.MaximumSnapshotBytes {
+			return resources.ListResult[T]{}, false
+		}
+		snapshotBytes += len(encoded)
+		for _, object := range snapshot.Items {
+			item, ok := object.(T)
+			if !ok {
+				return resources.ListResult[T]{}, false
+			}
+			items = append(items, item)
+		}
+		cursor.Origins[index].ResourceVersion = snapshot.ResourceVersion
+		cursor.Origins[index].Exhausted = true
+	}
+	items = filterSort(items, options)
+	if len(items) > options.Limit {
+		return resources.ListResult[T]{}, false
+	}
+	completed := len(resolution.Namespaces)
+	if len(options.Namespaces) != 0 {
+		completed = len(options.Namespaces)
+	}
+	return resources.ListResult[T]{
+		Items: items, Cursor: &cursor,
+		Page:        resources.PageDTO{Limit: options.Limit, Complete: true, FilterScope: resources.FilterScopeCollection},
+		Coverage:    resources.CoverageDTO{RequestedNamespaces: completed, CompletedNamespaces: completed, DeniedNamespaces: []string{}, Failed: []resources.PartialErrorDTO{}},
+		CollectedAt: time.Now().UTC(),
+	}, true
+}
+
+// An authorized all-namespaces WATCH uses the single Kubernetes global origin
+// as its effective origin. Match that identity only for global cursor/snapshot
+// origins; namespaced fan-out must retain its exact resolved namespace set.
+func watchCoverageSelection(binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, origins []resources.Origin) resources.Selection {
+	selection := resourceSelection(binding, resolution)
+	if !resolution.PreferGlobal || len(origins) == 0 {
+		return selection
+	}
+	for _, origin := range origins {
+		if origin.Namespace != "" {
+			return selection
+		}
+	}
+	selection.Namespaces = []string{""}
+	return selection
+}
+
+func (backend *ResourceBackend) requestCoalescer() *resources.RequestCoalescer {
+	backend.listCoalescerOnce.Do(func() {
+		backend.listCoalescer = resources.NewRequestCoalescer()
+	})
+	return backend.listCoalescer
+}
+
+func (backend *ResourceBackend) listRetryPolicy() resources.RetryPolicy {
+	return resources.RetryPolicy{OnThrottle: func() { backend.scheduler.Observe(0, true, false) }}
+}
+
+func collectionRequestKey[T resources.ListItem](binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, collection resources.Collection, options resources.ListOptions, cursor *resources.CompositeCursor[T]) (string, error) {
+	material := struct {
+		Binding    namespaces.SelectionBinding
+		Resolution namespaces.ScopeResolution
+		Collection resources.Collection
+		Options    resources.ListOptions
+		Cursor     *resources.CompositeCursor[T]
+	}{binding, resolution, collection, options, cursor}
+	encoded, err := json.Marshal(material)
+	if err != nil {
+		return "", fmt.Errorf("encode collection request identity: %w", err)
+	}
+	digest := sha256.Sum256(encoded)
+	return fmt.Sprintf("%x", digest), nil
 }
 
 func collectResource[T resources.ListItem](
@@ -148,15 +549,21 @@ func collectResource[T resources.ListItem](
 		}
 		decision := globalListDecision(ctx, backend.authorizer, binding.Generation, origins)
 		if decision == authorization.DecisionAllowed {
+			backend.metrics.IncCounter(observability.ResourceListsTotalName, map[string]string{"resource": string(collection), "strategy": "global"})
 			selection := resourceSelection(binding, resolution)
 			selection.Namespaces = []string{""}
 			var received atomic.Int64
+			started := time.Now()
 			result, collectErr := resources.Collect(ctx, resources.CollectionRequest[T]{
 				Selection: selection, Options: options, Origins: origins, Cursor: cursor,
 				Lister: countingLister(list, &received), Authorizer: backend.authorizer, Less: less,
 				Timeout:             backend.listWindowTimeout,
 				RequestedNamespaces: len(resolution.Namespaces),
+				Fanout:              backend.listFanout,
+				NativeIdentityOrder: true,
+				Retry:               backend.listRetryPolicy(),
 			})
+			observeListDuration(backend.metrics, collection, "global", started)
 			if collectErr == nil {
 				backend.observeList(collection, int(received.Load()), len(result.Items))
 			}
@@ -165,6 +572,48 @@ func collectResource[T resources.ListItem](
 		if cursorGlobal {
 			if decision == authorization.DecisionDenied {
 				return resources.ListResult[T]{}, resourceDomain(resources.CodeForbidden, "Access to this resource was denied.", nil)
+			}
+			return resources.ListResult[T]{}, resourceDomain(resources.CodeAuthorizationUnavailable, "Authorization could not be confirmed.", nil)
+		}
+	}
+	if collection == resources.CollectionPods && !resolution.PreferGlobal && !cursorNamespaced && len(resolution.Namespaces) > 1 && (len(options.Namespaces) != 1 || cursorGlobal) {
+		names, namesErr := resources.ResolveNamespaces(resolution.Namespaces, options.Namespaces)
+		if namesErr != nil {
+			return resources.ListResult[T]{}, namesErr
+		}
+		origins, originsErr := resources.GlobalOriginsFor(collection, options.Kinds)
+		if originsErr != nil {
+			return resources.ListResult[T]{}, originsErr
+		}
+		decision := globalListDecision(ctx, backend.authorizer, binding.Generation, origins)
+		if decision == authorization.DecisionAllowed {
+			allowed := make(map[string]struct{}, len(names))
+			for _, name := range names {
+				allowed[name] = struct{}{}
+			}
+			selection := resourceSelection(binding, resolution)
+			selection.Namespaces = []string{""}
+			var received atomic.Int64
+			counted := countingLister(list, &received)
+			started := time.Now()
+			result, collectErr := resources.Collect(ctx, resources.CollectionRequest[T]{
+				Selection: selection, Options: options, Origins: origins, Cursor: cursor,
+				Lister: originListerFunc[T](func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[T], error) {
+					return listGlobalPodPageInScope(ctx, page, counted, allowed)
+				}),
+				Authorizer: backend.authorizer, Less: less, Timeout: backend.listWindowTimeout,
+				RequestedNamespaces: len(names), Fanout: backend.listFanout, NativeIdentityOrder: true,
+				Retry: backend.listRetryPolicy(),
+			})
+			observeListDuration(backend.metrics, collection, "global", started)
+			if collectErr == nil {
+				backend.observeList(collection, int(received.Load()), len(result.Items))
+			}
+			return result, collectErr
+		}
+		if cursorGlobal {
+			if decision == authorization.DecisionDenied {
+				return resources.ListResult[T]{}, resourceDomain(resources.CodeForbidden, "The global list grant required by this cursor is unavailable.", nil)
 			}
 			return resources.ListResult[T]{}, resourceDomain(resources.CodeAuthorizationUnavailable, "Authorization could not be confirmed.", nil)
 		}
@@ -183,16 +632,79 @@ func collectResource[T resources.ListItem](
 		return resources.ListResult[T]{}, err
 	}
 	var received atomic.Int64
+	backend.metrics.IncCounter(observability.ResourceListsTotalName, map[string]string{"resource": string(collection), "strategy": "fanout"})
+	started := time.Now()
 	result, collectErr := resources.Collect(ctx, resources.CollectionRequest[T]{
 		Selection: selection, Options: options, Origins: origins, Cursor: cursor,
 		Lister: countingLister(list, &received), Authorizer: backend.authorizer, Less: less,
 		Timeout:             backend.listWindowTimeout,
 		RequestedNamespaces: len(names),
+		Fanout:              backend.listFanout,
+		NativeIdentityOrder: true,
+		GlobalGrantFastPath: true,
+		Retry:               backend.listRetryPolicy(),
 	})
+	observeListDuration(backend.metrics, collection, "fanout", started)
 	if collectErr == nil {
 		backend.observeList(collection, int(received.Load()), len(result.Items))
 	}
 	return result, collectErr
+}
+
+// A global LIST is safe for an explicit scope only after a global LIST grant.
+// Filter each native page before it reaches the cursor. Bound the raw scan to
+// five pages so a scope sparse in a large cluster cannot monopolize a request.
+func listGlobalPodPageInScope[T resources.ListItem](ctx context.Context, page resources.PageRequest, list originListerFunc[T], allowed map[string]struct{}) (resources.OriginPage[T], error) {
+	result := resources.OriginPage[T]{Origin: page.Origin, Items: []T{}}
+	maxNamespace := ""
+	for namespace := range allowed {
+		if namespace > maxNamespace {
+			maxNamespace = namespace
+		}
+	}
+	next := page
+	for range 5 {
+		if err := ctx.Err(); err != nil {
+			return result, err
+		}
+		fetched, err := list(ctx, next)
+		if err != nil {
+			return result, err
+		}
+		if result.ResourceVersion == "" {
+			result.ResourceVersion = fetched.ResourceVersion
+		}
+		lastNamespace := ""
+		for _, item := range fetched.Items {
+			pod, ok := any(item).(resources.PodDTO)
+			if !ok {
+				return result, resourceDomain(resources.CodeClusterUnavailable, "The global Pod list returned an invalid item.", nil)
+			}
+			lastNamespace = pod.Namespace
+			if _, included := allowed[pod.Namespace]; included {
+				result.Items = append(result.Items, item)
+			}
+		}
+		result.Continue = fetched.Continue
+		// Native Pod LIST order is namespace/name. Once it passes the last
+		// selected namespace, no later raw page can add an allowed Pod.
+		if lastNamespace > maxNamespace {
+			result.Continue = ""
+			return result, nil
+		}
+		if result.Continue == "" || len(result.Items) > int(page.Limit) || len(result.Items) >= int(page.Limit) && lastNamespace < maxNamespace {
+			return result, nil
+		}
+		next.Continue = result.Continue
+		// A full page at the last selected namespace needs one-item lookahead
+		// to distinguish an exact terminal page from a real continuation.
+		if len(result.Items) >= int(page.Limit) {
+			next.Limit = 1
+		} else {
+			next.Limit = page.Limit
+		}
+	}
+	return result, nil
 }
 
 func listCursorMode[T resources.ListItem](cursor *resources.CompositeCursor[T]) (global, namespaced bool, err error) {
@@ -233,9 +745,13 @@ func globalListDecision(ctx context.Context, checker resources.AuthorizationChec
 }
 
 func (backend *ResourceBackend) ListWorkloads(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, options resources.ListOptions, cursor *resources.CompositeCursor[resources.WorkloadDTO]) (resources.ListResult[resources.WorkloadDTO], error) {
-	return collectFilteredResource(ctx, backend, binding, resolution, resources.CollectionWorkloads, options, cursor, workloadIdentityLess, func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[resources.WorkloadDTO], error) {
+	result, err := collectFilteredResource(ctx, backend, binding, resolution, resources.CollectionWorkloads, options, cursor, workloadIdentityLess, func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[resources.WorkloadDTO], error) {
 		return backend.listWorkloadPage(ctx, binding, page)
 	}, filterSortWorkloads)
+	if err == nil && cursor == nil && options.Priority == resources.PriorityVisible && len(result.Items) > 0 {
+		backend.scheduleRelatedPrefetch(ctx, binding, resolution, result.Items[0])
+	}
+	return result, err
 }
 
 func (backend *ResourceBackend) ListPods(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, options resources.ListOptions, cursor *resources.CompositeCursor[resources.PodDTO]) (resources.ListResult[resources.PodDTO], error) {
@@ -287,6 +803,37 @@ func clusterCollect[T resources.ListItem](ctx context.Context, backend *Resource
 	if err != nil {
 		return resources.ListResult[T]{}, err
 	}
+	key, err := collectionRequestKey(binding, resolution, collection, normalized, cursor)
+	if err != nil {
+		return resources.ListResult[T]{}, err
+	}
+	coalescingKey := key
+	if normalized.Priority != resources.PriorityVisible {
+		coalescingKey += ":speculative"
+	}
+	value, err := backend.requestCoalescer().Do(ctx, coalescingKey, func(shared context.Context) (any, error) {
+		return clusterCollectUncoalesced(shared, backend, binding, resolution, collection, normalized, cursor, less, list, filterSort)
+	})
+	if err != nil {
+		return resources.ListResult[T]{}, err
+	}
+	result, ok := value.(resources.ListResult[T])
+	if !ok {
+		return resources.ListResult[T]{}, resourceDomain(resources.CodeClusterUnavailable, "The resource request could not be completed.", nil)
+	}
+	return result, nil
+}
+
+func clusterCollectUncoalesced[T resources.ListItem](ctx context.Context, backend *ResourceBackend, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, collection resources.Collection, options resources.ListOptions, cursor *resources.CompositeCursor[T], less func(T, T) bool, list originListerFunc[T], filterSort func([]T, resources.ListOptions) []T) (resources.ListResult[T], error) {
+	release, scheduleErr := backend.scheduler.Acquire(ctx, options.Priority)
+	if scheduleErr != nil {
+		return resources.ListResult[T]{}, scheduleErr
+	}
+	defer release()
+	normalized, err := resources.NormalizeListOptions(collection, options)
+	if err != nil {
+		return resources.ListResult[T]{}, err
+	}
 	origin, err := resources.ClusterOriginFor(collection)
 	if err != nil {
 		return resources.ListResult[T]{}, err
@@ -299,11 +846,26 @@ func clusterCollect[T resources.ListItem](ctx context.Context, backend *Resource
 		selection.Scope = "none"
 	}
 	var received atomic.Int64
+	backend.metrics.IncCounter(observability.ResourceListsTotalName, map[string]string{"resource": string(collection), "strategy": "global"})
+	started := time.Now()
 	result, collectErr := resources.Collect(ctx, resources.CollectionRequest[T]{
 		Selection: selection, Options: normalized, Origins: []resources.Origin{origin}, Cursor: cursor,
 		Lister: countingLister(list, &received), Authorizer: backend.authorizer, Less: less,
-		Timeout: backend.listWindowTimeout,
+		Timeout:             backend.listWindowTimeout,
+		Fanout:              backend.listFanout,
+		NativeIdentityOrder: true,
+		Retry:               backend.listRetryPolicy(),
 	})
+	if cursor == nil && resources.ErrorCodeOf(collectErr) == resources.CodeCursorExpired && ctx.Err() == nil {
+		result, collectErr = resources.Collect(ctx, resources.CollectionRequest[T]{
+			Selection: selection, Options: normalized, Origins: []resources.Origin{origin},
+			Lister: countingLister(list, &received), Authorizer: backend.authorizer, Less: less,
+			Timeout: backend.listWindowTimeout, Fanout: backend.listFanout, NativeIdentityOrder: true,
+			Retry: backend.listRetryPolicy(),
+		})
+	}
+	backend.scheduler.Observe(time.Since(started), resources.ErrorCodeOf(collectErr) == resources.CodeRateLimited, resources.ErrorCodeOf(collectErr) == resources.CodeUpstreamTimeout || errors.Is(collectErr, context.DeadlineExceeded))
+	observeListDuration(backend.metrics, collection, "global", started)
 	if collectErr != nil {
 		return resources.ListResult[T]{}, collectErr
 	}
@@ -312,7 +874,14 @@ func clusterCollect[T resources.ListItem](ctx context.Context, backend *Resource
 	// single empty namespace origin must not surface as fictitious counts.
 	result.Coverage = resources.CoverageDTO{RequestedNamespaces: 0, CompletedNamespaces: 0, DeniedNamespaces: []string{}, Failed: sanitizeClusterFailures(result.Coverage.Failed)}
 	result.Items = filterSort(result.Items, normalized)
+	markCollectionScope(&result, cursor == nil)
 	return result, nil
+}
+
+func markCollectionScope[T resources.ListItem](result *resources.ListResult[T], firstPage bool) {
+	if firstPage && result.Page.Complete && !result.Page.Truncated && len(result.Coverage.Failed) == 0 {
+		result.Page.FilterScope = resources.FilterScopeCollection
+	}
 }
 
 func sanitizeClusterFailures(failures []resources.PartialErrorDTO) []resources.PartialErrorDTO {
@@ -329,12 +898,23 @@ func sanitizeClusterFailures(failures []resources.PartialErrorDTO) []resources.P
 // is bounded by the collection fan-out, so an atomic counter is sufficient.
 func countingLister[T resources.ListItem](list originListerFunc[T], received *atomic.Int64) originListerFunc[T] {
 	return func(ctx context.Context, request resources.PageRequest) (resources.OriginPage[T], error) {
+		ctx, end := observability.StartSpanWithAttributes(ctx, "resources.list.origin", observability.SafeSpanAttributes{PageSize: int(request.Limit), Fanout: 1})
 		page, err := list(ctx, request)
+		end(err)
 		if err == nil {
 			received.Add(int64(len(page.Items)))
 		}
 		return page, err
 	}
+}
+
+func observeListDuration(registry *observability.Registry, collection resources.Collection, strategy string, started time.Time) {
+	nanoseconds := time.Since(started).Nanoseconds()
+	if nanoseconds < 1 {
+		nanoseconds = 1
+	}
+	registry.AddCounter(observability.ResourceListDurationNanosecondsTotalName, map[string]string{"resource": string(collection), "strategy": strategy}, uint64(nanoseconds))
+	registry.ObserveDuration(observability.ResourceListDurationNanosecondsTotalName, map[string]string{"resource": string(collection), "strategy": strategy}, time.Duration(nanoseconds))
 }
 
 // observeList records the per-collection over-fetch counters. Label values are
@@ -813,7 +1393,10 @@ func eventIdentityLess(left, right resources.EventDTO) bool {
 	if left.ObjectName != right.ObjectName {
 		return left.ObjectName < right.ObjectName
 	}
-	return left.Reason < right.Reason
+	if left.Reason != right.Reason {
+		return left.Reason < right.Reason
+	}
+	return left.Name < right.Name
 }
 func serviceIdentityLess(left, right resources.ServiceDTO) bool {
 	if left.Namespace != right.Namespace {

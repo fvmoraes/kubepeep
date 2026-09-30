@@ -3,6 +3,7 @@ package resources
 import (
 	"errors"
 	"fmt"
+	"time"
 )
 
 // ErrorCode is a stable, public classification. Detail from Kubernetes is
@@ -21,6 +22,7 @@ const (
 	CodeCursorExpired             ErrorCode = "CURSOR_EXPIRED"
 	CodeGenerationChanged         ErrorCode = "GENERATION_CHANGED"
 	CodeLimitExceeded             ErrorCode = "LIMIT_EXCEEDED"
+	CodeRateLimited               ErrorCode = "RATE_LIMITED"
 	CodePreferenceSensitive       ErrorCode = "PREFERENCE_SENSITIVE_VALUE"
 )
 
@@ -32,9 +34,17 @@ var (
 // DomainError contains only an allowlisted code and message suitable for a
 // response. Cause remains available to errors.Is/As but must not be rendered.
 type DomainError struct {
-	Code    ErrorCode
-	Message string
-	Cause   error
+	Code       ErrorCode
+	Message    string
+	Cause      error
+	retryAfter time.Duration
+}
+
+func (e *DomainError) RetryAfter() time.Duration {
+	if e == nil {
+		return 0
+	}
+	return e.retryAfter
 }
 
 func (e *DomainError) Error() string {
@@ -53,6 +63,13 @@ func (e *DomainError) Unwrap() error {
 
 func domainError(code ErrorCode, message string, cause error) error {
 	return &DomainError{Code: code, Message: message, Cause: cause}
+}
+
+// NewRateLimitedError preserves only the server-provided delay for internal
+// retry scheduling. Kubernetes response text is retained solely as an
+// unrendered cause and never reaches the public response.
+func NewRateLimitedError(retryAfter time.Duration, cause error) error {
+	return &DomainError{Code: CodeRateLimited, Message: "The Kubernetes API is rate limiting requests.", Cause: cause, retryAfter: retryAfter}
 }
 
 // ErrorCodeOf extracts a stable code without revealing an upstream error.

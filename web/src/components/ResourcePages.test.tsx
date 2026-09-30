@@ -1,13 +1,16 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
-import { MemoryRouter } from 'react-router'
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { StoragePage } from './FamilyPages'
 import { ConfigPage, EventsPage, NetworkPage, PodsPage, WorkloadsPage } from './ResourcePages'
+import { prefetchDefaultPodPreview } from './resource/podPreview'
+import type { SelectionSummary } from '../api/types'
 import { ToastProvider } from './ui/Toast'
 import { ResourceWorkspaceProvider } from './workspace/ResourceWorkspaceProvider'
-import { ResourceWorkspaceOverlay } from './workspace/ResourceWorkspace'
-import { GlobalNamespaceProvider } from '../context/GlobalNamespace'
+import { ResourceWorkspaceOverlay, tabsFor } from './workspace/ResourceWorkspace'
+import { GlobalNamespaceProvider, useGlobalNamespace } from '../context/GlobalNamespace'
 
 const generation = 'gen_42'
 
@@ -32,15 +35,24 @@ function preferences() {
   return { version: 1, ui: { language: 'en' }, logs: { wrap: false, timestamps: true, tailLines: 200 }, dashboard: { logScanWindow: '15m', sectionOrder: ['summary'], hiddenSections: [] }, filters: { workloads: empty, pods: empty, events: empty, logs: empty } }
 }
 
-function renderPage(component: React.ReactNode) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+function NamespaceTestControl() {
+  const namespace = useGlobalNamespace()
+  return <button onClick={() => namespace.setValue(namespace.value ? '' : 'payments')}>Change global namespace</button>
+}
+
+function LocationProbe() {
+  return <output aria-label="Current route">{useLocation().pathname}</output>
+}
+
+function renderPage(component: React.ReactNode, initialEntries: string[] = ['/'], client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })) {
   const selection = selectedStatus()
   return { client, ...render(
     <QueryClientProvider client={client}>
-      <MemoryRouter>
+      <MemoryRouter initialEntries={initialEntries}>
         <ToastProvider>
           <ResourceWorkspaceProvider>
             <GlobalNamespaceProvider generation={selection.selection.generation} scopeId={selection.selection.scopeId} scopeMode={selection.selection.scopeMode}>
+              <NamespaceTestControl />
               {component}
               <ResourceWorkspaceOverlay />
             </GlobalNamespaceProvider>
@@ -63,6 +75,403 @@ afterEach(() => {
 })
 
 describe('read-only resource pages', () => {
+
+  it('publishes the complete workspace tab catalog for each actionable kind', () => {
+    const labels = (collection: string, kind: string | null = null) => tabsFor({ collection, kind, namespace: 'payments', name: 'api', tab: 'overview' }).map((tab) => tab.label)
+    expect(labels('pods', 'Pod')).toEqual(['Overview', 'Investigation', 'Logs', 'YAML', 'Events', 'Metrics', 'Containers', 'Actions'])
+    expect(labels('workloads', 'Deployment')).toEqual(['Overview', 'Investigation', 'Pods', 'ReplicaSets', 'YAML', 'Events', 'Rollout', 'Actions'])
+    expect(labels('workloads', 'StatefulSet')).toEqual(['Overview', 'Investigation', 'Pods', 'PVCs', 'YAML', 'Events', 'Actions'])
+    expect(labels('workloads', 'CronJob')).toEqual(['Overview', 'Investigation', 'Jobs', 'YAML', 'Events', 'Actions'])
+    expect(labels('services', 'Service')).toEqual(['Overview', 'Endpoints', 'YAML', 'Events', 'Actions'])
+    expect(labels('ingresses', 'Ingress')).toEqual(['Overview', 'Rules', 'Backends', 'YAML', 'Events', 'Actions'])
+  })
+
+  it('starts a Service port-forward only after all prerequisite permissions are allowed', async () => {
+    let portForwardInit: RequestInit | undefined
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      const path = String(input)
+      if (path === '/api/v1/status') return Promise.resolve(json(selectedStatus()))
+      if (path === '/api/v1/preferences') return Promise.resolve(json(preferences()))
+      if (path === '/api/v1/namespace-scopes/7') return Promise.resolve(json({ namespaces: ['payments'] }))
+      if (path.startsWith('/api/v1/services?')) return Promise.resolve(json([{ namespace: 'payments', name: 'api', type: 'ClusterIP', clusterIPs: ['10.96.0.10'], ports: [{ name: 'http', protocol: 'TCP', port: 80, targetPort: { type: 'name', value: 'web' }, nodePort: null, appProtocol: null }], selector: { app: 'api' }, externalEndpoints: [] }], page()))
+      if (path.startsWith('/api/v1/stream?')) return Promise.resolve(new Response('', { status: 503, headers: { 'Content-Type': 'application/json' } }))
+      if (path === '/api/v1/services/payments/api') return Promise.resolve(json({
+        metadata: { namespace: 'payments', name: 'api', uid: 'uid-service', resourceVersion: '7', creationTimestamp: '2026-08-17T10:00:00Z', labels: {} },
+        summary: { namespace: 'payments', name: 'api', type: 'ClusterIP', clusterIPs: ['10.96.0.10'], ports: [{ name: 'http', protocol: 'TCP', port: 80, targetPort: { type: 'name', value: 'web' }, nodePort: null, appProtocol: null }], selector: { app: 'api' }, externalEndpoints: [] },
+        sessionAffinity: 'None', externalTrafficPolicy: null, ipFamilies: ['IPv4'], healthCheckNodePort: null,
+      }))
+      if (path.startsWith('/api/v1/permissions?')) {
+        const ids = new URL(path, 'http://127.0.0.1').searchParams.getAll('capability')
+        return Promise.resolve(json({ generation, complete: true, truncated: false, errors: [], decisions: ids.map((capabilityId) => ({ capabilityId, namespace: 'payments', resourceName: capabilityId === 'services.get' ? 'api' : '', decision: 'allowed' })) }))
+      }
+      if (path === '/api/v1/session') return Promise.resolve(json({ csrfToken: 'csrf-service', generation, origin: 'http://127.0.0.1:2748', expiresAt: '2026-08-17T18:00:00Z' }))
+      if (path === '/api/v1/services/payments/api/port-forward') {
+        portForwardInit = init
+        return Promise.resolve(json({ id: 'pf_service', clusterProfileId: 1, context: 'development', generation, namespace: 'payments', pod: 'api-a', remotePort: 8080, localAddress: '127.0.0.1', localPort: 49152, status: 'active', createdAt: '2026-08-17T10:00:00Z', expiresAt: '2026-08-17T18:00:00Z', endedAt: null, endReason: null }))
+      }
+      throw new Error(`Unexpected request: ${path}`)
+    }))
+
+    renderPage(<Routes><Route path="/network/:tab" element={<NetworkPage />} /></Routes>, ['/network/services'])
+    fireEvent.click(await screen.findByRole('button', { name: 'Open services api in payments' }))
+    fireEvent.click(await screen.findByRole('tab', { name: 'Actions' }))
+    const start = await screen.findByRole('button', { name: 'Start port-forward' })
+    await waitFor(() => expect(start).toBeEnabled())
+    fireEvent.click(start)
+
+    expect(await screen.findByRole('status')).toHaveTextContent(/Service port-forward active/i)
+    expect(portForwardInit?.headers).toEqual(expect.objectContaining({ 'X-KubePeep-CSRF': 'csrf-service', 'Idempotency-Key': expect.stringMatching(/^kp-/) }))
+    expect(JSON.parse(String(portForwardInit?.body))).toEqual(expect.objectContaining({ remotePort: 80, consequenceCode: 'EXPOSE_SERVICE_PORT_LOCALLY', target: expect.objectContaining({ kind: 'Service', name: 'api' }) }))
+  })
+
+  it('restarts a compatible authorized workload selection with one contextual confirmation', async () => {
+    const restarted: string[] = []
+    const workloads = [
+      { namespace: 'payments', kind: 'Deployment', name: 'api', ready: 2, desired: 2, available: 2, updated: 2, status: 'Healthy', ageSeconds: 120 },
+      { namespace: 'payments', kind: 'StatefulSet', name: 'db', ready: 1, desired: 1, available: 1, updated: 1, status: 'Healthy', ageSeconds: 240 },
+    ]
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const path = String(input)
+      if (path === '/api/v1/status') return Promise.resolve(json(selectedStatus()))
+      if (path === '/api/v1/preferences') return Promise.resolve(json(preferences()))
+      if (path === '/api/v1/namespace-scopes/7') return Promise.resolve(json({ namespaces: ['payments'] }))
+      if (path.startsWith('/api/v1/workloads?')) return Promise.resolve(json(workloads, page()))
+      if (path.startsWith('/api/v1/stream?')) return Promise.resolve(new Response('', { status: 503, headers: { 'Content-Type': 'application/json' } }))
+      if (path.startsWith('/api/v1/permissions?')) {
+        const query = new URL(path, 'http://127.0.0.1').searchParams
+        const capabilities = query.getAll('capability')
+        const names = query.getAll('resourceName')
+        return Promise.resolve(json({ generation, complete: true, truncated: false, errors: [], decisions: capabilities.flatMap((capabilityId) => names.map((resourceName) => ({ capabilityId, namespace: 'payments', resourceName, decision: 'allowed' }))) }))
+      }
+      if (path === '/api/v1/session') return Promise.resolve(json({ csrfToken: 'csrf-bulk', generation, origin: 'http://127.0.0.1:2748', expiresAt: '2026-08-17T18:00:00Z' }))
+      const detail = path.match(/^\/api\/v1\/workloads\/(deployments|statefulsets)\/payments\/(api|db)$/)
+      if (detail) {
+        const kind = detail[1] === 'deployments' ? 'Deployment' : 'StatefulSet'
+        return Promise.resolve(json({ metadata: { namespace: 'payments', name: detail[2], uid: `uid-${detail[2]}`, resourceVersion: '17', creationTimestamp: '2026-08-17T10:00:00Z', labels: {} }, kind, ready: 1, desired: 1, available: 1, updated: 1, status: 'Healthy', selector: {}, restartAt: null, conditions: [], containers: [], related: [] }))
+      }
+      const restart = path.match(/^\/api\/v1\/workloads\/(deployments|statefulsets)\/payments\/(api|db)\/restart$/)
+      if (restart) {
+        restarted.push(restart[2])
+        return Promise.resolve(json({ accepted: true, action: 'restart', target: {}, generation, resourceVersion: '18' }))
+      }
+      throw new Error(`Unexpected request: ${path}`)
+    }))
+
+    renderPage(<WorkloadsPage />)
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'Select row Deployment/payments/api' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Select row StatefulSet/payments/db' }))
+    expect(screen.getByRole('toolbar', { name: 'Bulk actions' })).toHaveTextContent('2 selected')
+    const restart = screen.getByRole('button', { name: 'Restart selected' })
+    await waitFor(() => expect(restart).toBeEnabled())
+    fireEvent.click(restart)
+    const dialog = screen.getByRole('alertdialog', { name: 'Restart 2 workloads' })
+    expect(dialog).toHaveTextContent('Deployment api · ns payments')
+    expect(dialog).toHaveTextContent('StatefulSet db · ns payments')
+    fireEvent.click(within(dialog).getByRole('checkbox'))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Restart selected' }))
+
+    await waitFor(() => expect(restarted).toEqual(['api', 'db']))
+    expect(await screen.findByRole('status')).toHaveTextContent('Restarted 2 workloads')
+  })
+
+  it('shows only the authorized namespace seed as a non-selectable preview and clears it on revocation', async () => {
+    const pod = { namespace: 'payments', name: 'seed-pod', status: 'Running', ready: { current: 1, desired: 1 }, restarts: 0, node: null, ip: null, owner: null, ageSeconds: 60, problematic: false }
+    let rejectFullPage: ((response: Response) => void) | undefined
+    const paths: string[] = []
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const path = String(input)
+      paths.push(path)
+      if (path === '/api/v1/status') return Promise.resolve(json({ ...selectedStatus(), components: { ...selectedStatus().components, metrics: { status: 'unknown' } } }))
+      if (path === '/api/v1/preferences') return Promise.resolve(json(preferences()))
+      if (path === '/api/v1/namespace-scopes/7') return Promise.resolve(json({ namespaces: ['payments'] }))
+      if (path === '/api/v1/pods?limit=20&namespace=payments') return Promise.resolve(json([pod], page()))
+      if (path.startsWith('/api/v1/pods?')) return new Promise<Response>((resolve) => { rejectFullPage = resolve })
+      if (path === '/api/v1/session') return Promise.resolve(json({ csrfToken: 'csrf', generation, origin: 'http://127.0.0.1:2748', expiresAt: '2026-09-12T12:00:00Z' }))
+      if (path === '/api/v1/stream?topic=pods') return Promise.resolve(new Response(JSON.stringify({ code: 'FORBIDDEN', message: 'watch revoked' }), { status: 403, headers: { 'Content-Type': 'application/json' } }))
+      throw new Error(`Unexpected request: ${path}`)
+    }))
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+    await prefetchDefaultPodPreview(client, selectedStatus().selection as SelectionSummary, '', 'payments')
+    renderPage(<PodsPage />, ['/'], client)
+    expect(await screen.findByRole('button', { name: 'Open Pod seed-pod in payments' })).toBeInTheDocument()
+    expect(screen.getByText(/✓ 1\/1 namespaces · partial preview/)).toBeInTheDocument()
+    expect(screen.queryByRole('checkbox', { name: 'Select row payments/seed-pod' })).not.toBeInTheDocument()
+    expect(paths.filter((path) => path === '/api/v1/pods?limit=20&namespace=payments')).toHaveLength(1)
+    await waitFor(() => expect(rejectFullPage).toBeDefined())
+    await act(async () => rejectFullPage?.(new Response(JSON.stringify({ code: 'FORBIDDEN', message: 'list revoked' }), { status: 403, headers: { 'Content-Type': 'application/json' } })))
+    expect(await screen.findByText('Resource request failed')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Open Pod seed-pod in payments' })).not.toBeInTheDocument()
+  })
+
+  it('shows a bounded Pod stream preview while HTTP is pending, then replaces it with the authorized page', async () => {
+    const streamed = { namespace: 'payments', name: 'streamed', status: 'Running', ready: { current: 1, desired: 1 }, restarts: 0, node: null, ip: null, owner: null, ageSeconds: 60, problematic: false }
+    let resolvePods: ((response: Response) => void) | undefined
+    let streamController: ReadableStreamDefaultController<Uint8Array> | undefined
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const path = String(input)
+      if (path === '/api/v1/status') return Promise.resolve(json({ ...selectedStatus(), components: { ...selectedStatus().components, metrics: { status: 'unknown' } } }))
+      if (path === '/api/v1/preferences') return Promise.resolve(json(preferences()))
+      if (path === '/api/v1/namespace-scopes/7') return Promise.resolve(json({ namespaces: ['payments'] }))
+      if (path.startsWith('/api/v1/pods?')) return new Promise<Response>((resolve) => { resolvePods = resolve })
+      if (path === '/api/v1/session') return Promise.resolve(json({ csrfToken: 'csrf', generation, origin: 'http://127.0.0.1:2748', expiresAt: '2026-09-12T12:00:00Z' }))
+      if (path === '/api/v1/stream?topic=pods') return Promise.resolve(new Response(new ReadableStream<Uint8Array>({ start(controller) {
+        streamController = controller
+        controller.enqueue(new TextEncoder().encode(`event: progress\ndata: ${JSON.stringify({ generation, topic: 'pods', snapshotId: 'snap_1', items: [streamed], completedNamespaces: 1, requestedNamespaces: 2 })}\n\n`))
+      } }), { headers: { 'Content-Type': 'text/event-stream' } }))
+      throw new Error(`Unexpected request: ${path}`)
+    }))
+    renderPage(<PodsPage />)
+    expect(await screen.findByRole('button', { name: 'Open Pod streamed in payments' })).toBeInTheDocument()
+    expect(screen.getByText(/✓ 1\/2 namespaces · partial preview/)).toBeInTheDocument()
+    expect(screen.queryByRole('checkbox', { name: 'Select row payments/streamed' })).not.toBeInTheDocument()
+    await act(async () => { resolvePods?.(json([{ ...streamed, name: 'from-http' }], page())) })
+    expect(await screen.findByRole('button', { name: 'Open Pod from-http in payments' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Open Pod streamed in payments' })).not.toBeInTheDocument()
+    streamController?.close()
+  })
+
+  it.each([
+    { name: 'Workloads', path: '/api/v1/workloads?', topic: 'workloads', route: '/', component: <WorkloadsPage />, item: { kind: 'Deployment', namespace: 'payments', name: 'streamed', status: 'Healthy', ready: 1, desired: 1, ageSeconds: 60 } },
+    { name: 'Events', path: '/api/v1/events?', topic: 'events', route: '/', component: <EventsPage />, item: { namespace: 'payments', objectKind: 'Pod', objectName: 'streamed', timestamp: '2026-09-21T12:00:00Z', type: 'Normal', reason: 'Started', count: 1, message: 'streamed event' } },
+    { name: 'Services', path: '/api/v1/services?', topic: 'services', route: '/network/services', component: <Routes><Route path="/network/:tab" element={<NetworkPage />} /></Routes>, item: { namespace: 'payments', name: 'streamed', type: 'ClusterIP', clusterIPs: ['10.0.0.1'] } },
+    { name: 'ConfigMaps', path: '/api/v1/configmaps?', topic: 'configmaps', route: '/config/configmaps', component: <Routes><Route path="/config/:tab" element={<ConfigPage />} /></Routes>, item: { namespace: 'payments', name: 'streamed', uid: 'uid-streamed', creationTimestamp: '2026-09-21T12:00:00Z' } },
+  ])('shows $name stream rows and coverage before the HTTP page completes', async ({ path, topic, route, component, item }) => {
+    let resolvePage: ((response: Response) => void) | undefined
+    let streamController: ReadableStreamDefaultController<Uint8Array> | undefined
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const requestPath = String(input)
+      if (requestPath === '/api/v1/status') return Promise.resolve(json({ ...selectedStatus(), components: { ...selectedStatus().components, metrics: { status: 'unknown' } } }))
+      if (requestPath === '/api/v1/preferences') return Promise.resolve(json(preferences()))
+      if (requestPath === '/api/v1/namespace-scopes/7') return Promise.resolve(json({ namespaces: ['payments'] }))
+      if (requestPath.startsWith(path)) return new Promise<Response>((resolve) => { resolvePage = resolve })
+      if (requestPath === '/api/v1/session') return Promise.resolve(json({ csrfToken: 'csrf', generation, origin: 'http://127.0.0.1:2748', expiresAt: '2026-09-12T12:00:00Z' }))
+      if (requestPath === `/api/v1/stream?topic=${topic}`) return Promise.resolve(new Response(new ReadableStream<Uint8Array>({ start(controller) {
+        streamController = controller
+        controller.enqueue(new TextEncoder().encode(`event: progress\ndata: ${JSON.stringify({ generation, topic, snapshotId: 'snap_1', items: [item], completedNamespaces: 1, requestedNamespaces: 2 })}\n\n`))
+      } }), { headers: { 'Content-Type': 'text/event-stream' } }))
+      throw new Error(`Unexpected request: ${requestPath}`)
+    }))
+    renderPage(component, [route])
+    await waitFor(() => expect(screen.getByRole('table')).toHaveTextContent('streamed'))
+    expect(screen.getByText(/✓ 1\/2 namespaces · partial preview/)).toBeInTheDocument()
+    await act(async () => resolvePage?.(json([{ ...item, name: 'from-http', objectName: 'from-http', message: 'from-http event', uid: 'uid-from-http' }], page())))
+    await waitFor(() => expect(screen.getByRole('table')).toHaveTextContent('from-http'))
+    expect(screen.getByRole('table')).not.toHaveTextContent('streamed')
+    streamController?.close()
+  })
+
+  it('keeps hidden Storage columns in the chooser so they can be restored', async () => {
+    const storedPreferences = {
+      ...preferences(),
+      columns: { hidden: { 'storage/persistent-volumes': ['status'] } },
+    }
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      const path = String(input)
+      if (path === '/api/v1/status') return Promise.resolve(json(selectedStatus()))
+      if (path === '/api/v1/preferences' && init?.method !== 'PUT') return Promise.resolve(json(storedPreferences))
+      if (path === '/api/v1/session') return Promise.resolve(json({ csrfToken: 'csrf', generation, origin: 'http://127.0.0.1:2748', expiresAt: '2026-09-12T12:00:00Z' }))
+      if (path === '/api/v1/preferences' && init?.method === 'PUT') return Promise.resolve(json({ ...storedPreferences, columns: { hidden: { 'storage/persistent-volumes': [] } } }))
+      if (path === '/api/v1/persistent-volumes?limit=100') return Promise.resolve(json([{
+        name: 'pv-data', status: 'Bound', capacity: '10Gi', storageClass: 'fast', claim: null, ageSeconds: 60,
+      }], page()))
+      throw new Error(`Unexpected request: ${path}`)
+    }))
+    renderPage(
+      <Routes><Route path="/storage/:tab" element={<StoragePage />} /></Routes>,
+      ['/storage/persistent-volumes'],
+    )
+
+    await screen.findByRole('button', { name: 'Open pv-data' })
+    expect(screen.queryByRole('columnheader', { name: 'Phase' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Choose visible columns' }))
+    const statusColumn = screen.getByRole('checkbox', { name: 'status' })
+    expect(statusColumn).not.toBeChecked()
+    fireEvent.click(statusColumn)
+    expect(await screen.findByRole('columnheader', { name: 'Phase' })).toBeInTheDocument()
+  })
+
+  it('accumulates Pod pages and drops old cursors when the global namespace changes', async () => {
+    const paths: string[] = []
+    const pod = { namespace: 'payments', name: 'all-pods', status: 'Running', ready: { current: 1, desired: 1 }, restarts: 0, ageSeconds: 60, problematic: false }
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const path = String(input)
+      paths.push(path)
+      if (path === '/api/v1/status') return Promise.resolve(json({ ...selectedStatus(), components: { ...selectedStatus().components, metrics: { status: 'unknown' } } }))
+      if (path === '/api/v1/preferences') return Promise.resolve(json(preferences()))
+      if (path === '/api/v1/namespace-scopes/7') return Promise.resolve(json({ namespaces: ['payments'] }))
+      if (path.startsWith('/api/v1/pods?')) {
+        const params = new URL(path, 'http://127.0.0.1').searchParams
+        return Promise.resolve(json([{ ...pod, name: params.has('namespace') ? 'filtered-pod' : params.has('continue') ? 'page-two' : 'all-pods' }], page(params.has('continue') ? '' : 'old-cursor')))
+      }
+      throw new Error(`Unexpected request: ${path}`)
+    }))
+    renderPage(<PodsPage />)
+    await screen.findByRole('button', { name: 'Open Pod all-pods in payments' })
+    expect(screen.getByRole('button', { name: 'First page' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'First page' })).toHaveAttribute('title', 'Already on the first page.')
+    fireEvent.click(screen.getByRole('button', { name: 'Load next page' }))
+    await screen.findByRole('button', { name: 'Open Pod page-two in payments' })
+    expect(screen.getByRole('button', { name: 'Open Pod all-pods in payments' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'First page' })).toBeEnabled()
+    fireEvent.click(screen.getByRole('button', { name: 'First page' }))
+    await screen.findByRole('button', { name: 'Open Pod all-pods in payments' })
+    const before = paths.length
+    fireEvent.click(screen.getByRole('button', { name: 'Change global namespace' }))
+    await screen.findByRole('button', { name: 'Open Pod filtered-pod in payments' })
+    expect(paths.slice(before).filter((path) => path.startsWith('/api/v1/pods?')).every((path) => !path.includes('continue='))).toBe(true)
+    fireEvent.click(screen.getByRole('button', { name: 'Change global namespace' }))
+    await screen.findByRole('button', { name: 'Open Pod all-pods in payments' })
+  })
+
+  it('retains no more than five Pod pages while loading forward', async () => {
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const path = String(input)
+      if (path === '/api/v1/status') return Promise.resolve(json({ ...selectedStatus(), components: { ...selectedStatus().components, metrics: { status: 'unknown' } } }))
+      if (path === '/api/v1/preferences') return Promise.resolve(json(preferences()))
+      if (path === '/api/v1/namespace-scopes/7') return Promise.resolve(json({ namespaces: ['payments'] }))
+      if (path.startsWith('/api/v1/pods?')) {
+        const cursor = new URL(path, 'http://127.0.0.1').searchParams.get('continue')
+        const index = cursor === null ? 0 : Number(cursor)
+        return Promise.resolve(json([{ namespace: 'payments', name: `page-${index}`, status: 'Running', ready: { current: 1, desired: 1 }, restarts: 0, ageSeconds: 60, problematic: false }], page(index < 6 ? String(index + 1) : '')))
+      }
+      throw new Error(`Unexpected request: ${path}`)
+    }))
+    const { client } = renderPage(<PodsPage />)
+    await screen.findByRole('button', { name: 'Open Pod page-0 in payments' })
+    for (let index = 1; index <= 5; index += 1) {
+      fireEvent.click(screen.getByRole('button', { name: 'Load next page' }))
+      await screen.findByRole('button', { name: `Open Pod page-${index} in payments` })
+    }
+    expect(screen.queryByRole('button', { name: 'Open Pod page-0 in payments' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Open Pod page-1 in payments' })).toBeInTheDocument()
+    const data = client.getQueriesData({ queryKey: ['resources', 'pods'] }).map(([, value]) => value).find((value): value is { pages: unknown[]; pageParams: unknown[] } => Boolean(value && typeof value === 'object' && 'pages' in value))
+    expect(data).toBeDefined()
+    expect(data?.pages).toHaveLength(5)
+    expect(data?.pageParams).toHaveLength(5)
+  })
+
+  it('replaces accumulated Pods when a continuation expires', async () => {
+    let firstPageRequests = 0
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const path = String(input)
+      if (path === '/api/v1/status') return Promise.resolve(json({ ...selectedStatus(), components: { ...selectedStatus().components, metrics: { status: 'unknown' } } }))
+      if (path === '/api/v1/preferences') return Promise.resolve(json(preferences()))
+      if (path === '/api/v1/namespace-scopes/7') return Promise.resolve(json({ namespaces: ['payments'] }))
+      if (path.startsWith('/api/v1/pods?')) {
+        const cursor = new URL(path, 'http://127.0.0.1').searchParams.get('continue')
+        if (cursor === 'expired-token') return Promise.resolve(new Response(JSON.stringify({ code: 'CURSOR_EXPIRED', message: 'expired' }), { status: 410, headers: { 'Content-Type': 'application/json' } }))
+        firstPageRequests += 1
+        const name = firstPageRequests === 1 ? 'old-pod' : 'fresh-pod'
+        return Promise.resolve(json([{ namespace: 'payments', name, status: 'Running', ready: { current: 1, desired: 1 }, restarts: 0, ageSeconds: 60, problematic: false }], page(firstPageRequests === 1 ? 'expired-token' : '')))
+      }
+      throw new Error(`Unexpected request: ${path}`)
+    }))
+    renderPage(<PodsPage />)
+    await screen.findByRole('button', { name: 'Open Pod old-pod in payments' })
+    fireEvent.click(screen.getByRole('button', { name: 'Load next page' }))
+    await screen.findByRole('button', { name: 'Open Pod fresh-pod in payments' })
+    expect(screen.queryByRole('button', { name: 'Open Pod old-pod in payments' })).not.toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('snapshot expired')
+    expect(firstPageRequests).toBe(2)
+  })
+
+  it.each([
+    { code: 'FORBIDDEN', status: 403 },
+    { code: 'AUTHORIZATION_UNAVAILABLE', status: 503 },
+  ])('hides loaded Pods when a later page returns $code', async ({ code, status }) => {
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const path = String(input)
+      if (path === '/api/v1/status') return Promise.resolve(json({ ...selectedStatus(), components: { ...selectedStatus().components, metrics: { status: 'unknown' } } }))
+      if (path === '/api/v1/preferences') return Promise.resolve(json(preferences()))
+      if (path === '/api/v1/namespace-scopes/7') return Promise.resolve(json({ namespaces: ['payments'] }))
+      if (path.startsWith('/api/v1/pods?')) {
+        const cursor = new URL(path, 'http://127.0.0.1').searchParams.get('continue')
+        if (cursor) return Promise.resolve(new Response(JSON.stringify({ code, message: 'access cannot be confirmed' }), { status, headers: { 'Content-Type': 'application/json' } }))
+        return Promise.resolve(json([{ namespace: 'payments', name: 'private-pod', status: 'Running', ready: { current: 1, desired: 1 }, restarts: 0, ageSeconds: 60, problematic: false }], page('next-token')))
+      }
+      throw new Error(`Unexpected request: ${path}`)
+    }))
+    renderPage(<PodsPage />)
+    await screen.findByRole('button', { name: 'Open Pod private-pod in payments' })
+    fireEvent.click(screen.getByRole('button', { name: 'Load next page' }))
+    await screen.findByText('Resource request failed')
+    expect(screen.queryByRole('button', { name: 'Open Pod private-pod in payments' })).not.toBeInTheDocument()
+  })
+
+  it('keeps Pods visible while same-selection filters refresh', async () => {
+    let release: ((response: Response) => void) | undefined
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const path = String(input)
+      if (path === '/api/v1/status') return Promise.resolve(json({ ...selectedStatus(), components: { ...selectedStatus().components, metrics: { status: 'unknown' } } }))
+      if (path === '/api/v1/preferences') return Promise.resolve(json(preferences()))
+      if (path === '/api/v1/namespace-scopes/7') return Promise.resolve(json({ namespaces: ['payments'] }))
+      if (path.startsWith('/api/v1/pods?')) {
+        if (new URL(path, 'http://127.0.0.1').searchParams.has('search')) return new Promise<Response>((resolve) => { release = resolve })
+        return Promise.resolve(json([{ namespace: 'payments', name: 'old-pod', status: 'Running', ready: { current: 1, desired: 1 }, restarts: 0, ageSeconds: 60, problematic: false }], page()))
+      }
+      throw new Error(`Unexpected request: ${path}`)
+    }))
+    renderPage(<PodsPage />)
+    await screen.findByRole('button', { name: 'Open Pod old-pod in payments' })
+    fireEvent.change(screen.getByLabelText('Search this bounded page'), { target: { value: 'new' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Apply filters' }))
+    await screen.findByText('Refreshing Pods…')
+    expect(screen.getByRole('button', { name: 'Open Pod old-pod in payments' })).toBeInTheDocument()
+    await act(async () => release?.(json([{ namespace: 'payments', name: 'new-pod', status: 'Running', ready: { current: 1, desired: 1 }, restarts: 0, ageSeconds: 60, problematic: false }], page())))
+    await screen.findByRole('button', { name: 'Open Pod new-pod in payments' })
+    expect(screen.queryByRole('button', { name: 'Open Pod old-pod in payments' })).not.toBeInTheDocument()
+  })
+
+  it.each([
+    { name: 'Workloads', path: '/api/v1/workloads?', component: <WorkloadsPage />, item: { kind: 'Deployment', namespace: 'payments', name: 'old-marker', status: 'Healthy', ready: 1, desired: 1, ageSeconds: 60 } },
+    { name: 'Pods', path: '/api/v1/pods?', component: <PodsPage />, item: { namespace: 'payments', name: 'old-marker', status: 'Running', ready: { current: 1, desired: 1 }, restarts: 0, ageSeconds: 60, problematic: false } },
+    { name: 'Events', path: '/api/v1/events?', component: <EventsPage />, item: { namespace: 'payments', objectKind: 'Pod', objectName: 'old-marker', timestamp: '2026-09-21T12:00:00Z', type: 'Normal', reason: 'Started', count: 1, message: 'old-marker' } },
+  ])('drops $name rows as soon as the effective namespace filter changes', async ({ path, component, item }) => {
+    let release: ((response: Response) => void) | undefined
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const requestPath = String(input)
+      if (requestPath === '/api/v1/status') return Promise.resolve(json({ ...selectedStatus(), components: { ...selectedStatus().components, metrics: { status: 'unknown' } } }))
+      if (requestPath === '/api/v1/preferences') return Promise.resolve(json(preferences()))
+      if (requestPath === '/api/v1/namespace-scopes/7') return Promise.resolve(json({ namespaces: ['payments'] }))
+      if (requestPath.startsWith(path)) {
+        const namespace = new URL(requestPath, 'http://127.0.0.1').searchParams.get('namespace')
+        if (namespace === 'other') return new Promise<Response>((resolve) => { release = resolve })
+        return Promise.resolve(json([item], page()))
+      }
+      throw new Error(`Unexpected request: ${requestPath}`)
+    }))
+    renderPage(component)
+    await screen.findAllByText('old-marker')
+    fireEvent.change(screen.getByLabelText('Namespace'), { target: { value: 'other' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Apply filters' }))
+    await waitFor(() => expect(release).toBeDefined())
+    expect(screen.queryAllByText('old-marker')).toHaveLength(0)
+    await act(async () => release?.(json([], page())))
+  })
+
+
+  it.each([null, []])('opens a Pod whose relatedEvents is %j without blanking the page', async (relatedEvents) => {
+    const pod = { namespace: 'payments', name: 'api-empty-events', status: 'Running', ready: { current: 1, desired: 1 }, restarts: 0, node: 'worker-1', ip: null, owner: null, ageSeconds: 60, problematic: false }
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const path = String(input)
+      if (path === '/api/v1/status') return Promise.resolve(json({ ...selectedStatus(), components: { ...selectedStatus().components, metrics: { status: 'unknown' } } }))
+      if (path === '/api/v1/preferences') return Promise.resolve(json(preferences()))
+      if (path.startsWith('/api/v1/pods?')) return Promise.resolve(json([pod], page()))
+      if (path === '/api/v1/pods/payments/api-empty-events') return Promise.resolve(json({
+        metadata: { namespace: pod.namespace, name: pod.name, uid: 'uid-empty-events', resourceVersion: '1', labels: {} },
+        summary: pod, conditions: [], containers: [], initContainers: [], ephemeralContainers: [], relatedEvents,
+      }))
+      throw new Error(`Unexpected request: ${path}`)
+    }))
+    renderPage(<PodsPage />)
+    fireEvent.click(await screen.findByRole('button', { name: 'Open Pod api-empty-events in payments' }))
+    expect(await screen.findByText('uid-empty-events')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Pods' })).toBeInTheDocument()
+    expect(screen.getByRole('dialog')).toHaveTextContent('This Pod has no controller owner.')
+    expect(screen.getByRole('button', { name: 'Go to previous resource' })).toHaveAttribute('title', 'There is no previous resource in this workspace history.')
+    expect(screen.getByRole('button', { name: 'Go to next resource' })).toHaveAttribute('title', 'There is no next resource in this workspace history.')
+  })
+
   it('navigates a bounded workload list to generation-fenced detail and explicit YAML', async () => {
     const calls: Array<{ path: string; init?: RequestInit }> = []
     let activeGeneration = generation
@@ -97,13 +506,15 @@ describe('read-only resource pages', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Load authorized YAML' }))
     expect(await screen.findByLabelText('YAML document')).toHaveTextContent('kind: Deployment')
 
-    fireEvent.click(screen.getByRole('button', { name: 'Next page' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Load next page' }))
     expect(await screen.findByRole('button', { name: 'Open Deployment worker in payments' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Open Deployment api in payments' })).toBeInTheDocument()
     expect(calls.some((call) => call.path.endsWith('continue=next-token'))).toBe(true)
     const resourceRequestsBeforeGenerationChange = calls.filter((call) => call.path.startsWith('/api/v1/workloads?')).length
     activeGeneration = 'gen_43'
     await act(async () => client.setQueryData(['local-status'], selectedStatus(activeGeneration)))
     expect(await screen.findByRole('button', { name: 'Open Deployment fresh in payments' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Open Deployment worker in payments' })).not.toBeInTheDocument()
     const requestsAfterGenerationChange = calls.filter((call) => call.path.startsWith('/api/v1/workloads?')).slice(resourceRequestsBeforeGenerationChange)
     expect(requestsAfterGenerationChange.some((call) => call.path === '/api/v1/workloads?limit=100')).toBe(true)
     expect(requestsAfterGenerationChange.some((call) => call.path.includes('continue='))).toBe(false)
@@ -149,12 +560,11 @@ describe('read-only resource pages', () => {
 
     const requestsBeforeClear = paths.length
     fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }))
-    await waitFor(() => expect(paths.slice(requestsBeforeClear).some((path) => {
-      if (!path.startsWith('/api/v1/pods?')) return false
+    await waitFor(() => expect(screen.getByText('None')).toBeInTheDocument())
+    expect(paths.slice(requestsBeforeClear).filter((path) => path.startsWith('/api/v1/pods?')).every((path) => {
       const query = new URL(path, 'http://127.0.0.1').searchParams
       return !query.has('namespace') && !query.has('search') && !query.has('sort') && !query.has('order') && !query.has('continue')
-    })).toBe(true))
-    expect(screen.getByText('None')).toBeInTheDocument()
+    })).toBe(true)
 
     fireEvent.change(await screen.findByRole('combobox', { name: 'Saved filter' }), { target: { value: 'saved-pods' } })
     fireEvent.click(screen.getByRole('button', { name: 'Apply saved filter' }))
@@ -205,6 +615,42 @@ describe('read-only resource pages', () => {
     expect(screen.queryByText(/super-secret|annotation-secret|raw-token/)).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Load authorized YAML' })).not.toBeInTheDocument()
     expect(paths.some((path) => path.includes('/secrets/') && path.endsWith('/yaml'))).toBe(false)
+  })
+
+  it('navigates Network tabs from the canonical sidebar route and changes the active query', async () => {
+    const paths: string[] = []
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const path = String(input)
+      paths.push(path)
+      if (path === '/api/v1/status') return Promise.resolve(json(selectedStatus()))
+      if (path === '/api/v1/preferences') return Promise.resolve(json(preferences()))
+      if (path.startsWith('/api/v1/services?') || path.startsWith('/api/v1/ingresses?')) return Promise.resolve(json([], page()))
+      throw new Error(`Unexpected request: ${path}`)
+    }))
+
+    renderPage(<><Routes><Route path="/network/:tab" element={<NetworkPage />} /></Routes><LocationProbe /></>, ['/network/services'])
+    await waitFor(() => expect(paths.some((path) => path.startsWith('/api/v1/services?'))).toBe(true))
+    fireEvent.click(screen.getByRole('tab', { name: 'ingresses' }))
+    expect(await screen.findByLabelText('Current route')).toHaveTextContent('/network/ingresses')
+    await waitFor(() => expect(paths.some((path) => path.startsWith('/api/v1/ingresses?'))).toBe(true))
+  })
+
+  it('navigates Config tabs from the canonical sidebar route and changes the active query', async () => {
+    const paths: string[] = []
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const path = String(input)
+      paths.push(path)
+      if (path === '/api/v1/status') return Promise.resolve(json(selectedStatus()))
+      if (path === '/api/v1/preferences') return Promise.resolve(json(preferences()))
+      if (path.startsWith('/api/v1/configmaps?') || path.startsWith('/api/v1/secrets?')) return Promise.resolve(json([], page()))
+      throw new Error(`Unexpected request: ${path}`)
+    }))
+
+    renderPage(<><Routes><Route path="/config/:tab" element={<ConfigPage />} /></Routes><LocationProbe /></>, ['/config/configmaps'])
+    await waitFor(() => expect(paths.some((path) => path.startsWith('/api/v1/configmaps?'))).toBe(true))
+    fireEvent.click(screen.getByRole('tab', { name: 'secrets' }))
+    expect(await screen.findByLabelText('Current route')).toHaveTextContent('/config/secrets')
+    await waitFor(() => expect(paths.some((path) => path.startsWith('/api/v1/secrets?'))).toBe(true))
   })
 
   it('keeps draft search and allowlisted ordering independent across Network tabs', async () => {

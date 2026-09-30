@@ -284,6 +284,7 @@ func ClassifyProblemPod(pod *corev1.Pod, events []NormalizedEvent, owner *Resour
 	})
 	winner := candidates[0]
 	return ProblemPodDTO{
+		Resource:      ResourceRef{Kind: "Pod", Namespace: pod.Namespace, Name: pod.Name, UID: string(pod.UID)},
 		Namespace:     pod.Namespace,
 		Pod:           pod.Name,
 		Owner:         cloneResourceRef(owner),
@@ -292,10 +293,22 @@ func ClassifyProblemPod(pod *corev1.Pod, events []NormalizedEvent, owner *Resour
 		Status:        sanitizeText(status, MaximumStatusBytes),
 		Reason:        winner.reason,
 		Message:       winner.message,
+		Summary:       problemSummary(winner.reason, winner.message),
 		Source:        winner.source,
 		Severity:      winner.severity,
 		AgeSeconds:    ageSeconds(pod.CreationTimestamp, now),
+		Actions:       []string{"inspect", "logs"},
 	}, true
+}
+
+func problemSummary(reason, message *string) string {
+	if reason != nil && *reason != "" {
+		return *reason
+	}
+	if message != nil && *message != "" {
+		return *message
+	}
+	return "Observed problem"
 }
 
 func waitingProblem(reason string) (int, ProblemSeverity, bool) {
@@ -415,7 +428,16 @@ func lessProblemCandidate(left, right problemCandidate) bool {
 func SortProblems(values []ProblemPodDTO) {
 	sort.SliceStable(values, func(left, right int) bool {
 		if values[left].Severity != values[right].Severity {
-			return values[left].Severity == ProblemCritical
+			rank := func(value ProblemSeverity) int {
+				if value == ProblemCritical {
+					return 0
+				}
+				if value == ProblemWarning {
+					return 1
+				}
+				return 2
+			}
+			return rank(values[left].Severity) < rank(values[right].Severity)
 		}
 		if values[left].Namespace != values[right].Namespace {
 			return values[left].Namespace < values[right].Namespace

@@ -7,6 +7,9 @@ import (
 )
 
 type EventDTO struct {
+	// Name identifies the Event itself, not the involved object. It lets a
+	// deleted watch event remove the exact item from a cached snapshot.
+	Name       string  `json:"name"`
 	Timestamp  *string `json:"timestamp"`
 	Namespace  string  `json:"namespace"`
 	ObjectKind string  `json:"objectKind"`
@@ -36,6 +39,7 @@ func ConvertEvent(value *corev1.Event, redactor TextRedactor) EventDTO {
 		typeName = "Unknown"
 	}
 	return EventDTO{
+		Name:      value.Name,
 		Timestamp: eventTimestamp(value), Namespace: value.Namespace,
 		ObjectKind: value.InvolvedObject.Kind, ObjectName: value.InvolvedObject.Name,
 		Reason: reason, Message: message, Count: count,

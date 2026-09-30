@@ -29,6 +29,8 @@ const (
 	CodeAuthorizationUnavailable  = "AUTHORIZATION_UNAVAILABLE"
 	CodeFeatureUnavailable        = "FEATURE_UNAVAILABLE"
 	CodeUpstreamTimeout           = "UPSTREAM_TIMEOUT"
+	CodeRateLimited               = "RATE_LIMITED"
+	CodePrefetchDeferred          = "PREFETCH_DEFERRED"
 	CodeLimitExceeded             = "LIMIT_EXCEEDED"
 	CodePreferenceSensitive       = "PREFERENCE_SENSITIVE_VALUE"
 	CodeKubeconfigInvalid         = "KUBECONFIG_INVALID"

@@ -70,7 +70,7 @@ function ConfirmDialogBody({
   return (
     <div className="fixed inset-0 z-[var(--z-confirm)] grid place-items-center p-4" role="presentation">
       <div className="absolute inset-0 bg-black/70 backdrop-blur-sm" aria-hidden="true" onMouseDown={(event) => { if (event.target === event.currentTarget) onCancel() }} />
-      <div role="alertdialog" aria-modal="true" aria-labelledby="confirm-dialog-title" className={`relative w-full max-w-lg rounded-xl border ${accent.border} bg-kp-surface-0 p-4 shadow-dialog`}>
+      <div role="alertdialog" aria-modal="true" aria-labelledby="confirm-dialog-title" className={`relative max-h-[calc(100vh-2rem)] w-full max-w-lg overflow-y-auto overscroll-contain rounded-xl border ${accent.border} bg-kp-surface-0 p-4 shadow-dialog`}>
         <div className="flex items-start gap-2.5">
           <TriangleAlert size={18} strokeWidth={1.8} className={`mt-0.5 shrink-0 ${accent.text}`} aria-hidden="true" />
           <div className="min-w-0 flex-1">
@@ -79,7 +79,7 @@ function ConfirmDialogBody({
           </div>
         </div>
         {resources.length > 0 ? (
-          <ul className="m-0 mt-3 grid max-h-40 list-none gap-1 overflow-auto rounded-lg border border-kp-overlay-0 bg-kp-crust p-2.5">
+          <ul className="m-0 mt-3 grid max-h-40 list-none gap-1 overflow-auto overscroll-contain rounded-lg border border-kp-overlay-0 bg-kp-crust p-2.5">
             {resources.map((resource) => (
               <li key={`${resource.namespace ?? ''}/${resource.kind ?? ''}/${resource.name}`} className="mono text-xs text-kp-subtext">
                 {resource.kind ? `${resource.kind} ` : ''}{resource.name}
@@ -98,7 +98,10 @@ function ConfirmDialogBody({
             <span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Type <strong className="mono text-kp-subtext">{requireTypingName}</strong> to confirm</span>
             <input
               type="text"
-              className="h-8 rounded-md border border-kp-overlay-0 bg-kp-crust px-2.5 text-sm text-kp-text focus:border-kp-mauve focus:outline-none"
+              name="confirmation-name"
+              autoComplete="off"
+              spellCheck={false}
+              className="h-8 rounded-md border border-kp-overlay-0 bg-kp-crust px-2.5 text-sm text-kp-text focus:border-kp-mauve focus:outline-none focus-visible:ring-2 focus-visible:ring-kp-mauve"
               value={typed}
               onChange={(event) => setTyped(event.target.value)}
               aria-label={`Type ${requireTypingName} to confirm`}

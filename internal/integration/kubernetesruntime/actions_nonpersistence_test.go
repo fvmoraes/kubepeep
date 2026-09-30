@@ -21,10 +21,13 @@ import (
 
 func TestExecSecretsNeverReachAuditLogOrSQLiteArtifacts(t *testing.T) {
 	const (
-		commandNeedle = "COMMAND_MUST_NOT_PERSIST_7f2ab2b99e2d"
-		stdinNeedle   = "STDIN_MUST_NOT_PERSIST_b6fb38eaa4c1"
-		stdoutNeedle  = "STDOUT_MUST_NOT_PERSIST_323a02d54d81"
-		stderrNeedle  = "STDERR_MUST_NOT_PERSIST_83c78ab63d0e"
+		commandNeedle   = "COMMAND_MUST_NOT_PERSIST_7f2ab2b99e2d"
+		stdinNeedle     = "STDIN_MUST_NOT_PERSIST_b6fb38eaa4c1"
+		stdoutNeedle    = "STDOUT_MUST_NOT_PERSIST_323a02d54d81"
+		stderrNeedle    = "STDERR_MUST_NOT_PERSIST_83c78ab63d0e"
+		contextNeedle   = "context-must-not-persist-3fc78ab63d0e"
+		namespaceNeedle = "namespace-must-not-persist-4fc78ab63d0e"
+		objectNeedle    = "object-must-not-persist-5fc78ab63d0e"
 	)
 	directory := t.TempDir()
 	if err := securefs.EnsurePrivateDirectory(directory); err != nil {
@@ -57,8 +60,8 @@ func TestExecSecretsNeverReachAuditLogOrSQLiteArtifacts(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(manager.Shutdown)
-	binding := namespaces.SelectionBinding{ClusterProfileID: 41, Context: "evidence", Generation: "gen_evidence"}
-	route := actions.RouteTarget{Kind: "pods", Namespace: "payments", Name: "audit-evidence"}
+	binding := namespaces.SelectionBinding{ClusterProfileID: 41, Context: contextNeedle, Generation: "gen_evidence"}
+	route := actions.RouteTarget{Kind: "pods", Namespace: namespaceNeedle, Name: objectNeedle}
 	request := actions.ExecInit{
 		Container: "api",
 		Command:   []string{"/bin/evidence", "--opaque=" + commandNeedle},
@@ -70,10 +73,10 @@ func TestExecSecretsNeverReachAuditLogOrSQLiteArtifacts(t *testing.T) {
 			ConsequenceCode: actions.ConsequenceOpenInteractiveProcess,
 			Target: actions.ActionTargetDTO{
 				ClusterProfileID: 41,
-				Context:          "evidence",
-				Namespace:        "payments",
+				Context:          contextNeedle,
+				Namespace:        namespaceNeedle,
 				Kind:             "Pod",
-				Name:             "audit-evidence",
+				Name:             objectNeedle,
 			},
 			ExpectedGeneration: "gen_evidence",
 		},
@@ -129,12 +132,15 @@ func TestExecSecretsNeverReachAuditLogOrSQLiteArtifacts(t *testing.T) {
 		}
 	}
 	needles := map[string]string{
-		"command":         commandNeedle,
-		"stdin":           stdinNeedle,
-		"stdout":          stdoutNeedle,
-		"stderr":          stderrNeedle,
-		"ticket protocol": ticket.Protocols[1],
-		"ticket token":    strings.TrimPrefix(ticket.Protocols[1], actions.ExecTicketPrefix),
+		"command":            commandNeedle,
+		"stdin":              stdinNeedle,
+		"stdout":             stdoutNeedle,
+		"stderr":             stderrNeedle,
+		"ticket protocol":    ticket.Protocols[1],
+		"ticket token":       strings.TrimPrefix(ticket.Protocols[1], actions.ExecTicketPrefix),
+		"context identity":   contextNeedle,
+		"namespace identity": namespaceNeedle,
+		"object identity":    objectNeedle,
 	}
 	assertNoExecNeedles(t, "sanitized stdout", stdout.Bytes(), needles)
 	entries, err := os.ReadDir(directory)

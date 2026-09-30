@@ -172,27 +172,34 @@ const (
 	ProblemContainerStatus     ProblemSource = "containerStatus"
 	ProblemCondition           ProblemSource = "condition"
 	ProblemEvent               ProblemSource = "event"
+	ProblemWorkloadStatus      ProblemSource = "workloadStatus"
+	ProblemPVCStatus           ProblemSource = "pvcStatus"
+	ProblemNodeCondition       ProblemSource = "nodeCondition"
 )
 
 type ProblemSeverity string
 
 const (
+	ProblemInfo     ProblemSeverity = "info"
 	ProblemWarning  ProblemSeverity = "warning"
 	ProblemCritical ProblemSeverity = "critical"
 )
 
 type ProblemPodDTO struct {
+	Resource      ResourceRef     `json:"resource"`
 	Namespace     string          `json:"namespace"`
-	Pod           string          `json:"pod"`
+	Pod           string          `json:"pod,omitempty"`
 	Owner         *ResourceRef    `json:"owner"`
 	Container     *string         `json:"container"`
 	ContainerType *ContainerType  `json:"containerType"`
 	Status        string          `json:"status"`
 	Reason        *string         `json:"reason"`
 	Message       *string         `json:"message"`
+	Summary       string          `json:"summary"`
 	Source        ProblemSource   `json:"source"`
 	Severity      ProblemSeverity `json:"severity"`
 	AgeSeconds    int64           `json:"ageSeconds"`
+	Actions       []string        `json:"actions"`
 }
 
 type WorkloadStatus string

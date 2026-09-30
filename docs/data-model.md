@@ -1,6 +1,6 @@
 # Modelo de dados local
 
-> **Escopo:** contratos de persistência local; mudanças de schema acompanham a implementação e o [plano v1](../plan/README.md).
+> **Escopo:** contratos de persistência local; mudanças de schema acompanham a implementação e o [plano v0.7](../plan/README.md).
 >
 > **Banco:** SQLite com `modernc.org/sqlite`, versão fixada em `go.mod`,
 > sem dependência de CGO no driver.
@@ -121,6 +121,7 @@ Regras:
 | `name` | TEXT | não | trim; 1–120 caracteres |
 | `mode` | TEXT | não | `single`, `list` ou `all` |
 | `default_namespace` | TEXT | sim | null ou nome Kubernetes válido |
+| `is_default` | INTEGER | não | 0 ou 1; preferência local do contexto |
 | `version` | INTEGER | não | começa em 1; incrementa em cada update |
 | `created_at` | INTEGER | não | epoch ms |
 | `updated_at` | INTEGER | não | epoch ms, `>= created_at` |
@@ -130,15 +131,24 @@ Constraints:
 ```sql
 CHECK (mode IN ('single', 'list', 'all'))
 CHECK (mode <> 'all' OR default_namespace IS NULL)
+CHECK (is_default IN (0, 1))
 CHECK (version >= 1)
 UNIQUE (cluster_profile_id, context_name, name)
 CREATE INDEX namespace_scopes_by_profile_context
   ON namespace_scopes(cluster_profile_id, context_name, id);
+CREATE UNIQUE INDEX namespace_scopes_one_default_per_context
+  ON namespace_scopes(cluster_profile_id, context_name)
+  WHERE is_default = 1;
 ```
 
 `cluster_profile_id` e `context_name` identificam a origem do scope e são
 imutáveis depois da criação. Mover um scope entre profiles/contextos exige criar
 outro aggregate; um `PUT` não pode alterar esses campos.
+
+`is_default` não concede permissão Kubernetes. A migration 0003 adiciona a
+coluna com default 0 e o índice parcial; contextos existentes permanecem sem
+default até escolha explícita. Definir outro default e substituir/remover o
+atual ocorre na mesma transação local.
 
 ### 3.4 `namespace_scope_items`
 
@@ -479,6 +489,7 @@ Nenhum teste usa credencial real.
   paths, inclusive sob concorrência.
 - Um scope pertence a exatamente um `(cluster_profile_id, context_name)` e não
   pode ser movido por update.
+- Há no máximo um scope default por `(cluster_profile_id, context_name)`.
 - `single`, `list` e `all` satisfazem cardinalidades após todo commit.
 - Nenhum item duplicado existe por scope.
 - `all` não cria item `*`.
@@ -499,4 +510,5 @@ Executar os testes de SQLite, migrations, preferências e seleção junto dos
 da allowlist, atomicidade, recuperação e ausência de marcadores proibidos.
 Lock e comandos de controle também precisam passar em runners nativos antes
 da distribuição. A execução histórica está em [archive/](archive/README.md);
-novas chaves de preferência e migrations são trabalho do [plano v1](../plan/README.md).
+novas chaves de preferência e migrations exigem contrato e atualização do
+[plano ou backlog vigente](../plan/README.md).

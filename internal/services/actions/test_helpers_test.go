@@ -187,6 +187,13 @@ func testPortForward(generation, namespace, name string, remotePort int) PortFor
 	}
 }
 
+func testServicePortForward(generation, namespace, name string, remotePort int) PortForwardCreateRequest {
+	request := testPortForward(generation, namespace, name, remotePort)
+	request.ConsequenceCode = ConsequenceExposeServicePortLocally
+	request.Target.Kind = "Service"
+	return request
+}
+
 func testExec(generation, namespace, name string, command []string) ExecInit {
 	return ExecInit{
 		Container: "api",
@@ -301,6 +308,12 @@ type portForwardAdapterStub struct {
 	started   chan struct{}
 	release   chan struct{}
 	err       error
+}
+
+func (s *portForwardAdapterStub) ResolveService(_ context.Context, target MutationTarget, servicePort int) (ResolvedServicePort, error) {
+	target.Kind = "Pod"
+	target.Name += "-pod"
+	return ResolvedServicePort{Target: target, RemotePort: servicePort}, nil
 }
 
 func (s *portForwardAdapterStub) Start(setup context.Context, _ context.Context, command PortForwardCommand, listener net.Listener) (PortForwardHandle, error) {

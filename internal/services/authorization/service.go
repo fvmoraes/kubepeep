@@ -7,6 +7,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/fvmoraes/kubepeep/internal/observability"
 	"k8s.io/apimachinery/pkg/util/validation"
 )
 
@@ -159,9 +160,13 @@ func (s *Service) check(ctx context.Context, key Key, bypassCache bool) Capabili
 		return capabilityFor(key, DecisionUnknown, ReasonSARUnavailable, s.now())
 	}
 
+	ctx, end := observability.StartSpan(ctx, "cache.authorization")
+	defer end(nil)
+	observability.CacheOutcome(ctx, "miss")
 	now := s.now()
 	s.mu.Lock()
 	if bypassCache {
+		observability.CacheOutcome(ctx, "refresh")
 		// Invalidate the cached decision in the same critical section that
 		// joins or creates the live review. A separate lock window lets a
 		// concurrent refresher delete a freshly published result and issue a
@@ -170,6 +175,7 @@ func (s *Service) check(ctx context.Context, key Key, bypassCache bool) Capabili
 	} else {
 		if entry, ok := s.cache[key]; ok {
 			if now.Before(entry.capability.ExpiresAt) {
+				observability.CacheOutcome(ctx, "hit")
 				result := entry.capability
 				s.mu.Unlock()
 				return result
@@ -180,6 +186,7 @@ func (s *Service) check(ctx context.Context, key Key, bypassCache bool) Capabili
 	revision := s.revisionLocked(key)
 	flight := flightKey{key: key, revision: revision}
 	if call, ok := s.inflight[flight]; ok {
+		observability.CacheOutcome(ctx, "coalesced")
 		s.mu.Unlock()
 		select {
 		case <-call.done:

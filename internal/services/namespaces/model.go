@@ -35,6 +35,7 @@ type Scope struct {
 	Mode             ScopeMode
 	Namespaces       []string
 	DefaultNamespace *string
+	IsDefault        bool
 	Version          int64
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
@@ -54,7 +55,8 @@ type Repository interface {
 	Get(context.Context, int64) (Scope, error)
 	Create(context.Context, ScopeDraft) (Scope, error)
 	Update(context.Context, int64, int64, ScopeDraft) (Scope, error)
-	Delete(context.Context, int64, int64) error
+	SetDefault(context.Context, int64) (Scope, error)
+	Delete(context.Context, int64, int64, int64) error
 }
 
 // SelectionBinding is a stable snapshot held by the coordinator for the full

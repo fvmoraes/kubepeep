@@ -10,16 +10,16 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/fvmoraes/kubepeep/internal/buildinfo"
 )
 
 // invokeRequestTimeout is the desktop bridge's outer ceiling for one JSON API
-// call. Wails bindings cannot carry the frontend AbortSignal, so every
-// operation must terminate through its own internal deadlines (per-call
-// Kubernetes deadline, collection window budget, dashboard block budget); this
-// ceiling is defense-in-depth so no bridge call can outlive them all.
+// call. Cancelable bindings propagate the frontend AbortSignal, while internal
+// deadlines still bound older callers and provide defense in depth (per-call
+// Kubernetes deadline, collection window budget and dashboard block budget).
 const invokeRequestTimeout = 5 * time.Minute
 
 // PlatformInfoDTO is the sanitized environment surface exposed to the React
@@ -52,6 +52,8 @@ type Bridge struct {
 	origin       string
 	streamBase   string
 	platformInfo PlatformInfoDTO
+	requestMu    sync.Mutex
+	requests     map[string]context.CancelFunc
 }
 
 func NewBridge(handler http.Handler, origin string, streamBase string) *Bridge {
@@ -60,6 +62,7 @@ func NewBridge(handler http.Handler, origin string, streamBase string) *Bridge {
 		host:       strings.TrimPrefix(origin, "http://"),
 		origin:     origin,
 		streamBase: streamBase,
+		requests:   make(map[string]context.CancelFunc),
 		platformInfo: PlatformInfoDTO{
 			Mode:       "desktop",
 			StreamBase: streamBase,
@@ -83,6 +86,54 @@ func (bridge *Bridge) PlatformInfo() PlatformInfoDTO {
 // excluded because Wails bindings cannot carry them; they use the loopback
 // base returned by PlatformInfo.
 func (bridge *Bridge) Invoke(method string, path string, headers map[string]string, body string) (InvokeResult, error) {
+	requestContext, cancel := context.WithTimeout(context.Background(), invokeRequestTimeout)
+	defer cancel()
+	return bridge.invoke(requestContext, method, path, headers, body)
+}
+
+// InvokeCancelable binds a Wails JSON call to an opaque frontend request ID.
+// Cancel removes only that in-flight request; identifiers are never forwarded
+// to Kubernetes or included in logs.
+func (bridge *Bridge) InvokeCancelable(requestID string, method string, path string, headers map[string]string, body string) (InvokeResult, error) {
+	if !validBridgeRequestID(requestID) {
+		return InvokeResult{}, fmt.Errorf("desktop: request id is invalid")
+	}
+	requestContext, cancel := context.WithTimeout(context.Background(), invokeRequestTimeout)
+	bridge.requestMu.Lock()
+	if bridge.requests == nil {
+		bridge.requests = make(map[string]context.CancelFunc)
+	}
+	if _, duplicate := bridge.requests[requestID]; duplicate {
+		bridge.requestMu.Unlock()
+		cancel()
+		return InvokeResult{}, fmt.Errorf("desktop: request id is already active")
+	}
+	bridge.requests[requestID] = cancel
+	bridge.requestMu.Unlock()
+	defer func() {
+		bridge.requestMu.Lock()
+		delete(bridge.requests, requestID)
+		bridge.requestMu.Unlock()
+		cancel()
+	}()
+	return bridge.invoke(requestContext, method, path, headers, body)
+}
+
+// Cancel propagates an AbortSignal from React Query into the HTTP handler and
+// therefore into the generation lease and Kubernetes client request.
+func (bridge *Bridge) Cancel(requestID string) {
+	if bridge == nil || !validBridgeRequestID(requestID) {
+		return
+	}
+	bridge.requestMu.Lock()
+	cancel := bridge.requests[requestID]
+	bridge.requestMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+func (bridge *Bridge) invoke(ctx context.Context, method string, path string, headers map[string]string, body string) (InvokeResult, error) {
 	if bridge == nil || bridge.handler == nil {
 		return InvokeResult{}, fmt.Errorf("desktop: bridge is unavailable")
 	}
@@ -95,9 +146,7 @@ func (bridge *Bridge) Invoke(method string, path string, headers map[string]stri
 	if !invokePathAllowed(path) {
 		return InvokeResult{}, fmt.Errorf("desktop: path is not allowed through bindings")
 	}
-	requestContext, cancel := context.WithTimeout(context.Background(), invokeRequestTimeout)
-	defer cancel()
-	request, err := http.NewRequestWithContext(requestContext, method, "http://"+bridge.host+path, strings.NewReader(body))
+	request, err := http.NewRequestWithContext(ctx, method, "http://"+bridge.host+path, strings.NewReader(body))
 	if err != nil {
 		return InvokeResult{}, fmt.Errorf("desktop: build request: %w", err)
 	}
@@ -122,6 +171,18 @@ func (bridge *Bridge) Invoke(method string, path string, headers map[string]stri
 		Headers: normalized,
 		Body:    recorder.Body.String(),
 	}, nil
+}
+
+func validBridgeRequestID(value string) bool {
+	if value == "" || len(value) > 128 {
+		return false
+	}
+	for _, character := range value {
+		if character != '-' && character != '_' && (character < '0' || character > '9') && (character < 'A' || character > 'Z') && (character < 'a' || character > 'z') {
+			return false
+		}
+	}
+	return true
 }
 
 func invokePathAllowed(path string) bool {

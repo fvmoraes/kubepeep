@@ -51,6 +51,9 @@ type Options struct {
 	Port          int
 	ExtraHosts    []string
 	ExtraOrigins  []string
+	// BootstrapAsync lets the desktop shell start before kubeconfig and client
+	// activation. The headless server keeps synchronous startup semantics.
+	BootstrapAsync bool
 }
 
 // Platform is the composed, transport-independent core returned by Compose.
@@ -125,12 +128,37 @@ func Compose(ctx context.Context, options Options) (*Platform, error) {
 	if err != nil {
 		return nil, err
 	}
-	cursorStore := api.NewCursorStore(nil)
+	var metricsRegistry *observability.Registry
+	if options.Config.Observability.Metrics.Enabled {
+		metricsRegistry = observability.NewRegistry()
+	}
+	cursorStore := api.NewCursorStoreWithMetrics(nil, metricsRegistry)
+	tracing, err := observability.NewTracing(ctx, options.Config.Observability.OTel, metricsRegistry, func() {
+		logger.Logger.LogAttrs(context.Background(), slog.LevelWarn, "trace export failed", slog.String("component", "observability"))
+	})
+	if err != nil {
+		return nil, err
+	}
+	closeTracingOnError := true
+	defer func() {
+		if closeTracingOnError {
+			shutdownContext, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			if err := tracing.Shutdown(shutdownContext); err != nil {
+				logger.Logger.LogAttrs(context.Background(), slog.LevelWarn, "trace shutdown failed", slog.String("component", "observability"))
+			}
+		}
+	}()
+	ctx = observability.WithTracing(ctx, tracing)
 	sessions, err := api.NewSessionStore(0)
 	if err != nil {
 		return nil, err
 	}
-	clientFactory, err := kubernetes.NewClientFactory(kubernetes.FactoryOptions{})
+	protocol := options.Config.Resources.Protocol
+	clientFactory, err := kubernetes.NewClientFactory(kubernetes.FactoryOptions{
+		Metrics: metricsRegistry, QPS: float32(protocol.QPS), Burst: protocol.Burst,
+		Protobuf: protocol.Protobuf, Compression: protocol.Compression,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -154,20 +182,22 @@ func Compose(ctx context.Context, options Options) (*Platform, error) {
 	}
 	// The optional local metrics registry is created before the resource
 	// backend so the list path can be instrumented from startup.
-	var metricsRegistry *observability.Registry
-	if options.Config.Observability.Metrics.Enabled {
-		metricsRegistry = observability.NewRegistry()
-	}
 	resourceBackend, err := kuberuntime.NewResourceBackendWithOptions(kubernetesRuntime, authorizationService, resourcecore.TextRedactorFunc(func(value string) string {
 		redacted, _ := dashboard.Redact(value)
 		return redacted
 	}), kuberuntime.ResourceBackendOptions{
-		ListWindowTimeout: options.Config.Resources.CollectionTimeout.Duration,
-		Metrics:           metricsRegistry,
+		ListWindowTimeout:   options.Config.Resources.CollectionTimeout.Duration,
+		Metrics:             metricsRegistry,
+		StreamingLists:      os.Getenv("KUBEPEEP_STREAMING_LISTS") == "1",
+		PartialMetadata:     &protocol.PartialMetadata,
+		AdaptiveConcurrency: protocol.AdaptiveConcurrency,
+		IntelligentPrefetch: protocol.IntelligentPrefetch,
+		CursorMemory:        cursorStore,
 	})
 	if err != nil {
 		return nil, err
 	}
+	dashboardBackend.ConfigureDiagnostics(metricsRegistry, resourceBackend)
 	preferenceService := &resourcecore.PreferenceService{
 		Repository: sqlite.NewPreferenceRepository(store),
 		Detector:   resourcecore.DefaultSensitiveDetector{},
@@ -259,10 +289,13 @@ func Compose(ctx context.Context, options Options) (*Platform, error) {
 	if options.NamespaceSet {
 		ephemeralNamespace = options.Namespace
 	}
-	if err := contexts.Bootstrap(ctx, contextservice.BootstrapRequest{
+	bootstrapRequest := contextservice.BootstrapRequest{
 		ExplicitPath: explicitPath, ExplicitContext: explicitContext, EphemeralNS: ephemeralNamespace,
-	}); err != nil {
-		return nil, fmt.Errorf("startup: bootstrap Kubernetes selection: %w", err)
+	}
+	if !options.BootstrapAsync {
+		if err := contexts.Bootstrap(ctx, bootstrapRequest); err != nil {
+			return nil, fmt.Errorf("startup: bootstrap Kubernetes selection: %w", err)
+		}
 	}
 	namespaceRepository := sqlite.NewNamespaceScopeRepository(store)
 	namespaceService := namespaces.NewService(namespaceRepository, selectionState, kubernetesRuntime)
@@ -276,31 +309,47 @@ func Compose(ctx context.Context, options Options) (*Platform, error) {
 			Commit:    buildinfo.Commit,
 			BuildDate: buildinfo.BuildDate,
 		},
-		Snapshots:    snapshots,
-		Profiles:     profileService,
-		Contexts:     contexts,
-		Scopes:       namespaceService,
-		Namespaces:   kubernetesRuntime,
-		Permissions:  authorizationService,
-		Selection:    selectionState,
-		Dashboard:    dashboardBackend,
-		Resources:    resourceBackend,
-		Streams:      resourceBackend,
-		Preferences:  preferenceService,
-		Actions:      actions,
-		PortForwards: portForwards,
-		Exec:         execSessions,
-		Cursors:      cursors,
-		CursorStore:  cursorStore,
-		Generation:   generation,
-		Sessions:     sessions,
-		Logger:       logger,
-		ExtraHosts:   options.ExtraHosts,
-		ExtraOrigins: options.ExtraOrigins,
-		Metrics:      metricsRegistry,
+		Snapshots:     snapshots,
+		Profiles:      profileService,
+		Contexts:      contexts,
+		Scopes:        namespaceService,
+		Namespaces:    kubernetesRuntime,
+		Permissions:   authorizationService,
+		Selection:     selectionState,
+		Dashboard:     dashboardBackend,
+		Resources:     resourceBackend,
+		Investigation: resourceBackend,
+		Diagnostics:   dashboardBackend,
+		Streams:       resourceBackend,
+		Preferences:   preferenceService,
+		Actions:       actions,
+		PortForwards:  portForwards,
+		Exec:          execSessions,
+		Cursors:       cursors,
+		CursorStore:   cursorStore,
+		Generation:    generation,
+		Sessions:      sessions,
+		Logger:        logger,
+		ExtraHosts:    options.ExtraHosts,
+		ExtraOrigins:  options.ExtraOrigins,
+		Metrics:       metricsRegistry,
+		Tracing:       tracing,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("startup: compose HTTP application: %w", err)
+	}
+	var bootstrapCancel context.CancelFunc
+	var bootstrapDone chan struct{}
+	if options.BootstrapAsync {
+		bootstrapCtx, cancel := context.WithCancel(ctx)
+		bootstrapCancel = cancel
+		bootstrapDone = make(chan struct{})
+		go func() {
+			defer close(bootstrapDone)
+			if err := contexts.Bootstrap(bootstrapCtx, bootstrapRequest); err != nil && !errors.Is(err, context.Canceled) {
+				logger.Logger.LogAttrs(bootstrapCtx, slog.LevelError, "selection bootstrap failed", slog.String("component", "lifecycle"), slog.Any("error", err))
+			}
+		}()
 	}
 
 	closeStoreOnError = false
@@ -308,6 +357,7 @@ func Compose(ctx context.Context, options Options) (*Platform, error) {
 	closeRuntimeOnError = false
 	closeCoordinatorOnError = false
 	closeActionsOnError = false
+	closeTracingOnError = false
 	// Structured lifecycle events (O-05/O-02): the log handler emits both the
 	// human "duration" string and the numeric duration_ms for aggregation.
 	logger.Logger.LogAttrs(context.Background(), slog.LevelInfo, "startup",
@@ -329,8 +379,21 @@ func Compose(ctx context.Context, options Options) (*Platform, error) {
 			}},
 			{Name: "selection coordinator", Func: func(context.Context) error { coordinator.Close(); return nil }},
 			{Name: "Kubernetes clients", Func: func(context.Context) error { return kubernetesRuntime.Close() }},
+			{Name: "trace exporter", Func: tracing.Shutdown},
 			{Name: "local log", Func: func(context.Context) error { return logSink.Close() }},
 			{Name: "SQLite", Func: func(context.Context) error { return store.Close() }},
+			{Name: "background selection bootstrap", Func: func(shutdown context.Context) error {
+				if bootstrapCancel == nil {
+					return nil
+				}
+				bootstrapCancel()
+				select {
+				case <-bootstrapDone:
+					return nil
+				case <-shutdown.Done():
+					return fmt.Errorf("startup: stop background selection bootstrap: %w", shutdown.Err())
+				}
+			}},
 			// Cleanup registries run LIFO: being last makes this lifecycle
 			// event the first shutdown write, while the log sink is still open.
 			{Name: "lifecycle log", Func: func(context.Context) error {

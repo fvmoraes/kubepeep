@@ -250,7 +250,7 @@ func (handler *ResourceStreams) Resources(w http.ResponseWriter, r *http.Request
 			return
 		}
 	} else {
-		session, err = handler.createStreamSession(binding, streamResolution, topics)
+		session, err = handler.createStreamSession(binding, streamResolution, resolution, topics)
 		if err != nil {
 			api.WriteError(w, r, resourceHTTPError(err))
 			return
@@ -331,10 +331,15 @@ func (handler *ResourceStreams) preflight(w http.ResponseWriter, r *http.Request
 	if binding.ClusterProfileID <= 0 || binding.Context == "" || binding.Generation == "" || len(resolution.Namespaces) == 0 {
 		return binding, resolution, api.NewHTTPError(http.StatusConflict, api.CodeGenerationChanged, "No active Kubernetes resource scope is available.", nil, nil)
 	}
-	if !handler.originAllowed(r.Header.Get("Origin")) || !handler.sessions.Validate(r.Header.Get("X-KubePeep-CSRF"), binding.Generation) {
+	origin := r.Header.Get("Origin")
+	site := r.Header.Get("Sec-Fetch-Site")
+	// Browsers omit Origin on some same-origin GET fetches. Fetch Metadata plus
+	// the generation-bound CSRF token still prove the local browser boundary.
+	originAllowed := handler.originAllowed(origin) || (origin == "" && site == "same-origin")
+	if !originAllowed || !handler.sessions.Validate(r.Header.Get("X-KubePeep-CSRF"), binding.Generation) {
 		return binding, resolution, api.NewHTTPError(http.StatusForbidden, api.CodeCSRFRejected, "The request did not pass local browser security checks.", nil, nil)
 	}
-	if site := r.Header.Get("Sec-Fetch-Site"); site != "" && site != "same-origin" && site != "none" && !(len(handler.extraOrigins) > 0 && handler.originAllowed(r.Header.Get("Origin"))) {
+	if site != "" && site != "same-origin" && site != "none" && !(len(handler.extraOrigins) > 0 && handler.originAllowed(origin)) {
 		return binding, resolution, api.NewHTTPError(http.StatusForbidden, api.CodeCSRFRejected, "The request did not pass local browser security checks.", nil, nil)
 	}
 	return binding, resolution, nil

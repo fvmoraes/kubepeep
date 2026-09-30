@@ -1,6 +1,6 @@
 # Plano de execução — KubePeep v0.7 (estado, performance e investigação)
 
-Este plano transforma os três documentos de [`v0.7_reference/`](v0.7_reference/) — [avaliação e evolução](v0.7_reference/KUBEPEEP_AVALIACAO_E_PLANO_DE_EVOLUCAO.md), [performance e escalabilidade](v0.7_reference/KUBEPEEP_PERFORMANCE_SCALABILITY_PLAN.md) e [refinamento UI/UX](v0.7_reference/KUBEPEEP_UI_UX_REFINEMENT_PLAN.md) — em entregas faseadas executáveis. **Todo o conteúdo é tratado como trabalho de ajuste, melhoria e revisão a executar nas fases**, independentemente do que já exista na base: nada é assumido como pronto, e cada entrega exige evidência própria.
+Este plano transformou os três documentos de [`v0.7_reference/`](v0.7_reference/) — [avaliação e evolução](v0.7_reference/KUBEPEEP_AVALIACAO_E_PLANO_DE_EVOLUCAO.md), [performance e escalabilidade](v0.7_reference/KUBEPEEP_PERFORMANCE_SCALABILITY_PLAN.md) e [refinamento UI/UX](v0.7_reference/KUBEPEEP_UI_UX_REFINEMENT_PLAN.md) — em entregas faseadas executáveis. Durante a execução, **todo o conteúdo foi tratado como trabalho de ajuste, melhoria e revisão**, independentemente do que já existia na base; cada entrega recebeu evidência própria. F0–F7 estão finalizadas e o candidato permanece local.
 
 Comece pelo [estado e limites](v0.7/00-estado-e-escopo.md), depois consulte a [matriz de entregas e aceite](v0.7/01-matriz-de-entregas.md). O plano anterior (expansão de recursos) está executado e arquivado em [`v0/`](v0/), com evidências em [`v0/03-evidencias-execucao.md`](v0/03-evidencias-execucao.md).
 
@@ -15,14 +15,14 @@ Comece pelo [estado e limites](v0.7/00-estado-e-escopo.md), depois consulte a [m
 
 | Fase | Entrega | Dependências | Estado |
 | --- | --- | --- | --- |
-| 0 | [Correção funcional P0, baseline e instrumentação](v0.7/phase-00-baseline-instrumentacao.md) | base | planejado; R01/R02 bloqueantes |
-| 1 | [Paginação estratégica e uso responsável do API Server](v0.7/phase-01-paginacao-e-api-server.md) | F0 | planejado |
-| 2 | [Estado orientado a snapshot: cache sob demanda + WATCH](v0.7/phase-02-cache-watch-snapshot.md) | F1 | planejado |
-| 3 | [Frontend progressivo, virtualizado e inicialização instantânea](v0.7/phase-03-frontend-instantaneo.md) | F1; efeito completo com F2 | planejado |
-| 4 | [Fechamento do refinamento UI/UX e scope default](v0.7/phase-04-refinamento-ui-ux.md) | F0 (inventário); paralelizável com F1–F3 | planejado |
-| 5 | [Investigação: problems, diagnóstico e logs agregados](v0.7/phase-05-investigacao-diagnostico.md) | F2, F4 | planejado |
-| 6 | [Protocolo e tuning avançado (condicional a benchmark)](v0.7/phase-06-protocolo-avancado.md) | F0, F2 | planejado; cada item só ativa com ganho medido |
-| 7 | [Validação comparativa e preparação da release](v0.7/phase-07-validacao-release.md) | F0–F6 | planejado |
+| 0 | [Correção funcional P0, baseline e instrumentação](v0.7/phase-00-baseline-instrumentacao.md) | base | finalizada |
+| 1 | [Paginação estratégica e uso responsável do API Server](v0.7/phase-01-paginacao-e-api-server.md) | F0 | finalizada; 13/13 |
+| 2 | [Estado orientado a snapshot: cache sob demanda + WATCH](v0.7/phase-02-cache-watch-snapshot.md) | F1 | finalizada; 12/12 |
+| 3 | [Frontend progressivo, virtualizado e inicialização instantânea](v0.7/phase-03-frontend-instantaneo.md) | F1; efeito completo com F2 | finalizada; 9/9 |
+| 4 | [Fechamento do refinamento UI/UX e scope default](v0.7/phase-04-refinamento-ui-ux.md) | F0 (inventário); paralelizável com F1–F3 | finalizada; 15/15 |
+| 5 | [Investigação: problems, diagnóstico e logs agregados](v0.7/phase-05-investigacao-diagnostico.md) | F2, F4 | finalizada; 8/8 |
+| 6 | [Protocolo e tuning avançado (condicional a benchmark)](v0.7/phase-06-protocolo-avancado.md) | F0, F2 | finalizada; 6/6 avaliados |
+| 7 | [Validação comparativa e preparação da release](v0.7/phase-07-validacao-release.md) | F0–F6 (F6 conforme critérios condicionais de C05) | finalizada; 7/7, candidato local |
 
 F4 pode avançar em paralelo a F1–F3 coordenando os arquivos compartilhados. A evidência de execução é registrada em [`v0.7/03-evidencias-execucao.md`](v0.7/03-evidencias-execucao.md).
 
@@ -60,6 +60,10 @@ Os alvos podem repetir etapas; na execução diária, validar cada requisito uma
 
 ## Escopo e histórico
 
-A v0.7 entrega: correção funcional P0, arquitetura de leitura orientada a estado (cursor opaco, estratégias de paginação, cache+watch), frontend progressivo/virtualizado/instantâneo, refinamento UI/UX fechado com scope default obrigatório, camada de investigação e otimizações de protocolo condicionais a benchmark. Multi-contexto simultâneo, Prometheus, Resource Diff entre origens, Helm, Gateway API, CR genérico, plugins e supply chain extra ficam no [backlog pós-v0.7](v0.7/02-backlog-pos-v0.7.md).
+A v0.7 entrega: correção funcional P0, arquitetura de leitura orientada a estado (cursor opaco, estratégias de paginação, cache+watch), frontend progressivo/virtualizado/instantâneo, refinamento UI/UX fechado com scope default obrigatório, camada de investigação e otimizações de protocolo condicionais a benchmark. Multi-contexto simultâneo, Prometheus, Resource Diff entre origens, Helm, Gateway API, CR genérico, plugins e supply chain extra ficam no [backlog pós-v0.7](v0.7/02-backlog-pos-v1.md).
 
 Planos anteriores permanecem no Git (`plan/v0/` executado; `5ac7320^:plan/` histórico). As referências em `v0.7_reference/` são preservadas como fonte; decisões de recorte ficam neste plano.
+
+## Avaliação antes da execução
+
+Consulte a [avaliação técnica do plano](v0.7/04-avaliacao-do-plano.md). Os [contratos e critérios de aceite](v0.7/05-contratos-e-aceite.md) resolvem os conflitos identificados. A revisão documental inicial não fechou F0 nem substituiu seus testes e benchmarks; o fechamento posterior de F0–F7 está registrado nas [evidências](v0.7/03-evidencias-execucao.md).

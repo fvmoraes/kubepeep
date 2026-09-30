@@ -9,6 +9,8 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/fvmoraes/kubepeep/internal/observability"
+
 	// Register client-go authentication providers so kubeconfigs using
 	// auth-provider flows (oidc, gcp, azure) resolve exactly as kubectl
 	// does. Without these, real-world clusters fail with a sanitized
@@ -47,6 +49,8 @@ func withDiscardedStderr() (restore func()) {
 const (
 	DefaultUnaryTimeout = 15 * time.Second
 	defaultUserAgent    = "kubePeep"
+	kubernetesProtobuf  = "application/vnd.kubernetes.protobuf"
+	kubernetesJSON      = "application/json"
 )
 
 // ClientBuilder permits a cache to deduplicate construction without global
@@ -61,14 +65,20 @@ type FactoryOptions struct {
 	QPS          float32
 	Burst        int
 	UserAgent    string
+	Metrics      *observability.Registry
+	Protobuf     bool
+	Compression  bool
 }
 
 // ClientFactory builds independent client groups from an in-memory resolution.
 type ClientFactory struct {
+	metrics      *observability.Registry
 	unaryTimeout time.Duration
 	qps          float32
 	burst        int
 	userAgent    string
+	protobuf     bool
+	compression  bool
 }
 
 func NewClientFactory(options FactoryOptions) (*ClientFactory, error) {
@@ -94,10 +104,13 @@ func NewClientFactory(options FactoryOptions) (*ClientFactory, error) {
 	if burst == 0 {
 		burst = 20
 	}
-	if qps < 0 || burst < 1 {
+	if qps < 1 || qps > 20 || float32(burst) < qps || burst > 40 {
 		return nil, safeError(CodeClientUnavailable, "The Kubernetes client rate limit is invalid.", false)
 	}
-	return &ClientFactory{unaryTimeout: timeout, qps: qps, burst: burst, userAgent: userAgent}, nil
+	return &ClientFactory{
+		unaryTimeout: timeout, qps: qps, burst: burst, userAgent: userAgent,
+		metrics: options.Metrics, protobuf: options.Protobuf, compression: options.Compression,
+	}, nil
 }
 
 type clientGroup struct {
@@ -212,6 +225,7 @@ func (factory *ClientFactory) Build(ctx context.Context, resolution *Resolution)
 	base.UserAgent = factory.userAgent
 	base.QPS = factory.qps
 	base.Burst = factory.burst
+	base.DisableCompression = !factory.compression
 	base.Impersonate = rest.ImpersonationConfig{}
 
 	if discardedExecPluginStderrError != nil || discardedExecPluginStderr == nil {
@@ -225,19 +239,21 @@ func (factory *ClientFactory) Build(ctx context.Context, resolution *Resolution)
 
 	unaryConfig := rest.CopyConfig(base)
 	unaryConfig.Timeout = factory.unaryTimeout
-	unary, err := buildClientGroup(unaryConfig)
+	observeTransport(unaryConfig, factory.metrics, "unary")
+	unary, err := buildClientGroupWithProtocol(unaryConfig, factory.metrics, "unary", factory.protobuf)
 	if err != nil {
 		return nil, SanitizeError(err)
 	}
 
 	streamingConfig := rest.CopyConfig(base)
 	streamingConfig.Timeout = 0
-	streaming, err := buildClientGroup(streamingConfig)
+	observeTransport(streamingConfig, factory.metrics, "streaming")
+	streaming, err := buildClientGroupWithProtocol(streamingConfig, factory.metrics, "streaming", factory.protobuf)
 	if err != nil {
 		unary.httpClient.CloseIdleConnections()
 		return nil, SanitizeError(err)
 	}
-	metrics, err := metricsclient.NewForConfigAndClient(unaryConfig, unary.httpClient)
+	metrics, err := metricsclient.NewForConfigAndClient(observeRateLimit(unaryConfig, factory.metrics, "unary"), unary.httpClient)
 	if err != nil {
 		unary.httpClient.CloseIdleConnections()
 		streaming.httpClient.CloseIdleConnections()
@@ -252,6 +268,14 @@ func (factory *ClientFactory) Build(ctx context.Context, resolution *Resolution)
 }
 
 func buildClientGroup(config *rest.Config) (*clientGroup, error) {
+	return buildClientGroupWithMetrics(config, nil, "")
+}
+
+func buildClientGroupWithMetrics(config *rest.Config, registry *observability.Registry, traffic string) (*clientGroup, error) {
+	return buildClientGroupWithProtocol(config, registry, traffic, false)
+}
+
+func buildClientGroupWithProtocol(config *rest.Config, registry *observability.Registry, traffic string, protobuf bool) (*clientGroup, error) {
 	if config == nil || !impersonationIsEmpty(config.Impersonate) {
 		return nil, safeError(CodeClientUnavailable, "The Kubernetes client configuration is invalid.", false)
 	}
@@ -259,17 +283,25 @@ func buildClientGroup(config *rest.Config) (*clientGroup, error) {
 	if err != nil {
 		return nil, err
 	}
-	kubernetesClient, err := kubeclient.NewForConfigAndClient(config, httpClient)
+	typedConfig := rest.CopyConfig(config)
+	if protobuf {
+		typedConfig.ContentType = kubernetesProtobuf
+		typedConfig.AcceptContentTypes = kubernetesProtobuf + "," + kubernetesJSON
+	}
+	kubernetesClient, err := kubeclient.NewForConfigAndClient(observeRateLimit(typedConfig, registry, traffic), httpClient)
 	if err != nil {
 		httpClient.CloseIdleConnections()
 		return nil, err
 	}
-	dynamicClient, err := dynamic.NewForConfigAndClient(config, httpClient)
+	jsonConfig := rest.CopyConfig(config)
+	jsonConfig.ContentType = kubernetesJSON
+	jsonConfig.AcceptContentTypes = kubernetesJSON
+	dynamicClient, err := dynamic.NewForConfigAndClient(observeRateLimit(jsonConfig, registry, traffic), httpClient)
 	if err != nil {
 		httpClient.CloseIdleConnections()
 		return nil, err
 	}
-	metadataClient, err := metadata.NewForConfigAndClient(config, httpClient)
+	metadataClient, err := metadata.NewForConfigAndClient(observeRateLimit(jsonConfig, registry, traffic), httpClient)
 	if err != nil {
 		httpClient.CloseIdleConnections()
 		return nil, err

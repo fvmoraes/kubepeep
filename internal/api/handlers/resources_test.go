@@ -117,6 +117,9 @@ func TestResourceListEnvelopeCursorBindingAndNoStore(t *testing.T) {
 	if service.calls != 1 || service.podOptions.Limit != 25 {
 		t.Fatalf("service options=%#v calls=%d", service.podOptions, service.calls)
 	}
+	if service.podOptions.Priority != resourcecore.PriorityVisible {
+		t.Fatalf("initial priority=%d", service.podOptions.Priority)
+	}
 	var envelope struct {
 		Data []resourcecore.PodDTO `json:"data"`
 		Meta struct {
@@ -131,14 +134,58 @@ func TestResourceListEnvelopeCursorBindingAndNoStore(t *testing.T) {
 	if envelope.Meta.RequestID != "req_test" || envelope.Meta.Generation != "gen" || envelope.Meta.Page.Next == "" {
 		t.Fatalf("bad envelope: %#v", envelope)
 	}
+	prefetch := httptest.NewRequest(http.MethodGet, "/api/v1/pods?limit=25&status=Running&sort=name&continue="+envelope.Meta.Page.Next, nil)
+	prefetch.Header.Set("X-KubePeep-List-Priority", "likely-next")
+	prefetchResponse := httptest.NewRecorder()
+	handler.Pods(prefetchResponse, prefetch)
+	if prefetchResponse.Code != http.StatusOK || service.calls != 2 || service.podOptions.Priority != resourcecore.PriorityLikelyNext {
+		t.Fatalf("prefetch status=%d calls=%d priority=%d body=%s", prefetchResponse.Code, service.calls, service.podOptions.Priority, prefetchResponse.Body.String())
+	}
+	manual := httptest.NewRequest(http.MethodGet, "/api/v1/pods?limit=25&status=Running&sort=name&continue="+envelope.Meta.Page.Next, nil)
+	manualResponse := httptest.NewRecorder()
+	handler.Pods(manualResponse, manual)
+	if manualResponse.Code != http.StatusOK || service.calls != 3 || service.podOptions.Priority != resourcecore.PriorityVisible {
+		t.Fatalf("manual status=%d calls=%d priority=%d body=%s", manualResponse.Code, service.calls, service.podOptions.Priority, manualResponse.Body.String())
+	}
 	mismatch := httptest.NewRequest(http.MethodGet, "/api/v1/pods?limit=25&status=Failed&sort=name&continue="+envelope.Meta.Page.Next, nil)
 	mismatchResponse := httptest.NewRecorder()
 	handler.Pods(mismatchResponse, mismatch)
 	if mismatchResponse.Code != http.StatusBadRequest {
 		t.Fatalf("cursor mismatch status=%d body=%s", mismatchResponse.Code, mismatchResponse.Body.String())
 	}
-	if service.calls != 1 {
+	if service.calls != 3 {
 		t.Fatalf("mismatched cursor reached service: calls=%d", service.calls)
+	}
+}
+
+func TestResourceListPriorityRejectsUnsupportedOrInitialSpeculation(t *testing.T) {
+	unrelated := httptest.NewRequest(http.MethodGet, "/api/v1/pods?limit=25", nil)
+	unrelated.Header.Set("X-KubePeep-List-Priority", "unrelated")
+	options, err := decodeResourceListQuery(unrelated, resourcecore.CollectionPods)
+	if err != nil || options.Priority != resourcecore.PriorityUnrelated {
+		t.Fatalf("unrelated priority options=%#v err=%v", options, err)
+	}
+	for _, test := range []struct {
+		name     string
+		query    string
+		priority string
+	}{
+		{name: "initial page", query: "limit=25", priority: "likely-next"},
+		{name: "unknown priority", query: "limit=25&continue=cursor", priority: "urgent"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, "/api/v1/pods?"+test.query, nil)
+			request.Header.Set("X-KubePeep-List-Priority", test.priority)
+			if _, err := decodeResourceListQuery(request, resourcecore.CollectionPods); err == nil {
+				t.Fatal("invalid priority was accepted")
+			}
+		})
+	}
+	err = resourceHTTPError(resourcecore.ErrPrefetchDeferred)
+	recorder := httptest.NewRecorder()
+	api.WriteError(recorder, httptest.NewRequest(http.MethodGet, "/api/v1/pods", nil), err)
+	if recorder.Code != http.StatusTooManyRequests || !strings.Contains(recorder.Body.String(), api.CodePrefetchDeferred) {
+		t.Fatalf("deferred response status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 }
 
@@ -147,7 +194,18 @@ func TestResourceQueryGrammarIsClosedAndNormalized(t *testing.T) {
 		query      string
 		collection resourcecore.Collection
 		valid      bool
-	}{{"namespace=a&namespace=b&status=Running&status=Failed", resourcecore.CollectionPods, true}, {"kind=deployments&kind=jobs", resourcecore.CollectionWorkloads, true}, {"limit=01", resourcecore.CollectionPods, true}, {"search=", resourcecore.CollectionPods, false}, {"sort=name&sort=age", resourcecore.CollectionPods, false}, {"unknown=x", resourcecore.CollectionPods, false}, {"problematic=1", resourcecore.CollectionPods, false}, {"addressType=IPv4", resourcecore.CollectionServices, false}}
+	}{
+		{"namespace=a&namespace=b&status=Running&status=Failed", resourcecore.CollectionPods, true},
+		{"kind=deployments&kind=jobs", resourcecore.CollectionWorkloads, true},
+		{"limit=01", resourcecore.CollectionPods, true},
+		{"labelSelector=app%3Dapi&fieldSelector=spec.nodeName%3Dworker-1", resourcecore.CollectionPods, true},
+		{"fieldSelector=spec.nodeName%3Dworker-1", resourcecore.CollectionServices, false},
+		{"search=", resourcecore.CollectionPods, false},
+		{"sort=name&sort=age", resourcecore.CollectionPods, false},
+		{"unknown=x", resourcecore.CollectionPods, false},
+		{"problematic=1", resourcecore.CollectionPods, false},
+		{"addressType=IPv4", resourcecore.CollectionServices, false},
+	}
 	for _, test := range tests {
 		t.Run(test.query, func(t *testing.T) {
 			request := httptest.NewRequest(http.MethodGet, "/api/v1/resources?"+test.query, nil)
@@ -270,6 +328,43 @@ func TestResourceStreamValidUnavailableResumeUsesTerminalReset(t *testing.T) {
 	}
 }
 
+func TestResourceStreamAllowsSameOriginBrowserGETWithoutOriginHeader(t *testing.T) {
+	origin := "http://127.0.0.1:2748"
+	sessions, err := api.NewSessionStore(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := sessions.Current(origin, "gen")
+	if err != nil {
+		t.Fatal(err)
+	}
+	selection := &resourceSelectionStub{binding: namespaces.SelectionBinding{ClusterProfileID: 1, Context: "ctx", Generation: "gen"}, resolution: namespaces.ScopeResolution{Namespaces: []string{"default"}}}
+	handler := NewResourceStreams(&resourceStreamServiceStub{}, selection, sessions, origin)
+	for _, test := range []struct {
+		name, site, csrf string
+		want             int
+	}{
+		{name: "same origin", site: "same-origin", csrf: session.CSRFToken, want: http.StatusOK},
+		{name: "missing fetch metadata", csrf: session.CSRFToken, want: http.StatusForbidden},
+		{name: "cross site", site: "cross-site", csrf: session.CSRFToken, want: http.StatusForbidden},
+		{name: "missing csrf", site: "same-origin", want: http.StatusForbidden},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodGet, "/api/v1/stream?topic=pods", nil)
+			if test.site != "" {
+				request.Header.Set("Sec-Fetch-Site", test.site)
+			}
+			request.Header.Set("X-KubePeep-CSRF", test.csrf)
+			response := httptest.NewRecorder()
+			_, _, err := handler.preflight(response, request)
+			var httpErr *api.HTTPError
+			if test.want == http.StatusOK && err != nil || test.want == http.StatusForbidden && (!errors.As(err, &httpErr) || httpErr.Status != http.StatusForbidden) {
+				t.Fatalf("preflight error = %v", err)
+			}
+		})
+	}
+}
+
 func TestResourceAllowedMethodsMergeReadAndDelete(t *testing.T) {
 	allow, known := allowedMethods("/api/v1/pods/default/api")
 	if !known || allow != "DELETE, GET, HEAD" {
@@ -361,6 +456,23 @@ func TestNodeDetailAndYAMLRequireOnlyContext(t *testing.T) {
 	}
 	if allow, known := allowedMethods("/api/v1/nodes"); !known || allow != "GET, HEAD" {
 		t.Fatalf("nodes allow=%q known=%v", allow, known)
+	}
+}
+
+func TestAllowedMethodsRecognizesPhaseFiveReadRoutes(t *testing.T) {
+	t.Parallel()
+	for _, path := range []string{
+		"/api/v1/diagnostics",
+		"/api/v1/local-index",
+		"/api/v1/investigation/Pod/portal/portal-api",
+	} {
+		allow, known := allowedMethods(path)
+		if !known || allow != "GET, HEAD" {
+			t.Fatalf("allowedMethods(%q) = %q, %v", path, allow, known)
+		}
+	}
+	if allow, known := allowedMethods("/api/v1/investigation/Pod/portal"); known {
+		t.Fatalf("incomplete investigation route = %q, %v", allow, known)
 	}
 }
 
@@ -491,6 +603,11 @@ func TestResourceListCursorStoreMissingReferenceIsExpired(t *testing.T) {
 	replacement.Pods(recovery, podsRequest(token))
 	if recovery.Code != http.StatusGone || !strings.Contains(recovery.Body.String(), api.CodeCursorExpired) {
 		t.Fatalf("missing reference status=%d body=%s", recovery.Code, recovery.Body.String())
+	}
+	for _, forbidden := range []string{"goroutine ", "runtime/", "internal/api/", "stack"} {
+		if strings.Contains(strings.ToLower(recovery.Body.String()), strings.ToLower(forbidden)) {
+			t.Fatalf("expired cursor response exposed internal diagnostics %q: %s", forbidden, recovery.Body.String())
+		}
 	}
 	if service.calls != 1 {
 		t.Fatalf("expired cursor reached the service: calls=%d", service.calls)

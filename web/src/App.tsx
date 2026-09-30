@@ -1,34 +1,48 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { Waypoints } from 'lucide-react'
 import { Outlet, Route, Routes, useLocation, useNavigate } from 'react-router'
 
 import { clearRecentTargets, recordPath, recentTargets, subscribeRecentTargets } from './recent/recent'
 
-import { getPreferences, getSession, getStatus, putPreferences, type Preferences } from './api/client'
+import { getPreferences, getStatus, type Preferences } from './api/client'
+import { mutatePreferences } from './api/preferences'
 import { Badge } from './components/ui/Badge'
 import { CommandCenter, type CommandRoute } from './components/CommandCenter'
 import { ContextSelector } from './components/ContextSelector'
+import { DefaultScopeGate } from './components/DefaultScopeGate'
 import { GlobalNamespaceSelect } from './components/GlobalNamespaceSelect'
-import { DashboardPage } from './components/Dashboard'
-import { NamespaceScopeEditor } from './components/NamespaceScopeEditor'
-import { PermissionsMatrixPage } from './components/PermissionsMatrix'
-import { LogsPage } from './components/LogsPage'
-import { ConfigPage, EventsPage, NetworkPage, NodesPage, PodsPage, WorkloadsPage } from './components/ResourcePages'
-import { LeasesPage, NamespaceObjectPage, StoragePage } from './components/FamilyPages'
-import { ConfigurationPage, ServiceAccountsPage } from './components/ConfigurationPages'
-import { AccessControlPage, AdministrationPage } from './components/AccessPages'
-import { SettingsPage } from './components/SettingsPage'
 import { Sidebar } from './components/Sidebar'
 import { StatePanel } from './components/StatePanel'
-import { ResourceWorkspaceOverlay } from './components/workspace/ResourceWorkspace'
 import { ResourceWorkspaceProvider, useResourceWorkspace } from './components/workspace/ResourceWorkspaceProvider'
-import { GlobalNamespaceProvider } from './context/GlobalNamespace'
+import { GlobalNamespaceProvider, useGlobalNamespace } from './context/GlobalNamespace'
 import { ToastProvider } from './components/ui/Toast'
 import { useAppVersion } from './hooks/useAppVersion'
 import { navGroups, settingsNavItem } from './navigation/tree'
 import { resourceDetailPath } from './navigation/paths'
 import { desktopPlatform } from './api/desktop'
+import { recordShellReady } from './observability/uxMetrics'
+
+// Load the shell first. Sections render inside its independent fallback.
+const DashboardPage = lazy(() => import('./components/Dashboard').then((module) => ({ default: module.DashboardPage })))
+const NamespaceScopeEditor = lazy(() => import('./components/NamespaceScopeEditor').then((module) => ({ default: module.NamespaceScopeEditor })))
+const PermissionsMatrixPage = lazy(() => import('./components/PermissionsMatrix').then((module) => ({ default: module.PermissionsMatrixPage })))
+const LogsPage = lazy(() => import('./components/LogsPage').then((module) => ({ default: module.LogsPage })))
+const ConfigPage = lazy(() => import('./components/ResourcePages').then((module) => ({ default: module.ConfigPage })))
+const EventsPage = lazy(() => import('./components/ResourcePages').then((module) => ({ default: module.EventsPage })))
+const NetworkPage = lazy(() => import('./components/ResourcePages').then((module) => ({ default: module.NetworkPage })))
+const NodesPage = lazy(() => import('./components/ResourcePages').then((module) => ({ default: module.NodesPage })))
+const PodsPage = lazy(() => import('./components/ResourcePages').then((module) => ({ default: module.PodsPage })))
+const WorkloadsPage = lazy(() => import('./components/ResourcePages').then((module) => ({ default: module.WorkloadsPage })))
+const LeasesPage = lazy(() => import('./components/FamilyPages').then((module) => ({ default: module.LeasesPage })))
+const NamespaceObjectPage = lazy(() => import('./components/FamilyPages').then((module) => ({ default: module.NamespaceObjectPage })))
+const StoragePage = lazy(() => import('./components/FamilyPages').then((module) => ({ default: module.StoragePage })))
+const ConfigurationPage = lazy(() => import('./components/ConfigurationPages').then((module) => ({ default: module.ConfigurationPage })))
+const ServiceAccountsPage = lazy(() => import('./components/ConfigurationPages').then((module) => ({ default: module.ServiceAccountsPage })))
+const AccessControlPage = lazy(() => import('./components/AccessPages').then((module) => ({ default: module.AccessControlPage })))
+const AdministrationPage = lazy(() => import('./components/AccessPages').then((module) => ({ default: module.AdministrationPage })))
+const SettingsPage = lazy(() => import('./components/SettingsPage').then((module) => ({ default: module.SettingsPage })))
+const ResourceWorkspaceOverlay = lazy(() => import('./components/workspace/ResourceWorkspace').then((module) => ({ default: module.ResourceWorkspaceOverlay })))
 
 // Command palette catalog: every enabled navigation destination. Group labels
 // disambiguate repeated item names (e.g. the Workloads "Overview").
@@ -112,21 +126,30 @@ function commandResourceEntries(queryClient: ReturnType<typeof useQueryClient>, 
   const entries: Array<{ path: string; label: string; description: string; keywords: string[] }> = []
   for (const query of queryClient.getQueryCache().getAll()) {
     const key = query.queryKey
-    if (key[0] !== 'resources' || key[2] !== generation) continue
+    const infiniteCollection = key[5] === generation
+    if (key[0] !== 'resources' || (key[2] !== generation && !infiniteCollection) || query.state.error) continue
     const collection = typeof key[1] === 'string' ? key[1] : ''
-    const data = query.state.data as { items?: Array<{ name?: string; namespace?: string; kind?: string }> } | undefined
-    if (!Array.isArray(data?.items)) continue
-    for (const item of data.items) {
-      const path = resourceEntryPath(collection, item)
-      if (!path || seen.has(path)) continue
-      seen.add(path)
-      entries.push({
-        path,
-        label: item.name ?? '',
-        description: `${item.kind ?? collection} · ${item.namespace ?? 'cluster'}`,
-        keywords: resourceEntryKeywords(collection, item),
-      })
-      if (entries.length >= maximumCommandResources) return entries
+    type CachedPage = { items?: Array<{ name?: string; namespace?: string; kind?: string }>; snapshotRenewed?: boolean }
+    const data = query.state.data as (CachedPage & { pages?: CachedPage[] }) | undefined
+    const pages = infiniteCollection && Array.isArray(data?.pages) ? data.pages : data ? [data] : []
+    let firstCurrentPage = 0
+    for (let index = 0; index < pages.length; index += 1) {
+      if (pages[index].snapshotRenewed) firstCurrentPage = index
+    }
+    for (const page of pages.slice(firstCurrentPage)) {
+      if (!Array.isArray(page.items)) continue
+      for (const item of page.items) {
+        const path = resourceEntryPath(collection, item)
+        if (!path || seen.has(path)) continue
+        seen.add(path)
+        entries.push({
+          path,
+          label: item.name ?? '',
+          description: `${item.kind ?? collection} · ${item.namespace ?? 'cluster'}`,
+          keywords: resourceEntryKeywords(collection, item),
+        })
+        if (entries.length >= maximumCommandResources) return entries
+      }
     }
   }
   return entries
@@ -169,6 +192,12 @@ function StatusBadge() {
     queryFn: ({ signal }) => getStatus(signal),
     staleTime: 15_000,
     refetchOnWindowFocus: false,
+    // Desktop bootstrap may still be resolving kubeconfig after the shell
+    // appears. Poll only that short unknown state, never an idle no-selection.
+    refetchInterval: (query) => {
+      const data = query.state.data
+      return data && !data.selection && data.components.kubeconfig.status === 'unknown' ? 500 : false
+    },
   })
 
   if (status.isPending) {
@@ -182,25 +211,28 @@ function StatusBadge() {
   return <Badge variant={variant}>{local}</Badge>
 }
 
-// persistShellPrefs merges the shell change into the current preferences
-// document so concurrent updates (filters, favorites, recent) are never lost
-// (V6-05). A failed save keeps the UI usable and shows a recoverable error.
-function useShellPreferencePersistence(preferences: Preferences | undefined, onSaved: () => void) {
+// persistShellPrefs delegates every shell/recent update to the shared
+// preferences coordinator. The mutator receives a fresh backend document, so
+// concurrent filters, favorites, columns and future sections are preserved.
+function useShellPreferencePersistence(preferencesAvailable: boolean, onSaveError: () => void) {
   const queryClient = useQueryClient()
   return useCallback(async (change: (current: Preferences) => Preferences) => {
-    if (!preferences) return
+    if (!preferencesAvailable) return
     try {
-      const session = await getSession()
-      const saved = await putPreferences(change(structuredClone(preferences)), session.csrfToken)
+      const saved = await mutatePreferences(change)
       queryClient.setQueryData(['preferences'], saved)
     } catch {
-      onSaved()
+      onSaveError()
     }
-  }, [onSaved, preferences, queryClient])
+  }, [onSaveError, preferencesAvailable, queryClient])
 }
 
 function Shell() {
   const queryClient = useQueryClient()
+  useEffect(() => {
+    recordShellReady()
+    void import('./components/ResourcePages')
+  }, [])
   const navigate = useNavigate()
   const version = useAppVersion()
   const [compact, setCompact] = useState<boolean>(false)
@@ -214,6 +246,22 @@ function Shell() {
     refetchOnWindowFocus: false,
   })
   const selection = status.data?.selection ?? null
+  const selectionPendingForRoute = status.isPending
+    && location.pathname !== '/'
+    && location.pathname !== '/namespaces'
+    && commandRoutes.some((route) => route.path === location.pathname)
+  const globalNamespace = useGlobalNamespace()
+  const prefetchedPodsFor = useRef('')
+  useEffect(() => {
+    if (!selection || selection.namespaceCount < 1 || selection.namespaceCount > 50 || globalNamespace.loading || globalNamespace.degraded || globalNamespace.options.length === 0 || location.pathname !== '/') return
+    const previewNamespace = globalNamespace.value || globalNamespace.options[0]
+    const key = `${selection.generation}:\0${globalNamespace.value}:\0${previewNamespace}`
+    if (prefetchedPodsFor.current === key) return
+    prefetchedPodsFor.current = key
+    void import('./components/resource/podPreview').then(({ prefetchDefaultPodPreview }) => {
+      if (prefetchedPodsFor.current === key) return prefetchDefaultPodPreview(queryClient, selection, globalNamespace.value, previewNamespace)
+    })
+  }, [queryClient, selection, globalNamespace.value, globalNamespace.options, globalNamespace.loading, globalNamespace.degraded, location.pathname])
   const previousGeneration = useRef<string | null>(null)
   const refreshActiveReads = useCallback(() => queryClient.refetchQueries({ type: 'active', predicate: isSafeGlobalRefreshQuery }), [queryClient])
   const preferences = useQuery({
@@ -251,7 +299,7 @@ function Shell() {
     })
   }, [location.pathname, navigate])
 
-  const persistShellPrefs = useShellPreferencePersistence(preferencesData, () => setHydrationError(true))
+  const persistShellPrefs = useShellPreferencePersistence(Boolean(preferencesData), () => setHydrationError(true))
 
   const persistRecent = useCallback(() => {
     void persistShellPrefs((currentPrefs) => {
@@ -347,9 +395,9 @@ function Shell() {
             }))} onClearRecent={() => { clearRecentTargets(); void persistShellPrefs((currentPrefs) => { currentPrefs.recent = { version: 1, items: [] }; return currentPrefs }) }} getResources={() => commandResourceEntries(queryClient, selection?.generation)} onRefresh={refreshActiveReads} />
           </div>
         </header>
-        <main id="main-content"><Outlet /></main>
+          <main id="main-content"><DefaultScopeGate selection={selection} selectionPending={selectionPendingForRoute}><Suspense fallback={<StatePanel kind="loading" title="Opening section">The shell remains available while this section loads.</StatePanel>}><Outlet /></Suspense></DefaultScopeGate></main>
       </div>
-      <ResourceWorkspaceOverlay />
+        {workspace.open ? <Suspense fallback={<div role="status" className="workspace-panel p-4 text-sm text-kp-overlay-text">Opening resource…</div>}><ResourceWorkspaceOverlay /></Suspense> : null}
     </div>
   )
 }

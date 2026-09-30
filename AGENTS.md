@@ -3,86 +3,31 @@
 
 # DWYT - Don't Waste Your Tokens
 
-DWYT coordinates RTK, Codebase MCP, Obsidian MCP, and Headroom without overwriting user-managed files.
+DWYT exposes three local MCPs. **Mandatory flow:** Optimizer → Codebase → Obsidian → targeted shell/file access.
+Always report concise telemetry promptly with `dwyt_report_usage` after meaningful work so the UI remains accurate; mark `observed` only for provider-reported values.
+Models used must always be informed and populated via `dwyt_report_usage`: model and variant, plus effort — never leave the models-used view empty when you ran requests.
 
-## Required Rules
+## 1. Optimizer first
+`dwyt_optimizer` — context optimizer for context planning, token budget, output profile, routing, cache guidance, output compaction and raw-data retrieval.
+Before broad retrieval call `dwyt_context_plan`; use `dwyt_context_status` to reuse state and `dwyt_register_context` after obtaining reusable source or memory.
+Use `dwyt_output_profile` for response budget, `dwyt_route` for effort, and `dwyt_cache_guidance` for cache order. Use `dwyt_compact_tool_output` for verbose output; call `dwyt_get_raw` only when its compact reference is insufficient.
 
-Always use the DWYT Codebase MCP to understand the real repository structure before making changes.
-Always use the DWYT Obsidian MCP to read and persist project context.
-Always save relevant decisions, findings, fixes, and summaries into the project brain.
-Before every final response, save a session context snapshot with the Obsidian MCP.
-Never rely only on grep/glob when MCP tools are available.
-Keep project context under `~/.dwyt`.
-Never hardcode machine-specific absolute paths in shared markdown instructions.
-Treat the absence of sensitive data as a non-negotiable project premise: never commit or push credentials, tokens, kubeconfigs, private keys, private PII, machine-specific paths, runtime logs/databases, or generated artifacts.
-Before every commit and push, run `scripts/security_check.sh HEAD`; commit and tag identities must use an approved GitHub noreply address.
-Never print a discovered secret. Report only its type, location, and affected commit; rotate or revoke it before rewriting every affected remote ref.
-Golden rule: only commit, never push — pushing is always an explicit decision of the user; never run `git push` autonomously.
+## 2. Codebase first
+`dwyt_codebase` — structural code retrieval and the **PRIMARY** repository layer for architecture, symbols, implementations, references, dependencies, execution paths and blast-radius analysis.
+**Codebase first. Shell discovery only as fallback.**
+`get_architecture` maps the repository; `search_graph` finds definitions, implementations, symbols and relationships; `query_graph` answers advanced graph relationships.
+`trace_path` follows callers/callees, data flow and cross-service paths; `get_code_snippet` reads one already-located implementation.
+Use `detect_changes` for Git blast radius; `check_index_coverage`/`index_status` for completeness; `index_repository` only when a refresh is necessary; `manage_adr` to record an architectural decision.
+Use `search_code` only when graph lookup is insufficient. Examples: implementation → `search_graph`; callers/dependencies → `trace_path`; one implementation → `get_code_snippet`; architecture → `get_architecture`; change impact → `detect_changes`.
+Do not begin with `grep`, `rg`, `find`, recursive scans, filename guesses, or opening many files manually while Codebase can answer structurally.
+Direct shell/file access is allowed only for exact raw text, non-indexed files, generated/config files outside the graph, incomplete coverage, or physical final verification.
 
-## Priority Order
+## 3. Obsidian after Codebase
+`dwyt_obsidian` — persistent project memory and canonical knowledge for architecture, decisions, conventions, constraints, lessons and reusable knowledge.
+Read `obsidian_canonical` first; use `obsidian_search` only when canonical knowledge is insufficient. Use `obsidian_save_context` at meaningful task end, `obsidian_upsert_canonical` for current facts, `obsidian_compile` to promote reusable knowledge, and `obsidian_summarize` for compact history.
+Codebase = repository now. Obsidian = what the project knows and decided. If they disagree, current source verified through Codebase wins; update canonical memory when appropriate.
 
-1. RTK
-   - Prefix shell commands with `rtk`: `rtk git status`, `rtk go test ./...`, `rtk npm run build`.
-   - In command chains, prefix each segment.
-
-2. Codebase MCP
-   - Before diagnosing, refactoring, or editing structural code, validate that the project is indexed.
-   - Use `search_graph` to locate symbols, routes, handlers, components, modules, and relationships.
-   - Use `trace_path` for calls, flows, dependencies, and impact.
-   - Use `get_code_snippet` before applying changes.
-   - Avoid grep/glob/find as the first strategy when MCP tools are available.
-
-3. Obsidian MCP
-   - Before relevant work, search notes and rebuild or read the summary:
-     `GET http://localhost:2737/api/obsidian/search?q=<query>`
-     `POST http://localhost:2737/api/obsidian/summarize`
-   - During the work, save decisions, findings, and tasks:
-     `POST http://localhost:2737/api/obsidian/save {"type":"decision","content":"[[decisions]] ..."}`
-     `POST http://localhost:2737/api/obsidian/save {"type":"task","content":"[[tasks]] ..."}`
-   - At the end of every task/session, save complete context before the final answer.
-     Prefer the MCP tool `obsidian_save_context`; in Codex it may appear as `mcp__obsidian__obsidian_save_context`.
-     Set `client` to the current client: `codex`, `opencode`, `claude`, `cursor`, `kiro`, `copilot`, `windsurf`, or `continue`.
-     This rule applies to Codex, OpenCode, Claude, Cursor, Kiro, Copilot, Windsurf, and Continue.
-     If the MCP tool is unavailable, fall back to:
-     `POST http://localhost:2737/api/obsidian/context`
-     If saving fails, mention the failure in the final response.
-
-4. Headroom
-   - Use Headroom only when `OPENAI_BASE_URL` or `ANTHROPIC_BASE_URL` points to the compatible local proxy.
-   - Never route Codex through Headroom when Codex is authenticated through ChatGPT/OAuth.
-   - If Headroom is inactive or unavailable, use the standard endpoints.
-
-## Codebase Law
-
-When you need to understand, validate, diagnose, or change the real code structure, consult the DWYT Codebase MCP. The indexed graph is the primary source for files, symbols, dependencies, calls, paths, and impact. Do not create duplicate code, remove files, or move components without checking graph relationships and impact.
-
-## Obsidian Law
-
-The Obsidian vault at `~/.dwyt/projects/<id>_<project-name>/` (e.g. 1597b5fc9bfb_dwyt) is the official durable memory for the project. Keep notes with internal links such as `[[index]]`, `[[maps/project-map]]`, `[[instructions/obsidian-law]]`, and `[[instructions/codebase-law]]`. Never delete vaults, projects, notes, or history as an automatic repair step.
-
-Minimum payload for saving context:
-
-```json
-{
-  "client": "<client>",
-  "user_request": "...",
-  "summary": "...",
-  "files": ["..."],
-  "decisions": ["..."],
-  "actions": ["..."],
-  "commands": ["..."],
-  "errors": ["..."],
-  "outcome": "...",
-  "next_steps": ["..."],
-  "context": "..."
-}
-```
-
-## User Files
-
-Treat instruction files as safe append-only files: create the DWYT block if missing, update only the DWYT-managed block, and preserve all content outside that block.
-
-## Validation
-
-Before completing changes, run the relevant validation: Go tests, frontend build/lint when available, and manual checks for installed, inactive, and launch-on-demand states.
+## Output discipline
+Use `rtk` for supported test/build/git commands; it reduces shell output and never replaces Codebase. Use Headroom for verbose logs when available; otherwise compact with `dwyt_compact_tool_output` and retain raw output by reference.
+Keep updates concise: status, files, validation, blockers. Do not truncate requested artifacts.
 <!-- DWYT:END -->

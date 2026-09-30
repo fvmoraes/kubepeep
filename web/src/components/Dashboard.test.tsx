@@ -4,8 +4,9 @@ import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { DashboardPage } from './Dashboard'
+import { ResourceWorkspaceProvider } from './workspace/ResourceWorkspaceProvider'
 
-function json(data: unknown, meta = { generation: 'gen_42', collectedAt: '2026-08-10T12:00:00Z' }): Response {
+function json(data: unknown, meta: Record<string, unknown> = { generation: 'gen_42', collectedAt: '2026-08-10T12:00:00Z' }): Response {
   return new Response(JSON.stringify({ data, meta }), { status: 200, headers: { 'Content-Type': 'application/json' } })
 }
 
@@ -56,7 +57,7 @@ function renderDashboard() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(
     <QueryClientProvider client={client}>
-      <MemoryRouter><DashboardPage /></MemoryRouter>
+      <MemoryRouter><ResourceWorkspaceProvider><DashboardPage /></ResourceWorkspaceProvider></MemoryRouter>
     </QueryClientProvider>,
   )
 }
@@ -70,6 +71,8 @@ function defaultResponse(path: string): Response {
   if (path === '/api/v1/dashboard/events') return json(block([]))
   if (path === '/api/v1/dashboard/namespace-health') return json(block([]))
   if (path === '/api/v1/metrics') return json(block({ collectedAt: '2026-08-10T12:00:00Z', windowSeconds: 60, pods: [], topCPU: [], topMemory: [] }))
+	if (path === '/api/v1/nodes?limit=100') return json([], { generation: 'gen_42', collectedAt: '2026-08-10T12:00:00Z', page: { limit: 100, complete: true, truncated: false, filterScope: 'collection' } })
+	if (path === '/api/v1/persistent-volume-claims?limit=100') return json([], { generation: 'gen_42', collectedAt: '2026-08-10T12:00:00Z', page: { limit: 100, complete: true, truncated: false, filterScope: 'collection' } })
   throw new Error(`Unexpected request: ${path}`)
 }
 
@@ -81,14 +84,69 @@ afterEach(() => {
 })
 
 describe('progressive dashboard', () => {
-  it('keeps partial, empty, and optional blocks distinct while loading all queries independently', async () => {
+	it('loads node health and storage after the core summary within one unrelated slot', async () => {
+		let summaryResolved = false
+		let resolveNodes!: (response: Response) => void
+		const nodesResponse = new Promise<Response>((resolve) => { resolveNodes = resolve })
+		const fetch = vi.fn((input: string | URL | Request, init?: RequestInit) => {
+			const path = String(input)
+			if (path === '/api/v1/dashboard/summary') {
+				summaryResolved = true
+				return Promise.resolve(defaultResponse(path))
+			}
+			if (path === '/api/v1/nodes?limit=100') {
+				expect(summaryResolved).toBe(true)
+				expect(init?.headers).toMatchObject({ 'X-KubePeep-List-Priority': 'unrelated' })
+				return nodesResponse
+			}
+			if (path === '/api/v1/persistent-volume-claims?limit=100') {
+				expect(summaryResolved).toBe(true)
+				expect(init?.headers).toMatchObject({ 'X-KubePeep-List-Priority': 'unrelated' })
+				return Promise.resolve(json([{ namespace: 'payments', name: 'data', status: 'Pending', volume: '', capacity: '', accessModes: [], storageClass: '', ageSeconds: 10 }], { generation: 'gen_42', collectedAt: '2026-08-10T12:00:00Z', page: { limit: 100, complete: true, truncated: false, filterScope: 'collection' } }))
+			}
+			return Promise.resolve(defaultResponse(path))
+		})
+		vi.stubGlobal('fetch', fetch)
+
+		renderDashboard()
+
+		await waitFor(() => expect(fetch.mock.calls.some(([input]) => String(input) === '/api/v1/nodes?limit=100')).toBe(true))
+		expect(fetch.mock.calls.some(([input]) => String(input) === '/api/v1/persistent-volume-claims?limit=100')).toBe(false)
+		resolveNodes(json([{ name: 'worker-1', ready: true, roles: [], version: 'v1', ageSeconds: 10, cpuCapacity: '', memoryCapacity: '', pods: 1 }], { generation: 'gen_42', collectedAt: '2026-08-10T12:00:00Z', page: { limit: 100, complete: true, truncated: false, filterScope: 'collection' } }))
+		expect(await screen.findByText('1/1 Ready')).toBeInTheDocument()
+		expect(screen.getByText('1 not Bound')).toBeInTheDocument()
+	})
+
+  it('isolates a failed metrics request and retries only that panel', async () => {
+    let metricsCalls = 0
+    const fetch = vi.fn((input: string | URL | Request) => {
+      const path = String(input)
+      if (path === '/api/v1/metrics') {
+        metricsCalls += 1
+        if (metricsCalls === 1) return Promise.resolve(new Response(JSON.stringify({ code: 'FEATURE_UNAVAILABLE', message: 'Metrics API failed.' }), { status: 503, headers: { 'Content-Type': 'application/json' } }))
+      }
+      return Promise.resolve(defaultResponse(path))
+    })
+    vi.stubGlobal('fetch', fetch)
+    renderDashboard()
+    expect(await screen.findByRole('button', { name: 'Retry Pod metrics' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Cluster overview' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Problems' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Retry Pod metrics' }))
+    await waitFor(() => expect(metricsCalls).toBe(2))
+    expect(screen.queryByRole('button', { name: 'Retry Pod metrics' })).not.toBeInTheDocument()
+  })
+
+  it('keeps partial, empty, and optional blocks distinct while loading tier two after summary', async () => {
     const fetch = vi.fn((input: string | URL | Request) => {
       const path = String(input)
       if (path === '/api/v1/dashboard/problems') {
         return Promise.resolve(json(block([{
+          resource: { kind: 'Pod', namespace: 'payments', name: 'api-abc' },
           namespace: 'payments', pod: 'api-abc', owner: { kind: 'Deployment', name: 'api' },
           container: 'api', containerType: 'regular', status: 'Running', reason: 'CrashLoopBackOff',
-          message: 'back-off restarting failed container', source: 'containerWaiting', severity: 'critical', ageSeconds: 180,
+          message: 'back-off restarting failed container', summary: 'Container is repeatedly crashing.', source: 'containerWaiting', severity: 'critical', ageSeconds: 180,
+          actions: ['inspect', 'logs'],
         }], {
           complete: false,
           coverage: { requestedNamespaces: 2, completedNamespaces: 1, deniedNamespaces: ['restricted'], failed: [] },
@@ -120,10 +178,11 @@ describe('progressive dashboard', () => {
     renderDashboard()
 
     expect(await screen.findByRole('heading', { name: 'Cluster overview' })).toBeInTheDocument()
-    expect((await screen.findAllByText('api-abc', { selector: 'strong' })).length).toBeGreaterThanOrEqual(2)
+    expect((await screen.findAllByText('api-abc', { selector: 'strong' })).length).toBeGreaterThanOrEqual(1)
+    expect(screen.getByText('1 critical')).toBeInTheDocument()
     expect(screen.getByText('Coverage: 1 of 2 namespaces. 1 denied.')).toBeInTheDocument()
     expect(screen.getByText('BackOff', { selector: 'strong' })).toBeInTheDocument()
-    expect(screen.getByText('Metrics API is not available. The rest of the dashboard is unaffected.')).toBeInTheDocument()
+    expect(await screen.findByText('Metrics API is not available. The rest of the dashboard is unaffected.')).toBeInTheDocument()
     expect(screen.getByText('Scan has not been run')).toBeInTheDocument()
     expect(screen.getByLabelText('Warning events: access denied')).toBeInTheDocument()
 

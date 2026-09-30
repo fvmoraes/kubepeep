@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/fvmoraes/kubepeep/internal/observability"
 )
 
 type storedCursorStateFixture struct {
@@ -76,6 +78,46 @@ func TestCursorStoreExpiresWithTTL(t *testing.T) {
 	}
 	if store.Len() != 0 || store.Bytes() != 0 {
 		t.Fatalf("expired entry was not reclaimed: len=%d bytes=%d", store.Len(), store.Bytes())
+	}
+}
+
+func TestCursorStoreFixedTTLAndPurgeMetrics(t *testing.T) {
+	now := time.Unix(1_000_000, 0)
+	metrics := observability.NewRegistry()
+	store := NewCursorStoreWithMetrics(func() time.Time { return now }, metrics)
+	store.ttl = time.Minute
+	first, err := store.Put("first")
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := store.Put("second")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(59 * time.Second)
+	var value string
+	if err := store.Get(first, &value); err != nil {
+		t.Fatal(err)
+	}
+	now = now.Add(time.Second)
+	third, err := store.Put("third") // Purge both expired entries, including the recently read one.
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, reference := range []string{first, second} {
+		var httpErr *HTTPError
+		if err := store.Get(reference, &value); !errors.As(err, &httpErr) || httpErr.Status != http.StatusGone || string(httpErr.AppError.Code) != CodeCursorExpired {
+			t.Fatalf("want recoverable 410, got %v", err)
+		}
+	}
+	if store.Len() != 1 || store.Bytes() != int64(len(`"third"`)) {
+		t.Fatalf("purge left stale occupancy: %d/%d", store.Len(), store.Bytes())
+	}
+	store.Delete(third)
+	for _, want := range []string{"kubepeep_cursor_expired_total 2", "kubepeep_cursor_hits_total 1", "kubepeep_cursor_misses_total 2", "kubepeep_cursor_entries 0", "kubepeep_cursor_bytes 0"} {
+		if !strings.Contains(metrics.Render(), want) {
+			t.Fatalf("missing %q: %s", want, metrics.Render())
+		}
 	}
 }
 
@@ -217,25 +259,77 @@ func TestCursorStoreNormalizesEquivalentState(t *testing.T) {
 	}
 }
 
-// BenchmarkCursorStorePutGet measures the server-side cursor parking cost that
-// replaced serializing buffered DTOs into the signed token.
-func BenchmarkCursorStorePutGet(b *testing.B) {
+func TestCursorStoreRoundTripsTwoHundredSyntheticOriginsWithinEntryBudget(t *testing.T) {
 	store := NewCursorStore(nil)
-	state := storedCursorStateFixture{Version: 1, Origins: make([]storedFixtureOrigin, 100)}
+	state := storedCursorStateFixture{Version: 1, Origins: make([]storedFixtureOrigin, 200)}
 	for index := range state.Origins {
 		state.Origins[index] = storedFixtureOrigin{Namespace: fmt.Sprintf("ns-%04d", index), Buffered: []string{"buffered-item"}}
 	}
-	b.ReportAllocs()
-	b.ResetTimer()
-	for iteration := 0; iteration < b.N; iteration++ {
-		reference, err := store.Put(state)
-		if err != nil {
-			b.Fatal(err)
-		}
-		var decoded storedCursorStateFixture
-		if err := store.Get(reference, &decoded); err != nil {
-			b.Fatal(err)
-		}
-		store.Delete(reference)
+	reference, err := store.Put(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if store.Bytes() <= 0 || store.Bytes() > CursorStoreMaxEntryBytes {
+		t.Fatalf("cursor bytes = %d, budget = %d", store.Bytes(), CursorStoreMaxEntryBytes)
+	}
+	var decoded storedCursorStateFixture
+	if err := store.Get(reference, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if len(decoded.Origins) != 200 {
+		t.Fatalf("decoded origins = %d, want 200", len(decoded.Origins))
+	}
+}
+
+func TestCursorStorePurgeExpiredReclaimsBytesAndUpdatesMetrics(t *testing.T) {
+	t.Parallel()
+	now := time.Unix(100, 0)
+	metrics := observability.NewRegistry()
+	store := NewCursorStoreWithMetrics(func() time.Time { return now }, metrics)
+	store.ttl = time.Second
+	if _, err := store.Put(map[string]string{"cursor": "state"}); err != nil {
+		t.Fatal(err)
+	}
+	if store.Len() != 1 || store.Bytes() == 0 {
+		t.Fatalf("stored cursor entries=%d bytes=%d", store.Len(), store.Bytes())
+	}
+	now = now.Add(time.Second)
+	if removed := store.PurgeExpired(); removed != 1 {
+		t.Fatalf("removed = %d", removed)
+	}
+	if store.Len() != 0 || store.Bytes() != 0 {
+		t.Fatalf("purged cursor entries=%d bytes=%d", store.Len(), store.Bytes())
+	}
+	rendered := metrics.Render()
+	if !strings.Contains(rendered, observability.CursorExpiredTotalName+" 1") || !strings.Contains(rendered, observability.CursorBytesName+" 0") {
+		t.Fatalf("purge metrics missing:\n%s", rendered)
+	}
+}
+
+// BenchmarkCursorStorePutGet measures the server-side cursor parking cost that
+// replaced serializing buffered DTOs into the signed token. Two hundred
+// origins are an internal stress case, not public restricted fan-out support.
+func BenchmarkCursorStorePutGet(b *testing.B) {
+	for _, originCount := range []int{10, 50, 100, 200} {
+		b.Run(fmt.Sprintf("origins=%d", originCount), func(b *testing.B) {
+			store := NewCursorStore(nil)
+			state := storedCursorStateFixture{Version: 1, Origins: make([]storedFixtureOrigin, originCount)}
+			for index := range state.Origins {
+				state.Origins[index] = storedFixtureOrigin{Namespace: fmt.Sprintf("ns-%04d", index), Buffered: []string{"buffered-item"}}
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for iteration := 0; iteration < b.N; iteration++ {
+				reference, err := store.Put(state)
+				if err != nil {
+					b.Fatal(err)
+				}
+				var decoded storedCursorStateFixture
+				if err := store.Get(reference, &decoded); err != nil {
+					b.Fatal(err)
+				}
+				store.Delete(reference)
+			}
+		})
 	}
 }

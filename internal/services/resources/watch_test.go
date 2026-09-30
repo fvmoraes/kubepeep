@@ -2,14 +2,23 @@ package resources
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/fvmoraes/kubepeep/internal/config"
+	"github.com/fvmoraes/kubepeep/internal/observability"
 	"github.com/fvmoraes/kubepeep/internal/services/authorization"
+	collectortrace "go.opentelemetry.io/proto/otlp/collector/trace/v1"
+	"google.golang.org/protobuf/proto"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 )
 
@@ -18,20 +27,41 @@ type fakeWatchStream struct {
 	once    sync.Once
 }
 
+func TestOldWatchWorkerRemovalPreservesReplacement(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	manager := &WatchManager{workers: map[string]*watchWorker{}}
+	key := WatchKey{Generation: "gen", Topic: TopicPods}
+	subscription := newSubscription(ctx)
+	old := &watchWorker{manager: manager, key: key, ctx: ctx, cancel: cancel, subscribers: map[*Subscription]struct{}{subscription: {}}}
+	replacement := &watchWorker{manager: manager, key: key}
+	manager.workers[key.identity()] = replacement
+	old.remove(subscription)
+	if manager.workers[key.identity()] != replacement {
+		t.Fatal("closing an old subscription removed its replacement worker")
+	}
+	if ctx.Err() == nil {
+		t.Fatal("old worker was not cancelled")
+	}
+}
+
 func (stream *fakeWatchStream) ResultChan() <-chan WatchChange { return stream.channel }
 func (stream *fakeWatchStream) Stop()                          { stream.once.Do(func() {}) }
 
 type fakeWatchPort struct {
-	mu            sync.Mutex
-	lists         int
-	watches       int
-	snapshot      WatchSnapshot
-	snapshots     []WatchSnapshot
-	stream        *fakeWatchStream
-	listErr       error
-	watchErr      error
-	watchErrs     []error
-	watchVersions []string
+	mu             sync.Mutex
+	lists          int
+	watches        int
+	snapshot       WatchSnapshot
+	snapshots      []WatchSnapshot
+	stream         *fakeWatchStream
+	listErr        error
+	watchErr       error
+	watchErrs      []error
+	watchVersions  []string
+	initialWatches int
+	initialStream  *fakeWatchStream
+	initialErr     error
 }
 
 func (port *fakeWatchPort) List(context.Context, WatchKey) (WatchSnapshot, error) {
@@ -58,7 +88,61 @@ func (port *fakeWatchPort) Watch(_ context.Context, _ WatchKey, resourceVersion 
 	return port.stream, nil
 }
 
-func TestWatchCreationResourceExpiredResetsAndNextConnectionRelists(t *testing.T) {
+func (port *fakeWatchPort) WatchInitial(context.Context, WatchKey, int64) (WatchStream, error) {
+	port.mu.Lock()
+	defer port.mu.Unlock()
+	port.initialWatches++
+	if port.initialErr != nil {
+		return nil, port.initialErr
+	}
+	return port.initialStream, nil
+}
+
+func TestStreamingListFastPathAndUnsupportedFallback(t *testing.T) {
+	t.Run("fast path", func(t *testing.T) {
+		stream := &fakeWatchStream{channel: make(chan WatchChange, 4)}
+		stream.channel <- WatchChange{Type: "ADDED", Object: PodDTO{Namespace: "ns", Name: "api"}}
+		stream.channel <- WatchChange{Type: "BOOKMARK", ResourceVersion: "7", InitialEventsEnd: true}
+		port := &fakeWatchPort{initialStream: stream}
+		manager := NewWatchManagerWithConfig(port, WatchManagerConfig{StreamingLists: true})
+		defer manager.Close()
+		subscription, err := manager.Subscribe(t.Context(), podWatchKey())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer subscription.Close()
+		event, err := nextWithin(subscription)
+		if err != nil || event.Event != "snapshot" || event.ResourceVersion != "7" || len(event.Items) != 1 {
+			t.Fatalf("initial watch snapshot=%#v err=%v", event, err)
+		}
+		port.mu.Lock()
+		defer port.mu.Unlock()
+		if port.initialWatches != 1 || port.lists != 0 || port.watches != 0 {
+			t.Fatalf("initial=%d lists=%d watches=%d", port.initialWatches, port.lists, port.watches)
+		}
+	})
+	t.Run("unsupported falls back", func(t *testing.T) {
+		port := &fakeWatchPort{initialErr: ErrStreamingListsUnsupported, snapshot: WatchSnapshot{ResourceVersion: "8"}, stream: &fakeWatchStream{channel: make(chan WatchChange, 1)}}
+		manager := NewWatchManagerWithConfig(port, WatchManagerConfig{StreamingLists: true})
+		defer manager.Close()
+		subscription, err := manager.Subscribe(t.Context(), podWatchKey())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer subscription.Close()
+		event, err := nextWithin(subscription)
+		if err != nil || event.Event != "snapshot" || event.ResourceVersion != "8" {
+			t.Fatalf("fallback snapshot=%#v err=%v", event, err)
+		}
+		port.mu.Lock()
+		defer port.mu.Unlock()
+		if port.initialWatches != 1 || port.lists != 1 || port.watches != 1 {
+			t.Fatalf("initial=%d lists=%d watches=%d", port.initialWatches, port.lists, port.watches)
+		}
+	})
+}
+
+func TestWatchCreationResourceExpiredRelistsWithoutDroppingSubscription(t *testing.T) {
 	stream := &fakeWatchStream{channel: make(chan WatchChange, 1)}
 	port := &fakeWatchPort{
 		snapshots: []WatchSnapshot{
@@ -78,25 +162,142 @@ func TestWatchCreationResourceExpiredResetsAndNextConnectionRelists(t *testing.T
 	if event, nextErr := nextWithin(first); nextErr != nil || event.Event != "snapshot" || event.ResourceVersion != "1" {
 		t.Fatalf("first snapshot=%#v err=%v", event, nextErr)
 	}
-	if event, nextErr := nextWithin(first); nextErr != nil || event.Event != "reset" || event.Reason != "resource_version_expired" || !event.RefetchRequired {
-		t.Fatalf("expiry terminal=%#v err=%v", event, nextErr)
+	if event, nextErr := nextWithin(first); nextErr != nil || event.Event != "refreshed" || event.Reason != "resource_version_expired" || !event.RefetchRequired {
+		t.Fatalf("expiry notice=%#v err=%v", event, nextErr)
 	}
-	deadline := time.Now().Add(time.Second)
-	for manager.SharedWatchCount() != 0 && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
-	}
-
-	second, err := manager.Subscribe(context.Background(), podWatchKey())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if event, nextErr := nextWithin(second); nextErr != nil || event.Event != "snapshot" || event.ResourceVersion != "2" {
+	if event, nextErr := nextWithin(first); nextErr != nil || event.Event != "snapshot" || event.ResourceVersion != "2" {
 		t.Fatalf("relisted snapshot=%#v err=%v", event, nextErr)
+	}
+	if manager.SharedWatchCount() != 1 {
+		t.Fatal("recovery dropped the shared watch")
 	}
 	port.mu.Lock()
 	defer port.mu.Unlock()
 	if port.lists != 2 || port.watches != 2 || len(port.watchVersions) != 2 || port.watchVersions[0] != "1" || port.watchVersions[1] != "2" {
 		t.Fatalf("lists=%d watches=%d versions=%v", port.lists, port.watches, port.watchVersions)
+	}
+}
+
+func TestWatchForbiddenInvalidatesCachedSnapshotBeforeNextSubscription(t *testing.T) {
+	stream := &fakeWatchStream{channel: make(chan WatchChange, 1)}
+	port := &fakeWatchPort{
+		snapshots: []WatchSnapshot{
+			{ResourceVersion: "1", Items: []TopicObject{PodDTO{Namespace: "payments", Name: "old"}}},
+			{ResourceVersion: "2", Items: []TopicObject{PodDTO{Namespace: "payments", Name: "current"}}},
+		},
+		watchErrs: []error{domainError(CodeForbidden, "Resource watch is forbidden.", nil), nil},
+		stream:    stream,
+	}
+	cache := NewResourceCache(ResourceCacheConfig{MaxBytes: 1 << 20, MaxEntries: 4})
+	manager := NewWatchManagerWithConfig(port, WatchManagerConfig{Cache: cache})
+	defer manager.Close()
+	first, err := manager.Subscribe(t.Context(), podWatchKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if event, nextErr := nextWithin(first); nextErr != nil || event.Event != "snapshot" || event.ResourceVersion != "1" {
+		t.Fatalf("first snapshot=%#v err=%v", event, nextErr)
+	}
+	if event, nextErr := nextWithin(first); nextErr != nil || event.Event != "error" || event.Reason != string(CodeForbidden) {
+		t.Fatalf("forbidden event=%#v err=%v", event, nextErr)
+	}
+	deadline := time.Now().Add(time.Second)
+	for manager.SharedWatchCount() != 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if stats := cache.Stats(); stats.Entries != 0 {
+		t.Fatalf("forbidden snapshot retained: %#v", stats)
+	}
+	second, err := manager.Subscribe(t.Context(), podWatchKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	if event, nextErr := nextWithin(second); nextErr != nil || event.Event != "snapshot" || event.ResourceVersion != "2" || event.Items[0].(PodDTO).Name != "current" {
+		t.Fatalf("revalidated snapshot=%#v err=%v", event, nextErr)
+	}
+}
+
+func TestWatchBookmarkAdvancesReconnectCheckpointWithoutUIEvent(t *testing.T) {
+	stream := &fakeWatchStream{channel: make(chan WatchChange, 2)}
+	port := &fakeWatchPort{snapshot: WatchSnapshot{ResourceVersion: "1"}, stream: stream}
+	manager := NewWatchManager(port)
+	defer manager.Close()
+	subscription, err := manager.Subscribe(t.Context(), podWatchKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer subscription.Close()
+	if event, nextErr := nextWithin(subscription); nextErr != nil || event.Event != "snapshot" {
+		t.Fatalf("initial snapshot=%#v err=%v", event, nextErr)
+	}
+	stream.channel <- WatchChange{Type: "BOOKMARK", ResourceVersion: "9"}
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Millisecond)
+	defer cancel()
+	if event, nextErr := subscription.Next(ctx); !errors.Is(nextErr, context.DeadlineExceeded) {
+		t.Fatalf("bookmark leaked to UI: %#v, %v", event, nextErr)
+	}
+	close(stream.channel)
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		port.mu.Lock()
+		versions := append([]string(nil), port.watchVersions...)
+		port.mu.Unlock()
+		if len(versions) >= 2 {
+			if versions[0] != "1" || versions[1] != "9" {
+				t.Fatalf("watch reconnect versions = %v", versions)
+			}
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("watch did not reconnect from bookmark checkpoint")
+}
+
+func TestWatchCoverageRequiresConnectedStream(t *testing.T) {
+	stream := &fakeWatchStream{channel: make(chan WatchChange)}
+	port := &fakeWatchPort{snapshot: WatchSnapshot{ResourceVersion: "1"}, stream: stream}
+	cache := NewResourceCache(ResourceCacheConfig{})
+	manager := NewWatchManagerWithConfig(port, WatchManagerConfig{Cache: cache})
+	defer manager.Close()
+	subscription, err := manager.Subscribe(t.Context(), podWatchKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer subscription.Close()
+	if event, nextErr := nextWithin(subscription); nextErr != nil || event.Event != "snapshot" {
+		t.Fatalf("initial snapshot=%#v err=%v", event, nextErr)
+	}
+	origins := []Origin{{Namespace: "payments", Version: "v1", Resource: "pods"}}
+	deadline := time.Now().Add(time.Second)
+	selection := Selection{Generation: "gen", Context: "ctx", Scope: "scope"}
+	for !manager.Covers(selection, TopicPods, origins) && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if !manager.Covers(selection, TopicPods, origins) {
+		t.Fatal("healthy watch did not cover its origin")
+	}
+	if manager.Covers(Selection{Generation: "gen", Context: "another", Scope: "scope"}, TopicPods, origins) {
+		t.Fatal("watch from another context covered an HTTP page")
+	}
+	port.mu.Lock()
+	port.watchErr = errors.New("watch temporarily unavailable")
+	port.mu.Unlock()
+	close(stream.channel)
+	deadline = time.Now().Add(time.Second)
+	for manager.Covers(selection, TopicPods, origins) && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if manager.Covers(selection, TopicPods, origins) {
+		t.Fatal("disconnected watch still covered an HTTP page")
+	}
+	probe, err := cache.Subscribe(t.Context(), ResourceCacheKey{WatchKey: podWatchKey()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer probe.Close()
+	if cached, ok := probe.Load(t.Context()); !ok || cached.State != CacheStateStale {
+		t.Fatalf("disconnected watch cache state = %#v, found=%t", cached.State, ok)
 	}
 }
 func (port *fakeWatchPort) counts() (int, int) {
@@ -191,6 +392,538 @@ func TestWatchManagerSharesSourceAndCancelsGeneration(t *testing.T) {
 		if err != nil || event.Event != "reset" || event.Reason != "generation_changed" {
 			t.Fatalf("terminal=%#v err=%v", event, err)
 		}
+	}
+}
+
+func TestWatchManagerKeepsIdleSourceAndReplaysItsCurrentSnapshot(t *testing.T) {
+	stream := &fakeWatchStream{channel: make(chan WatchChange, 8)}
+	port := &fakeWatchPort{
+		snapshot: WatchSnapshot{ResourceVersion: "1", Items: []TopicObject{PodDTO{Namespace: "payments", Name: "api", Status: "Pending"}}},
+		stream:   stream,
+	}
+	cache := NewResourceCache(ResourceCacheConfig{MaxBytes: 1 << 20, MaxEntries: 8})
+	manager := NewWatchManagerWithConfig(port, WatchManagerConfig{Cache: cache, IdleTimeout: 100 * time.Millisecond})
+	defer manager.Close()
+
+	first, err := manager.Subscribe(t.Context(), podWatchKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if event, nextErr := nextWithin(first); nextErr != nil || event.Event != "snapshot" {
+		t.Fatalf("first snapshot=%#v err=%v", event, nextErr)
+	}
+	stream.channel <- WatchChange{
+		Type: "MODIFIED", ResourceVersion: "2",
+		Object: PodDTO{Namespace: "payments", Name: "api", Status: "Running"},
+	}
+	if event, nextErr := nextWithin(first); nextErr != nil || event.Event != "modified" {
+		t.Fatalf("first delta=%#v err=%v", event, nextErr)
+	}
+	first.Close()
+	if manager.SharedWatchCount() != 1 {
+		t.Fatalf("idle worker count = %d", manager.SharedWatchCount())
+	}
+
+	second, err := manager.Subscribe(t.Context(), podWatchKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	event, err := nextWithin(second)
+	if err != nil || event.Event != "snapshot" || len(event.Items) != 1 {
+		t.Fatalf("idle replay=%#v err=%v", event, err)
+	}
+	pod, ok := event.Items[0].(PodDTO)
+	if !ok || pod.Status != "Running" || event.ResourceVersion != "2" {
+		t.Fatalf("idle replay pod=%#v event=%#v", event.Items[0], event)
+	}
+	if lists, watches := port.counts(); lists != 1 || watches != 1 {
+		t.Fatalf("idle reuse lists=%d watches=%d", lists, watches)
+	}
+	second.Close()
+	deadline := time.Now().Add(time.Second)
+	for manager.SharedWatchCount() != 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if manager.SharedWatchCount() != 0 {
+		t.Fatal("idle worker was not released")
+	}
+
+	third, err := manager.Subscribe(t.Context(), podWatchKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer third.Close()
+	event, err = nextWithin(third)
+	if err != nil || event.Event != "snapshot" || event.ResourceVersion != "2" {
+		t.Fatalf("cache replay=%#v err=%v", event, err)
+	}
+	pod, ok = event.Items[0].(PodDTO)
+	if !ok || pod.Status != "Running" {
+		t.Fatalf("cache replay pod=%#v", event.Items[0])
+	}
+	deadline = time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if lists, watches := port.counts(); lists == 1 && watches == 2 {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if lists, watches := port.counts(); lists != 1 || watches != 2 {
+		t.Fatalf("cached watch reopened with LIST: lists=%d watches=%d", lists, watches)
+	}
+}
+
+func TestWatchManagerEvictIdleReleasesWorkerBeforeCachePressure(t *testing.T) {
+	stream := &fakeWatchStream{channel: make(chan WatchChange, 2)}
+	port := &fakeWatchPort{snapshot: WatchSnapshot{ResourceVersion: "1", Items: []TopicObject{PodDTO{Namespace: "payments", Name: "api"}}}, stream: stream}
+	cache := NewResourceCache(ResourceCacheConfig{MaxBytes: 1 << 20, MaxEntries: 8})
+	manager := NewWatchManagerWithConfig(port, WatchManagerConfig{Cache: cache, IdleTimeout: time.Hour})
+	defer manager.Close()
+	subscription, err := manager.Subscribe(t.Context(), podWatchKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if event, nextErr := nextWithin(subscription); nextErr != nil || event.Event != "snapshot" {
+		t.Fatalf("snapshot=%#v err=%v", event, nextErr)
+	}
+	subscription.Close()
+	if manager.SharedWatchCount() != 1 {
+		t.Fatal("worker did not enter idle retention")
+	}
+	if evicted := manager.EvictIdle(); evicted != 1 || manager.SharedWatchCount() != 0 {
+		t.Fatalf("evicted=%d shared=%d", evicted, manager.SharedWatchCount())
+	}
+	if stats := cache.Stats(); stats.Subscriptions != 0 {
+		t.Fatalf("cache subscription retained after idle eviction: %#v", stats)
+	}
+}
+
+func TestWatchCacheOperationsExportSafeOTLPSpans(t *testing.T) {
+	var mu sync.Mutex
+	var requests []*collectortrace.ExportTraceServiceRequest
+	var rawPayloads [][]byte
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
+		if err != nil {
+			http.Error(w, "read failed", http.StatusBadRequest)
+			return
+		}
+		var request collectortrace.ExportTraceServiceRequest
+		if r.URL.Path != "/v1/traces" || r.Header.Get("Content-Type") != "application/x-protobuf" || proto.Unmarshal(body, &request) != nil {
+			http.Error(w, "invalid OTLP request", http.StatusBadRequest)
+			return
+		}
+		mu.Lock()
+		requests = append(requests, &request)
+		rawPayloads = append(rawPayloads, append([]byte(nil), body...))
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/x-protobuf")
+	}))
+	defer server.Close()
+
+	endpoint := server.URL + "/v1/traces"
+	tracing, err := observability.NewTracing(t.Context(), config.OTelConfig{
+		Enabled: true, Endpoint: &endpoint, Protocol: config.OTelHTTPProtobuf, Insecure: true,
+	}, observability.NewRegistry(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := observability.WithTracing(t.Context(), tracing)
+	stream := &fakeWatchStream{channel: make(chan WatchChange, 2)}
+	port := &fakeWatchPort{
+		snapshot: WatchSnapshot{ResourceVersion: "1", Items: []TopicObject{PodDTO{Namespace: "private-namespace", Name: "private-pod"}}},
+		stream:   stream,
+	}
+	manager := NewWatchManager(port)
+	subscription, err := manager.Subscribe(ctx, WatchKey{
+		Generation: "private-generation", Context: "private-context", Scope: "private-scope", Topic: TopicPods,
+		GVR: schema.GroupVersionResource{Version: "v1", Resource: "pods"}, Namespace: "private-namespace",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if event, nextErr := nextWithin(subscription); nextErr != nil || event.Event != "snapshot" {
+		t.Fatalf("snapshot=%#v err=%v", event, nextErr)
+	}
+	stream.channel <- WatchChange{Type: "MODIFIED", ResourceVersion: "2", Object: PodDTO{Namespace: "private-namespace", Name: "private-pod", Status: "Running"}}
+	if event, nextErr := nextWithin(subscription); nextErr != nil || event.Event != "modified" {
+		t.Fatalf("delta=%#v err=%v", event, nextErr)
+	}
+	subscription.Close()
+	manager.Close()
+	if err := tracing.Shutdown(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	names := make(map[string]int)
+	for _, request := range requests {
+		for _, resourceSpans := range request.ResourceSpans {
+			for _, scopeSpans := range resourceSpans.ScopeSpans {
+				for _, span := range scopeSpans.Spans {
+					names[span.Name]++
+				}
+			}
+		}
+	}
+	if names["cache.snapshot"] == 0 || names["cache.apply_event"] == 0 {
+		t.Fatalf("cache spans missing: %#v", names)
+	}
+	for _, payload := range rawPayloads {
+		text := string(payload)
+		for _, sensitive := range []string{"private-generation", "private-context", "private-scope", "private-namespace", "private-pod"} {
+			if strings.Contains(text, sensitive) {
+				t.Fatalf("OTLP payload leaked %q", sensitive)
+			}
+		}
+	}
+}
+
+func TestSubscriptionCoalescesResourceBurstButPreservesEvents(t *testing.T) {
+	t.Parallel()
+	subscription := newSubscription(t.Context())
+	for index := range 10000 {
+		if !subscription.push(StreamEvent{Event: "modified", Topic: TopicPods, Generation: "gen", Object: PodDTO{Namespace: "ns", Name: "pod", Status: strconv.Itoa(index)}}) {
+			t.Fatalf("resource burst rejected at %d", index)
+		}
+	}
+	if len(subscription.queue) != 1 || subscription.bytes > MaximumStreamQueueBytes {
+		t.Fatalf("coalesced queue len=%d bytes=%d", len(subscription.queue), subscription.bytes)
+	}
+	event, err := subscription.Next(t.Context())
+	if err != nil || event.Object.(PodDTO).Status != "9999" {
+		t.Fatalf("latest state=%#v err=%v", event, err)
+	}
+	for index := range 2 {
+		if !subscription.push(StreamEvent{Event: "modified", Topic: TopicEvents, Generation: "gen", Object: EventDTO{Name: "event", Count: int64(index)}}) {
+			t.Fatal("chronological event rejected")
+		}
+	}
+	if len(subscription.queue) != 2 {
+		t.Fatalf("events were coalesced: %d", len(subscription.queue))
+	}
+}
+
+func TestWatchManagerDoesNotShareDifferentEffectiveOrigins(t *testing.T) {
+	stream := &fakeWatchStream{channel: make(chan WatchChange, 4)}
+	port := &fakeWatchPort{snapshot: WatchSnapshot{ResourceVersion: "1"}, stream: stream}
+	manager := NewWatchManager(port)
+	defer manager.Close()
+	firstKey := podWatchKey()
+	firstKey.EffectiveOrigins = []string{"payments", "platform"}
+	secondKey := podWatchKey()
+	secondKey.EffectiveOrigins = []string{"payments", "restricted"}
+	first, err := manager.Subscribe(t.Context(), firstKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close()
+	second, err := manager.Subscribe(t.Context(), secondKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	if _, err = nextWithin(first); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = nextWithin(second); err != nil {
+		t.Fatal(err)
+	}
+	if lists, watches := port.counts(); lists != 2 || watches != 2 || manager.SharedWatchCount() != 2 {
+		t.Fatalf("lists=%d watches=%d shared=%d", lists, watches, manager.SharedWatchCount())
+	}
+}
+
+func TestWatchManagerRejectsTopicGVRMismatch(t *testing.T) {
+	t.Parallel()
+	manager := NewWatchManager(&fakeWatchPort{})
+	defer manager.Close()
+	key := podWatchKey()
+	key.GVR = schema.GroupVersionResource{Version: "v1", Resource: "secrets"}
+	if _, err := manager.Subscribe(t.Context(), key); ErrorCodeOf(err) != CodeValidationFailed {
+		t.Fatalf("secret resource accepted for Pods watch: %v", err)
+	}
+}
+
+func TestApplyStreamEventToSnapshotMaintainsLevelState(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name  string
+		start WatchSnapshot
+		event StreamEvent
+		want  []string
+	}{
+		{
+			name: "add", start: WatchSnapshot{Items: []TopicObject{PodDTO{Namespace: "ns", Name: "one"}}},
+			event: StreamEvent{Event: "added", ResourceVersion: "2", Object: PodDTO{Namespace: "ns", Name: "two"}},
+			want:  []string{"one", "two"},
+		},
+		{
+			name: "modify", start: WatchSnapshot{Items: []TopicObject{PodDTO{Namespace: "ns", Name: "one", Status: "Pending"}}},
+			event: StreamEvent{Event: "modified", ResourceVersion: "2", Object: PodDTO{Namespace: "ns", Name: "one", Status: "Running"}},
+			want:  []string{"one:Running"},
+		},
+		{
+			name: "delete", start: WatchSnapshot{Items: []TopicObject{PodDTO{Namespace: "ns", Name: "one"}, PodDTO{Namespace: "ns", Name: "two"}}},
+			event: StreamEvent{Event: "deleted", ResourceVersion: "2", Deleted: &ResourceRef{Kind: "Pod", Namespace: "ns", Name: "one"}},
+			want:  []string{"two"},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			got := applyStreamEventToSnapshot(TopicPods, test.start, test.event)
+			if got.ResourceVersion != "2" {
+				t.Fatalf("resource version = %q", got.ResourceVersion)
+			}
+			values := make([]string, 0, len(got.Items))
+			for _, item := range got.Items {
+				pod := item.(PodDTO)
+				value := pod.Name
+				if pod.Status != "" {
+					value += ":" + pod.Status
+				}
+				values = append(values, value)
+			}
+			if strings.Join(values, ",") != strings.Join(test.want, ",") {
+				t.Fatalf("items = %v, want %v", values, test.want)
+			}
+		})
+	}
+}
+
+func TestWatchSnapshotDeltaLimitsInvalidateAndReset(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name  string
+		setup func() (WatchSnapshot, StreamEvent)
+	}{
+		{name: "added object count", setup: func() (WatchSnapshot, StreamEvent) {
+			items := make([]TopicObject, MaximumSnapshotItems)
+			for index := range items {
+				items[index] = PodDTO{Namespace: "ns", Name: strconv.Itoa(index)}
+			}
+			return WatchSnapshot{ResourceVersion: "1", Items: items}, StreamEvent{Event: "added", Topic: TopicPods, ResourceVersion: "2", Object: PodDTO{Namespace: "ns", Name: "extra"}}
+		}},
+		{name: "modified object bytes", setup: func() (WatchSnapshot, StreamEvent) {
+			items := make([]TopicObject, 200)
+			for index := range items {
+				items[index] = PodDTO{Namespace: "ns", Name: strconv.Itoa(index), Labels: map[string]string{"padding": strings.Repeat("x", 50000)}}
+			}
+			encoded, _ := json.Marshal(items)
+			padding := 50000 + (MaximumSnapshotBytes-1024-len(encoded))/len(items)
+			for index := range items {
+				pod := items[index].(PodDTO)
+				pod.Labels = map[string]string{"padding": strings.Repeat("x", padding)}
+				items[index] = pod
+			}
+			changed := items[0].(PodDTO)
+			changed.Labels = map[string]string{"padding": strings.Repeat("x", padding+2048)}
+			return WatchSnapshot{ResourceVersion: "1", Items: items}, StreamEvent{Event: "modified", Topic: TopicPods, ResourceVersion: "2", Object: changed}
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			snapshot, event := test.setup()
+			encoded, err := json.Marshal(snapshot.Items)
+			if err != nil || len(encoded) > MaximumSnapshotBytes {
+				t.Fatalf("initial snapshot must fit the budget: bytes=%d err=%v", len(encoded), err)
+			}
+			cache := NewResourceCache(ResourceCacheConfig{})
+			manager := &WatchManager{cache: cache}
+			key := podWatchKey()
+			cached, err := cache.Subscribe(t.Context(), ResourceCacheKey{WatchKey: key})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(cached.Close)
+			token, err := cached.BeginRefresh(t.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := cached.Commit(t.Context(), token, WatchSnapshot{ResourceVersion: "1", Items: []TopicObject{PodDTO{Namespace: "ns", Name: "cached"}}}, false); err != nil {
+				t.Fatal(err)
+			}
+			subscription := newSubscription(t.Context())
+			worker := &watchWorker{manager: manager, key: key, ctx: t.Context(), snapshot: snapshot, snapshotReady: true, cacheSubscription: cached, subscribers: map[*Subscription]struct{}{subscription: {}}}
+			if worker.updateSnapshot(event) {
+				t.Fatal("watch accepted a delta beyond the snapshot budget")
+			}
+			reset, err := nextWithin(subscription)
+			if err != nil || reset.Event != "reset" || reset.Reason != "snapshot_limit_exceeded" || !reset.RefetchRequired {
+				t.Fatalf("snapshot limit did not require an honest reset: event=%#v err=%v", reset, err)
+			}
+			if _, ok := cached.Load(t.Context()); ok {
+				t.Fatal("obsolete cache survived the rejected delta")
+			}
+			if worker.snapshotReady || len(worker.snapshot.Items) != 0 {
+				t.Fatal("worker retained the incomplete snapshot after its limit")
+			}
+		})
+	}
+}
+
+func TestWatchSnapshotAccountsForAddReplaceAndDeleteBytes(t *testing.T) {
+	t.Parallel()
+	worker := &watchWorker{manager: &WatchManager{}, key: podWatchKey(), ctx: t.Context(), snapshotReady: true}
+	for _, event := range []StreamEvent{
+		{Event: "added", Object: PodDTO{Namespace: "ns", Name: "one"}},
+		{Event: "modified", Object: PodDTO{Namespace: "ns", Name: "one", Labels: map[string]string{"quoted": "\"escaped\""}}},
+		{Event: "added", Object: PodDTO{Namespace: "ns", Name: "two"}},
+		{Event: "deleted", Deleted: &ResourceRef{Kind: "Pod", Namespace: "ns", Name: "one"}},
+		{Event: "deleted", Deleted: &ResourceRef{Kind: "Pod", Namespace: "ns", Name: "missing"}},
+		{Event: "deleted", Deleted: &ResourceRef{Kind: "Pod", Namespace: "ns", Name: "two"}},
+		{Event: "modified", Object: PodDTO{Namespace: "ns", Name: "three"}},
+	} {
+		if !worker.updateSnapshot(event) {
+			t.Fatalf("ordinary watch delta was rejected: %#v", event)
+		}
+		encoded, err := json.Marshal(worker.snapshot.Items)
+		if err != nil || worker.snapshotBytes != len(encoded) {
+			t.Fatalf("snapshot accounting drift after %s: tracked=%d encoded=%d err=%v", event.Event, worker.snapshotBytes, len(encoded), err)
+		}
+	}
+}
+
+func TestWatchManagerBoundsCombinedSnapshotsAndReleasesIdleBudget(t *testing.T) {
+	t.Parallel()
+	snapshot := WatchSnapshot{ResourceVersion: "1", Items: []TopicObject{PodDTO{Namespace: "ns", Name: "api"}}}
+	encoded, _ := json.Marshal(snapshot.Items)
+	port := &fakeWatchPort{snapshot: snapshot, stream: &fakeWatchStream{channel: make(chan WatchChange)}}
+	manager := NewWatchManagerWithConfig(port, WatchManagerConfig{MaxSnapshotBytes: len(encoded)})
+	t.Cleanup(manager.Close)
+	first, err := manager.Subscribe(t.Context(), podWatchKey())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(first.Close)
+	if event, err := nextWithin(first); err != nil || event.Event != "snapshot" {
+		t.Fatalf("first snapshot: %#v %v", event, err)
+	}
+	if got := manager.SnapshotBytes(); got != len(encoded) {
+		t.Fatalf("watch bytes=%d want %d", got, len(encoded))
+	}
+	otherKey := podWatchKey()
+	otherKey.Scope = "another-scope"
+	second, err := manager.Subscribe(t.Context(), otherKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(second.Close)
+	if event, err := nextWithin(second); err != nil || event.Event != "error" || event.Reason != string(CodeLimitExceeded) || !event.RefetchRequired {
+		t.Fatalf("combined limit: %#v %v", event, err)
+	}
+	if got := manager.SnapshotBytes(); got != len(encoded) {
+		t.Fatalf("rejected snapshot retained bytes: %d", got)
+	}
+	first.Close()
+	second.Close()
+	manager.EvictIdle()
+	if got := manager.SnapshotBytes(); got != 0 {
+		t.Fatalf("evicted workers retained %d bytes", got)
+	}
+	otherKey.Scope = "third-scope"
+	third, err := manager.Subscribe(t.Context(), otherKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(third.Close)
+	if event, err := nextWithin(third); err != nil || event.Event != "snapshot" {
+		t.Fatalf("released budget not reusable: %#v %v", event, err)
+	}
+}
+
+func TestWatchManagerCachedSnapshotsCannotBypassCombinedBudget(t *testing.T) {
+	t.Parallel()
+	snapshot := WatchSnapshot{ResourceVersion: "1", Items: []TopicObject{PodDTO{Namespace: "ns", Name: "api"}}}
+	encoded, _ := json.Marshal(snapshot.Items)
+	cache := NewResourceCache(ResourceCacheConfig{})
+	keys := []WatchKey{podWatchKey(), podWatchKey()}
+	keys[1].Scope = "another-scope"
+	for _, key := range keys {
+		seed, err := cache.Subscribe(t.Context(), ResourceCacheKey{WatchKey: key})
+		if err != nil {
+			t.Fatal(err)
+		}
+		token, err := seed.BeginRefresh(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := seed.Commit(t.Context(), token, snapshot, false); err != nil {
+			t.Fatal(err)
+		}
+		seed.Close()
+	}
+	port := &fakeWatchPort{stream: &fakeWatchStream{channel: make(chan WatchChange)}}
+	manager := NewWatchManagerWithConfig(port, WatchManagerConfig{Cache: cache, MaxSnapshotBytes: len(encoded)})
+	t.Cleanup(manager.Close)
+	first, err := manager.Subscribe(t.Context(), keys[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(first.Close)
+	if _, err := manager.Subscribe(t.Context(), keys[1]); ErrorCodeOf(err) != CodeLimitExceeded {
+		t.Fatalf("cached snapshot bypassed quota: %v", err)
+	}
+	if stats := cache.Stats(); stats.Subscriptions != 1 {
+		t.Fatalf("rejected cached admission leaked subscription: %#v", stats)
+	}
+}
+
+func TestWatchRejectedCachedReplayReleasesUnstartedWorker(t *testing.T) {
+	t.Parallel()
+	cache := NewResourceCache(ResourceCacheConfig{})
+	key := podWatchKey()
+	seed, err := cache.Subscribe(t.Context(), ResourceCacheKey{WatchKey: key})
+	if err != nil {
+		t.Fatal(err)
+	}
+	items := make([]TopicObject, 20)
+	for index := range items {
+		items[index] = PodDTO{Namespace: "ns", Name: strconv.Itoa(index), Labels: map[string]string{"padding": strings.Repeat("x", 60000)}}
+	}
+	token, err := seed.BeginRefresh(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := seed.Commit(t.Context(), token, WatchSnapshot{ResourceVersion: "1", Items: items}, false); err != nil {
+		t.Fatal(err)
+	}
+	seed.Close()
+	port := &fakeWatchPort{}
+	manager := NewWatchManagerWithConfig(port, WatchManagerConfig{Cache: cache})
+	t.Cleanup(manager.Close)
+	subscription, err := manager.Subscribe(t.Context(), key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(subscription.Close)
+	event, err := nextWithin(subscription)
+	if err != nil || event.Event != "reset" || event.Reason != "slow_consumer" {
+		t.Fatalf("large cached replay did not reset: event=%#v err=%v", event, err)
+	}
+	if stats := cache.Stats(); stats.Subscriptions != 0 || manager.SharedWatchCount() != 0 {
+		t.Fatalf("rejected replay leaked an unstarted worker: cache=%#v workers=%d", stats, manager.SharedWatchCount())
+	}
+	port.mu.Lock()
+	defer port.mu.Unlock()
+	if port.lists != 0 || port.watches != 0 {
+		t.Fatal("rejected replay started unnecessary upstream work")
+	}
+}
+
+func TestApplyStreamEventToSnapshotDeletesExactEvent(t *testing.T) {
+	t.Parallel()
+	snapshot := WatchSnapshot{Items: []TopicObject{
+		EventDTO{Name: "one", Namespace: "ns", ObjectKind: "Pod", ObjectName: "api"},
+		EventDTO{Name: "two", Namespace: "ns", ObjectKind: "Pod", ObjectName: "api"},
+	}}
+	result := applyStreamEventToSnapshot(TopicEvents, snapshot, StreamEvent{
+		Event: "deleted", Topic: TopicEvents, Deleted: &ResourceRef{Kind: "Event", Namespace: "ns", Name: "one"},
+	})
+	if len(result.Items) != 1 || result.Items[0].(EventDTO).Name != "two" {
+		t.Fatalf("event deletion removed the wrong item: %#v", result.Items)
 	}
 }
 
@@ -340,6 +1073,75 @@ func TestReauthorizeTopicsBypassesCacheAndStopsOnRevocation(t *testing.T) {
 	err := ReauthorizeTopics(context.Background(), stub, Selection{Generation: "gen", Namespaces: []string{"payments"}}, []Topic{TopicPods})
 	if ErrorCodeOf(err) != CodeForbidden || stub.refreshes != 1 || stub.checks != 0 {
 		t.Fatalf("err=%v refreshes=%d checks=%d", err, stub.refreshes, stub.checks)
+	}
+}
+
+type concurrentStreamAuthorization struct {
+	globalDecision    authorization.Decision
+	namespaceDecision authorization.Decision
+	checks            atomic.Int32
+	active            atomic.Int32
+	maximum           atomic.Int32
+}
+
+func (stub *concurrentStreamAuthorization) Check(ctx context.Context, key authorization.Key) authorization.Capability {
+	return stub.capability(ctx, key)
+}
+
+func (stub *concurrentStreamAuthorization) Refresh(ctx context.Context, key authorization.Key) authorization.Capability {
+	return stub.capability(ctx, key)
+}
+
+func (stub *concurrentStreamAuthorization) capability(ctx context.Context, key authorization.Key) authorization.Capability {
+	stub.checks.Add(1)
+	if key.Namespace == "" {
+		return authorization.Capability{Decision: stub.globalDecision}
+	}
+	active := stub.active.Add(1)
+	defer stub.active.Add(-1)
+	for {
+		maximum := stub.maximum.Load()
+		if active <= maximum || stub.maximum.CompareAndSwap(maximum, active) {
+			break
+		}
+	}
+	select {
+	case <-time.After(time.Millisecond):
+	case <-ctx.Done():
+		return authorization.Capability{Decision: authorization.DecisionUnknown}
+	}
+	return authorization.Capability{Decision: stub.namespaceDecision}
+}
+
+func TestMultiNamespaceStreamAuthorizationUsesGlobalGrant(t *testing.T) {
+	selection := Selection{Generation: "gen", Namespaces: []string{"a", "b", "c"}}
+	stub := &concurrentStreamAuthorization{globalDecision: authorization.DecisionAllowed}
+	if err := AuthorizeTopics(t.Context(), stub, selection, []Topic{TopicPods}); err != nil {
+		t.Fatal(err)
+	}
+	if got := stub.checks.Load(); got != 2 {
+		t.Fatalf("expected only global list/watch probes, got %d", got)
+	}
+}
+
+func TestMultiNamespaceStreamAuthorizationFallsBackToBoundedChecks(t *testing.T) {
+	selection := Selection{Generation: "gen"}
+	for index := range 50 {
+		selection.Namespaces = append(selection.Namespaces, "ns-"+strconv.Itoa(index))
+	}
+	stub := &concurrentStreamAuthorization{globalDecision: authorization.DecisionDenied, namespaceDecision: authorization.DecisionAllowed}
+	if err := ReauthorizeTopics(t.Context(), stub, selection, []Topic{TopicPods}); err != nil {
+		t.Fatal(err)
+	}
+	if got := stub.checks.Load(); got != 101 {
+		t.Fatalf("expected global probe and 100 namespace checks, got %d", got)
+	}
+	if got := stub.maximum.Load(); got <= 1 || got > maximumConcurrentStreamAuthorizations {
+		t.Fatalf("bounded parallelism = %d", got)
+	}
+	stub.namespaceDecision = authorization.DecisionDenied
+	if err := AuthorizeTopics(t.Context(), stub, selection, []Topic{TopicPods}); ErrorCodeOf(err) != CodeForbidden {
+		t.Fatalf("denied namespace grant = %v", err)
 	}
 }
 

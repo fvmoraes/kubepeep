@@ -1,9 +1,10 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { PodDetail, SelectionSummary, WorkloadDetail } from '../api/types'
 import { PodActions, WorkloadActions } from './ResourceActions'
+import { workloadActionCatalog, type WorkloadActionID } from './workloadActionCatalog'
 import { ToastProvider } from './ui/Toast'
 
 function json(data: unknown, status = 200): Response {
@@ -75,6 +76,9 @@ describe('generation-bound authorized actions', () => {
     const restartButton = await screen.findByRole('button', { name: 'Restart Deployment' })
     await waitFor(() => expect(restartButton).toBeEnabled())
     fireEvent.click(restartButton)
+    const restartDialog = screen.getByRole('alertdialog', { name: 'Restart Deployment' })
+    fireEvent.click(within(restartDialog).getByRole('checkbox'))
+    fireEvent.click(within(restartDialog).getByRole('button', { name: 'Restart Deployment' }))
 
     expect(await screen.findByRole('status')).toHaveTextContent(/restart accepted/i)
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['action-permissions', 'gen_42'] })
@@ -107,11 +111,46 @@ describe('generation-bound authorized actions', () => {
     const restartButton = await screen.findByRole('button', { name: 'Restart Deployment' })
     await waitFor(() => expect(restartButton).toBeEnabled())
     fireEvent.click(restartButton)
+    const restartDialog = screen.getByRole('alertdialog', { name: 'Restart Deployment' })
+    fireEvent.click(within(restartDialog).getByRole('checkbox'))
+    fireEvent.click(within(restartDialog).getByRole('button', { name: 'Restart Deployment' }))
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/ACTION_FORBIDDEN/)
     await waitFor(() => expect(permissionCalls).toBeGreaterThan(1))
     expect(screen.getByRole('button', { name: 'Restart Deployment' })).toBeDisabled()
     expect(invalidateQueries).toHaveBeenCalledWith({ queryKey: ['action-permissions', 'gen_42'] })
+  })
+
+  it('requires the exact workload name before destructive deletion', async () => {
+    let deleteInit: RequestInit | undefined
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request, init?: RequestInit) => {
+      const path = String(input)
+      if (path.startsWith('/api/v1/permissions?')) return Promise.resolve(json({ generation: 'gen_42', complete: true, truncated: false, errors: [], decisions: [
+        { capabilityId: 'deployments.restart', decision: 'allowed' }, { capabilityId: 'deployments.scale', decision: 'allowed' }, { capabilityId: 'deployments.delete', decision: 'allowed' },
+      ] }))
+      if (path === '/api/v1/session') return Promise.resolve(json({ csrfToken: 'csrf-action', origin: 'http://127.0.0.1:2748', generation: 'gen_42', expiresAt: '2026-08-17T18:00:00Z' }))
+      if (path === '/api/v1/workloads/deployments/payments/api') {
+        deleteInit = init
+        return Promise.resolve(json({ accepted: true, action: 'deleteWorkload', target: {}, generation: 'gen_42', resourceVersion: '17' }))
+      }
+      throw new Error(`Unexpected request: ${path}`)
+    }))
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+    render(wrapper(client, <WorkloadActions detail={workload} selection={selection} />))
+
+    const remove = await screen.findByRole('button', { name: 'Delete Deployment' })
+    await waitFor(() => expect(remove).toBeEnabled())
+    fireEvent.click(remove)
+    const dialog = screen.getByRole('alertdialog', { name: 'Delete Deployment' })
+    const confirm = within(dialog).getByRole('button', { name: 'Delete Deployment' })
+    fireEvent.click(within(dialog).getByRole('checkbox'))
+    expect(confirm).toBeDisabled()
+    fireEvent.change(within(dialog).getByLabelText('Type api to confirm'), { target: { value: 'api' } })
+    expect(confirm).toBeEnabled()
+    fireEvent.click(confirm)
+
+    expect(await screen.findByRole('status')).toHaveTextContent(/Deployment deleted/i)
+    expect(JSON.parse(String(deleteInit?.body))).toEqual(expect.objectContaining({ expectedUid: 'uid-api', expectedResourceVersion: '17', consequenceCode: 'DELETE_RESOURCE' }))
   })
 
   it('opens exec only from an ephemeral ticket, echoes heartbeat, and closes on generation change', async () => {
@@ -175,4 +214,54 @@ describe('generation-bound authorized actions', () => {
     view.rerender(wrapper(client, <PodActions detail={pod} selection={{ ...selection, generation: 'gen_43' }} />))
     expect(socket.close).toHaveBeenCalledWith(1000, 'page_closed')
   })
+})
+
+describe('workload action catalog RBAC matrix', () => {
+  const states = ['allowed', 'denied', 'unknown', 'error'] as const
+  const kinds = Object.keys(workloadActionCatalog) as WorkloadDetail['kind'][]
+
+  function actionButtonName(kind: WorkloadDetail['kind'], action: WorkloadActionID): string {
+    if (action === 'restart') return `Restart ${kind}`
+    if (action === 'scale') return 'Decrease replicas'
+    if (action === 'delete') return `Delete ${kind}`
+    if (action === 'suspend') return 'Suspend schedule'
+    return 'Run now'
+  }
+
+  it.each(kinds.flatMap((kind) => states.map((state) => ({ kind, state }))))(
+    'renders $kind capabilities as $state',
+    async ({ kind, state }) => {
+      const definitions = workloadActionCatalog[kind]
+      vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+        const path = String(input)
+        if (path.startsWith('/api/v1/permissions?')) {
+          if (state === 'error') return Promise.resolve(json({ code: 'CLUSTER_UNAVAILABLE', message: 'Permission check failed.' }, 503))
+          return Promise.resolve(json({
+            generation: selection.generation,
+            complete: true,
+            truncated: false,
+            errors: [],
+            decisions: definitions.map((action) => ({ capabilityId: action.capabilityID, decision: state })),
+          }))
+        }
+        if (path.startsWith('/api/v1/hpas?')) {
+          return Promise.resolve(json({ items: [], page: { limit: 100, next: '', complete: true, truncated: false, filterScope: 'collection' }, coverage: null }))
+        }
+        throw new Error(`Unexpected request: ${path}`)
+      }))
+      const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+      render(wrapper(client, <WorkloadActions detail={{ ...workload, kind }} selection={selection} />))
+
+      if (state === 'error') {
+        expect(await screen.findByText('Permission check failed; actions remain disabled.')).toBeInTheDocument()
+      } else {
+        await screen.findAllByText(state === 'allowed' ? /allowed \(the backend/ : state === 'denied' ? /denied by Kubernetes/ : /could not be verified/)
+      }
+      for (const action of definitions) {
+        const button = screen.getByRole('button', { name: actionButtonName(kind, action.id) })
+        if (state === 'allowed') await waitFor(() => expect(button).toBeEnabled())
+        else expect(button).toBeDisabled()
+      }
+    },
+  )
 })

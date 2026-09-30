@@ -138,6 +138,37 @@ func TestSelectRejectsScopeFromAnotherProfileContext(t *testing.T) {
 	}
 }
 
+func TestSetDefaultMarksAndActivatesScopeWithoutListingNamespaces(t *testing.T) {
+	repository := newFakeRepository()
+	repository.scopes[7] = Scope{ID: 7, ClusterProfileID: 1, Context: "development", Name: "Finance", Mode: ScopeModeList, Namespaces: []string{"payments", "billing"}, Version: 1}
+	repository.scopes[8] = Scope{ID: 8, ClusterProfileID: 1, Context: "development", Name: "Platform", Mode: ScopeModeSingle, Namespaces: []string{"platform"}, IsDefault: true, Version: 1}
+	coordinator := &fakeCoordinator{binding: SelectionBinding{ClusterProfileID: 1, Context: "development", ActiveScopeID: 8, Generation: "gen_41"}}
+	service := NewService(repository, coordinator, nil)
+
+	resolution, result, err := service.SetDefault(context.Background(), 7, ScopeSelectRequest{ExpectedGeneration: "gen_41"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !repository.scopes[7].IsDefault || repository.scopes[8].IsDefault || resolution.ScopeID != 7 || result.Binding.ActiveScopeID != 7 || result.Generation != "gen_42" {
+		t.Fatalf("resolution=%#v result=%#v scopes=%#v", resolution, result, repository.scopes)
+	}
+}
+
+func TestDeleteDefaultCanExplicitlyReturnActiveContextToSetup(t *testing.T) {
+	repository := newFakeRepository()
+	repository.scopes[7] = Scope{ID: 7, ClusterProfileID: 1, Context: "development", Name: "Finance", Mode: ScopeModeSingle, Namespaces: []string{"payments"}, IsDefault: true, Version: 2}
+	coordinator := &fakeCoordinator{binding: SelectionBinding{ClusterProfileID: 1, Context: "development", ActiveScopeID: 7, Generation: "gen_41"}}
+	service := NewService(repository, coordinator, nil)
+
+	result, err := service.Delete(context.Background(), 7, ScopeDeleteRequest{Confirmed: true, Version: 2, ReturnToSetup: true, ExpectedGeneration: "gen_41"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Changed || result.Binding.ActiveScopeID != 0 || result.Resolution.ScopeID != 0 {
+		t.Fatalf("result=%#v", result)
+	}
+}
+
 func TestUpdateActiveScopeChecksVersionAndPublishesGeneration(t *testing.T) {
 	repository := newFakeRepository()
 	repository.scopes[7] = Scope{ID: 7, ClusterProfileID: 1, Context: "development", Name: "Finance", Mode: ScopeModeSingle, Namespaces: []string{"payments"}, Version: 3, CreatedAt: time.Now()}
@@ -347,7 +378,24 @@ func (repository *fakeRepository) Update(_ context.Context, id, expectedVersion 
 	return existing, nil
 }
 
-func (repository *fakeRepository) Delete(_ context.Context, id, expectedVersion int64) error {
+func (repository *fakeRepository) SetDefault(_ context.Context, id int64) (Scope, error) {
+	repository.mutex.Lock()
+	defer repository.mutex.Unlock()
+	target, exists := repository.scopes[id]
+	if !exists {
+		return Scope{}, ErrNotFound
+	}
+	for key, scope := range repository.scopes {
+		if scope.ClusterProfileID == target.ClusterProfileID && scope.Context == target.Context {
+			scope.IsDefault = key == id
+			repository.scopes[key] = scope
+		}
+	}
+	target.IsDefault = true
+	return target, nil
+}
+
+func (repository *fakeRepository) Delete(_ context.Context, id, expectedVersion, replacementDefaultID int64) error {
 	repository.mutex.Lock()
 	defer repository.mutex.Unlock()
 	repository.deleteCalls++
@@ -357,6 +405,16 @@ func (repository *fakeRepository) Delete(_ context.Context, id, expectedVersion 
 	}
 	if existing.Version != expectedVersion {
 		return ErrConflict
+	}
+	if replacementDefaultID > 0 {
+		replacement, exists := repository.scopes[replacementDefaultID]
+		if !exists || replacement.ClusterProfileID != existing.ClusterProfileID || replacement.Context != existing.Context {
+			return ErrSelectionMismatch
+		}
+		delete(repository.scopes, id)
+		replacement.IsDefault = true
+		repository.scopes[replacementDefaultID] = replacement
+		return nil
 	}
 	delete(repository.scopes, id)
 	return nil

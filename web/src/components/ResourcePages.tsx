@@ -1,16 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useParams, useSearchParams } from 'react-router'
-import { ScrollText, Trash2 } from 'lucide-react'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
+import { RotateCcw, ScrollText, Trash2 } from 'lucide-react'
 
 import {
   closePortForward,
+  createIdempotencyKey,
   getDashboardMetrics,
   getEndpointsList,
   getEndpointSlices,
   getEvents,
   getIngressClasses,
   getIngresses,
+  getPermissions,
   getNetworkPolicies,
   getNodes,
   getPod,
@@ -23,30 +25,37 @@ import {
   getWorkloads,
   deletePod,
   deleteWorkload,
+  restartWorkload,
   APIError,
 } from '../api/client'
 import type {
-  CollectionResult,
   EndpointSliceResource,
   Endpoints,
   EventResource,
+  ConfigMapResource,
   IngressClass,
   NetworkPolicy,
   IngressResource,
   Pod,
   ServiceResource,
   Workload,
+  CapabilityMatrix,
 } from '../api/types'
 import { Badge, Button, DataTable, Input, Select, StatusBadge, type DataTableColumn } from './ui'
 import { ConfirmDialog } from './ui/ConfirmDialog'
 import { useToast } from './ui/Toast'
 import { csrfForGeneration } from '../actions/csrf'
 import { effectiveNamespaces, useGlobalNamespace } from '../context/GlobalNamespace'
+import { bindListInteraction, listInteractionFor } from '../observability/uxMetrics'
 import { ResourceListControls } from './ResourceListControls'
 import type { ActiveListFilter, ListSortOrder, ListSortOption } from './ResourceListControls'
 import { ResourceLiveUpdates } from './ResourceLiveUpdates'
 import { SavedFilterControls } from './SavedFilterControls'
-import { CollectionFooter, QueryState, SelectionGate } from './resource/states'
+import { InfiniteCollectionFooter, QueryState, SelectionGate } from './resource/states'
+import { collectionGcTime, collectionStaleTime, useInfiniteCollection } from './resource/useInfiniteCollection'
+import { podPreviewKey } from './resource/podPreview'
+import { useSelectionBoundKeys } from './resource/useSelectionBoundKeys'
+import { useResourceStreamPreview } from './resource/useResourceStreamPreview'
 import { ResourcePage } from './resource/ResourcePage'
 import { ResourceTabStrip } from './resource/ResourceTabStrip'
 import { TableLink } from './resource/TableLink'
@@ -76,22 +85,7 @@ function useGenerationRequests(generation: string | undefined) {
   return { run, abortAll }
 }
 
-function useGenerationCursor(generation: string | undefined): [string, (value: string) => void] {
-  const [state, setState] = useState<{ generation: string | undefined; value: string }>({ generation, value: '' })
-  const value = state.generation === generation ? state.value : ''
-  const setValue = useCallback((next: string) => setState({ generation, value: next }), [generation])
-  return [value, setValue]
-}
 
-function useGenerationCursorMap<K extends string>(generation: string | undefined, empty: Record<K, string>): [Record<K, string>, (key: K, value: string) => void] {
-  const [state, setState] = useState<{ generation: string | undefined; values: Record<K, string> }>(() => ({ generation, values: { ...empty } }))
-  const values = state.generation === generation ? state.values : empty
-  const setValue = useCallback((key: K, value: string) => setState((current) => ({
-    generation,
-    values: { ...(current.generation === generation ? current.values : empty), [key]: value },
-  })), [empty, generation])
-  return [values, setValue]
-}
 
 const workloadKindTitles: Record<string, Workload['kind']> = {
   deployments: 'Deployment',
@@ -188,6 +182,53 @@ const podSortOptions: readonly ListSortOption[] = [
   { value: 'restarts', label: 'Restarts' },
   { value: 'status', label: 'Status' },
 ]
+
+function isPodPreview(value: unknown): value is Pod {
+  if (!value || typeof value !== 'object') return false
+  const pod = value as Partial<Pod>
+  return typeof pod.namespace === 'string' && typeof pod.name === 'string'
+    && typeof pod.status === 'string' && typeof pod.ready?.current === 'number'
+    && typeof pod.ready.desired === 'number' && typeof pod.restarts === 'number'
+    && typeof pod.ageSeconds === 'number' && typeof pod.problematic === 'boolean'
+}
+function isNamedPreview(value: unknown): value is { namespace: string; name: string } {
+  if (!value || typeof value !== 'object') return false
+  const item = value as { namespace?: unknown; name?: unknown }
+  return typeof item.namespace === 'string' && typeof item.name === 'string'
+}
+
+function isWorkloadPreview(value: unknown): value is Workload {
+  if (!isNamedPreview(value)) return false
+  const item = value as Partial<Workload>
+  return typeof item.kind === 'string' && typeof item.status === 'string' && typeof item.ageSeconds === 'number'
+}
+
+function isEventPreview(value: unknown): value is EventResource {
+  if (!value || typeof value !== 'object') return false
+  const item = value as Partial<EventResource>
+  return typeof item.namespace === 'string' && typeof item.objectKind === 'string' && typeof item.objectName === 'string'
+    && typeof item.type === 'string' && typeof item.reason === 'string' && typeof item.message === 'string'
+    && typeof item.count === 'number' && (item.timestamp === null || typeof item.timestamp === 'string')
+}
+
+function isNetworkPreview(value: unknown): value is ServiceResource | IngressResource | EndpointSliceResource {
+  if (!isNamedPreview(value)) return false
+  const item = value as Partial<ServiceResource & IngressResource & EndpointSliceResource>
+  return typeof item.type === 'string' && Array.isArray(item.clusterIPs)
+    || Array.isArray(item.hosts) && (item.className === null || typeof item.className === 'string')
+    || typeof item.addressType === 'string' && Array.isArray(item.endpoints)
+}
+
+function isConfigMapPreview(value: unknown): value is ConfigMapResource {
+  if (!isNamedPreview(value)) return false
+  const item = value as Partial<ConfigMapResource>
+  return typeof item.uid === 'string' && typeof item.creationTimestamp === 'string'
+}
+
+const namedPreviewKey = (item: { namespace: string; name: string }) => `${item.namespace}/${item.name}`
+const eventPreviewKey = (item: EventResource) => `${item.namespace}/${item.objectKind}/${item.objectName}/${item.timestamp ?? ''}/${item.reason}`
+const compareEventPreview = (left: EventResource, right: EventResource) => (right.timestamp ?? '').localeCompare(left.timestamp ?? '') || eventPreviewKey(left).localeCompare(eventPreviewKey(right))
+const workloadPreviewKey = (item: Workload) => `${item.kind}/${item.namespace}/${item.name}`
 const eventSortOptions: readonly ListSortOption[] = [
   { value: 'timestamp', label: 'Timestamp' },
   { value: 'count', label: 'Count' },
@@ -274,8 +315,27 @@ function sameListState<T extends object>(left: T, right: T): boolean {
 
 /** Bulk destructive operations: per-resource detail fetch → authorized delete. */
 interface BulkOutcome {
-  deleted: number
+  succeeded: number
   failed: Array<{ name: string; reason: string }>
+}
+
+const bulkRestartCapabilities: Partial<Record<Workload['kind'], string>> = {
+  Deployment: 'deployments.restart',
+  StatefulSet: 'statefulsets.restart',
+  DaemonSet: 'daemonsets.restart',
+}
+
+const bulkDeleteCapabilities: Record<Workload['kind'], string> = {
+  Deployment: 'deployments.delete',
+  StatefulSet: 'statefulsets.delete',
+  DaemonSet: 'daemonsets.delete',
+  Job: 'jobs.delete',
+  CronJob: 'cronjobs.delete',
+  ReplicaSet: 'replicasets.delete',
+}
+
+function allows(matrix: CapabilityMatrix | undefined, capabilityId: string, namespace: string, resourceName: string): boolean {
+  return matrix?.decisions.some((item) => item.capabilityId === capabilityId && item.namespace === namespace && item.resourceName === resourceName && item.decision === 'allowed') === true
 }
 
 function mutationError(error: unknown): string {
@@ -304,10 +364,9 @@ export function WorkloadsPage() {
   const kindPreset = useMemo(() => (kindParam && !paramNamespace && !paramName && (workloadKinds as readonly string[]).includes(kindParam) ? kindParam : ''), [kindParam, paramNamespace, paramName])
   const [draft, setDraft] = useState<WorkloadListState>(() => ({ ...workloadsStateFromParams(params), kind: kindPreset }))
   const [applied, setApplied] = useState<WorkloadListState>(() => ({ ...workloadsStateFromParams(params), kind: kindPreset }))
-  const [cursor, setCursor] = useGenerationCursor(generation)
   const queryClient = useQueryClient()
-  const [selectedKeys, setSelectedKeys] = useState<ReadonlySet<string>>(new Set())
-  const [bulkConfirm, setBulkConfirm] = useState(false)
+  const [selectedKeys, setSelectedKeys] = useSelectionBoundKeys([selection?.clusterProfileId, selection?.context, selection?.scopeId, generation, globalNamespace.value])
+  const [bulkAction, setBulkAction] = useState<'delete' | 'restart' | null>(null)
 
   // Deep links (/workloads/:kind/:ns/:name) open in the Resource Workspace.
   useEffect(() => {
@@ -330,17 +389,35 @@ export function WorkloadsPage() {
   ]
   const rowKey = useCallback((item: Workload) => `${item.kind}/${item.namespace}/${item.name}`, [])
 
-  const list = useQuery({
-    queryKey: ['resources', 'workloads', generation, applied, cursor],
-    queryFn: ({ signal }) => getWorkloads({ limit: 100, search: applied.search || undefined, namespaces: effectiveNamespaces(globalNamespace.value, namespaceValues(applied.namespace)), kinds: applied.kind ? [applied.kind] : undefined, statuses: applied.workloadStatus ? [applied.workloadStatus] : undefined, ...optionalSort(applied.sort, applied.order, 'identity', 'asc'), continueToken: cursor || undefined }, signal, generation),
+  const collection = useInfiniteCollection<Workload>({
+    identity: ['resources', 'workloads', selection?.clusterProfileId, selection?.context, selection?.scopeId, generation, globalNamespace.value, applied.namespace],
+    filters: applied,
+    fetchPage: (cursor, signal, prefetch) => getWorkloads({ limit: 100, prefetch, uxInteractionId: listInteractionFor(applied), search: applied.search || undefined, namespaces: effectiveNamespaces(globalNamespace.value, namespaceValues(applied.namespace)), kinds: applied.kind ? [applied.kind] : undefined, statuses: applied.workloadStatus ? [applied.workloadStatus] : undefined, ...optionalSort(applied.sort, applied.order, 'identity', 'asc'), continueToken: cursor || undefined }, signal, generation),
     enabled: Boolean(selection),
   })
-  const selectedItems = useMemo(() => (list.data?.items ?? []).filter((item) => selectedKeys.has(rowKey(item))), [list.data, selectedKeys, rowKey])
+  const list = collection.query
+  const preview = useResourceStreamPreview<Workload>({ identity: [selection?.clusterProfileId, selection?.context, selection?.scopeId, generation, globalNamespace.value], topic: 'workloads', namespace: globalNamespace.value, isItem: isWorkloadPreview, itemKey: workloadPreviewKey })
+  const previewActive = list.isPending && !collection.authorizationFailed && sameListState(applied, defaultWorkloadList) && Boolean(preview.preview?.items.length)
+  const visibleItems = previewActive ? preview.preview!.items : collection.items
+  useEffect(() => { if (collection.authorizationFailed) setSelectedKeys(new Set()) }, [collection.authorizationFailed, setSelectedKeys])
+  const selectedItems = useMemo(() => collection.items.filter((item) => selectedKeys.has(rowKey(item))), [collection.items, selectedKeys, rowKey])
+  const selectedCapabilityIDs = useMemo(() => Array.from(new Set(selectedItems.flatMap((item) => [bulkDeleteCapabilities[item.kind], bulkRestartCapabilities[item.kind]].filter((value): value is string => Boolean(value))))), [selectedItems])
+  const bulkPermissions = useQuery({
+    queryKey: ['bulk-action-permissions', generation, selectedItems.map(rowKey).join('|'), selectedCapabilityIDs.join('|')],
+    queryFn: ({ signal }) => getPermissions({ namespaces: Array.from(new Set(selectedItems.map((item) => item.namespace))), capabilityIds: selectedCapabilityIDs, resourceNames: selectedItems.map((item) => item.name) }, signal, generation),
+    enabled: Boolean(generation && selectedItems.length),
+    staleTime: 15_000,
+  })
+  const canBulkDelete = selectedItems.length > 0 && selectedItems.every((item) => allows(bulkPermissions.data, bulkDeleteCapabilities[item.kind], item.namespace, item.name))
+  const canBulkRestart = selectedItems.length > 0 && selectedItems.every((item) => {
+    const capability = bulkRestartCapabilities[item.kind]
+    return Boolean(capability && allows(bulkPermissions.data, capability, item.namespace, item.name))
+  })
 
   const bulkDelete = useMutation({
     mutationFn: async (): Promise<BulkOutcome> => {
       const csrfToken = await csrfForGeneration(generation!)
-      const outcome: BulkOutcome = { deleted: 0, failed: [] }
+      const outcome: BulkOutcome = { succeeded: 0, failed: [] }
       for (const item of selectedItems) {
         try {
           const detail = await getWorkload(workloadKindPath(item.kind)!, item.namespace, item.name, undefined, generation)
@@ -353,7 +430,7 @@ export function WorkloadsPage() {
             expectedUid: detail.metadata.uid,
             expectedResourceVersion: detail.metadata.resourceVersion,
           }, csrfToken)
-          outcome.deleted += 1
+          outcome.succeeded += 1
         } catch (error) {
           outcome.failed.push({ name: `${item.kind}/${item.name}`, reason: mutationError(error) })
         }
@@ -361,14 +438,53 @@ export function WorkloadsPage() {
       return outcome
     },
     onSuccess: (outcome) => {
-      toast.success(`Deleted ${outcome.deleted} workload${outcome.deleted === 1 ? '' : 's'}`, outcome.failed.length ? `${outcome.failed.length} failed: ${outcome.failed.map((item) => item.name).join(', ')}` : 'Every selected workload was removed.')
-      setBulkConfirm(false)
+      toast.success(`Deleted ${outcome.succeeded} workload${outcome.succeeded === 1 ? '' : 's'}`, outcome.failed.length ? `${outcome.failed.length} failed: ${outcome.failed.map((item) => item.name).join(', ')}` : 'Every selected workload was removed.')
+      setBulkAction(null)
       setSelectedKeys(new Set())
       void queryClient.invalidateQueries({ queryKey: ['resources', 'workloads'] })
     },
     onError: (error) => {
       toast.error('Bulk delete failed', mutationError(error))
-      setBulkConfirm(false)
+      setBulkAction(null)
+    },
+  })
+
+  const bulkRestart = useMutation({
+    mutationFn: async (): Promise<BulkOutcome> => {
+      const csrfToken = await csrfForGeneration(generation!)
+      const outcome: BulkOutcome = { succeeded: 0, failed: [] }
+      for (const item of selectedItems) {
+        const kindPath = workloadKindPath(item.kind)
+        if (!kindPath || !bulkRestartCapabilities[item.kind]) {
+          outcome.failed.push({ name: `${item.kind}/${item.name}`, reason: 'This workload kind does not support rollout restart.' })
+          continue
+        }
+        try {
+          const detail = await getWorkload(kindPath, item.namespace, item.name, undefined, generation)
+          await restartWorkload(kindPath, item.namespace, item.name, {
+            confirmed: true,
+            action: 'restart',
+            consequenceCode: 'RECREATE_WORKLOAD_PODS',
+            target: { clusterProfileId: selection!.clusterProfileId, context: selection!.context, namespace: item.namespace, kind: item.kind, name: item.name },
+            expectedGeneration: generation!,
+            expectedResourceVersion: detail.metadata.resourceVersion,
+          }, csrfToken, createIdempotencyKey())
+          outcome.succeeded += 1
+        } catch (error) {
+          outcome.failed.push({ name: `${item.kind}/${item.name}`, reason: mutationError(error) })
+        }
+      }
+      return outcome
+    },
+    onSuccess: (outcome) => {
+      toast.success(`Restarted ${outcome.succeeded} workload${outcome.succeeded === 1 ? '' : 's'}`, outcome.failed.length ? `${outcome.failed.length} failed: ${outcome.failed.map((item) => item.name).join(', ')}` : 'Every selected controller accepted a rollout restart.')
+      setBulkAction(null)
+      setSelectedKeys(new Set())
+      void queryClient.invalidateQueries({ queryKey: ['resources', 'workloads'] })
+    },
+    onError: (error) => {
+      toast.error('Bulk restart failed', mutationError(error))
+      setBulkAction(null)
     },
   })
 
@@ -376,9 +492,9 @@ export function WorkloadsPage() {
     <ResourcePage
       title="Workloads"
       description="Deployments, StatefulSets, DaemonSets, Jobs and CronJobs in the active scope."
-      actions={selection ? <ResourceLiveUpdates key={`workloads/${generation}`} generation={generation!} topics={['workloads']} queryKeys={[["resources", "workloads"]]} /> : null}
+      actions={selection ? <ResourceLiveUpdates key={`workloads/${generation}`} generation={generation!} topics={['workloads']} queryKeys={[["resources", "workloads"]]} autoStart={list.isPending} onProgress={preview.onProgress} onPreviewReset={preview.onReset} /> : null}
     >
-      <ResourceListControls search={draft.search} appliedSearch={applied.search} onSearchChange={(value) => setDraft((current) => ({ ...current, search: value }))} onApply={() => { setApplied(draft); setCursor('') }} onRefresh={() => queryClient.invalidateQueries({ queryKey: ['resources', 'workloads'] })} onClear={() => { setDraft({ ...defaultWorkloadList, kind: kindPreset }); setApplied({ ...defaultWorkloadList, kind: kindPreset }); setCursor('') }} activeFilters={[
+      <ResourceListControls search={draft.search} appliedSearch={applied.search} onSearchChange={(value) => setDraft((current) => ({ ...current, search: value }))} onApply={(interactionId) => { setApplied(bindListInteraction({ ...draft }, interactionId)) }} onRefresh={() => queryClient.invalidateQueries({ queryKey: ['resources', 'workloads'] })} onClear={() => { setDraft({ ...defaultWorkloadList, kind: kindPreset }); setApplied({ ...defaultWorkloadList, kind: kindPreset }) }} activeFilters={[
         ...activeFilter('namespace', 'Namespace', namespaceValues(applied.namespace)), ...activeFilter('kind', 'Kind', applied.kind), ...activeFilter('status', 'Status', applied.workloadStatus),
       ]} sort={draft.sort} order={draft.order} appliedSort={applied.sort} appliedOrder={applied.order} defaultSort="identity" defaultOrder="asc" hasPendingChanges={!sameListState(draft, applied)} sortOptions={workloadSortOptions} onSortChange={(value) => setDraft((current) => ({ ...current, sort: value }))} onOrderChange={(value) => setDraft((current) => ({ ...current, order: value }))}>
         <NamespaceFilterInput value={draft.namespace} onChange={(value) => setDraft((current) => ({ ...current, namespace: value }))} />
@@ -398,24 +514,27 @@ export function WorkloadsPage() {
         }
         setDraft(next)
         setApplied(next)
-        setCursor('')
       }} /> : null}
       <SelectionGate pending={status.isPending} error={status.error} selected={Boolean(selection)}>
-        <QueryState pending={list.isPending} error={list.error} empty={list.data?.items.length === 0}>
+        <QueryState pending={list.isPending && !previewActive} error={!list.data || collection.authorizationFailed ? list.error : null} empty={visibleItems.length === 0 && !list.hasNextPage}>
           {selectedItems.length > 0 ? (
             <BulkToolbar count={selectedItems.length}>
-              <Button variant="danger" size="sm" onClick={() => setBulkConfirm(true)}><Trash2 size={12} aria-hidden="true" /> Delete selected</Button>
+              <Button variant="warning" size="sm" disabled={!canBulkRestart || bulkPermissions.isPending} disabledReason="Every selected workload must support rollout restart and be authorized." onClick={() => setBulkAction('restart')}><RotateCcw size={12} aria-hidden="true" /> Restart selected</Button>
+              <Button variant="danger" size="sm" disabled={!canBulkDelete || bulkPermissions.isPending} disabledReason="Delete must be authorized for every selected workload." onClick={() => setBulkAction('delete')}><Trash2 size={12} aria-hidden="true" /> Delete selected</Button>
               <Button variant="ghost" size="sm" onClick={() => setSelectedKeys(new Set())}>Clear selection</Button>
             </BulkToolbar>
           ) : null}
           <div className="min-w-0 overflow-x-auto rounded-xl border border-kp-overlay-0 bg-kp-surface-0">
             <ColumnVisibilityControl state={workloadColumnState} columns={workloadColumns} />
+            {previewActive ? <p className="px-3 py-1.5 text-xs text-kp-sky" role="status">Receiving workloads · ✓ {preview.preview!.completed}/{preview.preview!.requested} namespaces · partial preview</p> : null}
+            {list.isPlaceholderData || list.isFetching && !list.isFetchingNextPage ? <p className="px-3 py-1.5 text-xs text-kp-overlay-text" role="status">Refreshing workloads…</p> : null}
             <DataTable
-              caption="Authorized workload page"
-              rows={list.data?.items ?? []}
+              caption="Authorized workload pages"
+              rows={visibleItems}
+              onScrollProgress={collection.onScrollProgress}
               getRowKey={rowKey}
               columns={applyColumnVisibility(workloadColumns, workloadColumnState)}
-              selectable
+              selectable={!previewActive}
               selectedKeys={selectedKeys}
               onToggleRow={(key, checked) => {
                 setSelectedKeys((current) => {
@@ -426,25 +545,25 @@ export function WorkloadsPage() {
                 })
               }}
               onToggleAll={(checked) => {
-                setSelectedKeys(checked ? new Set((list.data?.items ?? []).map(rowKey)) : new Set())
+                setSelectedKeys(checked ? new Set(collection.items.map(rowKey)) : new Set())
               }}
             />
-            {list.data ? <CollectionFooter result={list.data} onNext={setCursor} onRestart={() => setCursor('')} /> : null}
+            {collection.lastPage ? <InfiniteCollectionFooter result={collection.lastPage} itemCount={collection.items.length} pageCount={list.data?.pages.length ?? 0} firstPage={list.data?.pageParams[0] === '' && list.data.pages.length === 1} hasNextPage={Boolean(list.hasNextPage)} loading={list.isFetching} refreshing={list.isPlaceholderData} nextPageError={collection.nextPageError} onNext={() => void collection.loadNextPage()} onRestart={() => void queryClient.resetQueries({ queryKey: collection.queryKey })} /> : null}
           </div>
         </QueryState>
       </SelectionGate>
       <ConfirmDialog
-        open={bulkConfirm}
-        severity="danger"
-        title={`Delete ${selectedItems.length} workload${selectedItems.length === 1 ? '' : 's'}`}
-        description="Each delete is authorized and re-validated by Kubernetes individually before it executes."
+        open={bulkAction !== null}
+        severity={bulkAction === 'restart' ? 'warning' : 'danger'}
+        title={`${bulkAction === 'restart' ? 'Restart' : 'Delete'} ${selectedItems.length} workload${selectedItems.length === 1 ? '' : 's'}`}
+        description={`Each ${bulkAction === 'restart' ? 'restart' : 'delete'} is authorized and re-validated by Kubernetes individually before it executes.`}
         resources={selectedItems.map((item) => ({ kind: item.kind, namespace: item.namespace, name: item.name }))}
-        consequenceNote="Dependent ReplicaSets, Pods and Jobs are garbage-collected by Kubernetes after deletion. This action cannot be undone."
-        confirmLabel="Delete selected"
-        pendingLabel="Deleting…"
-        pending={bulkDelete.isPending}
-        onConfirm={() => bulkDelete.mutate()}
-        onCancel={() => setBulkConfirm(false)}
+        consequenceNote={bulkAction === 'restart' ? 'Each controller updates its Pod template and Kubernetes replaces the managed Pods.' : 'Dependent ReplicaSets, Pods and Jobs are garbage-collected by Kubernetes after deletion. This action cannot be undone.'}
+        confirmLabel={bulkAction === 'restart' ? 'Restart selected' : 'Delete selected'}
+        pendingLabel={bulkAction === 'restart' ? 'Restarting…' : 'Deleting…'}
+        pending={bulkDelete.isPending || bulkRestart.isPending}
+        onConfirm={() => bulkAction === 'restart' ? bulkRestart.mutate() : bulkDelete.mutate()}
+        onCancel={() => setBulkAction(null)}
       />
     </ResourcePage>
   )
@@ -460,10 +579,18 @@ export function PodsPage() {
   const generation = selection?.generation
   const [draft, setDraft] = useState<PodListState>(() => podsStateFromParams(params))
   const [applied, setApplied] = useState<PodListState>(() => podsStateFromParams(params))
-  const [cursor, setCursor] = useGenerationCursor(generation)
   const queryClient = useQueryClient()
-  const [selectedKeys, setSelectedKeys] = useState<ReadonlySet<string>>(new Set())
-  const [bulkConfirm, setBulkConfirm] = useState(false)
+  const [selectedKeys, setSelectedKeys] = useSelectionBoundKeys([selection?.clusterProfileId, selection?.context, selection?.scopeId, generation, globalNamespace.value])
+  const [bulkAction, setBulkAction] = useState<'delete' | 'restart' | null>(null)
+  const preview = useResourceStreamPreview<Pod>({ identity: [selection?.clusterProfileId, selection?.context, selection?.scopeId, generation, globalNamespace.value], topic: 'pods', namespace: globalNamespace.value, isItem: isPodPreview, itemKey: namedPreviewKey })
+  const previewNamespace = globalNamespace.value || globalNamespace.options[0] || ''
+  const seedPreview = useQuery({
+    queryKey: selection && previewNamespace ? podPreviewKey(selection, globalNamespace.value, previewNamespace) : ['pod-preview', 'unavailable'],
+    queryFn: ({ signal }) => getPods({ limit: 20, namespaces: [previewNamespace] }, signal, generation),
+    enabled: false,
+    staleTime: collectionStaleTime,
+    gcTime: collectionGcTime,
+  })
 
   useEffect(() => {
     if (!paramNamespace || !paramName || !generation) return
@@ -472,18 +599,36 @@ export function PodsPage() {
   }, [paramNamespace, paramName, generation])
 
   const rowKey = useCallback((item: Pod) => `${item.namespace}/${item.name}`, [])
-  const list = useQuery({
-    queryKey: ['resources', 'pods', generation, applied, cursor],
-    queryFn: ({ signal }) => getPods({ limit: 100, search: applied.search || undefined, namespaces: effectiveNamespaces(globalNamespace.value, namespaceValues(applied.namespace)), statuses: applied.podStatus ? [applied.podStatus] : undefined, workload: applied.workload || undefined, node: applied.node || undefined, restarts: applied.restarts as 'any' | 'gt0' | 'gte3' | 'gte10', problematic: applied.problematic === '' ? undefined : applied.problematic === 'true', ...optionalSort(applied.sort, applied.order, 'identity', 'asc'), continueToken: cursor || undefined }, signal, generation),
+  const collection = useInfiniteCollection<Pod>({
+    identity: ['resources', 'pods', selection?.clusterProfileId, selection?.context, selection?.scopeId, generation, globalNamespace.value, applied.namespace],
+    filters: applied,
+    fetchPage: (cursor, signal, prefetch) => getPods({ limit: 100, prefetch, uxInteractionId: listInteractionFor(applied), search: applied.search || undefined, namespaces: effectiveNamespaces(globalNamespace.value, namespaceValues(applied.namespace)), statuses: applied.podStatus ? [applied.podStatus] : undefined, workload: applied.workload || undefined, node: applied.node || undefined, restarts: applied.restarts as 'any' | 'gt0' | 'gte3' | 'gte10', problematic: applied.problematic === '' ? undefined : applied.problematic === 'true', ...optionalSort(applied.sort, applied.order, 'identity', 'asc'), continueToken: cursor || undefined }, signal, generation),
     enabled: Boolean(selection),
   })
-  const listData = list.data
-  const selectedItems = useMemo(() => (listData?.items ?? []).filter((item) => selectedKeys.has(rowKey(item))), [listData, selectedKeys, rowKey])
+  const list = collection.query
+  const listKey = collection.queryKey
+  const listData = collection.lastPage
+  const listItems = collection.items
+  const snapshotRenewed = collection.snapshotRenewed
+  const authorizationFailed = collection.authorizationFailed
+  useEffect(() => { if (authorizationFailed) setSelectedKeys(new Set()) }, [authorizationFailed, setSelectedKeys])
+  const seedItems = seedPreview.data?.items.filter((item) => item.namespace === previewNamespace) ?? []
+  const previewActive = list.isPending && !authorizationFailed && sameListState(applied, defaultPodList) && Boolean(preview.preview?.items.length || seedItems.length)
+  const visibleItems = previewActive ? preview.preview?.items.length ? preview.preview.items : seedItems : listItems
+  const selectedItems = useMemo(() => listItems.filter((item) => selectedKeys.has(rowKey(item))), [listItems, selectedKeys, rowKey])
+  const bulkPermissions = useQuery({
+    queryKey: ['bulk-action-permissions', generation, 'pods.delete', selectedItems.map(rowKey).join('|')],
+    queryFn: ({ signal }) => getPermissions({ namespaces: Array.from(new Set(selectedItems.map((item) => item.namespace))), capabilityIds: ['pods.delete'], resourceNames: selectedItems.map((item) => item.name) }, signal, generation),
+    enabled: Boolean(generation && selectedItems.length),
+    staleTime: 15_000,
+  })
+  const canBulkDelete = selectedItems.length > 0 && selectedItems.every((item) => allows(bulkPermissions.data, 'pods.delete', item.namespace, item.name))
+  const canBulkRestart = canBulkDelete && selectedItems.every((item) => item.owner !== null)
 
   // V5-11: Pod metrics render only when the Metrics API is healthy; absence,
   // denial or partial coverage touches the metrics columns alone.
   const metricsAvailable = status.data?.components.metrics.status === 'healthy'
-  const metrics = useQuery({ queryKey: ['pod-metrics', generation], queryFn: ({ signal }) => getDashboardMetrics(signal, generation), enabled: Boolean(selection && metricsAvailable), staleTime: 30_000 })
+  const metrics = useQuery({ queryKey: ['pod-metrics', generation], queryFn: ({ signal }) => getDashboardMetrics(signal, generation), enabled: Boolean(selection && metricsAvailable), staleTime: 8_000, refetchInterval: 8_000, refetchIntervalInBackground: false })
   const metricsByPod = useMemo(() => {
     const map = new Map<string, { cpuMillicores: number; memoryBytes: number }>()
     for (const entry of metrics.data?.block.value.pods ?? []) {
@@ -507,11 +652,16 @@ export function PodsPage() {
     { key: 'age', header: 'Age', cell: (item) => age(item.ageSeconds) },
   ]
 
-  const bulkDelete = useMutation({
+  const bulkPodAction = useMutation({
     mutationFn: async (): Promise<BulkOutcome> => {
       const csrfToken = await csrfForGeneration(generation!)
-      const outcome: BulkOutcome = { deleted: 0, failed: [] }
+      const outcome: BulkOutcome = { succeeded: 0, failed: [] }
+      const restarting = bulkAction === 'restart'
       for (const item of selectedItems) {
+        if (restarting && !item.owner) {
+          outcome.failed.push({ name: `${item.namespace}/${item.name}`, reason: 'Standalone Pods cannot be restarted because no controller will recreate them.' })
+          continue
+        }
         try {
           const detail = await getPod(item.namespace, item.name, undefined, generation)
           await deletePod(item.namespace, item.name, {
@@ -523,7 +673,7 @@ export function PodsPage() {
             expectedUid: detail.metadata.uid,
             expectedResourceVersion: detail.metadata.resourceVersion,
           }, csrfToken)
-          outcome.deleted += 1
+          outcome.succeeded += 1
         } catch (error) {
           outcome.failed.push({ name: `${item.namespace}/${item.name}`, reason: mutationError(error) })
         }
@@ -531,14 +681,15 @@ export function PodsPage() {
       return outcome
     },
     onSuccess: (outcome) => {
-      toast.success(`Deleted ${outcome.deleted} Pod${outcome.deleted === 1 ? '' : 's'}`, outcome.failed.length ? `${outcome.failed.length} failed: ${outcome.failed.map((item) => item.name).join(', ')}` : 'Controllers recreate owned Pods according to their strategy.')
-      setBulkConfirm(false)
+      const restarted = bulkAction === 'restart'
+      toast.success(`${restarted ? 'Restarted' : 'Deleted'} ${outcome.succeeded} Pod${outcome.succeeded === 1 ? '' : 's'}`, outcome.failed.length ? `${outcome.failed.length} failed: ${outcome.failed.map((item) => item.name).join(', ')}` : restarted ? 'Every selected Pod will be recreated by its controller.' : 'The selected Pods were removed.')
+      setBulkAction(null)
       setSelectedKeys(new Set())
       void queryClient.invalidateQueries({ queryKey: ['resources', 'pods'] })
     },
     onError: (error) => {
-      toast.error('Bulk delete failed', mutationError(error))
-      setBulkConfirm(false)
+      toast.error(`Bulk ${bulkAction === 'restart' ? 'restart' : 'delete'} failed`, mutationError(error))
+      setBulkAction(null)
     },
   })
 
@@ -546,9 +697,9 @@ export function PodsPage() {
     <ResourcePage
       title="Pods"
       description="Pod inventory with readiness, restarts, owner, metrics and problem evidence in the active scope."
-      actions={<div className="flex items-center gap-2"><Link to="/logs"><Button variant="secondary" size="md"><ScrollText size={14} aria-hidden="true" /> Open logs</Button></Link>{selection ? <ResourceLiveUpdates key={`pods/${generation}`} generation={generation!} topics={['pods']} queryKeys={[["resources", "pods"]]} /> : null}</div>}
+      actions={<div className="flex items-center gap-2"><Link to="/logs"><Button variant="secondary" size="md"><ScrollText size={14} aria-hidden="true" /> Open logs</Button></Link>{selection ? <ResourceLiveUpdates key={`pods/${generation}`} generation={generation!} topics={['pods']} queryKeys={[["resources", "pods"]]} autoStart={list.isPending} onProgress={preview.onProgress} onPreviewReset={preview.onReset} /> : null}</div>}
     >
-      <ResourceListControls search={draft.search} appliedSearch={applied.search} onSearchChange={(value) => setDraft((current) => ({ ...current, search: value }))} onApply={() => { setApplied(draft); setCursor('') }} onRefresh={() => queryClient.invalidateQueries({ queryKey: ['resources', 'pods'] })} onClear={() => { setDraft({ ...defaultPodList }); setApplied({ ...defaultPodList }); setCursor('') }} activeFilters={[
+      <ResourceListControls search={draft.search} appliedSearch={applied.search} onSearchChange={(value) => setDraft((current) => ({ ...current, search: value }))} onApply={(interactionId) => setApplied(bindListInteraction({ ...draft }, interactionId))} onRefresh={() => queryClient.invalidateQueries({ queryKey: ['resources', 'pods'] })} onClear={() => { setDraft({ ...defaultPodList }); setApplied({ ...defaultPodList }) }} activeFilters={[
         ...activeFilter('namespace', 'Namespace', namespaceValues(applied.namespace)), ...activeFilter('workload', 'Workload owner', applied.workload), ...activeFilter('node', 'Node', applied.node), ...activeFilter('status', 'Status', applied.podStatus), ...activeFilter('restarts', 'Restarts', applied.restarts === 'any' ? '' : applied.restarts), ...activeFilter('problematic', 'Problem evidence', applied.problematic === 'true' ? 'problematic only' : applied.problematic === 'false' ? 'without evidence' : ''),
       ]} sort={draft.sort} order={draft.order} appliedSort={applied.sort} appliedOrder={applied.order} defaultSort="identity" defaultOrder="asc" hasPendingChanges={!sameListState(draft, applied)} sortOptions={podSortOptions} onSortChange={(value) => setDraft((current) => ({ ...current, sort: value }))} onOrderChange={(value) => setDraft((current) => ({ ...current, order: value }))}>
         <NamespaceFilterInput value={draft.namespace} onChange={(value) => setDraft((current) => ({ ...current, namespace: value }))} />
@@ -575,27 +726,29 @@ export function PodsPage() {
         }
         setDraft(next)
         setApplied(next)
-        setCursor('')
       }} /> : null}
       <SelectionGate pending={status.isPending} error={status.error} selected={Boolean(selection)}>
-        <QueryState pending={list.isPending} error={list.error} empty={listData?.items.length === 0}>
+        <QueryState pending={list.isPending && visibleItems.length === 0} error={!list.data || authorizationFailed ? list.error : null} empty={visibleItems.length === 0 && !list.hasNextPage}>
           {selectedItems.length > 0 ? (
             <BulkToolbar count={selectedItems.length}>
               {selectedItems.length === 1 ? (
                 <Link to={`/logs?namespace=${encodeURIComponent(selectedItems[0].namespace)}&pod=${encodeURIComponent(selectedItems[0].name)}`}><Button variant="secondary" size="sm"><ScrollText size={12} aria-hidden="true" /> View logs</Button></Link>
               ) : null}
-              <Button variant="danger" size="sm" onClick={() => setBulkConfirm(true)}><Trash2 size={12} aria-hidden="true" /> Delete selected</Button>
+              <Button variant="warning" size="sm" disabled={!canBulkRestart || bulkPermissions.isPending} disabledReason="Every selected Pod must have a controller owner and delete permission." onClick={() => setBulkAction('restart')}><RotateCcw size={12} aria-hidden="true" /> Restart selected</Button>
+              <Button variant="danger" size="sm" disabled={!canBulkDelete || bulkPermissions.isPending} disabledReason="Delete must be authorized for every selected Pod." onClick={() => setBulkAction('delete')}><Trash2 size={12} aria-hidden="true" /> Delete selected</Button>
               <Button variant="ghost" size="sm" onClick={() => setSelectedKeys(new Set())}>Clear selection</Button>
             </BulkToolbar>
           ) : null}
           <div className="min-w-0 overflow-x-auto rounded-xl border border-kp-overlay-0 bg-kp-surface-0">
             <ColumnVisibilityControl state={podColumnState} columns={podColumns} />
+            {previewActive ? <p className="px-3 py-1.5 text-xs text-kp-sky" role="status">Receiving Pods · ✓ {preview.preview?.items.length ? preview.preview.completed : 1}/{preview.preview?.items.length ? preview.preview.requested : selection?.namespaceCount ?? 1} namespaces · partial preview</p> : null}
+            {list.isPlaceholderData || list.isFetching && !list.isFetchingNextPage ? <p className="px-3 py-1.5 text-xs text-kp-overlay-text" role="status">Refreshing Pods…</p> : null}
             <DataTable
-              caption="Authorized Pod page"
-              rows={listData?.items ?? []}
+              caption="Authorized Pod pages"
+              rows={visibleItems}
               getRowKey={rowKey}
               columns={applyColumnVisibility(podColumns, podColumnState)}
-              selectable
+              selectable={!previewActive}
               selectedKeys={selectedKeys}
               onToggleRow={(key, checked) => {
                 setSelectedKeys((current) => {
@@ -606,26 +759,41 @@ export function PodsPage() {
                 })
               }}
               onToggleAll={(checked) => {
-                setSelectedKeys(checked ? new Set((listData?.items ?? []).map(rowKey)) : new Set())
+                setSelectedKeys(checked ? new Set(listItems.map(rowKey)) : new Set())
               }}
+              onScrollProgress={collection.onScrollProgress}
             />
-            {listData ? <CollectionFooter result={listData} onNext={setCursor} onRestart={() => setCursor('')} /> : null}
+            {listData ? (
+              <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-kp-overlay-0 px-3 py-2.5">
+                <div className="text-xs text-kp-overlay-text">
+                  <span className="block text-kp-subtext">{listItems.length} Pods loaded · {list.data?.pages.length ?? 0} page{list.data?.pages.length === 1 ? '' : 's'} retained</span>
+                  <small className="block">{listData.page.complete ? 'Collection complete' : `Bounded ${listData.page.filterScope} result`}</small>
+                  {snapshotRenewed ? <small className="block text-kp-yellow" role="status">The list snapshot expired and was renewed from the first page.</small> : null}
+                  {listData.coverage ? <small className="block">{listData.coverage.completedNamespaces}/{listData.coverage.requestedNamespaces} namespaces completed · {listData.coverage.deniedNamespaces.length} denied</small> : null}
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="secondary" size="sm" disabled={list.data?.pageParams[0] === '' && list.data?.pages.length === 1} disabledReason="Already on the first page." onClick={() => void queryClient.resetQueries({ queryKey: listKey })}>First page</Button>
+                  <Button size="sm" disabled={!list.hasNextPage || list.isFetching || list.isPlaceholderData} disabledReason="The current result has no next page or is refreshing." onClick={() => void collection.loadNextPage()}>{list.isFetchingNextPage ? 'Loading…' : 'Load next page'}</Button>
+                </div>
+                {collection.nextPageError ? <p className="w-full text-xs text-kp-red" role="alert">The next page could not be loaded. The loaded Pods remain available; retry when ready.</p> : null}
+              </footer>
+            ) : null}
           </div>
           {!metricsAvailable ? <p className="mt-1.5 text-xs text-kp-overlay-text" role="note">Metrics API unavailable; CPU and memory columns stay empty.</p> : null}
         </QueryState>
       </SelectionGate>
       <ConfirmDialog
-        open={bulkConfirm}
-        severity="danger"
-        title={`Delete ${selectedItems.length} Pod${selectedItems.length === 1 ? '' : 's'}`}
-        description="Each delete is authorized and re-validated by Kubernetes individually before it executes."
+        open={bulkAction !== null}
+        severity={bulkAction === 'restart' ? 'warning' : 'danger'}
+        title={`${bulkAction === 'restart' ? 'Restart' : 'Delete'} ${selectedItems.length} Pod${selectedItems.length === 1 ? '' : 's'}`}
+        description={`Each Pod deletion is authorized and re-validated by Kubernetes individually before it executes.`}
         resources={selectedItems.map((item) => ({ kind: 'Pod', namespace: item.namespace, name: item.name }))}
-        consequenceNote="Owned Pods are recreated by their controllers; standalone Pods are gone for good. This action cannot be undone."
-        confirmLabel="Delete selected"
-        pendingLabel="Deleting…"
-        pending={bulkDelete.isPending}
-        onConfirm={() => bulkDelete.mutate()}
-        onCancel={() => setBulkConfirm(false)}
+        consequenceNote={bulkAction === 'restart' ? 'Every selected Pod has an owner. Kubernetes removes each Pod and its controller creates a replacement; ephemeral local state is lost.' : 'Owned Pods may be recreated by their controllers; standalone Pods are gone for good. This action cannot be undone.'}
+        confirmLabel={bulkAction === 'restart' ? 'Restart selected' : 'Delete selected'}
+        pendingLabel={bulkAction === 'restart' ? 'Restarting…' : 'Deleting…'}
+        pending={bulkPodAction.isPending}
+        onConfirm={() => bulkPodAction.mutate()}
+        onCancel={() => setBulkAction(null)}
       />
     </ResourcePage>
   )
@@ -638,7 +806,6 @@ export function EventsPage() {
   const generation = selection?.generation
   const [draft, setDraft] = useState<EventListState>(() => eventsStateFromParams(params))
   const [applied, setApplied] = useState<EventListState>(() => eventsStateFromParams(params))
-  const [cursor, setCursor] = useGenerationCursor(generation)
   const queryClient = useQueryClient()
   const eventColumnState = usePreferenceColumnVisibility('events')
   const eventColumns: DataTableColumn<EventResource>[] = [
@@ -649,14 +816,23 @@ export function EventsPage() {
     { key: 'count', header: 'Count', cell: (item) => item.count },
     { key: 'message', header: 'Message', cell: (item) => <span className="block max-w-[480px] break-words text-sm leading-snug">{item.message}</span> },
   ]
-  const list = useQuery({ queryKey: ['resources', 'events', generation, applied, cursor], queryFn: ({ signal }) => getEvents({ limit: 100, search: applied.search || undefined, namespaces: effectiveNamespaces(globalNamespace.value, namespaceValues(applied.namespace)), statuses: applied.eventType ? [applied.eventType] : undefined, objectKind: applied.objectKind || undefined, reason: applied.reason || undefined, continueToken: cursor || undefined, ...optionalSort(applied.sort, applied.order, 'timestamp', 'desc') }, signal, generation), enabled: Boolean(selection) })
+  const collection = useInfiniteCollection<EventResource>({
+    identity: ['resources', 'events', selection?.clusterProfileId, selection?.context, selection?.scopeId, generation, globalNamespace.value, applied.namespace],
+    filters: applied,
+    fetchPage: (cursor, signal, prefetch) => getEvents({ limit: 100, prefetch, uxInteractionId: listInteractionFor(applied), search: applied.search || undefined, namespaces: effectiveNamespaces(globalNamespace.value, namespaceValues(applied.namespace)), statuses: applied.eventType ? [applied.eventType] : undefined, objectKind: applied.objectKind || undefined, reason: applied.reason || undefined, continueToken: cursor || undefined, ...optionalSort(applied.sort, applied.order, 'timestamp', 'desc') }, signal, generation),
+    enabled: Boolean(selection),
+  })
+  const list = collection.query
+  const preview = useResourceStreamPreview<EventResource>({ identity: [selection?.clusterProfileId, selection?.context, selection?.scopeId, generation, globalNamespace.value], topic: 'events', namespace: globalNamespace.value, isItem: isEventPreview, itemKey: eventPreviewKey, compare: compareEventPreview })
+  const previewActive = list.isPending && !collection.authorizationFailed && sameListState(applied, defaultEventList) && Boolean(preview.preview?.items.length)
+  const visibleItems = previewActive ? preview.preview!.items : collection.items
   return (
     <ResourcePage
       title="Events"
       description="Kubernetes events ordered within the bounded page; type, source and count are preserved."
-      actions={selection ? <ResourceLiveUpdates key={`events/${generation}`} generation={generation!} topics={['events']} queryKeys={[["resources", "events"]]} /> : null}
+      actions={selection ? <ResourceLiveUpdates key={`events/${generation}`} generation={generation!} topics={['events']} queryKeys={[["resources", "events"]]} autoStart={list.isPending} onProgress={preview.onProgress} onPreviewReset={preview.onReset} /> : null}
     >
-      <ResourceListControls search={draft.search} appliedSearch={applied.search} onSearchChange={(value) => setDraft((current) => ({ ...current, search: value }))} onApply={() => { setApplied(draft); setCursor('') }} onRefresh={() => queryClient.invalidateQueries({ queryKey: ['resources', 'events'] })} onClear={() => { setDraft({ ...defaultEventList }); setApplied({ ...defaultEventList }); setCursor('') }} activeFilters={[
+      <ResourceListControls search={draft.search} appliedSearch={applied.search} onSearchChange={(value) => setDraft((current) => ({ ...current, search: value }))} onApply={(interactionId) => { setApplied(bindListInteraction({ ...draft }, interactionId)) }} onRefresh={() => queryClient.invalidateQueries({ queryKey: ['resources', 'events'] })} onClear={() => { setDraft({ ...defaultEventList }); setApplied({ ...defaultEventList }) }} activeFilters={[
         ...activeFilter('namespace', 'Namespace', namespaceValues(applied.namespace)), ...activeFilter('type', 'Type', applied.eventType), ...activeFilter('objectKind', 'Object kind', applied.objectKind), ...activeFilter('reason', 'Reason', applied.reason),
       ]} sort={draft.sort} order={draft.order} appliedSort={applied.sort} appliedOrder={applied.order} defaultSort="timestamp" defaultOrder="desc" hasPendingChanges={!sameListState(draft, applied)} sortOptions={eventSortOptions} onSortChange={(value) => setDraft((current) => ({ ...current, sort: value }))} onOrderChange={(value) => setDraft((current) => ({ ...current, order: value }))}>
         <NamespaceFilterInput value={draft.namespace} onChange={(value) => setDraft((current) => ({ ...current, namespace: value }))} />
@@ -678,20 +854,22 @@ export function EventsPage() {
         }
         setDraft(next)
         setApplied(next)
-        setCursor('')
       }} /> : null}
       <SelectionGate pending={status.isPending} error={status.error} selected={Boolean(selection)}>
-        <QueryState pending={list.isPending} error={list.error} empty={list.data?.items.length === 0}>
+        <QueryState pending={list.isPending && !previewActive} error={!list.data || collection.authorizationFailed ? list.error : null} empty={visibleItems.length === 0 && !list.hasNextPage}>
           <div className="min-w-0 overflow-x-auto rounded-xl border border-kp-overlay-0 bg-kp-surface-0">
             <ColumnVisibilityControl state={eventColumnState} columns={eventColumns} />
+            {previewActive ? <p className="px-3 py-1.5 text-xs text-kp-sky" role="status">Receiving events · ✓ {preview.preview!.completed}/{preview.preview!.requested} namespaces · partial preview</p> : null}
+            {list.isPlaceholderData || list.isFetching && !list.isFetchingNextPage ? <p className="px-3 py-1.5 text-xs text-kp-overlay-text" role="status">Refreshing events…</p> : null}
             <DataTable
-              caption="Authorized event page"
-              rows={list.data?.items ?? []}
+              caption="Authorized event pages"
+              rows={visibleItems}
+              onScrollProgress={collection.onScrollProgress}
               getRowKey={(item, index) => `${item.namespace}/${item.objectKind}/${item.objectName}/${item.timestamp ?? index}`}
               columns={applyColumnVisibility(eventColumns, eventColumnState)}
               stickyHeader
             />
-            {list.data ? <CollectionFooter result={list.data} onNext={setCursor} onRestart={() => setCursor('')} /> : null}
+            {collection.lastPage ? <InfiniteCollectionFooter result={collection.lastPage} itemCount={collection.items.length} pageCount={list.data?.pages.length ?? 0} firstPage={list.data?.pageParams[0] === '' && list.data.pages.length === 1} hasNextPage={Boolean(list.hasNextPage)} loading={list.isFetching} refreshing={list.isPlaceholderData} nextPageError={collection.nextPageError} onNext={() => void collection.loadNextPage()} onRestart={() => void queryClient.resetQueries({ queryKey: collection.queryKey })} /> : null}
           </div>
         </QueryState>
       </SelectionGate>
@@ -702,6 +880,7 @@ export function EventsPage() {
 type NetworkTab = 'services' | 'endpoints' | 'ingresses' | 'ingress-classes' | 'endpoint-slices' | 'network-policies' | 'port-forwards'
 type NetworkResourceTab = Exclude<NetworkTab, 'port-forwards'>
 type NetworkItem = ServiceResource | IngressResource | EndpointSliceResource | Endpoints | IngressClass | NetworkPolicy
+type NetworkPreviewItem = ServiceResource | IngressResource | EndpointSliceResource
 
 interface SimpleListState {
   search: string
@@ -718,7 +897,6 @@ const defaultNetworkLists: Record<NetworkResourceTab, SimpleListState> = {
   'endpoint-slices': { ...defaultSimpleList },
   'network-policies': { ...defaultSimpleList },
 }
-const defaultNetworkCursors: Record<NetworkResourceTab, string> = { services: '', endpoints: '', ingresses: '', 'ingress-classes': '', 'endpoint-slices': '', 'network-policies': '' }
 
 const networkSortOptions: Record<NetworkResourceTab, readonly ListSortOption[]> = {
   services: [
@@ -766,12 +944,12 @@ export function NetworkPage() {
   const { status, selection } = useActiveSelection()
   const globalNamespace = useGlobalNamespace()
   const workspace = useResourceWorkspace()
+  const navigate = useNavigate()
   const toast = useToast()
   const { tab: tabParam, namespace: paramNamespace, name: paramName } = useParams<{ tab: string; namespace?: string; name?: string }>()
   const generation = selection?.generation
   const [tabState, setTab] = useState<NetworkTab>(() => networkTabFromParams(tabParam ?? '') ?? 'services')
   const tab = useMemo(() => networkTabFromParams(tabParam ?? '') ?? tabState, [tabParam, tabState])
-  const [cursors, setCursorValue] = useGenerationCursorMap(generation, defaultNetworkCursors)
   const [drafts, setDrafts] = useState<Record<NetworkResourceTab, SimpleListState>>(() => structuredClone(defaultNetworkLists))
   const [appliedLists, setAppliedLists] = useState<Record<NetworkResourceTab, SimpleListState>>(() => structuredClone(defaultNetworkLists))
   const queryClient = useQueryClient()
@@ -788,13 +966,29 @@ export function NetworkPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only react to route param changes
   }, [tabParam, paramNamespace, paramName, generation])
 
-  const networkOptions = (value: NetworkResourceTab) => ({ limit: 100, search: appliedLists[value].search || undefined, continueToken: cursors[value] || undefined, ...optionalSort(appliedLists[value].sort, appliedLists[value].order, 'identity', 'asc') })
-  const services = useQuery({ queryKey: ['resources', 'services', generation, appliedLists.services, cursors.services], queryFn: ({ signal }) => getServices({ ...networkOptions('services'), namespaces: effectiveNamespaces(globalNamespace.value, []) }, signal, generation), enabled: Boolean(selection && tab === 'services') })
-  const ingresses = useQuery({ queryKey: ['resources', 'ingresses', generation, appliedLists.ingresses, cursors.ingresses], queryFn: ({ signal }) => getIngresses({ ...networkOptions('ingresses'), namespaces: effectiveNamespaces(globalNamespace.value, []) }, signal, generation), enabled: Boolean(selection && tab === 'ingresses') })
-  const slices = useQuery({ queryKey: ['resources', 'endpoint-slices', generation, appliedLists['endpoint-slices'], cursors['endpoint-slices']], queryFn: ({ signal }) => getEndpointSlices({ ...networkOptions('endpoint-slices'), namespaces: effectiveNamespaces(globalNamespace.value, []) }, signal, generation), enabled: Boolean(selection && tab === 'endpoint-slices') })
-  const endpoints = useQuery({ queryKey: ['resources', 'endpoints', generation, appliedLists['endpoints'], cursors['endpoints']], queryFn: ({ signal }) => getEndpointsList({ ...networkOptions('endpoints'), namespaces: effectiveNamespaces(globalNamespace.value, []) }, signal, generation), enabled: Boolean(selection && tab === 'endpoints') })
-  const ingressClasses = useQuery({ queryKey: ['resources', 'ingress-classes', generation, appliedLists['ingress-classes'], cursors['ingress-classes']], queryFn: ({ signal }) => getIngressClasses(networkOptions('ingress-classes'), signal, generation), enabled: Boolean(selection && tab === 'ingress-classes') })
-  const networkPolicies = useQuery({ queryKey: ['resources', 'network-policies', generation, appliedLists['network-policies'], cursors['network-policies']], queryFn: ({ signal }) => getNetworkPolicies({ ...networkOptions('network-policies'), namespaces: effectiveNamespaces(globalNamespace.value, []) }, signal, generation), enabled: Boolean(selection && tab === 'network-policies') })
+  const networkOptions = (cursor: string) => ({ limit: 100, uxInteractionId: listInteractionFor(applied), search: applied.search || undefined, continueToken: cursor || undefined, ...optionalSort(applied.sort, applied.order, 'identity', 'asc') })
+  const collection = useInfiniteCollection<NetworkItem>({
+    identity: ['resources', resourceTab, selection?.clusterProfileId, selection?.context, selection?.scopeId, generation, globalNamespace.value],
+    filters: applied,
+    enabled: Boolean(selection && tab !== 'port-forwards'),
+    fetchPage: (cursor, signal, prefetch) => {
+      const options = { ...networkOptions(cursor), prefetch }
+      const namespacedOptions = { ...options, namespaces: effectiveNamespaces(globalNamespace.value, []) }
+      switch (resourceTab) {
+        case 'services': return getServices(namespacedOptions, signal, generation)
+        case 'ingresses': return getIngresses(namespacedOptions, signal, generation)
+        case 'endpoint-slices': return getEndpointSlices(namespacedOptions, signal, generation)
+        case 'endpoints': return getEndpointsList(namespacedOptions, signal, generation)
+        case 'ingress-classes': return getIngressClasses(options, signal, generation)
+        case 'network-policies': return getNetworkPolicies(namespacedOptions, signal, generation)
+      }
+    },
+  })
+  const activeQuery = collection.query
+  const streamTopic = resourceTab === 'ingresses' || resourceTab === 'endpoint-slices' ? resourceTab : 'services'
+  const preview = useResourceStreamPreview<NetworkPreviewItem>({ identity: [resourceTab, selection?.clusterProfileId, selection?.context, selection?.scopeId, generation, globalNamespace.value], topic: streamTopic, namespace: globalNamespace.value, isItem: isNetworkPreview, itemKey: namedPreviewKey })
+  const previewActive = (resourceTab === 'services' || resourceTab === 'ingresses' || resourceTab === 'endpoint-slices') && activeQuery.isPending && !collection.authorizationFailed && sameListState(applied, defaultSimpleList) && Boolean(preview.preview?.items.length)
+  const visibleItems: NetworkItem[] = previewActive ? preview.preview!.items : collection.items
   const forwards = useQuery({ queryKey: ['port-forwards', generation], queryFn: ({ signal }) => getPortForwards(signal, generation!), enabled: Boolean(selection && tab === 'port-forwards'), refetchInterval: 10_000 })
   const close = useMutation({ mutationFn: (id: string) => requests.run(async (signal) => { const session = await getSession(signal); if (session.generation !== generation) throw new APIError(409, { code: 'GENERATION_CHANGED', message: 'The active selection changed.' }); return closePortForward(id, generation!, session.csrfToken, signal) }), onSuccess: () => { toast.info('Loopback session closed'); queryClient.invalidateQueries({ queryKey: ['port-forwards'] }) }, onError: (error) => toast.error('Failed to close session', mutationError(error)) })
   const [stopAllState, setStopAllState] = useState<'idle' | 'confirm'>('idle')
@@ -825,17 +1019,10 @@ export function NetworkPage() {
     { key: 'summary', header: 'Summary', cell: (item) => ('clusterIPs' in item ? item.clusterIPs.join(', ') : 'hosts' in item ? item.hosts.join(', ') : 'addressType' in item ? `${item.endpoints.length} endpoints` : 'readyCount' in item ? `${item.readyCount} ready / ${item.notReadyCount} not ready${item.truncated ? ' (truncated)' : ''}` : 'ruleSummary' in item ? item.ruleSummary.length + ' rules' : item.default ? 'default class' : '—') },
   ]
 
-  const active: CollectionResult<NetworkItem> | undefined = tab === 'services' && services.data ? { ...services.data, items: services.data.items } : tab === 'ingresses' && ingresses.data ? { ...ingresses.data, items: ingresses.data.items } : tab === 'endpoint-slices' && slices.data ? { ...slices.data, items: slices.data.items } : tab === 'endpoints' && endpoints.data ? { ...endpoints.data, items: endpoints.data.items } : tab === 'ingress-classes' && ingressClasses.data ? { ...ingressClasses.data, items: ingressClasses.data.items } : tab === 'network-policies' && networkPolicies.data ? { ...networkPolicies.data, items: networkPolicies.data.items } : undefined
-  const activeQuery = tab === 'services' ? services : tab === 'ingresses' ? ingresses : tab === 'endpoint-slices' ? slices : tab === 'endpoints' ? endpoints : tab === 'ingress-classes' ? ingressClasses : networkPolicies
-
-  function setCursor(value: string) {
-    if (tab === 'port-forwards') return
-    setCursorValue(tab, value)
-  }
 
   return (
     <ResourcePage title="Network" description="Services, Ingresses, EndpointSlices and loopback-only port-forward sessions.">
-      <ResourceTabStrip ariaLabel="Network resource type" panelId="network-panel" active={tab} onChange={(value) => setTab(value as NetworkTab)} tabs={[
+      <ResourceTabStrip ariaLabel="Network resource type" panelId="network-panel" active={tab} onChange={(value) => { const next = value as NetworkTab; setTab(next); navigate(`/network/${next}`) }} tabs={[
         { id: 'services', label: 'services' },
         { id: 'endpoints', label: 'endpoints' },
         { id: 'ingresses', label: 'ingresses' },
@@ -844,8 +1031,8 @@ export function NetworkPage() {
         { id: 'network-policies', label: 'network-policies' },
         { id: 'port-forwards', label: 'port-forwards' },
       ]} />
-      {selection && (tab === 'services' || tab === 'ingresses' || tab === 'endpoint-slices') ? <ResourceLiveUpdates key={`${tab}/${generation}`} generation={generation!} topics={[tab]} queryKeys={[["resources", tab]]} /> : null}
-      {tab !== 'port-forwards' ? <ResourceListControls search={draft.search} appliedSearch={applied.search} onSearchChange={(value) => setDrafts((current) => ({ ...current, [resourceTab]: { ...current[resourceTab], search: value } }))} onApply={() => { setAppliedLists((current) => ({ ...current, [resourceTab]: { ...draft } })); setCursor('') }} onRefresh={() => queryClient.invalidateQueries({ queryKey: ['resources', tab] })} onClear={() => { setDrafts((current) => ({ ...current, [resourceTab]: { ...defaultSimpleList } })); setAppliedLists((current) => ({ ...current, [resourceTab]: { ...defaultSimpleList } })); setCursor('') }} sort={draft.sort} order={draft.order} appliedSort={applied.sort} appliedOrder={applied.order} defaultSort="identity" defaultOrder="asc" hasPendingChanges={!sameListState(draft, applied)} sortOptions={networkSortOptions[resourceTab]} onSortChange={(value) => setDrafts((current) => ({ ...current, [resourceTab]: { ...current[resourceTab], sort: value } }))} onOrderChange={(value) => setDrafts((current) => ({ ...current, [resourceTab]: { ...current[resourceTab], order: value } }))} /> : null}
+      {selection && (tab === 'services' || tab === 'ingresses' || tab === 'endpoint-slices') ? <ResourceLiveUpdates key={`${tab}/${generation}`} generation={generation!} topics={[tab]} queryKeys={[["resources", tab]]} autoStart={activeQuery.isPending} onProgress={preview.onProgress} onPreviewReset={preview.onReset} /> : null}
+      {tab !== 'port-forwards' ? <ResourceListControls search={draft.search} appliedSearch={applied.search} onSearchChange={(value) => setDrafts((current) => ({ ...current, [resourceTab]: { ...current[resourceTab], search: value } }))} onApply={(interactionId) => { setAppliedLists((current) => ({ ...current, [resourceTab]: bindListInteraction({ ...draft }, interactionId) })) }} onRefresh={() => queryClient.invalidateQueries({ queryKey: ['resources', tab] })} onClear={() => { setDrafts((current) => ({ ...current, [resourceTab]: { ...defaultSimpleList } })); setAppliedLists((current) => ({ ...current, [resourceTab]: { ...defaultSimpleList } })) }} sort={draft.sort} order={draft.order} appliedSort={applied.sort} appliedOrder={applied.order} defaultSort="identity" defaultOrder="asc" hasPendingChanges={!sameListState(draft, applied)} sortOptions={networkSortOptions[resourceTab]} onSortChange={(value) => setDrafts((current) => ({ ...current, [resourceTab]: { ...current[resourceTab], sort: value } }))} onOrderChange={(value) => setDrafts((current) => ({ ...current, [resourceTab]: { ...current[resourceTab], order: value } }))} /> : null}
       <div id="network-panel" role="tabpanel">
         <SelectionGate pending={status.isPending} error={status.error} selected={Boolean(selection)}>
           {tab === 'port-forwards' ? <QueryState pending={forwards.isPending} error={forwards.error ?? close.error} empty={forwards.data?.length === 0}>
@@ -874,17 +1061,20 @@ export function NetworkPage() {
                 </article>
               ))}
             </div>
-          </QueryState> : <QueryState pending={activeQuery.isPending} error={activeQuery.error} empty={active?.items.length === 0}>
+          </QueryState> : <QueryState pending={activeQuery.isPending && !previewActive} error={!activeQuery.data || collection.authorizationFailed ? activeQuery.error : null} empty={visibleItems.length === 0 && !activeQuery.hasNextPage}>
             <div className="min-w-0 overflow-x-auto rounded-xl border border-kp-overlay-0 bg-kp-surface-0">
               <ColumnVisibilityControl state={networkColumnState} columns={networkColumns} />
+              {previewActive ? <p className="px-3 py-1.5 text-xs text-kp-sky" role="status">Receiving {tab} · ✓ {preview.preview!.completed}/{preview.preview!.requested} namespaces · partial preview</p> : null}
+              {activeQuery.isPlaceholderData || activeQuery.isFetching && !activeQuery.isFetchingNextPage ? <p className="px-3 py-1.5 text-xs text-kp-overlay-text" role="status">Refreshing {tab}…</p> : null}
               <DataTable
-                caption={`Authorized ${tab} page`}
-                rows={active?.items ?? []}
+                caption={`Authorized ${tab} pages`}
+                rows={visibleItems}
+                onScrollProgress={collection.onScrollProgress}
                 getRowKey={(item) => `${'namespace' in item ? `${item.namespace}/` : ''}${item.name}`}
                 columns={applyColumnVisibility(networkColumns, networkColumnState)}
                 stickyHeader
               />
-              {active ? <CollectionFooter result={active} onNext={setCursor} onRestart={() => setCursor('')} /> : null}
+              {collection.lastPage ? <InfiniteCollectionFooter result={collection.lastPage} itemCount={collection.items.length} pageCount={activeQuery.data?.pages.length ?? 0} firstPage={activeQuery.data?.pageParams[0] === '' && activeQuery.data.pages.length === 1} hasNextPage={Boolean(activeQuery.hasNextPage)} loading={activeQuery.isFetching} refreshing={activeQuery.isPlaceholderData} nextPageError={collection.nextPageError} onNext={() => void collection.loadNextPage()} onRestart={() => void queryClient.resetQueries({ queryKey: collection.queryKey })} /> : null}
             </div>
           </QueryState>}
         </SelectionGate>
@@ -909,17 +1099,16 @@ const defaultConfigLists: Record<ConfigTab, SimpleListState> = {
   configmaps: { ...defaultSimpleList },
   secrets: { ...defaultSimpleList },
 }
-const defaultConfigCursors: Record<ConfigTab, string> = { configmaps: '', secrets: '' }
 
 export function ConfigPage() {
   const { status, selection } = useActiveSelection()
   const globalNamespace = useGlobalNamespace()
   const workspace = useResourceWorkspace()
+  const navigate = useNavigate()
   const { tab: tabParam, namespace: paramNamespace, name: paramName } = useParams<{ tab: string; namespace?: string; name?: string }>()
   const generation = selection?.generation
   const [tabState, setTab] = useState<ConfigTab>(() => configTabFromParams(tabParam ?? '') ?? 'configmaps')
   const tab = useMemo(() => configTabFromParams(tabParam ?? '') ?? tabState, [tabParam, tabState])
-  const [cursors, setCursorValue] = useGenerationCursorMap(generation, defaultConfigCursors)
   const [drafts, setDrafts] = useState<Record<ConfigTab, SimpleListState>>(() => structuredClone(defaultConfigLists))
   const [appliedLists, setAppliedLists] = useState<Record<ConfigTab, SimpleListState>>(() => structuredClone(defaultConfigLists))
   const queryClient = useQueryClient()
@@ -932,9 +1121,15 @@ export function ConfigPage() {
 
   const draft = drafts[tab]
   const applied = appliedLists[tab]
-  const configOptions = (value: ConfigTab) => ({ limit: 100, search: appliedLists[value].search || undefined, continueToken: cursors[value] || undefined, ...optionalSort(appliedLists[value].sort, appliedLists[value].order, 'identity', 'asc') })
-  const configMaps = useQuery({ queryKey: ['resources', 'configmaps', generation, appliedLists.configmaps, cursors.configmaps], queryFn: ({ signal }) => getConfigMapsSafe({ ...configOptions('configmaps'), namespaces: effectiveNamespaces(globalNamespace.value, []) }, signal, generation), enabled: Boolean(selection && tab === 'configmaps') })
-  const secrets = useQuery({ queryKey: ['resources', 'secrets', generation, appliedLists.secrets, cursors.secrets], queryFn: ({ signal }) => getSecretsSafe({ ...configOptions('secrets'), namespaces: effectiveNamespaces(globalNamespace.value, []) }, signal, generation), enabled: Boolean(selection && tab === 'secrets') })
+  const collection = useInfiniteCollection<ConfigItem>({
+    identity: ['resources', tab, selection?.clusterProfileId, selection?.context, selection?.scopeId, generation, globalNamespace.value],
+    filters: applied,
+    enabled: Boolean(selection),
+    fetchPage: (cursor, signal, prefetch) => {
+      const options = { limit: 100, prefetch, uxInteractionId: listInteractionFor(applied), search: applied.search || undefined, continueToken: cursor || undefined, ...optionalSort(applied.sort, applied.order, 'identity', 'asc'), namespaces: effectiveNamespaces(globalNamespace.value, []) }
+      return tab === 'configmaps' ? getConfigMapsSafe(options, signal, generation) : getSecretsSafe(options, signal, generation)
+    },
+  })
 
   const configColumnState = usePreferenceColumnVisibility(`config/${tab}`)
   const configColumns: DataTableColumn<ConfigItem>[] = [
@@ -942,34 +1137,35 @@ export function ConfigPage() {
     { key: 'uid', header: 'UID', cell: (item) => { const value = 'metadata' in item ? item.metadata : item; return <span className="mono text-xs">{value.uid}</span> } },
     { key: 'created', header: 'Created', cell: (item) => { const value = 'metadata' in item ? item.metadata : item; return dateTime(value.creationTimestamp) } },
   ]
-  const active: CollectionResult<ConfigItem> | undefined = tab === 'configmaps' && configMaps.data ? { ...configMaps.data, items: configMaps.data.items } : tab === 'secrets' && secrets.data ? { ...secrets.data, items: secrets.data.items } : undefined
-  const activeQuery = tab === 'configmaps' ? configMaps : secrets
-
-  function setCursor(value: string) {
-    setCursorValue(tab, value)
-  }
+  const activeQuery = collection.query
+  const preview = useResourceStreamPreview<ConfigMapResource>({ identity: [tab, selection?.clusterProfileId, selection?.context, selection?.scopeId, generation, globalNamespace.value], topic: 'configmaps', namespace: globalNamespace.value, isItem: isConfigMapPreview, itemKey: namedPreviewKey })
+  const previewActive = tab === 'configmaps' && activeQuery.isPending && !collection.authorizationFailed && sameListState(applied, defaultSimpleList) && Boolean(preview.preview?.items.length)
+  const visibleItems: ConfigItem[] = previewActive ? preview.preview!.items : collection.items
 
   return (
     <ResourcePage title="Configuration" description="ConfigMaps are fetched on detail; Secrets remain metadata-only and never expose values or YAML.">
-      <ResourceTabStrip ariaLabel="Configuration resource type" panelId="config-panel" active={tab} onChange={(value) => setTab(value as ConfigTab)} tabs={[
+      <ResourceTabStrip ariaLabel="Configuration resource type" panelId="config-panel" active={tab} onChange={(value) => { const next = value as ConfigTab; setTab(next); navigate(`/config/${next}`) }} tabs={[
         { id: 'configmaps', label: 'configmaps' },
         { id: 'secrets', label: 'secrets' },
       ]} />
-      {selection && tab === 'configmaps' ? <ResourceLiveUpdates key={`configmaps/${generation}`} generation={generation!} topics={['configmaps']} queryKeys={[["resources", "configmaps"]]} /> : null}
-      <ResourceListControls search={draft.search} appliedSearch={applied.search} onSearchChange={(value) => setDrafts((current) => ({ ...current, [tab]: { ...current[tab], search: value } }))} onApply={() => { setAppliedLists((current) => ({ ...current, [tab]: { ...draft } })); setCursor('') }} onRefresh={() => queryClient.invalidateQueries({ queryKey: ['resources', tab] })} onClear={() => { setDrafts((current) => ({ ...current, [tab]: { ...defaultSimpleList } })); setAppliedLists((current) => ({ ...current, [tab]: { ...defaultSimpleList } })); setCursor('') }} sort={draft.sort} order={draft.order} appliedSort={applied.sort} appliedOrder={applied.order} defaultSort="identity" defaultOrder="asc" hasPendingChanges={!sameListState(draft, applied)} sortOptions={configSortOptions} onSortChange={(value) => setDrafts((current) => ({ ...current, [tab]: { ...current[tab], sort: value } }))} onOrderChange={(value) => setDrafts((current) => ({ ...current, [tab]: { ...current[tab], order: value } }))} />
+      {selection && tab === 'configmaps' ? <ResourceLiveUpdates key={`configmaps/${generation}`} generation={generation!} topics={['configmaps']} queryKeys={[["resources", "configmaps"]]} autoStart={activeQuery.isPending} onProgress={preview.onProgress} onPreviewReset={preview.onReset} /> : null}
+      <ResourceListControls search={draft.search} appliedSearch={applied.search} onSearchChange={(value) => setDrafts((current) => ({ ...current, [tab]: { ...current[tab], search: value } }))} onApply={(interactionId) => { setAppliedLists((current) => ({ ...current, [tab]: bindListInteraction({ ...draft }, interactionId) })) }} onRefresh={() => queryClient.invalidateQueries({ queryKey: ['resources', tab] })} onClear={() => { setDrafts((current) => ({ ...current, [tab]: { ...defaultSimpleList } })); setAppliedLists((current) => ({ ...current, [tab]: { ...defaultSimpleList } })) }} sort={draft.sort} order={draft.order} appliedSort={applied.sort} appliedOrder={applied.order} defaultSort="identity" defaultOrder="asc" hasPendingChanges={!sameListState(draft, applied)} sortOptions={configSortOptions} onSortChange={(value) => setDrafts((current) => ({ ...current, [tab]: { ...current[tab], sort: value } }))} onOrderChange={(value) => setDrafts((current) => ({ ...current, [tab]: { ...current[tab], order: value } }))} />
       <div id="config-panel" role="tabpanel">
         <SelectionGate pending={status.isPending} error={status.error} selected={Boolean(selection)}>
-          <QueryState pending={activeQuery.isPending} error={activeQuery.error} empty={active?.items.length === 0}>
+          <QueryState pending={activeQuery.isPending && !previewActive} error={!activeQuery.data || collection.authorizationFailed ? activeQuery.error : null} empty={visibleItems.length === 0 && !activeQuery.hasNextPage}>
             <div className="min-w-0 overflow-x-auto rounded-xl border border-kp-overlay-0 bg-kp-surface-0">
               <ColumnVisibilityControl state={configColumnState} columns={configColumns} />
+              {previewActive ? <p className="px-3 py-1.5 text-xs text-kp-sky" role="status">Receiving ConfigMaps · ✓ {preview.preview!.completed}/{preview.preview!.requested} namespaces · partial preview</p> : null}
+              {activeQuery.isPlaceholderData || activeQuery.isFetching && !activeQuery.isFetchingNextPage ? <p className="px-3 py-1.5 text-xs text-kp-overlay-text" role="status">Refreshing {tab}…</p> : null}
               <DataTable
-                caption={`Authorized ${tab} metadata page`}
-                rows={active?.items ?? []}
+                caption={`Authorized ${tab} metadata pages`}
+                rows={visibleItems}
+                onScrollProgress={collection.onScrollProgress}
                 getRowKey={(item) => { const value = 'metadata' in item ? item.metadata : item; return `${value.namespace}/${value.name}` }}
                 columns={applyColumnVisibility(configColumns, configColumnState)}
                 stickyHeader
               />
-              {active ? <CollectionFooter result={active} onNext={setCursor} onRestart={() => setCursor('')} /> : null}
+              {collection.lastPage ? <InfiniteCollectionFooter result={collection.lastPage} itemCount={collection.items.length} pageCount={activeQuery.data?.pages.length ?? 0} firstPage={activeQuery.data?.pageParams[0] === '' && activeQuery.data.pages.length === 1} hasNextPage={Boolean(activeQuery.hasNextPage)} loading={activeQuery.isFetching} refreshing={activeQuery.isPlaceholderData} nextPageError={collection.nextPageError} onNext={() => void collection.loadNextPage()} onRestart={() => void queryClient.resetQueries({ queryKey: collection.queryKey })} /> : null}
             </div>
           </QueryState>
         </SelectionGate>
@@ -1023,7 +1219,6 @@ export function NodesPage() {
   const generation = selection?.generation
   const [draft, setDraft] = useState<NodeListState>(() => nodeStateFromParams(params))
   const [applied, setApplied] = useState<NodeListState>(() => nodeStateFromParams(params))
-  const [cursor, setCursor] = useGenerationCursor(generation)
   const queryClient = useQueryClient()
 
   useEffect(() => {
@@ -1032,28 +1227,32 @@ export function NodesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only react to route param changes
   }, [name, generation])
 
-  const list = useQuery({
-    queryKey: ['resources', 'nodes', generation, applied, cursor],
-    queryFn: ({ signal }) => getNodes({ limit: 100, search: applied.search || undefined, statuses: applied.nodeStatus ? [applied.nodeStatus] : undefined, ...optionalSort(applied.sort, applied.order, 'identity', 'asc'), continueToken: cursor || undefined }, signal, generation),
+  const collection = useInfiniteCollection({
+    identity: ['resources', 'nodes', selection?.clusterProfileId, selection?.context, selection?.scopeId, generation, ''],
+    filters: applied,
+    fetchPage: (cursor: string, signal: AbortSignal, prefetch: boolean) => getNodes({ limit: 100, prefetch, uxInteractionId: listInteractionFor(applied), search: applied.search || undefined, statuses: applied.nodeStatus ? [applied.nodeStatus] : undefined, ...optionalSort(applied.sort, applied.order, 'identity', 'asc'), continueToken: cursor || undefined }, signal, generation),
     enabled: Boolean(selection),
   })
+  const list = collection.query
 
   return (
     <ResourcePage
       title="Nodes"
       description="Cluster nodes with readiness, roles, capacity and taints; a selected context is enough and no namespace filter applies."
     >
-      <ResourceListControls search={draft.search} appliedSearch={applied.search} onSearchChange={(value) => setDraft((current) => ({ ...current, search: value }))} onApply={() => { setApplied(draft); setCursor('') }} onRefresh={() => queryClient.invalidateQueries({ queryKey: ['resources', 'nodes'] })} onClear={() => { setDraft({ ...defaultNodeList }); setApplied({ ...defaultNodeList }); setCursor('') }} activeFilters={[
+      <ResourceListControls search={draft.search} appliedSearch={applied.search} onSearchChange={(value) => setDraft((current) => ({ ...current, search: value }))} onApply={(interactionId) => { setApplied(bindListInteraction({ ...draft }, interactionId)) }} onRefresh={() => queryClient.invalidateQueries({ queryKey: ['resources', 'nodes'] })} onClear={() => { setDraft({ ...defaultNodeList }); setApplied({ ...defaultNodeList }) }} activeFilters={[
         ...activeFilter('status', 'Status', applied.nodeStatus),
       ]} sort={draft.sort} order={draft.order} appliedSort={applied.sort} appliedOrder={applied.order} defaultSort="identity" defaultOrder="asc" hasPendingChanges={!sameListState(draft, applied)} sortOptions={nodeSortOptions} onSortChange={(value) => setDraft((current) => ({ ...current, sort: value }))} onOrderChange={(value) => setDraft((current) => ({ ...current, order: value }))}>
         <Select aria-label="Status" className="!h-7 !w-auto max-w-[9rem] pr-6 text-sm" value={draft.nodeStatus} onChange={(event) => setDraft((current) => ({ ...current, nodeStatus: event.target.value }))}><option value="">All statuses</option>{nodeStatuses.map((value) => <option key={value}>{value}</option>)}</Select>
       </ResourceListControls>
       <SelectionGate pending={status.isPending} error={status.error} selected={Boolean(selection)}>
-        <QueryState pending={list.isPending} error={list.error} empty={list.data?.items.length === 0}>
+        <QueryState pending={list.isPending} error={!list.data || collection.authorizationFailed ? list.error : null} empty={collection.items.length === 0 && !list.hasNextPage}>
           <div className="min-w-0 overflow-x-auto rounded-xl border border-kp-overlay-0 bg-kp-surface-0">
+            {list.isPlaceholderData || list.isFetching && !list.isFetchingNextPage ? <p className="px-3 py-1.5 text-xs text-kp-overlay-text" role="status">Refreshing nodes…</p> : null}
             <DataTable
-              caption="Authorized node page"
-              rows={list.data?.items ?? []}
+              caption="Authorized node pages"
+              rows={collection.items}
+              onScrollProgress={collection.onScrollProgress}
               getRowKey={(item) => item.name}
               columns={[
                 { key: 'name', header: 'Node', cell: (item) => <TableLink aria-label={`Open Node ${item.name}`} onClick={() => workspace.openResource({ collection: 'nodes', name: item.name })} primary={item.name} secondary={item.roles.join(', ') || 'no role'} /> },
@@ -1064,7 +1263,7 @@ export function NodesPage() {
               ]}
               stickyHeader
             />
-            {list.data ? <CollectionFooter result={list.data} onNext={setCursor} onRestart={() => setCursor('')} /> : null}
+            {collection.lastPage ? <InfiniteCollectionFooter result={collection.lastPage} itemCount={collection.items.length} pageCount={list.data?.pages.length ?? 0} firstPage={list.data?.pageParams[0] === '' && list.data.pages.length === 1} hasNextPage={Boolean(list.hasNextPage)} loading={list.isFetching} refreshing={list.isPlaceholderData} nextPageError={collection.nextPageError} onNext={() => void collection.loadNextPage()} onRestart={() => void queryClient.resetQueries({ queryKey: collection.queryKey })} /> : null}
           </div>
         </QueryState>
       </SelectionGate>

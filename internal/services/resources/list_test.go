@@ -325,7 +325,7 @@ func (lister *pagingOriginLister) ListPage(_ context.Context, request PageReques
 	lister.served[request.Origin.Namespace] = served + take
 	continueToken := ""
 	if remaining > take {
-		continueToken = "native-" + request.Origin.Namespace
+		continueToken = fmt.Sprintf("native-%s-%d", request.Origin.Namespace, served+take)
 	}
 	return OriginPage[testListItem]{Origin: request.Origin, Items: items, Continue: continueToken}, nil
 }

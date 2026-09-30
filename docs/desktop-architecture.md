@@ -77,4 +77,4 @@ Kubernetes não atravessam bindings. As regras completas estão em
 
 Os builds nativos e pacotes já estão definidos no workflow de release.
 Persistência de preferências adicionais da janela e evolução da interface
-seguem o [plano v1](../plan/README.md), sem duplicar um backlog neste documento.
+seguem o [plano e backlog vigentes](../plan/README.md), sem duplicá-los neste documento.

@@ -5,6 +5,7 @@ import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { BrandLogo } from './BrandLogo'
 import { BrandWordmark } from './BrandWordmark'
 import { navGroups, settingsNavItem, type NavGroup, type NavItem } from '../navigation/tree'
+import { beginViewNavigation } from '../observability/uxMetrics'
 
 // Sidebar preferences stay in memory on purpose: production sources never
 // touch browser storage (see src/security.test.ts). The collapsed/compact
@@ -55,6 +56,7 @@ export function Sidebar({ version, compact, onToggleCompact, collapsedGroups, on
         <NavLink
           key={item.id}
           to={item.path}
+          onClick={(event) => { if (event.button === 0 && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) beginViewNavigation(item.path!) }}
           end={item.path === '/' || item.path === '/workloads'}
           data-tip={compact ? item.tip ?? item.label : undefined}
           className={({ isActive }) => `flex h-8 items-center gap-2.5 rounded-md px-2.5 text-sm transition-colors ${

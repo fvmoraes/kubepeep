@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router'
 
 import { Button, Input } from './ui'
+import { beginViewNavigation } from '../observability/uxMetrics'
 
 export interface CommandRoute {
   path: string
@@ -14,7 +15,7 @@ export interface CommandRoute {
 
 interface CommandCenterProps {
   routes: readonly CommandRoute[]
-  // Visible-resource entries (F7-04): identifiers only, gathered from
+  // Visible-resource entries (F5-06): identifiers only, gathered from
   // bounded pages already loaded in this session. Resolved when the palette
   // opens so the index always reflects the freshest cache without reactive
   // subscriptions.
@@ -82,6 +83,7 @@ export function CommandCenter({ routes, getFavorites, getRecent, getResources, o
   const navigate = useNavigate()
   const [view, setView] = useState<CommandCenterView>(null)
   const [query, setQuery] = useState('')
+  const [debouncedQuery, setDebouncedQuery] = useState('')
   const [activeIndex, setActiveIndex] = useState(0)
   const dialogRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -90,18 +92,22 @@ export function CommandCenter({ routes, getFavorites, getRecent, getResources, o
   const titleId = useId()
   const descriptionId = useId()
   const listboxId = useId()
-  const filteredRoutes = useMemo(() => routes.filter((route) => matchesQuery(route, query)), [query, routes])
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(query), 30)
+    return () => clearTimeout(timer)
+  }, [query])
+  const filteredRoutes = useMemo(() => routes.filter((route) => matchesQuery(route, debouncedQuery)), [debouncedQuery, routes])
   const filteredResources = useMemo(
-    () => (sessionResources.length > 0 ? sessionResources.filter((entry) => matchesQuery(entry, query)) : []),
-    [query, sessionResources],
+    () => (sessionResources.length > 0 ? sessionResources.filter((entry) => matchesQuery(entry, debouncedQuery)) : []),
+    [debouncedQuery, sessionResources],
   )
   const filteredFavorites = useMemo(
-    () => (sessionFavorites.length > 0 ? sessionFavorites.filter((entry) => matchesQuery(entry, query)) : []),
-    [query, sessionFavorites],
+    () => (sessionFavorites.length > 0 ? sessionFavorites.filter((entry) => matchesQuery(entry, debouncedQuery)) : []),
+    [debouncedQuery, sessionFavorites],
   )
   const filteredRecent = useMemo(
-    () => (sessionRecent.length > 0 ? sessionRecent.filter((entry) => matchesQuery(entry, query)) : []),
-    [query, sessionRecent],
+    () => (sessionRecent.length > 0 ? sessionRecent.filter((entry) => matchesQuery(entry, debouncedQuery)) : []),
+    [debouncedQuery, sessionRecent],
   )
   const combinedResults = useMemo(
     () => [...filteredFavorites, ...filteredRecent, ...filteredRoutes, ...(filteredResources.length > 0 ? filteredResources : [])],
@@ -179,6 +185,7 @@ export function CommandCenter({ routes, getFavorites, getRecent, getResources, o
   }, [view])
 
   const chooseRoute = useCallback((route: CommandRoute) => {
+    beginViewNavigation(route.path)
     navigate(route.path)
     setQuery('')
     setActiveIndex(0)
@@ -210,16 +217,22 @@ export function CommandCenter({ routes, getFavorites, getRecent, getResources, o
       return
     }
 
-    if (view !== 'commands' || combinedResults.length === 0) return
+    if (view !== 'commands') return
+    if (event.key === 'Enter' && event.target === inputRef.current) {
+      event.preventDefault()
+      const currentResults = query === debouncedQuery
+        ? combinedResults
+        : [...sessionFavorites, ...sessionRecent, ...routes, ...sessionResources].filter((entry) => matchesQuery(entry, query))
+      if (currentResults.length > 0) chooseRoute(currentResults[Math.min(activeIndex, currentResults.length - 1)])
+      return
+    }
+    if (combinedResults.length === 0) return
     if (event.key === 'ArrowDown') {
       event.preventDefault()
       setActiveIndex((current) => (current + 1) % combinedResults.length)
     } else if (event.key === 'ArrowUp') {
       event.preventDefault()
       setActiveIndex((current) => (current - 1 + combinedResults.length) % combinedResults.length)
-    } else if (event.key === 'Enter' && event.target === inputRef.current) {
-      event.preventDefault()
-      chooseRoute(combinedResults[Math.min(activeIndex, combinedResults.length - 1)])
     }
   }
 
@@ -278,7 +291,7 @@ export function CommandCenter({ routes, getFavorites, getRecent, getResources, o
 
             {view === 'commands' ? (
               <>
-                <p id={descriptionId} className="px-4 pb-2.5 text-xs text-kp-overlay-text leading-relaxed">{sessionResources.length > 0 ? 'Search pages and resources already loaded in this session. Only names and namespaces are searched; no resource content is read.' : 'Search the pages built into this local application. No cluster data is queried.'}</p>
+                <p id={descriptionId} className="px-4 pb-2.5 text-xs text-kp-overlay-text leading-relaxed">{sessionResources.length > 0 ? 'Search pages and resources already loaded in this session. Results use identifiers from the bounded local cache; absence here does not prove absence in the cluster.' : 'Search the pages built into this local application. The resource cache is empty or not loaded; absence here does not prove absence in the cluster.'}</p>
                 <div className="mx-4 mb-3 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2.5 px-3 rounded-md border border-kp-overlay-1 bg-kp-crust focus-within:border-kp-mauve focus-within:shadow-focus">
                   <Search size={16} aria-hidden="true" className="text-kp-mauve" />
                   <Input

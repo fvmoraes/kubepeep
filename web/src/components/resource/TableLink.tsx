@@ -7,10 +7,11 @@ export interface TableLinkProps {
   onClick: () => void
   primary: ReactNode
   secondary?: ReactNode
+  disabledReason?: string
 }
 
 /** Name cell inside resource tables — ghost button styled as a link. */
-export function TableLink({ 'aria-label': label, onClick, primary, secondary }: TableLinkProps) {
+export function TableLink({ 'aria-label': label, onClick, primary, secondary, disabledReason }: TableLinkProps) {
   return (
     <Button
       type="button"
@@ -19,6 +20,8 @@ export function TableLink({ 'aria-label': label, onClick, primary, secondary }: 
       className="-ml-2.5 h-auto justify-start px-2 py-0.5 text-left text-kp-mauve hover:not-disabled:bg-transparent hover:not-disabled:text-kp-mauve-hover"
       aria-label={label}
       onClick={onClick}
+      disabled={Boolean(disabledReason)}
+      title={disabledReason}
     >
       <strong className="block font-medium hover:underline">{primary}</strong>
       {secondary ? <small className="block text-xs text-kp-overlay-text">{secondary}</small> : null}

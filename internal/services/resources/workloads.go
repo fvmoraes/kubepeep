@@ -23,15 +23,19 @@ const (
 )
 
 type WorkloadDTO struct {
-	Namespace  string         `json:"namespace"`
-	Kind       string         `json:"kind"`
-	Name       string         `json:"name"`
-	Ready      *int64         `json:"ready"`
-	Desired    *int64         `json:"desired"`
-	Available  *int64         `json:"available"`
-	Updated    *int64         `json:"updated"`
-	Status     WorkloadStatus `json:"status"`
-	AgeSeconds int64          `json:"ageSeconds"`
+	Namespace  string            `json:"namespace"`
+	Kind       string            `json:"kind"`
+	Name       string            `json:"name"`
+	Labels     map[string]string `json:"labels,omitempty"`
+	Owner      *OwnerDTO         `json:"owner,omitempty"`
+	ConfigMaps []string          `json:"configMaps,omitempty"`
+	PVCs       []string          `json:"pvcs,omitempty"`
+	Ready      *int64            `json:"ready"`
+	Desired    *int64            `json:"desired"`
+	Available  *int64            `json:"available"`
+	Updated    *int64            `json:"updated"`
+	Status     WorkloadStatus    `json:"status"`
+	AgeSeconds int64             `json:"ageSeconds"`
 }
 
 func (WorkloadDTO) resourceListItem() {}
@@ -54,19 +58,19 @@ type WorkloadDetailDTO struct {
 func (WorkloadDetailDTO) resourceDetailItem() {}
 
 func ConvertDeployment(value *appsv1.Deployment, now time.Time) WorkloadDTO {
-	return workloadFromDashboard(dashboard.ClassifyDeployment(value, now))
+	return withWorkloadIndex(workloadFromDashboard(dashboard.ClassifyDeployment(value, now)), value.Labels, value.OwnerReferences, value.Spec.Template.Spec)
 }
 
 func ConvertStatefulSet(value *appsv1.StatefulSet, now time.Time) WorkloadDTO {
-	return workloadFromDashboard(dashboard.ClassifyStatefulSetWithAvailability(value, true, now))
+	return withWorkloadIndex(workloadFromDashboard(dashboard.ClassifyStatefulSetWithAvailability(value, true, now)), value.Labels, value.OwnerReferences, value.Spec.Template.Spec)
 }
 
 func ConvertDaemonSet(value *appsv1.DaemonSet, now time.Time) WorkloadDTO {
-	return workloadFromDashboard(dashboard.ClassifyDaemonSet(value, now))
+	return withWorkloadIndex(workloadFromDashboard(dashboard.ClassifyDaemonSet(value, now)), value.Labels, value.OwnerReferences, value.Spec.Template.Spec)
 }
 
 func ConvertJob(value *batchv1.Job, now time.Time) WorkloadDTO {
-	return workloadFromDashboard(dashboard.ClassifyJob(value, now))
+	return withWorkloadIndex(workloadFromDashboard(dashboard.ClassifyJob(value, now)), value.Labels, value.OwnerReferences, value.Spec.Template.Spec)
 }
 
 // ConvertReplicaSet classifies an apps/v1 ReplicaSet without inventing health:
@@ -81,7 +85,7 @@ func ConvertReplicaSet(value *appsv1.ReplicaSet, now time.Time) WorkloadDTO {
 	if ready == desired {
 		status = WorkloadHealthy
 	}
-	return WorkloadDTO{Namespace: value.Namespace, Kind: "ReplicaSet", Name: value.Name, Ready: &ready, Desired: &desired, Available: &available, Updated: nil, Status: status, AgeSeconds: int64(now.Sub(value.CreationTimestamp.Time) / time.Second)}
+	return withWorkloadIndex(WorkloadDTO{Namespace: value.Namespace, Kind: "ReplicaSet", Name: value.Name, Ready: &ready, Desired: &desired, Available: &available, Updated: nil, Status: status, AgeSeconds: int64(now.Sub(value.CreationTimestamp.Time) / time.Second)}, value.Labels, value.OwnerReferences, value.Spec.Template.Spec)
 }
 
 func ReplicaSetDetail(value *appsv1.ReplicaSet, related []ResourceRef, now time.Time) WorkloadDetailDTO {
@@ -108,7 +112,15 @@ func ConvertCronJobWithHistory(value *batchv1.CronJob, jobs []batchv1.Job, histo
 	if !historyComplete {
 		result.Status = WorkloadUnknown
 	}
-	return result
+	return withWorkloadIndex(result, value.Labels, value.OwnerReferences, value.Spec.JobTemplate.Spec.Template.Spec)
+}
+
+func withWorkloadIndex(value WorkloadDTO, labels map[string]string, owners []metav1.OwnerReference, spec corev1.PodSpec) WorkloadDTO {
+	value.Labels = limitedStringMap(labels)
+	value.Owner = directOwner(owners)
+	value.ConfigMaps = podConfigMapRefs(spec)
+	value.PVCs = podPVCRefs(spec)
+	return value
 }
 
 func workloadFromDashboard(value dashboard.WorkloadDTO) WorkloadDTO {

@@ -1,6 +1,6 @@
 # Contrato HTTP e streaming
 
-> **Escopo:** contrato da base atual; rotas explicitamente reservadas não são funcionalidades disponíveis. A execução corrente está no [plano v1](../plan/README.md).
+> **Escopo:** contrato da base atual; rotas explicitamente reservadas não são funcionalidades disponíveis. A execução concluída está no [plano v0.7](../plan/README.md).
 >
 > **Transporte:** origem loopback no modo web; bridge JSON e loopback de streams no [desktop](desktop-architecture.md).
 >
@@ -122,6 +122,7 @@ Limites de bytes de logs/frames têm configuração própria e não herdam o bod
 | 413 | `BODY_TOO_LARGE` | body excedeu limite |
 | 415 | `UNSUPPORTED_MEDIA_TYPE` | tipo de conteúdo não aceito |
 | 429 | `LIMIT_EXCEEDED` | concorrência/sessões/budget excedido |
+| 429 | `PREFETCH_DEFERRED` | prefetch da próxima página adiado para preservar a capacidade das listas visíveis |
 | 500 | `INTERNAL` | falha local inesperada sanitizada |
 | 503 | `CLUSTER_UNAVAILABLE` | API Kubernetes inacessível |
 | 503 | `AUTHENTICATION_UNAVAILABLE` | kubeconfig/plugin não concluiu autenticação |
@@ -144,6 +145,8 @@ Se o cliente fechar a conexão, pode não existir resposta. O servidor registra 
 | `status` | todos | enum por recurso |
 | `sort` | chave estável do endpoint | allowlist |
 | `order` | `asc` | `asc` ou `desc` |
+| `labelSelector` | vazio | listas de recursos da §5.4; sintaxe Kubernetes; até 1 KiB |
+| `fieldSelector` | vazio | listas de recursos da §5.4; campos allowlisted; até 1 KiB |
 
 Parâmetros são case-sensitive, URL-decoded uma vez e únicos, exceto
 `namespace`, `status` e `kind` quando a tabela abaixo os declara repetíveis.
@@ -151,6 +154,15 @@ Repetição não declarada, valor vazio e query desconhecida retornam
 `VALIDATION_FAILED`. `namespace` aceita no máximo 100 valores distintos, todos
 dentro do scope ativo; funciona como interseção, nunca amplia o scope.
 `status` e `kind` preservam a ordem canônica da tabela, não a ordem recebida.
+
+Nas listas de recursos, o cliente pode enviar o header
+`X-KubePeep-List-Priority: likely-next` somente com `continue` para o prefetch automático da próxima
+página. A ausência do header indica requisição visível, inclusive quando o
+usuário pede a próxima página manualmente. O header não altera a identidade
+do cursor ou do cache. O servidor pode responder `429/PREFETCH_DEFERRED` ao
+prefetch; o cliente conserva a página já carregada e permite a tentativa
+manual. Valores desconhecidos ou uso na primeira página retornam
+`VALIDATION_FAILED`.
 
 ### 5.2 Meta de página
 
@@ -256,14 +268,43 @@ e a tupla final emitida; a página seguinte nunca reconstrói um snapshot global
 nem mistura geração/resourceVersion incompatível. `410 ResourceExpired`
 descarta a página inteira e retorna 410 para recomeço, sem combinar dados.
 
-Em fan-out multi-origem, cada janela de coleta busca chunks pequenos por
-origem (default 10 itens, `MaxOriginChunkSize` 50) em vez de `limit` itens por
-namespace; a origem única de um LIST global ou coleção cluster-scoped mantém o
-`limit` integral. O resto da janela permanece no estado server-side do cursor
-e é consumido pelas páginas seguintes, o que reduz o over-fetch
+O backend escolhe a estratégia sem expô-la no contrato da UI. Uma origem usa
+`GlobalNative` e preserva o continuation nativo. Ordenação `identity asc` usa
+`NamespaceSequential` somente quando o adapter declara a sequência nativa
+namespace/nome monotônica; ele para assim que completa a página. Os demais
+sorts usam `LazyMerge`: chunks de aproximadamente 10 itens, heap e janela
+limitada, mantendo `filterScope=page` sem prometer ordenação global. O worker
+pool tem default 4 e teto interno 8. O resto da janela permanece no cursor
+server-side e é consumido pelas páginas seguintes, o que reduz o over-fetch
 (itens recebidos ÷ itens devolvidos, mensurável via
 `kubepeep_resource_list_items_received_total` ÷
 `kubepeep_resource_list_items_returned_total` em `/metrics`).
+
+Consultas simultâneas idênticas são coalescidas pela identidade completa
+(generation, contexto, scope resolvido, coleção/GVR, filtros, sort e cursor).
+O resultado concluído não vira cache. Cada consumidor mantém seu próprio
+cancelamento; quando o último sai, o trabalho Kubernetes compartilhado é
+cancelado. Em 429, somente LIST é repetido, no máximo três tentativas, honrando
+`Retry-After`, backoff exponencial com jitter e teto de 5 s; 429 repetido reduz
+o fan-out da janela pela metade.
+
+### 5.4 Selectors enviados ao API Server
+
+`labelSelector` e `fieldSelector` aceitam no máximo 1 KiB, são validados e
+normalizados antes de compor cursor/coalescing. `labelSelector` é enviado em
+todas as coleções. O allowlist conservador de `fieldSelector` é:
+
+| Coleção | Campos aceitos |
+| --- | --- |
+| todas | `metadata.name`; `metadata.namespace` apenas em recursos namespaced |
+| Pods | campos comuns + `spec.nodeName`, `status.phase` |
+| Events | campos comuns + `involvedObject.kind`, `involvedObject.name`, `involvedObject.namespace`, `involvedObject.uid`, `reason`, `reportingComponent`, `source`, `type` |
+
+Os filtros de produto `node` em Pods e `objectKind`/`reason` em Events geram
+field selectors equivalentes e continuam verificados localmente. Filtros sem
+semântica nativa equivalente (`search`, workload, restarts, problematic e
+sorts arbitrários) continuam limitados à página. Um `fieldSelector` explícito
+fora da matriz retorna validação 400; ele nunca é silenciosamente ignorado.
 
 Em `SavedFilterSet.query`, somente `namespace`, `search`, `status`, `sort`,
 `order` e os extras da linha correspondente podem ser salvos; `namespace`,
@@ -629,6 +670,7 @@ fingerprint, conteúdo ou credencial.
 | `DELETE /api/v1/namespace-scopes/{id}` | MVP | `NamespaceScopeDeleteRequest` | 204 se inativo; `SelectionDTO`, 200, se ativo | CSRF; substituto `all` revalida `list namespaces` | 404; 409 versão/geração ou ativo sem substituto |
 | `POST /api/v1/namespace-scopes/validate` | MVP | `NamespaceScopeValidateRequest` | `NamespaceScopeValidationDTO`, 200 | CSRF; existência só se permitida | parcial |
 | `POST /api/v1/namespace-scopes/{id}/select` | MVP | `SelectNamespaceScopeRequest` | `SelectionDTO`, 200 | CSRF; `all` revalida `list namespaces` | 403 real, 404, `GENERATION_CHANGED`, `SELECTION_MISMATCH` |
+| `PUT /api/v1/namespace-scopes/{id}/default` | MVP | `SelectNamespaceScopeRequest` | `SelectionDTO`, 200 | CSRF; ativa o scope; `all` revalida `list namespaces` | 403 real, 404, `GENERATION_CHANGED`, `SELECTION_MISMATCH` |
 
 `NamespaceScopeWriteRequest`:
 
@@ -694,15 +736,19 @@ Exclusão usa:
   "confirmed": true,
   "version": 3,
   "replacementScopeId": 8,
+  "returnToSetup": false,
   "expectedGeneration": "gen_41"
 }
 ```
 
-`replacementScopeId` é obrigatório somente se o scope removido está ativo e
-precisa pertencer ao mesmo profile/contexto. Excluir scope inativo não muda a
-geração e retorna 204. Excluir o ativo valida o substituto e suas permissões,
-remove o aggregate, ativa o substituto, cria uma nova geração e retorna
-`SelectionDTO`; qualquer falha preserva scope e seleção anteriores.
+O scope default exige `replacementScopeId` apontando para outro scope do mesmo
+profile/contexto ou `returnToSetup: true`; os campos são mutuamente exclusivos.
+Um scope ativo que não é default também exige substituto. Excluir scope inativo
+e não default não muda a geração e retorna 204. Com substituto, a transação
+marca o novo default quando necessário, remove o aggregate, ativa o substituto,
+cria uma geração e retorna `SelectionDTO`. Com `returnToSetup`, remove o default,
+limpa a seleção ativa e retorna ao fluxo de configuração. Qualquer falha
+preserva scope, default e seleção anteriores.
 
 `SelectNamespaceScopeRequest`:
 
@@ -716,6 +762,11 @@ Selecionar um scope cria uma nova geração e cancela a anterior. Em `all`, a
 operação revalida `list namespaces`, usa exatamente a coleção retornada e nunca
 materializa `*`. Se a permissão foi removida, a seleção falha com 403 e a
 geração anterior permanece ativa.
+
+Marcar default usa o mesmo body em `PUT /{id}/default`. A operação preserva no
+banco exatamente um default por `(clusterProfileId, context)`, ativa esse scope
+na mesma mutação cercada por geração e não depende de listar namespaces para
+scopes `single`/`list`.
 
 A rota seleciona somente scope pertencente ao profile/contexto já ativo. Um ID
 de outra origem retorna `SELECTION_MISMATCH` sem trocar profile, default,
@@ -770,6 +821,7 @@ Falta de permissão para listar não invalida lista manual. O backend processa t
   "mode": "list",
   "namespaces": ["payments", "billing", "invoices"],
   "defaultNamespace": "payments",
+  "isDefault": true,
   "version": 3,
   "createdAt": "2026-07-27T12:00:00Z",
   "updatedAt": "2026-07-27T12:30:00Z"
@@ -810,19 +862,28 @@ Allowlist completa do MVP (`group=""` significa core):
 | `deployments.watch` | `apps` | deployments | watch | namespace / vazio |
 | `deployments.restart` | `apps` | deployments | patch | namespace / target |
 | `deployments.scale` | `apps` | deployments/scale | update | namespace / target |
+| `deployments.delete` | `apps` | deployments | delete | namespace / target |
 | `statefulsets.list` | `apps` | statefulsets | list | namespace / vazio |
 | `statefulsets.get` | `apps` | statefulsets | get | namespace / target |
 | `statefulsets.watch` | `apps` | statefulsets | watch | namespace / vazio |
+| `statefulsets.restart` | `apps` | statefulsets | patch | namespace / target |
 | `statefulsets.scale` | `apps` | statefulsets/scale | update | namespace / target |
+| `statefulsets.delete` | `apps` | statefulsets | delete | namespace / target |
 | `daemonsets.list` | `apps` | daemonsets | list | namespace / vazio |
 | `daemonsets.get` | `apps` | daemonsets | get | namespace / target |
 | `daemonsets.watch` | `apps` | daemonsets | watch | namespace / vazio |
+| `daemonsets.restart` | `apps` | daemonsets | patch | namespace / target |
+| `daemonsets.delete` | `apps` | daemonsets | delete | namespace / target |
 | `jobs.list` | `batch` | jobs | list | namespace / vazio |
 | `jobs.get` | `batch` | jobs | get | namespace / target |
 | `jobs.watch` | `batch` | jobs | watch | namespace / vazio |
+| `jobs.delete` | `batch` | jobs | delete | namespace / target |
 | `cronjobs.list` | `batch` | cronjobs | list | namespace / vazio |
 | `cronjobs.get` | `batch` | cronjobs | get | namespace / target |
 | `cronjobs.watch` | `batch` | cronjobs | watch | namespace / vazio |
+| `cronjobs.suspend` | `batch` | cronjobs | patch | namespace / target |
+| `cronjobs.runnow` | `batch` | jobs | create | namespace / vazio |
+| `cronjobs.delete` | `batch` | cronjobs | delete | namespace / target |
 | `services.list` | `""` | services | list | namespace / vazio |
 | `services.get` | `""` | services | get | namespace / target |
 | `services.watch` | `""` | services | watch | namespace / vazio |
@@ -1163,8 +1224,10 @@ Ausência da Metrics API usa `FEATURE_UNAVAILABLE`, nunca números fabricados.
 ## 14. Workloads
 
 Kinds aceitos para leitura: `deployments`, `statefulsets`, `daemonsets`, `jobs`,
-`cronjobs`, `replicasets` (F3). Restart aceita somente `deployments`; scale
-aceita somente `deployments` e `statefulsets`. ReplicaSet classifica
+`cronjobs`, `replicasets` (F3). Restart aceita `deployments`, `statefulsets` e
+`daemonsets`; scale aceita `deployments` e `statefulsets`. Todos os seis kinds
+aceitam delete; CronJob também aceita suspend/resume e criação imediata de Job.
+ReplicaSet classifica
 `Healthy` quando ready == desired e `Progressing` caso contrário; nenhuma
 outra inferência de saúde é feita. Relações Deployment → ReplicaSet → Pods
 usam `ownerReferences` com UID, nunca igualdade de nome.
@@ -1174,10 +1237,13 @@ usam `ownerReferences` com UID, nunca igualdade de nome.
 | `GET /api/v1/workloads` | MVP | query de §5.3; `WorkloadDTO[]`, 200 | `list` de cada kind | 403/409/410/503/504; parcial em 200 |
 | `GET /api/v1/workloads/{kind}/{namespace}/{name}` | MVP | vazio; `WorkloadDetailDTO`, 200 | `get` kind/alvo | 403/404/409/503/504 |
 | `GET /api/v1/workloads/{kind}/{namespace}/{name}/yaml` | MVP | vazio; YAML, 200 | `get` kind/alvo | 403/404/409/413/503/504 |
-| `POST /api/v1/workloads/{kind}/{namespace}/{name}/restart` | MVP | `RestartRequest`; `ActionAcceptedDTO`, 202 | CSRF + `patch apps/deployments` com resourceName | 403/404/409; kind não suportado |
+| `POST /api/v1/workloads/{kind}/{namespace}/{name}/restart` | MVP | `RestartRequest`; `ActionAcceptedDTO`, 202 | CSRF + `patch apps/{deployments\|statefulsets\|daemonsets}` com resourceName | 403/404/409; kind não suportado |
 | `PUT /api/v1/workloads/{kind}/{namespace}/{name}/scale` | MVP | `ScaleRequest`; `ScaleResultDTO`, 200 | CSRF + `update apps/{deployments|statefulsets}/scale` com resourceName | 403/404/409; kind não suportado |
+| `DELETE /api/v1/workloads/{kind}/{namespace}/{name}` | MVP | `WorkloadDeleteRequest`; `ActionAcceptedDTO`, 202 | CSRF + `delete` no kind/alvo exato | 403/404/409; kind não suportado |
+| `PUT /api/v1/workloads/cronjobs/{namespace}/{name}/suspend` | MVP | `CronJobSuspendRequest`; `ActionAcceptedDTO`, 200 | CSRF + `patch batch/cronjobs` com resourceName | 403/404/409 |
+| `POST /api/v1/workloads/cronjobs/{namespace}/{name}/trigger` | MVP | `CronJobTriggerRequest`; `ActionAcceptedDTO`, 202 | CSRF + `create batch/jobs`; target CronJob exato | 403/404/409 |
 
-Restart aceita apenas Deployment no MVP e exige `Idempotency-Key`.
+Restart exige `Idempotency-Key`; trigger de CronJob também usa chave idempotente.
 
 O backend envia um strategic merge patch mínimo que altera somente
 `spec.template.metadata.annotations["kubectl.kubernetes.io/restartedAt"]`, com
@@ -1414,6 +1480,7 @@ omitidos, não reduzidos a objetos genéricos.
 | `GET /api/v1/services` | query comum | `ServiceDTO[]`, 200 | `list services` | cursor/parcial; 403/409/410/503/504 |
 | `GET /api/v1/services/{namespace}/{name}` | vazio | `ServiceDetailDTO`, 200 | `get services` com resourceName | 403/404/409/503/504 |
 | `GET /api/v1/services/{namespace}/{name}/yaml` | vazio | YAML, 200 | `get services` com resourceName | 403/404/409/413/503/504 |
+| `POST /api/v1/services/{namespace}/{name}/port-forward` | `PortForwardCreateRequest` | `PortForwardDTO`, 201; resolve backend Ready | CSRF + `get services`, `list pods` e `create pods/portforward` no Pod resolvido | 400/403/404/409/429/503/504 |
 | `GET /api/v1/ingresses` | query comum | `IngressDTO[]`, 200 | `list networking.k8s.io/ingresses` | cursor/parcial; 403/409/410/503/504 |
 | `GET /api/v1/ingresses/{namespace}/{name}` | vazio | `IngressDetailDTO`, 200 | `get networking.k8s.io/ingresses` com resourceName | 403/404/409/503/504 |
 | `GET /api/v1/ingresses/{namespace}/{name}/yaml` | vazio | YAML, 200 | `get networking.k8s.io/ingresses` com resourceName | 403/404/409/413/503/504 |
@@ -1597,6 +1664,15 @@ Criação pelo endpoint do Pod:
   "expectedGeneration": "gen_42"
 }
 ```
+
+Criação pelo endpoint do Service usa o mesmo envelope, com `kind: "Service"`,
+`name` do Service, `remotePort` igual à porta TCP publicada e
+`consequenceCode: "EXPOSE_SERVICE_PORT_LOCALLY"`. O backend lê o Service,
+seleciona deterministicamente um Pod Running/Ready compatível com seu selector,
+resolve `targetPort` inteiro ou nomeado e revalida `create pods/portforward`
+para o nome exato desse Pod antes do upgrade. Service sem selector, sem porta
+TCP solicitada, sem backend pronto ou sem o named target port retorna 404. O
+`PortForwardDTO.pod` identifica o backend efetivamente usado.
 
 Exige `Idempotency-Key`. O backend escolhe porta quando null e retorna somente após listener local adquirido:
 
@@ -2043,6 +2119,22 @@ banco, geração e nonce; cluster/auth offline após o commit mantém a seleçã
 com componente degradado, sem rollback.
 
 Se a conexão cair depois de uma mutação, o cliente não afirma falha nem repete cegamente; refaz GET do recurso/sessão e apresenta estado desconhecido até reconciliar.
+
+### API local de investigação da Fase 5
+
+As rotas read-only abaixo reutilizam seleção, geração, `no-store`, request ID e
+middlewares locais existentes:
+
+| Rota | Resposta | Limites |
+| --- | --- | --- |
+| `GET /api/v1/local-index` | identidades, contagens por namespace e cobertura por tópico | somente snapshots não filtrados da geração ativa |
+| `GET /api/v1/investigation/{kind}/{namespace}/{name}` | owner chain, Pods, Services, EndpointSlices, ConfigMaps, PVCs e Events | kind allowlisted, nomes DNS e namespace no scope ativo |
+| `GET /api/v1/diagnostics` | percentis, cache, watches, 429, sync, namespaces e cluster | timeout do dashboard, quatro workers e até 200 namespaces medidos |
+
+As respostas são cercadas novamente no momento da publicação. Ausência em
+cache parcial permanece `complete=false`; selector ou GVR/origem faltante não
+produz cobertura completa. O contrato detalhado e os limites de logs agregados
+estão em [investigation-diagnostics.md](investigation-diagnostics.md).
 
 ## 21. Rotas pós-MVP/proibidas
 

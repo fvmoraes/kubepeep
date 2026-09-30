@@ -1,6 +1,8 @@
 package resources
 
 import (
+	"slices"
+	"sort"
 	"time"
 
 	"github.com/fvmoraes/kubepeep/internal/services/podhealth"
@@ -9,16 +11,19 @@ import (
 )
 
 type PodDTO struct {
-	Namespace   string    `json:"namespace"`
-	Name        string    `json:"name"`
-	Status      string    `json:"status"`
-	Ready       ReadyDTO  `json:"ready"`
-	Restarts    int64     `json:"restarts"`
-	Node        *string   `json:"node"`
-	IP          *string   `json:"ip"`
-	Owner       *OwnerDTO `json:"owner"`
-	AgeSeconds  int64     `json:"ageSeconds"`
-	Problematic bool      `json:"problematic"`
+	Namespace   string            `json:"namespace"`
+	Name        string            `json:"name"`
+	Labels      map[string]string `json:"labels,omitempty"`
+	Status      string            `json:"status"`
+	Ready       ReadyDTO          `json:"ready"`
+	Restarts    int64             `json:"restarts"`
+	Node        *string           `json:"node"`
+	IP          *string           `json:"ip"`
+	Owner       *OwnerDTO         `json:"owner"`
+	AgeSeconds  int64             `json:"ageSeconds"`
+	Problematic bool              `json:"problematic"`
+	ConfigMaps  []string          `json:"configMaps,omitempty"`
+	PVCs        []string          `json:"pvcs,omitempty"`
 }
 
 func (PodDTO) resourceListItem() {}
@@ -54,6 +59,7 @@ func ConvertPod(value *corev1.Pod, now time.Time) PodDTO {
 	summary := PodDTO{
 		Namespace:  value.Namespace,
 		Name:       value.Name,
+		Labels:     limitedStringMap(value.Labels),
 		Status:     status,
 		Ready:      ReadyDTO{Current: ready, Desired: int64(len(value.Spec.Containers))},
 		Restarts:   restarts,
@@ -61,9 +67,70 @@ func ConvertPod(value *corev1.Pod, now time.Time) PodDTO {
 		IP:         nullableString(value.Status.PodIP),
 		Owner:      owner,
 		AgeSeconds: ageSeconds(value.CreationTimestamp.Time, now),
+		ConfigMaps: podConfigMapRefs(value.Spec),
+		PVCs:       podPVCRefs(value.Spec),
 	}
 	summary.Problematic = podProblematic(value, summary)
 	return summary
+}
+
+func podConfigMapRefs(spec corev1.PodSpec) []string {
+	values := make([]string, 0)
+	add := func(value string) {
+		if value == "" || len(values) >= 64 {
+			return
+		}
+		for _, existing := range values {
+			if existing == value {
+				return
+			}
+		}
+		values = append(values, value)
+	}
+	for _, volume := range spec.Volumes {
+		if volume.ConfigMap != nil {
+			add(volume.ConfigMap.Name)
+		}
+		if volume.Projected != nil {
+			for _, source := range volume.Projected.Sources {
+				if source.ConfigMap != nil {
+					add(source.ConfigMap.Name)
+				}
+			}
+		}
+	}
+	containers := make([]corev1.Container, 0, len(spec.InitContainers)+len(spec.Containers))
+	containers = append(containers, spec.InitContainers...)
+	containers = append(containers, spec.Containers...)
+	for _, container := range containers {
+		for _, source := range container.EnvFrom {
+			if source.ConfigMapRef != nil {
+				add(source.ConfigMapRef.Name)
+			}
+		}
+		for _, variable := range container.Env {
+			if variable.ValueFrom != nil && variable.ValueFrom.ConfigMapKeyRef != nil {
+				add(variable.ValueFrom.ConfigMapKeyRef.Name)
+			}
+		}
+	}
+	sort.Strings(values)
+	return values
+}
+
+func podPVCRefs(spec corev1.PodSpec) []string {
+	values := make([]string, 0)
+	for _, volume := range spec.Volumes {
+		if volume.PersistentVolumeClaim == nil || volume.PersistentVolumeClaim.ClaimName == "" {
+			continue
+		}
+		if len(values) == 64 {
+			break
+		}
+		values = append(values, volume.PersistentVolumeClaim.ClaimName)
+	}
+	sort.Strings(values)
+	return slices.Compact(values)
 }
 
 func PodDetail(value *corev1.Pod, relatedEvents []ResourceRef, now time.Time) PodDetailDTO {
@@ -84,7 +151,7 @@ func PodDetail(value *corev1.Pod, relatedEvents []ResourceRef, now time.Time) Po
 		Containers:          regularContainerDTOs(value.Spec.Containers, value.Status.ContainerStatuses, "regular"),
 		InitContainers:      regularContainerDTOs(value.Spec.InitContainers, value.Status.InitContainerStatuses, "init"),
 		EphemeralContainers: ephemeralContainerDTOs(value.Spec.EphemeralContainers, value.Status.EphemeralContainerStatuses),
-		RelatedEvents:       append([]ResourceRef(nil), relatedEvents...),
+		RelatedEvents:       append([]ResourceRef{}, relatedEvents...),
 	}
 }
 
