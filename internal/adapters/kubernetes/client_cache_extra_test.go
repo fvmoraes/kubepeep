@@ -107,10 +107,14 @@ func TestClientCacheWaitingCallerSeesItsOwnCancellation(t *testing.T) {
 	}
 	defer cache.Close()
 
-	builderError := make(chan error, 1)
+	type activationResult struct {
+		lease *Lease
+		err   error
+	}
+	builderResult := make(chan activationResult, 1)
 	go func() {
-		_, err := cache.Activate(context.Background(), resolution)
-		builderError <- err
+		lease, err := cache.Activate(context.Background(), resolution)
+		builderResult <- activationResult{lease: lease, err: err}
 	}()
 	select {
 	case <-builder.started:
@@ -136,9 +140,9 @@ func TestClientCacheWaitingCallerSeesItsOwnCancellation(t *testing.T) {
 
 	close(builder.release)
 	select {
-	case err := <-builderError:
-		if !IsGenerationChanged(err) {
-			t.Fatalf("superseded builder err = %v", err)
+	case result := <-builderResult:
+		if result.err != nil || result.lease == nil {
+			t.Fatalf("builder result = (%v, %v), want a lease without error", result.lease, result.err)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("blocked builder was not released")
