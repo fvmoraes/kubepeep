@@ -7,6 +7,24 @@ versions follow [Semantic Versioning](https://semver.org/) **without the `v`
 prefix** (official tags: `1.4.2`, `1.4.3`, …), and entries are generated
 automatically from Conventional Commits by `.github/workflows/release.yml`.
 
+## [0.8.0] - 2026-10-06
+
+## Added
+- feat: standardize resource workspace and reorganize repository
+
+## Changed
+- Merge pull request #24 from fvmoraes/feat/resource-workspace-ui
+
+## Fixed
+- fix(deps): resolve npm and OpenTelemetry audit failures
+
+## Download
+
+Permanently-updated links: https://github.com/fvmoraes/kubepeep/blob/main/docs/download.md
+
+## Full Changelog
+**Full Changelog**: https://github.com/fvmoraes/kubepeep/compare/0.7.0...0.8.0
+
 ## [0.7.0] - 2026-09-29
 
 ### Added
@@ -631,3 +649,4 @@ Permanently-updated links: https://github.com/fvmoraes/kubepeep/blob/main/docs/d
 [0.6.0]: https://github.com/fvmoraes/kubepeep/releases/tag/0.6.0
 [0.6.1]: https://github.com/fvmoraes/kubepeep/releases/tag/0.6.1
 [0.6.2]: https://github.com/fvmoraes/kubepeep/releases/tag/0.6.2
+[0.8.0]: https://github.com/fvmoraes/kubepeep/releases/tag/0.8.0
