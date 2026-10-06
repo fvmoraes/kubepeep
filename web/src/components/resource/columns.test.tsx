@@ -1,8 +1,9 @@
+import { DataTable } from '../ui/DataTable'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { applyColumnVisibility, ColumnVisibilityControl, usePreferenceColumnVisibility } from './columns'
+import { usePreferenceColumnVisibility } from './columns'
 
 function json(data: unknown): Response {
   return new Response(JSON.stringify({ data }), { headers: { 'Content-Type': 'application/json' } })
@@ -22,9 +23,9 @@ function preferences() {
 
 function Harness({ collectionId = 'pods' }: { collectionId?: string }) {
   const state = usePreferenceColumnVisibility(collectionId)
-  const columns = [{ key: 'name' }, { key: 'status' }, { key: 'age' }]
-  const visible = applyColumnVisibility(columns, state)
-  return <section data-testid={`columns-${collectionId}`}><ColumnVisibilityControl state={state} columns={columns} /><output aria-label={`Visible columns ${collectionId}`}>{visible.map((column) => column.key).join(',')}</output></section>
+  const columns = ['name', 'status', 'age'].map((key) => ({ key, header: key, cell: () => key }))
+  const visible = columns.filter((column) => !state.hidden.includes(column.key))
+  return <section data-testid={`columns-${collectionId}`}><DataTable columnVisibility={state} columns={columns} rows={[]} /><output aria-label={`Visible columns ${collectionId}`}>{visible.map((column) => column.key).join(',')}</output></section>
 }
 
 afterEach(() => {
@@ -79,9 +80,10 @@ describe('column visibility', () => {
     const pods = within(screen.getByTestId('columns-pods'))
     const services = within(screen.getByTestId('columns-services'))
     fireEvent.click(pods.getByRole('button', { name: 'Choose visible columns' }))
-    fireEvent.click(await pods.findByRole('checkbox', { name: 'status' }))
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'status' }))
+    fireEvent.keyDown(document, { key: 'Escape' })
     fireEvent.click(services.getByRole('button', { name: 'Choose visible columns' }))
-    fireEvent.click(await services.findByRole('checkbox', { name: 'age' }))
+    fireEvent.click(await screen.findByRole('checkbox', { name: 'age' }))
 
     await waitFor(() => expect(putBodies).toHaveLength(2))
     expect(putBodies[0].columns.hidden).toEqual({ pods: ['status'] })

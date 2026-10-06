@@ -10,7 +10,7 @@ import { prefetchDefaultPodPreview } from './resource/podPreview'
 import type { SelectionSummary } from '../api/types'
 import { ToastProvider } from './ui/Toast'
 import { ResourceWorkspaceProvider } from './workspace/ResourceWorkspaceProvider'
-import { ResourceWorkspaceOverlay, tabsFor } from './workspace/ResourceWorkspace'
+import { ResourceWorkspacePanel, tabsFor } from './workspace/ResourceWorkspace'
 import { GlobalNamespaceProvider, useGlobalNamespace } from '../context/GlobalNamespace'
 
 const generation = 'gen_42'
@@ -56,7 +56,7 @@ function renderPage(component: React.ReactNode, initialEntries: string[] = ['/']
               <NamespaceTestControl />
               <ResourceFamilyNav />
               {component}
-              <ResourceWorkspaceOverlay />
+              <ResourceWorkspacePanel />
             </GlobalNamespaceProvider>
           </ResourceWorkspaceProvider>
         </ToastProvider>
@@ -65,9 +65,6 @@ function renderPage(component: React.ReactNode, initialEntries: string[] = ['/']
   ) }
 }
 
-function sortOptionValues(): string[] {
-  return within(screen.getByLabelText('Sort this bounded page')).getAllByRole('option').map((option) => (option as HTMLOptionElement).value)
-}
 
 afterEach(() => {
   cleanup()
@@ -265,14 +262,14 @@ describe('read-only resource pages', () => {
   it('keeps hidden Storage columns in the chooser so they can be restored', async () => {
     const storedPreferences = {
       ...preferences(),
-      columns: { hidden: { 'storage/persistent-volumes': ['status'] } },
+      columns: { hidden: { 'persistent-volumes': ['status'] } },
     }
     vi.stubGlobal('fetch', vi.fn((input: string | URL | Request, init?: RequestInit) => {
       const path = String(input)
       if (path === '/api/v1/status') return Promise.resolve(json(selectedStatus()))
       if (path === '/api/v1/preferences' && init?.method !== 'PUT') return Promise.resolve(json(storedPreferences))
       if (path === '/api/v1/session') return Promise.resolve(json({ csrfToken: 'csrf', generation, origin: 'http://127.0.0.1:2748', expiresAt: '2026-09-12T12:00:00Z' }))
-      if (path === '/api/v1/preferences' && init?.method === 'PUT') return Promise.resolve(json({ ...storedPreferences, columns: { hidden: { 'storage/persistent-volumes': [] } } }))
+      if (path === '/api/v1/preferences' && init?.method === 'PUT') return Promise.resolve(json({ ...storedPreferences, columns: { hidden: { 'persistent-volumes': [] } } }))
       if (path === '/api/v1/persistent-volumes?limit=100') return Promise.resolve(json([{
         name: 'pv-data', status: 'Bound', capacity: '10Gi', storageClass: 'fast', claim: null, ageSeconds: 60,
       }], page()))
@@ -284,12 +281,12 @@ describe('read-only resource pages', () => {
     )
 
     await screen.findByRole('button', { name: 'Open pv-data' })
-    expect(screen.queryByRole('columnheader', { name: 'Phase' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('columnheader', { name: /^Phase/ })).not.toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: 'Choose visible columns' }))
-    const statusColumn = screen.getByRole('checkbox', { name: 'status' })
+    const statusColumn = screen.getByRole('checkbox', { name: 'Phase' })
     expect(statusColumn).not.toBeChecked()
     fireEvent.click(statusColumn)
-    expect(await screen.findByRole('columnheader', { name: 'Phase' })).toBeInTheDocument()
+    expect(await screen.findByRole('columnheader', { name: /^Phase/ })).toBeInTheDocument()
   })
 
   it('accumulates Pod pages and drops old cursors when the global namespace changes', async () => {
@@ -415,10 +412,10 @@ describe('read-only resource pages', () => {
     }))
     renderPage(<PodsPage />)
     await screen.findByRole('button', { name: 'Open Pod old-pod in payments' })
-    fireEvent.change(screen.getByLabelText('Search this bounded page'), { target: { value: 'new' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Apply filters' }))
+    fireEvent.change(screen.getByLabelText('Search resources'), { target: { value: 'new' } })
     await screen.findByText('Refreshing Pods…')
     expect(screen.getByRole('button', { name: 'Open Pod old-pod in payments' })).toBeInTheDocument()
+    await waitFor(() => expect(release).toBeDefined())
     await act(async () => release?.(json([{ namespace: 'payments', name: 'new-pod', status: 'Running', ready: { current: 1, desired: 1 }, restarts: 0, ageSeconds: 60, problematic: false }], page())))
     await screen.findByRole('button', { name: 'Open Pod new-pod in payments' })
     expect(screen.queryByRole('button', { name: 'Open Pod old-pod in payments' })).not.toBeInTheDocument()
@@ -437,15 +434,14 @@ describe('read-only resource pages', () => {
       if (requestPath === '/api/v1/namespace-scopes/7') return Promise.resolve(json({ namespaces: ['payments'] }))
       if (requestPath.startsWith(path)) {
         const namespace = new URL(requestPath, 'http://127.0.0.1').searchParams.get('namespace')
-        if (namespace === 'other') return new Promise<Response>((resolve) => { release = resolve })
+        if (namespace === 'payments') return new Promise<Response>((resolve) => { release = resolve })
         return Promise.resolve(json([item], page()))
       }
       throw new Error(`Unexpected request: ${requestPath}`)
     }))
     renderPage(component)
     await screen.findAllByText('old-marker')
-    fireEvent.change(screen.getByLabelText('Namespace'), { target: { value: 'other' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Apply filters' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Change global namespace' }))
     await waitFor(() => expect(release).toBeDefined())
     expect(screen.queryAllByText('old-marker')).toHaveLength(0)
     await act(async () => release?.(json([], page())))
@@ -469,7 +465,7 @@ describe('read-only resource pages', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Open Pod api-empty-events in payments' }))
     expect(await screen.findByText('uid-empty-events')).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Pods' })).toBeInTheDocument()
-    expect(screen.getByRole('dialog')).toHaveTextContent('This Pod has no controller owner.')
+    expect(screen.getByRole('region', { name: 'Pod api-empty-events' })).toHaveTextContent('This Pod has no controller owner.')
     expect(screen.getByRole('button', { name: 'Go to previous resource' })).toHaveAttribute('title', 'There is no previous resource in this workspace history.')
     expect(screen.getByRole('button', { name: 'Go to next resource' })).toHaveAttribute('title', 'There is no next resource in this workspace history.')
   })
@@ -500,7 +496,6 @@ describe('read-only resource pages', () => {
 
     const { client } = renderPage(<WorkloadsPage />)
 
-    expect(sortOptionValues()).toEqual(['identity', 'name', 'age', 'status'])
 
     fireEvent.click(await screen.findByRole('button', { name: 'Open Deployment api in payments' }))
     expect(await screen.findByText('17')).toBeInTheDocument()
@@ -526,71 +521,29 @@ describe('read-only resource pages', () => {
     expect(window.sessionStorage).toHaveLength(0)
   })
 
-  it('applies visual namespace, workload and node filters to the bounded Pod query', async () => {
+  it('uses only debounced string search above Pods and keeps Jobs below regular Pods', async () => {
     const paths: string[] = []
     vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
-      const path = String(input)
-      paths.push(path)
+      const path = String(input); paths.push(path)
       if (path === '/api/v1/status') return Promise.resolve(json(selectedStatus()))
-      if (path === '/api/v1/preferences') return Promise.resolve(json({ ...preferences(), filters: { ...preferences().filters, pods: { version: 1, items: [
-        { id: 'saved-pods', name: 'Saved problem Pods', query: { namespace: ['ops', 'payments'], search: 'failed', status: ['Failed'], workload: 'api', node: 'worker-9', restarts: 'gte3', problematic: true, sort: 'age', order: 'desc' } },
-        { id: 'saved-safe', name: 'Saved non-problem Pods', query: { problematic: false, sort: 'secretData', order: 'sideways' } },
-      ] } } }))
-      if (path.startsWith('/api/v1/pods?')) return Promise.resolve(json([], page()))
+      if (path === '/api/v1/preferences') return Promise.resolve(json(preferences()))
+      if (path.startsWith('/api/v1/pods?')) return Promise.resolve(json([
+        { namespace: 'payments', name: 'a-job', owner: { kind: 'Job', name: 'batch' }, status: 'Succeeded', ready: { current: 0, desired: 1 }, restarts: 0, ageSeconds: 60 },
+        { namespace: 'payments', name: 'z-api', owner: null, status: 'Running', ready: { current: 1, desired: 1 }, restarts: 12, ageSeconds: 60 },
+      ], page()))
       throw new Error(`Unexpected request: ${path}`)
     }))
-
     renderPage(<PodsPage />)
-    await screen.findByRole('combobox', { name: 'Saved filter' })
-    expect(sortOptionValues()).toEqual(['identity', 'name', 'age', 'restarts', 'status'])
-    const initialPodRequests = paths.filter((path) => path.startsWith('/api/v1/pods?')).length
-    fireEvent.change(await screen.findByLabelText('Namespace'), { target: { value: 'payments' } })
-    fireEvent.change(screen.getByLabelText('Workload owner'), { target: { value: 'api' } })
-    fireEvent.change(screen.getByLabelText('Node'), { target: { value: 'worker-1' } })
-    fireEvent.change(screen.getByLabelText('Search this bounded page'), { target: { value: 'backend' } })
-    fireEvent.change(screen.getByLabelText('Sort this bounded page'), { target: { value: 'restarts' } })
-    fireEvent.change(screen.getByLabelText('Order'), { target: { value: 'desc' } })
-    expect(screen.getByRole('status')).toHaveTextContent('Filter changes pending')
-    expect(paths.filter((path) => path.startsWith('/api/v1/pods?'))).toHaveLength(initialPodRequests)
-    fireEvent.click(screen.getByRole('button', { name: 'Apply filters' }))
-
-    await waitFor(() => expect(paths.some((path) => {
-      const query = new URL(path, 'http://127.0.0.1').searchParams
-      return query.get('namespace') === 'payments' && query.get('workload') === 'api' && query.get('node') === 'worker-1' && query.get('search') === 'backend' && query.get('sort') === 'restarts' && query.get('order') === 'desc'
-    })).toBe(true))
-    expect(screen.getByText('Restarts · descending')).toBeInTheDocument()
-
-    const requestsBeforeClear = paths.length
-    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }))
-    await waitFor(() => expect(screen.getByText('None')).toBeInTheDocument())
-    expect(paths.slice(requestsBeforeClear).filter((path) => path.startsWith('/api/v1/pods?')).every((path) => {
-      const query = new URL(path, 'http://127.0.0.1').searchParams
-      return !query.has('namespace') && !query.has('search') && !query.has('sort') && !query.has('order') && !query.has('continue')
-    })).toBe(true)
-
-    fireEvent.change(await screen.findByRole('combobox', { name: 'Saved filter' }), { target: { value: 'saved-pods' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Apply saved filter' }))
-    expect(screen.getByLabelText('Namespace')).toHaveValue('ops, payments')
-    expect(screen.getByLabelText('Workload owner')).toHaveValue('api')
-    expect(screen.getByLabelText('Node')).toHaveValue('worker-9')
-    expect(screen.getByLabelText('Status')).toHaveValue('Failed')
-    expect(screen.getByLabelText('Sort this bounded page')).toHaveValue('age')
-    expect(screen.getByLabelText('Order')).toHaveValue('desc')
-    await waitFor(() => expect(paths.some((path) => {
-      const query = new URL(path, 'http://127.0.0.1').searchParams
-      return query.getAll('namespace').join(',') === 'ops,payments' && query.get('restarts') === 'gte3' && query.get('problematic') === 'true' && query.get('sort') === 'age' && query.get('order') === 'desc'
-    })).toBe(true))
-
-    fireEvent.change(screen.getByRole('combobox', { name: 'Saved filter' }), { target: { value: 'saved-safe' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Apply saved filter' }))
-    expect(screen.getByLabelText('Problem evidence')).toHaveValue('false')
-    expect(screen.getByLabelText('Sort this bounded page')).toHaveValue('identity')
-    expect(screen.getByLabelText('Order')).toHaveValue('asc')
-    await waitFor(() => expect(paths.some((path) => {
-      if (!path.startsWith('/api/v1/pods?')) return false
-      const query = new URL(path, 'http://127.0.0.1').searchParams
-      return query.get('problematic') === 'false' && !query.has('sort') && !query.has('order')
-    })).toBe(true))
+    await screen.findByRole('button', { name: 'Open Pod z-api in payments' })
+    expect(screen.getAllByRole('row')[1]).toHaveTextContent('z-api')
+    expect(screen.queryByRole('button', { name: /refresh|apply filters/i })).not.toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: 'Saved filter' })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Filter Type' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Job' }))
+    expect(screen.queryByRole('button', { name: 'Open Pod a-job in payments' })).not.toBeInTheDocument()
+    fireEvent.keyDown(document, { key: 'Escape' })
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'api' } })
+    await waitFor(() => expect(paths.some((path) => path.includes('search=api'))).toBe(true))
   })
 
   it('renders Secret detail through an explicit metadata allowlist and never offers YAML', async () => {
@@ -608,7 +561,6 @@ describe('read-only resource pages', () => {
     }))
 
     renderPage(<Routes><Route path="/config/:tab" element={<ConfigPage />} /></Routes>, ['/config/configmaps'])
-    expect(sortOptionValues()).toEqual(['identity', 'name', 'createdAt'])
     fireEvent.click(screen.getByRole('link', { name: 'Secrets' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Open Secret registry in payments' }))
 
@@ -655,77 +607,42 @@ describe('read-only resource pages', () => {
     await waitFor(() => expect(paths.some((path) => path.startsWith('/api/v1/secrets?'))).toBe(true))
   })
 
-  it('keeps draft search and allowlisted ordering independent across Network tabs', async () => {
+  it('keeps string search independent across Network tabs', async () => {
     const paths: string[] = []
     vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
-      const path = String(input)
-      paths.push(path)
+      const path = String(input); paths.push(path)
       if (path === '/api/v1/status') return Promise.resolve(json(selectedStatus()))
-      if (path.startsWith('/api/v1/services?') || path.startsWith('/api/v1/ingresses?') || path.startsWith('/api/v1/endpoint-slices?')) return Promise.resolve(json([], page()))
+      if (path.startsWith('/api/v1/services?') || path.startsWith('/api/v1/ingresses?')) return Promise.resolve(json([], page()))
       throw new Error(`Unexpected request: ${path}`)
     }))
-
     renderPage(<Routes><Route path="/network/:tab" element={<NetworkPage />} /></Routes>, ['/network/services'])
-    await screen.findByLabelText('Search this bounded page')
-    expect(sortOptionValues()).toEqual(['identity', 'name', 'type'])
-    await waitFor(() => expect(paths.filter((path) => path.startsWith('/api/v1/services?'))).toHaveLength(1))
-    const initialServiceRequests = paths.filter((path) => path.startsWith('/api/v1/services?')).length
-    fireEvent.change(screen.getByLabelText('Search this bounded page'), { target: { value: 'edge' } })
-    fireEvent.change(screen.getByLabelText('Sort this bounded page'), { target: { value: 'type' } })
-    expect(paths.filter((path) => path.startsWith('/api/v1/services?'))).toHaveLength(initialServiceRequests)
-
+    fireEvent.change(await screen.findByLabelText('Search resources'), { target: { value: 'edge' } })
+    await waitFor(() => expect(paths.some((path) => path.startsWith('/api/v1/services?') && path.includes('search=edge'))).toBe(true))
     fireEvent.click(screen.getByRole('link', { name: 'Ingresses' }))
-    expect(sortOptionValues()).toEqual(['identity', 'name'])
-    expect(screen.getByLabelText('Search this bounded page')).toHaveValue('')
-    expect(screen.getByLabelText('Sort this bounded page')).toHaveValue('identity')
-    fireEvent.change(screen.getByLabelText('Search this bounded page'), { target: { value: 'public' } })
-    fireEvent.change(screen.getByLabelText('Sort this bounded page'), { target: { value: 'name' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Apply filters' }))
-    await waitFor(() => expect(paths.some((path) => {
-      if (!path.startsWith('/api/v1/ingresses?')) return false
-      const query = new URL(path, 'http://127.0.0.1').searchParams
-      return query.get('search') === 'public' && query.get('sort') === 'name' && query.get('order') === 'asc'
-    })).toBe(true))
-
+    expect(screen.getByLabelText('Search resources')).toHaveValue('')
+    fireEvent.change(screen.getByLabelText('Search resources'), { target: { value: 'public' } })
+    await waitFor(() => expect(paths.some((path) => path.startsWith('/api/v1/ingresses?') && path.includes('search=public'))).toBe(true))
     fireEvent.click(screen.getByRole('link', { name: 'Services' }))
-    expect(screen.getByLabelText('Search this bounded page')).toHaveValue('edge')
-    expect(screen.getByLabelText('Sort this bounded page')).toHaveValue('type')
-    expect(screen.getByRole('status')).toHaveTextContent('Filter changes pending')
-    fireEvent.click(screen.getByRole('button', { name: 'Apply filters' }))
-    await waitFor(() => expect(paths.some((path) => {
-      if (!path.startsWith('/api/v1/services?')) return false
-      const query = new URL(path, 'http://127.0.0.1').searchParams
-      return query.get('search') === 'edge' && query.get('sort') === 'type' && query.get('order') === 'asc'
-    })).toBe(true))
-
-    fireEvent.click(screen.getByRole('link', { name: 'EndpointSlices' }))
-    expect(sortOptionValues()).toEqual(['identity', 'name', 'addressType'])
-    await waitFor(() => expect(paths.some((path) => path === '/api/v1/endpoint-slices?limit=100')).toBe(true))
+    expect(screen.getByLabelText('Search resources')).toHaveValue('edge')
   })
 
-  it('uses the exact Event ordering catalog and applies non-default server ordering', async () => {
+  it('orders events in the column header without refetching the inventory', async () => {
     const paths: string[] = []
     vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
-      const path = String(input)
-      paths.push(path)
+      const path = String(input); paths.push(path)
       if (path === '/api/v1/status') return Promise.resolve(json(selectedStatus()))
       if (path === '/api/v1/preferences') return Promise.resolve(json(preferences()))
-      if (path.startsWith('/api/v1/events?')) return Promise.resolve(json([], page()))
+      if (path.startsWith('/api/v1/events?')) return Promise.resolve(json([1, 12, 2].map((count) => ({ namespace: 'payments', objectKind: 'Pod', objectName: `api-${count}`, timestamp: null, type: 'Normal', reason: 'Started', count, message: `event-${count}` })), page()))
       throw new Error(`Unexpected request: ${path}`)
     }))
-
     renderPage(<EventsPage />)
-    await screen.findByLabelText('Sort this bounded page')
-    expect(sortOptionValues()).toEqual(['timestamp', 'count', 'identity'])
-    fireEvent.change(screen.getByLabelText('Sort this bounded page'), { target: { value: 'count' } })
-    fireEvent.change(screen.getByLabelText('Order'), { target: { value: 'asc' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Apply filters' }))
-
-    await waitFor(() => expect(paths.some((path) => {
-      if (!path.startsWith('/api/v1/events?')) return false
-      const query = new URL(path, 'http://127.0.0.1').searchParams
-      return query.get('sort') === 'count' && query.get('order') === 'asc'
-    })).toBe(true))
+    await screen.findByText('event-12')
+    const count = paths.length
+    fireEvent.click(screen.getByRole('button', { name: 'Count' }))
+    expect(screen.getAllByRole('row').slice(1).map((row) => within(row).getAllByRole('cell')[4].textContent)).toEqual(['1', '2', '12'])
+    fireEvent.click(screen.getByRole('button', { name: 'Count' }))
+    expect(screen.getAllByRole('row')[1]).toHaveTextContent('event-12')
+    expect(paths).toHaveLength(count)
   })
 
   it('shows port-forward sessions only as generation-matched loopback listeners', async () => {
@@ -741,7 +658,11 @@ describe('read-only resource pages', () => {
     fireEvent.click(screen.getByRole('link', { name: 'Port Forwarding' }))
 
     expect(await screen.findByText('127.0.0.1:49152')).toBeInTheDocument()
-    expect(screen.getByText('development · payments/api-abc → 8080')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Open Pod api-abc in payments' })).toBeInTheDocument()
+    expect(screen.getByRole('cell', { name: '8080' })).toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Search resources'), { target: { value: 'another-pod' } })
+    expect(screen.queryByRole('button', { name: 'Close loopback session' })).not.toBeInTheDocument()
+    fireEvent.change(screen.getByLabelText('Search resources'), { target: { value: '' } })
     await waitFor(() => expect(screen.getByRole('button', { name: 'Close loopback session' })).toBeEnabled())
   })
 })

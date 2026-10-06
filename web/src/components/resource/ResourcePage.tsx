@@ -11,10 +11,10 @@ export interface ResourcePageProps {
 }
 
 /** Standard resource page scaffold: header + vertical stack of sections. */
-export function ResourcePage({ title, description, actions, children, className = '' }: ResourcePageProps) {
+export function ResourcePage({ title, actions, children, className = '' }: ResourcePageProps) {
   return (
-    <div className={`flex w-full min-w-0 flex-col gap-4 ${className}`}>
-      <PageHeader title={title} description={description} actions={actions} />
+    <div className={`flex w-full min-w-0 flex-col gap-2 ${className}`}>
+      <PageHeader title={title} actions={actions} />
       {children}
     </div>
   )

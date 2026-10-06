@@ -63,8 +63,7 @@ export function FavoriteButton({ kind, namespace, name, generation, label = 'res
   return (
     <>
       <Button
-        variant="ghost"
-        size="sm"
+        variant="icon"
         aria-pressed={isFavorite}
         aria-label={isFavorite ? `Remove ${name} from favorites` : `Add ${name} to favorites`}
         title={isFavorite ? 'Remove from favorites' : 'Add to favorites'}
@@ -74,7 +73,7 @@ export function FavoriteButton({ kind, namespace, name, generation, label = 'res
         <Star size={14} aria-hidden="true" fill={isFavorite ? 'currentColor' : 'none'} />
         <span className="sr-only">{isFavorite ? `Remove ${label} from favorites` : `Add ${label} to favorites`}</span>
       </Button>
-      {error ? <span className="text-xs text-kp-red" role="status">{error}</span> : null}
+      {error ? <span className="text-content text-kp-red" role="status">{error}</span> : null}
     </>
   )
 }

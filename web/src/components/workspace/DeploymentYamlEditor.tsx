@@ -55,12 +55,12 @@ export function DeploymentYamlEditor({ namespace, name, selection }: { namespace
     finally { if (!request.signal.aborted) setPending(false) }
   }
   return <section className="grid gap-3" aria-label="Deployment YAML editor">
-    {saved ? <p role="status" className="text-sm text-kp-green">Deployment saved. Load YAML to inspect the new version.</p> : null}
+    {saved ? <p role="status" className="text-content text-kp-green">Deployment saved. Load YAML to inspect the new version.</p> : null}
     {!editing ? <><YamlViewer value={original} pending={pending} error={error} onLoad={() => void load()} diffTarget={{ collection: 'deployments', namespace, name, generation: selection.generation }} />{original !== undefined ? <Button disabled={!canEdit || pending} disabledReason="Updating this Deployment requires deployments.update permission." onClick={() => { setDraft(original); setEditing(true); setError(null) }}>Edit YAML</Button> : null}</> : <>
-      <label htmlFor="deployment-yaml" className="text-sm font-medium">Deployment YAML</label>
+      <label htmlFor="deployment-yaml" className="text-content font-bold">Deployment YAML</label>
       <textarea id="deployment-yaml" className="yaml-editor" spellCheck={false} autoCapitalize="off" autoComplete="off" value={draft} disabled={pending} onChange={(event) => setDraft(event.target.value)} />
-      <p className="m-0 text-sm text-kp-overlay-text">Saving updates this Deployment in {namespace}. Pod template changes trigger a rollout. Conflicting changes require reloading the YAML.</p>
-      {error ? <p role="alert" className="text-sm text-kp-red">{errorMessage(error)}</p> : null}
+      <p className="m-0 text-content text-kp-overlay-text">Saving updates this Deployment in {namespace}. Pod template changes trigger a rollout. Conflicting changes require reloading the YAML.</p>
+      {error ? <p role="alert" className="text-content text-kp-red">{errorMessage(error)}</p> : null}
       <div className="flex flex-wrap gap-2"><Button disabled={pending || draft === original} onClick={() => void save()}>{pending ? 'Saving…' : 'Save Deployment'}</Button><Button variant="secondary" disabled={pending} onClick={() => { setEditing(false); setDraft(original ?? ''); setError(null) }}>Cancel editing</Button></div>
     </>}
   </section>

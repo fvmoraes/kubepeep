@@ -13,12 +13,12 @@ export const SearchInput = forwardRef<HTMLInputElement, SearchInputProps>(functi
   return (
     <div className={`relative min-w-0 ${className}`}>
       <Search size={14} aria-hidden="true" className="absolute left-2.5 top-1/2 -translate-y-1/2 text-kp-text-disabled pointer-events-none" />
-      <Input type="search" className="pl-8 pr-7" value={value} onChange={onChange} ref={ref} {...props} />
+      <Input type="search" className="pl-8 pr-8" value={value} onChange={onChange} ref={ref} {...props} />
       {typeof value === 'string' && value !== '' ? (
         <button
           type="button"
           aria-label="Clear search"
-          className="absolute right-1.5 top-1/2 -translate-y-1/2 grid place-items-center h-5 w-5 rounded text-kp-overlay-text hover:text-kp-text hover:bg-kp-surface-3"
+          className="control control-icon absolute right-px top-1/2 -translate-y-1/2 grid place-items-center text-kp-overlay-text hover:text-kp-text hover:bg-kp-surface-3"
           onClick={(event) => {
             const input = event.currentTarget.parentElement?.querySelector('input')
             if (input) {

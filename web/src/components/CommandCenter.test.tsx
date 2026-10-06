@@ -19,18 +19,22 @@ function CurrentPath() {
 function renderCommandCenter({
   extra,
   onRefresh,
+  getResources,
+  getFavorites,
   initialEntries = ['/'],
   initialIndex = initialEntries.length - 1,
 }: {
   extra?: React.ReactNode
   onRefresh?: () => void | Promise<unknown>
+  getResources?: () => readonly CommandRoute[]
+  getFavorites?: () => readonly CommandRoute[]
   initialEntries?: string[]
   initialIndex?: number
 } = {}) {
   return render(
     <MemoryRouter initialEntries={initialEntries} initialIndex={initialIndex}>
       {extra}
-      <CommandCenter routes={routes} onRefresh={onRefresh} />
+      <CommandCenter routes={routes} onRefresh={onRefresh} getResources={getResources} getFavorites={getFavorites} />
       <CurrentPath />
     </MemoryRouter>,
   )
@@ -45,16 +49,60 @@ afterEach(() => {
 })
 
 describe('CommandCenter', () => {
+  it.each([
+    { platform: 'MacIntel', maxTouchPoints: 0, label: '⌘K', shortcut: 'Meta+K' },
+    { platform: 'Win32', maxTouchPoints: 0, label: 'Ctrl+K', shortcut: 'Control+K' },
+    { platform: 'Linux x86_64', maxTouchPoints: 0, label: 'Ctrl+K', shortcut: 'Control+K' },
+    { platform: 'MacIntel', maxTouchPoints: 5, label: 'Ctrl+K', shortcut: 'Control+K' },
+    { platform: '', maxTouchPoints: 0, label: 'Ctrl+K', shortcut: 'Control+K' },
+  ])('shows OS-specific shortcuts on $platform (touch points: $maxTouchPoints)', ({ platform, maxTouchPoints, label, shortcut }) => {
+    vi.stubGlobal('navigator', { platform, maxTouchPoints })
+    renderCommandCenter()
+    const trigger = screen.getByRole('button', { name: 'Open command center' })
+    expect(trigger).toHaveTextContent(label)
+    expect(trigger).toHaveAttribute('aria-keyshortcuts', shortcut)
+    fireEvent.keyDown(document, { key: '?' })
+    const dialog = screen.getByRole('dialog', { name: 'Keyboard shortcuts' })
+    expect(within(dialog).getByText(label, { exact: true })).toBeVisible()
+    expect(dialog).not.toHaveTextContent(label === '⌘K' ? 'Ctrl+' : '⌘')
+  })
+
+  it('searches available pages and resources once, without injecting unavailable favorite targets', async () => {
+    const resource = { path: '/pods/payments/api', label: 'api', description: 'Pod · payments' }
+    const getResources = vi.fn(() => [resource, resource])
+    renderCommandCenter({
+      getResources,
+      getFavorites: () => [
+        { ...resource, keywords: ['favorite'] },
+        { path: '/pods/old-context/missing', label: 'missing', description: 'Pod · old-context' },
+      ],
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Open command center' }))
+    expect(screen.getAllByRole('option')).toHaveLength(routes.length + 1)
+    expect(screen.getAllByRole('option', { name: /api/ })).toHaveLength(1)
+    expect(screen.queryByRole('option', { name: /missing/ })).not.toBeInTheDocument()
+    const search = screen.getByRole('combobox', { name: 'Search pages and resources' })
+    fireEvent.change(search, { target: { value: 'payments api' } })
+    // Enter must use the current input even before its debounce completes.
+    fireEvent.keyDown(search, { key: 'Enter' })
+    expect(screen.getByTestId('current-path')).toHaveTextContent(resource.path)
+    expect(getResources).toHaveBeenCalledOnce()
+    fireEvent.click(screen.getByRole('button', { name: 'Open command center' }))
+    fireEvent.change(screen.getByRole('combobox', { name: 'Search pages and resources' }), { target: { value: 'favorite' } })
+    await waitFor(() => expect(screen.getAllByRole('option')).toHaveLength(1))
+    expect(screen.getByRole('option', { name: /api/ })).toBeVisible()
+  })
+
   it('exposes a visible trigger and opens page search with Ctrl/Cmd+K', () => {
     renderCommandCenter()
 
     const trigger = screen.getByRole('button', { name: 'Open command center' })
     expect(trigger).toBeVisible()
-    expect(trigger).toHaveAttribute('aria-keyshortcuts', 'Control+K Meta+K')
+    expect(trigger).toHaveAttribute('aria-keyshortcuts', 'Control+K')
 
     fireEvent.keyDown(document, { key: 'k', ctrlKey: true })
     expect(screen.getByRole('dialog', { name: 'Command center' })).toBeInTheDocument()
-    expect(screen.getByRole('combobox', { name: 'Search application pages' })).toHaveFocus()
+    expect(screen.getByRole('combobox', { name: 'Search pages and resources' })).toHaveFocus()
 
     fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' })
     fireEvent.keyDown(document, { key: 'k', metaKey: true })
@@ -74,7 +122,7 @@ describe('CommandCenter', () => {
     const dialog = screen.getByRole('dialog', { name: 'Keyboard shortcuts' })
     expect(dialog).toHaveAttribute('data-view', 'help')
     expect(dialog).toHaveTextContent('Refresh repeats only active read queries; no shortcut mutates Kubernetes resources.')
-    expect(dialog).toHaveTextContent('Open page search from anywhere.')
+    expect(dialog).toHaveTextContent('Open global search from anywhere.')
     expect(dialog).toHaveTextContent('Refresh active read-only views instead of reloading the browser.')
     expect(dialog).toHaveTextContent('Focus and select the current page search')
     expect(dialog).toHaveTextContent('Open and focus the Kubernetes context selector when it is available.')
@@ -84,7 +132,7 @@ describe('CommandCenter', () => {
     expect(fireEvent.keyDown(within(dialog).getByRole('button', { name: 'Close command center' }), { key: 'r', ctrlKey: true })).toBe(true)
     expect(onRefresh).not.toHaveBeenCalled()
 
-    fireEvent.click(within(dialog).getByRole('button', { name: 'Search pages' }))
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Global search' }))
     expect(screen.getByRole('dialog', { name: 'Command center' })).toHaveAttribute('data-view', 'commands')
   })
 
@@ -172,7 +220,7 @@ describe('CommandCenter', () => {
     renderCommandCenter()
 
     fireEvent.click(screen.getByRole('button', { name: 'Open command center' }))
-    const search = screen.getByRole('combobox', { name: 'Search application pages' })
+    const search = screen.getByRole('combobox', { name: 'Search pages and resources' })
     expect(screen.getAllByRole('option')).toHaveLength(routes.length)
 
     fireEvent.change(search, { target: { value: 'deployment' } })
@@ -192,7 +240,7 @@ describe('CommandCenter', () => {
     trigger.focus()
     fireEvent.click(trigger)
 
-    const search = screen.getByRole('combobox', { name: 'Search application pages' })
+    const search = screen.getByRole('combobox', { name: 'Search pages and resources' })
     fireEvent.keyDown(search, { key: 'ArrowUp' })
     expect(screen.getByRole('option', { name: /Settings/ })).toHaveAttribute('aria-selected', 'true')
 

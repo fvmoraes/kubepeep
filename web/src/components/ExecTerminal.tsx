@@ -61,7 +61,7 @@ const ExecTerminal = forwardRef<ExecTerminalHandle, ExecTerminalProps>(function 
     // to an inert <pre> instead of crashing the actions panel.
     try {
       const rootStyles = getComputedStyle(document.documentElement)
-      const tokenFontSize = Number.parseFloat(cssToken(rootStyles, '--text-terminal-px'))
+      const tokenFontSize = Number.parseFloat(getComputedStyle(container).fontSize)
       const terminal = new Terminal({
         convertEol: true,
         cursorBlink: true,
@@ -84,6 +84,11 @@ const ExecTerminal = forwardRef<ExecTerminalHandle, ExecTerminalProps>(function 
       }
       terminalRef.current = terminal
       fitRef.current = fit
+      // Fit again when the bundled face replaces the fallback metrics.
+      void document.fonts?.ready.then(() => {
+        if (terminalRef.current !== terminal) return
+        try { fit.fit() } catch { /* A hidden terminal is fitted on resize. */ }
+      })
     } catch {
       setDegraded(true)
       return
@@ -118,8 +123,8 @@ const ExecTerminal = forwardRef<ExecTerminalHandle, ExecTerminalProps>(function 
   }))
 
   return degraded
-    ? <pre aria-label={label} className="min-h-32 rounded-md border border-kp-overlay-0 bg-kp-crust p-2.5 text-kp-text" />
-    : <div ref={containerRef} role="group" aria-label={label} className="min-h-32" />
+    ? <pre aria-label={label} className="min-h-32 rounded-md border border-kp-overlay-0 bg-kp-crust p-2.5 text-content text-kp-text" />
+    : <div ref={containerRef} role="group" aria-label={label} className="min-h-32 text-content" />
 })
 
 export default ExecTerminal

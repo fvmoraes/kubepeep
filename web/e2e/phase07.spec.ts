@@ -1,6 +1,10 @@
 import { expect, test, type Page } from '@playwright/test'
 
 const viewports = [
+  { name: '320x568', width: 320, height: 568 },
+  { name: '390x844', width: 390, height: 844 },
+  { name: '768x1024', width: 768, height: 1024 },
+  { name: '844x390', width: 844, height: 390 },
   { name: '1366x768', width: 1366, height: 768 },
   { name: '1440x900', width: 1440, height: 900 },
   { name: '1920x1080', width: 1920, height: 1080 },
@@ -81,13 +85,16 @@ for (const viewport of viewports) {
     await page.setViewportSize(viewport)
     await page.goto('/')
     for (const path of navigationInventory) {
+      const menuTrigger = page.getByRole('button', { name: 'Open navigation', exact: true })
+      if (await menuTrigger.isVisible()) await menuTrigger.click()
       await expandSidebarGroups(page)
-      const navigation = page.getByRole('navigation', { name: 'Primary navigation' })
+      const navigation = page.getByRole('navigation', { name: 'Primary navigation', includeHidden: true })
       const link = navigation.locator(`a[href="${path}"]`)
       await expect(link).toBeVisible()
       await link.click()
       await expect(page).toHaveURL(path === '/' ? /\/$/ : new RegExp(`${path.replace(/\//g, '\\/')}$`))
       await expect(link).toHaveAttribute('aria-current', 'page')
+      await expect(page.locator('.resource-family-nav a[aria-current="page"]')).toBeInViewport({ ratio: 0.95 })
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
       expect(overflow, `${path} overflow at ${viewport.name}`).toBeLessThanOrEqual(1)
     }

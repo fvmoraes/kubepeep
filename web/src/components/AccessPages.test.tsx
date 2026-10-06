@@ -50,41 +50,39 @@ describe('Access and administration list controls', () => {
   it.each([
     { label: 'Access Control', path: '/access/roles', route: '/access/:tab', endpoint: '/api/v1/roles?', element: <AccessControlPage /> },
     { label: 'Administration', path: '/administration/customresourcedefinitions', route: '/administration/:tab', endpoint: '/api/v1/customresourcedefinitions?', element: <AdministrationPage /> },
-  ])('applies and clears search and ordering for $label', async ({ path, route, endpoint, element }) => {
+  ])('automatically applies and clears string search for $label', async ({ path, route, endpoint, element }) => {
     const paths: string[] = []
     vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
       const requested = String(input)
       paths.push(requested)
+      if (requested === '/api/v1/preferences') return Promise.resolve(json({ columns: { hidden: {} } }))
       if (requested === '/api/v1/status') return Promise.resolve(json(selectedStatus()))
       if (requested === '/api/v1/namespace-scopes/7') return Promise.resolve(json({ namespaces: ['payments'] }))
-      if (requested.startsWith(endpoint)) return Promise.resolve(json([], page()))
+      if (requested.startsWith(endpoint)) {
+        const filtered = new URL(requested, 'http://127.0.0.1').searchParams.has('search')
+        return Promise.resolve(json(filtered ? [] : [{ name: 'original-resource', namespace: 'payments', ruleCount: 0, ageSeconds: 60, group: 'example.test', kind: 'Example', scope: 'Namespaced', versions: [] }], page()))
+      }
       throw new Error(`Unexpected request: ${requested}`)
     }))
 
     renderPage(element, path, route)
     await waitFor(() => expect(paths.some((requested) => requested.startsWith(endpoint))).toBe(true))
-    expect(screen.getByRole('button', { name: 'Apply filters' })).toBeDisabled()
 
-    fireEvent.change(screen.getByLabelText('Search this bounded page'), { target: { value: 'backend' } })
-    fireEvent.change(screen.getByLabelText('Sort this bounded page'), { target: { value: 'name' } })
-    fireEvent.change(screen.getByLabelText('Order'), { target: { value: 'desc' } })
-    expect(screen.getByRole('button', { name: 'Apply filters' })).toBeEnabled()
-    fireEvent.click(screen.getByRole('button', { name: 'Apply filters' }))
+    fireEvent.change(screen.getByLabelText('Search resources'), { target: { value: 'backend' } })
 
     await waitFor(() => expect(paths.some((requested) => {
       if (!requested.startsWith(endpoint)) return false
       const query = new URL(requested, 'http://127.0.0.1').searchParams
-      return query.get('search') === 'backend' && query.get('sort') === 'name' && query.get('order') === 'desc'
+      return query.get('search') === 'backend' && !query.has('sort') && !query.has('order')
     })).toBe(true))
     expect(screen.queryByText('Filter changes pending; apply filters to update the bounded result.')).not.toBeInTheDocument()
 
+    expect(await screen.findByText('No matching resources')).toBeInTheDocument()
     const beforeClear = paths.length
-    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }))
-    await waitFor(() => expect(paths.slice(beforeClear).some((requested) => {
-      if (!requested.startsWith(endpoint)) return false
-      const query = new URL(requested, 'http://127.0.0.1').searchParams
-      return !query.has('search') && !query.has('sort') && !query.has('order')
-    })).toBe(true))
-    expect(screen.getByLabelText('Search this bounded page')).toHaveValue('')
+    fireEvent.change(screen.getByRole('searchbox'), { target: { value: '' } })
+    expect(await screen.findByText('original-resource')).toBeInTheDocument()
+    // Clearing search reuses the still-fresh first page, just like Pods.
+    expect(paths).toHaveLength(beforeClear)
+    expect(screen.getByLabelText('Search resources')).toHaveValue('')
   })
 })

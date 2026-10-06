@@ -52,7 +52,7 @@ describe('default scope gate', () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
     render(<QueryClientProvider client={client}><MemoryRouter initialEntries={['/pods']}><DefaultScopeGate selection={null} selectionPending><div>Protected resources</div></DefaultScopeGate></MemoryRouter></QueryClientProvider>)
 
-    expect(screen.getByRole('heading', { name: 'Loading the active context' })).toBeInTheDocument()
+    expect(screen.getByRole('status', { name: 'Loading the active context' })).toBeInTheDocument()
     expect(screen.queryByText('Protected resources')).not.toBeInTheDocument()
   })
 
@@ -92,7 +92,7 @@ describe('default scope gate', () => {
     renderGate(<ProtectedResources />)
 
     await waitFor(() => expect(selectScope).toHaveBeenCalledOnce())
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'Activating the default scope' })).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('status', { name: 'Activating the default scope' })).toBeInTheDocument())
     expect(protectedResources).not.toHaveBeenCalled()
   })
 

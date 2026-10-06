@@ -51,8 +51,7 @@ describe('application shell', () => {
     vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => undefined)))
     renderApp()
 
-    const heading = await screen.findByRole('heading', { name: 'Preparing the local workspace' })
-    const panel = heading.closest('section')
+    const panel = await screen.findByRole('status', { name: 'Preparing the local workspace' })
     expect(panel).toHaveAttribute('aria-live', 'polite')
     expect(panel).toHaveAttribute('aria-busy', 'true')
     expect(screen.getByRole('navigation', { name: 'Primary navigation' })).toBeInTheDocument()
@@ -98,7 +97,7 @@ describe('application shell', () => {
 
     expect(await screen.findByRole('heading', { name: 'Cluster overview' })).toBeInTheDocument()
     expect(screen.getByText('development / Finance')).toBeInTheDocument()
-    expect(screen.getByText('development / Finance').closest('button')).toHaveAttribute('data-tip', expect.stringContaining('dev-cluster'))
+    expect(screen.getByText('development / Finance').closest('button')).toHaveAttribute('title', expect.stringContaining('dev-cluster'))
     expect(window.localStorage).toHaveLength(0)
     expect(window.sessionStorage).toHaveLength(0)
   })
@@ -180,7 +179,7 @@ describe('application shell', () => {
       expect.stringContaining('Settings'),
     ])
 
-    fireEvent.change(screen.getByRole('combobox', { name: 'Search application pages' }), { target: { value: 'rbac' } })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Search pages and resources' }), { target: { value: 'rbac' } })
     expect(screen.getByRole('option', { name: /Permissions/ })).toBeInTheDocument()
     await waitFor(() => expect(screen.queryByRole('option', { name: /Overview/ })).not.toBeInTheDocument())
   })

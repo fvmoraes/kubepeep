@@ -86,7 +86,7 @@ usar Nodes (`cb86d6b`) como fonte do guia, não abstrações de planos antigos:
 5. **Cliente** — tipos em `web/src/api/types.ts` e funções em `client.ts`
    com geração esperada e AbortSignal.
 6. **Página/rota/nav** — página com o resource framework (`ResourcePage`,
-   `ResourceListControls`, `DataTable`, `CollectionFooter`, `Drawer`,
+   `ResourceListControls`, `DataTable`, `InfiniteCollectionFooter`, `ResourceWorkspacePanel`,
    `YamlViewer`), rota em `App.tsx`, item com `path` em
    `navigation/tree.tsx` e ajuste do teste de catálogo da paleta.
 7. **Testes** — unitários de DTO/contrato, integração handler/runtime com

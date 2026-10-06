@@ -5,8 +5,10 @@ export interface ResourceTab {
 
 /** Underline tabs for views within a resource; route menus use links. */
 export function ResourceTabStrip({ tabs, active, onChange, ariaLabel, panelId }: { tabs: readonly ResourceTab[]; active: string; onChange: (id: string) => void; ariaLabel: string; panelId: string }) {
+  const navigation = useRef<HTMLDivElement>(null)
+  useRevealActiveItem(navigation, active)
   return (
-    <div role="tablist" aria-label={ariaLabel} className="flex w-fit max-w-full gap-0.5 overflow-x-auto border-b border-kp-overlay-0">
+    <div ref={navigation} role="tablist" aria-label={ariaLabel} className="flex w-fit max-w-full gap-0.5 overflow-x-auto border-b border-kp-overlay-0">
       {tabs.map((tab) => {
         const isActive = tab.id === active
         return (
@@ -28,9 +30,9 @@ export function ResourceTabStrip({ tabs, active, onChange, ariaLabel, panelId }:
               button?.focus()
               button?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
             }}
-            className={`-mb-px h-10 shrink-0 whitespace-nowrap border-b-2 px-3 text-sm cursor-pointer transition-colors ${
+            className={`control -mb-px whitespace-nowrap border-b-2 px-2 text-menu cursor-pointer transition-colors ${
               isActive
-                ? 'border-kp-mauve font-medium text-kp-text'
+                ? 'border-kp-mauve font-bold text-kp-text'
                 : 'border-transparent text-kp-overlay-text hover:border-kp-overlay-1 hover:text-kp-subtext'
             }`}
           >
@@ -41,3 +43,5 @@ export function ResourceTabStrip({ tabs, active, onChange, ariaLabel, panelId }:
     </div>
   )
 }
+import { useRef } from 'react'
+import { useRevealActiveItem } from '../../hooks/useRevealActiveItem'

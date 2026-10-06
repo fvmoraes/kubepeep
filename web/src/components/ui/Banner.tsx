@@ -23,7 +23,7 @@ export interface BannerProps {
 export function Banner({ variant = 'info', title, children, details, className = '', role }: BannerProps) {
   const style = styles[variant]
   return (
-    <div role={role} className={`flex flex-col gap-1 px-3 py-2 border-l-2 rounded-r-md text-sm leading-relaxed ${style.box} ${className}`}>
+    <div role={role} className={`flex flex-col gap-1 px-3 py-2 border-l-2 rounded-r-md text-content leading-relaxed ${style.box} ${className}`}>
       <div className="flex items-start gap-2">
         <span className="mt-0.5 shrink-0" aria-hidden="true">{style.icon}</span>
         <div className="min-w-0">
@@ -31,7 +31,7 @@ export function Banner({ variant = 'info', title, children, details, className =
           <div className="text-kp-subtext">{children}</div>
         </div>
       </div>
-      {details ? <details className="ml-6"><summary className="cursor-pointer text-xs text-kp-overlay-text hover:text-kp-subtext">Technical details</summary><div className="mt-1 mono text-xs text-kp-overlay-text break-words">{details}</div></details> : null}
+      {details ? <details className="ml-6"><summary className="cursor-pointer text-content text-kp-overlay-text hover:text-kp-subtext">Technical details</summary><div className="mt-1 mono text-content text-kp-overlay-text break-words">{details}</div></details> : null}
     </div>
   )
 }

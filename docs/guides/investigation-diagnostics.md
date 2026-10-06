@@ -45,7 +45,35 @@ related Pods, Services, EndpointSlices, ConfigMaps, PVCs and Events from the
 local index. Opening a related object uses the existing workspace history.
 Missing relationships remain explicitly tied to local cache coverage.
 
+## Inline resource inspection
+
+Every resource family keeps its source inventory visible and places details
+underneath it, including related objects opened from that detail. Search, column
+controls and scroll position are preserved. Closing restores the source route;
+sidebar navigation starts a different inventory. Direct links remain supported.
+
+For Pods, the
+Logs tab automatically follows that exact Pod's main container; select another
+container or all containers inside the reader. Select multiple inventory rows
+and choose **Aggregate logs** to read them together without leaving Pods.
+Job-owned Pods remain last, and the Type column menu can exclude them.
+
+Inline logs use explicit Pod targets, without discovering the entire Pod or
+workload catalog. They share the bounded SSE reader with workload logs: five
+streams, 75 ms rendering batches, 1,000 lines and 1 MiB in memory. The initial
+tail is 200 lines. If streaming is unavailable, authorized HTTP reads update
+every 5 s; previous-container logs are read once. Pause, closing the panel,
+changing targets/tabs or changing generation cancels all active requests.
+Container access and log reads still pass through exact backend authorization.
+
 ## Workload logs
+
+The workload **Logs** tab opens the reader below the current inventory. It
+reuses up to 100 authorized, UID-checked Pod references already returned in the
+workload detail and follows up to five selected Pods in that namespace. It
+does not request an additional inventory scan. Relationship coverage is labeled
+as potentially incomplete.
+It uses the same inline reader and cancellation rules as Pod inspection.
 
 The Logs page supports Deployment, ReplicaSet, StatefulSet, DaemonSet and Job
 targets. It discovers related, log-authorized Pods and combines lines with Pod,

@@ -95,26 +95,26 @@ export function SavedFilterControls({
     <section aria-label={`${collection} saved filters`} className="grid gap-2.5 rounded-xl border border-kp-overlay-0 bg-kp-surface-0/60 px-3 py-2.5 md:grid-cols-2">
       <div className="flex items-end gap-2">
         <label className="grid flex-1 gap-1">
-          <span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Saved filter</span>
+          <span className="text-column uppercase tracking-wider text-kp-overlay-text">Saved filter</span>
           <Select value={selectedID} disabled={preferences.isPending || filters.length === 0} onChange={(event) => setSelectedID(event.target.value)}>
             <option value="">{preferences.isPending ? 'Loading filters…' : filters.length === 0 ? 'No saved filters' : 'Choose a filter'}</option>
             {filters.map((filter) => <option key={filter.id} value={filter.id}>{filter.name}</option>)}
           </Select>
         </label>
-        <Button variant="secondary" size="sm" disabled={selectedID === ''} onClick={apply}>Apply saved filter</Button>
+        <Button variant="secondary" disabled={selectedID === ''} onClick={apply}>Apply saved filter</Button>
       </div>
       <div className="flex items-end gap-2">
         <label className="grid flex-1 gap-1">
-          <span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Save current filter as</span>
+          <span className="text-column uppercase tracking-wider text-kp-overlay-text">Save current filter as</span>
           <Input value={name} maxLength={80} placeholder="My bounded view" onChange={(event) => { setName(event.target.value); setMessage('') }} />
         </label>
-        <Button variant="secondary" size="sm" disabled={!canSave || save.isPending} onClick={() => save.mutate()}>{save.isPending ? 'Saving…' : 'Save current filter'}</Button>
+        <Button variant="secondary" disabled={!canSave || save.isPending} onClick={() => save.mutate()}>{save.isPending ? 'Saving…' : 'Save current filter'}</Button>
       </div>
-      {preferences.isError ? <p className="text-xs text-kp-red md:col-span-2">Saved filters unavailable: {errorMessage(preferences.error)}</p> : null}
-      {!validName(name) && name !== '' ? <p className="text-xs text-kp-red md:col-span-2">Filter name must contain 1–80 characters.</p> : null}
-      {filters.length >= 50 ? <p className="text-xs text-kp-red md:col-span-2">This collection already has the maximum 50 saved filters.</p> : null}
-      {save.isError ? <p className="text-xs text-kp-red md:col-span-2">{errorMessage(save.error)}</p> : null}
-      {message ? <p className="text-xs text-kp-overlay-text md:col-span-2" role="status">{message}</p> : null}
+      {preferences.isError ? <p className="text-content text-kp-red md:col-span-2">Saved filters unavailable: {errorMessage(preferences.error)}</p> : null}
+      {!validName(name) && name !== '' ? <p className="text-content text-kp-red md:col-span-2">Filter name must contain 1–80 characters.</p> : null}
+      {filters.length >= 50 ? <p className="text-content text-kp-red md:col-span-2">This collection already has the maximum 50 saved filters.</p> : null}
+      {save.isError ? <p className="text-content text-kp-red md:col-span-2">{errorMessage(save.error)}</p> : null}
+      {message ? <p className="text-content text-kp-overlay-text md:col-span-2" role="status">{message}</p> : null}
     </section>
   )
 }

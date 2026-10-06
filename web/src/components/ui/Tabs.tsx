@@ -27,9 +27,9 @@ export function Tabs({ tabs, activeTab, onChange, className = '' }: TabsProps) {
               aria-selected={isActive}
               type="button"
               onClick={() => onChange(tab.id)}
-              className={`-mb-px h-8 px-3 border-b-2 whitespace-nowrap cursor-pointer text-sm transition-colors ${
+              className={`control -mb-px px-2 border-b-2 whitespace-nowrap cursor-pointer text-menu transition-colors ${
                 isActive
-                  ? 'border-kp-mauve text-kp-text font-medium'
+                  ? 'border-kp-mauve text-kp-text font-bold'
                   : 'border-transparent text-kp-overlay-text hover:text-kp-subtext hover:border-kp-overlay-1'
               }`}
             >
