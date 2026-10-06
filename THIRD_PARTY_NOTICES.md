@@ -12,7 +12,7 @@ the authoritative terms.
 | [coder/websocket](https://github.com/coder/websocket) | 1.8.15 | ISC |
 | [fvmoraes/ginger](https://github.com/fvmoraes/ginger) | 1.4.4 | MIT |
 | [spf13/cobra](https://github.com/spf13/cobra) | 1.10.2 | Apache-2.0 |
-| [golang.org/x/sys](https://cs.opensource.google/go/x/sys) | 0.46.0 | BSD-3-Clause |
+| [golang.org/x/sys](https://cs.opensource.google/go/x/sys) | 0.47.0 | BSD-3-Clause |
 | [go-yaml/yaml](https://github.com/go-yaml/yaml) | 3.0.1 | MIT |
 | [kubernetes/api](https://github.com/kubernetes/api) | 0.35.7 | Apache-2.0 |
 | [kubernetes/apimachinery](https://github.com/kubernetes/apimachinery) | 0.35.7 | Apache-2.0 and bundled BSD-3-Clause code |
