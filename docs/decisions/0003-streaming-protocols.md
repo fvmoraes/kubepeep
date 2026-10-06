@@ -45,7 +45,7 @@ não por uma duração global incompatível com streams.
 
 O wire contract de `/api/v1/stream`, incluindo ID opaco, snapshot em chunks,
 replay ring, payloads de update, heartbeat e eventos terminais `reset`/`error`,
-está fixado em [`../api.md`](../api.md#182-atualizações-de-recursos). Nenhum
+está fixado em [`../api.md`](../reference/api.md#182-atualizações-de-recursos). Nenhum
 evento ou cursor SSE é persistido.
 
 ### Exec
@@ -86,7 +86,7 @@ remoto; o WebSocket local não altera nem amplia RBAC.
 O wire contract não fica a cargo da implementação: encoding binário dos três
 streams, JSON de controle, sequência `ready`/`exit`, limites, heartbeat,
 backpressure e close codes estão fixados em
-[`../api.md`](../api.md#191-encoding-e-schemas-de-frames). Compressão WebSocket
+[`../api.md`](../reference/api.md#191-encoding-e-schemas-de-frames). Compressão WebSocket
 permanece desabilitada.
 
 ### Port-forward

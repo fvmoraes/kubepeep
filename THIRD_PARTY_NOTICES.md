@@ -40,6 +40,11 @@ check was applied to the platform-specific modernc modules.
 | [Scheduler](https://github.com/facebook/react) | 0.27.0 | MIT |
 | [React Router](https://github.com/remix-run/react-router) | 8.3.0 | MIT |
 | [cookie-es](https://github.com/unjs/cookie-es) | 3.1.1 | MIT |
+| [Inter Variable via Fontsource](https://github.com/fontsource/font-files/tree/main/fonts/variable/inter) | 5.3.0 | OFL-1.1 |
+| [xterm.js](https://github.com/xtermjs/xterm.js) | 6.0.0 | MIT |
+| [xterm.js fit addon](https://github.com/xtermjs/xterm.js/tree/master/addons/addon-fit) | 0.11.0 | MIT |
+| [React Syntax Highlighter](https://github.com/react-syntax-highlighter/react-syntax-highlighter) | 16.1.1 | MIT |
+| [YAML](https://github.com/eemeli/yaml) | 2.9.1 | ISC |
 
 Build and test tools are development-only and are not required at runtime.
 Their exact versions and licenses remain recorded by the frontend lockfile.

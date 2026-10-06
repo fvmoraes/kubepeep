@@ -36,7 +36,7 @@ type ValidationReport struct {
 	Existence           ExistenceReport    `json:"existence"`
 }
 
-// ParseRawInput implements the format commitment rules from docs/api.md. Once
+// ParseRawInput implements the format commitment rules from docs/reference/api.md. Once
 // input looks like JSON or YAML, a parse failure is final and never falls back
 // to the permissive text tokenizer.
 func ParseRawInput(raw string) (ValidationReport, error) {

@@ -23,6 +23,8 @@ const (
 )
 
 type WorkloadDTO struct {
+	Secrets    []string          `json:"secrets,omitempty"`
+	Resources  ResourceBudgetDTO `json:"resources"`
 	Namespace  string            `json:"namespace"`
 	Kind       string            `json:"kind"`
 	Name       string            `json:"name"`
@@ -41,6 +43,9 @@ type WorkloadDTO struct {
 func (WorkloadDTO) resourceListItem() {}
 
 type WorkloadDetailDTO struct {
+	ConfigMaps []string            `json:"configMaps"`
+	Secrets    []string            `json:"secrets"`
+	Resources  ResourceBudgetDTO   `json:"resources"`
 	Metadata   ResourceMetadataDTO `json:"metadata"`
 	Kind       string              `json:"kind"`
 	Ready      *int64              `json:"ready"`
@@ -119,6 +124,8 @@ func withWorkloadIndex(value WorkloadDTO, labels map[string]string, owners []met
 	value.Labels = limitedStringMap(labels)
 	value.Owner = directOwner(owners)
 	value.ConfigMaps = podConfigMapRefs(spec)
+	value.Secrets = podSecretRefs(spec)
+	value.Resources = podBudget(spec)
 	value.PVCs = podPVCRefs(spec)
 	return value
 }
@@ -201,6 +208,7 @@ func workloadDetail(value metav1.Object, summary WorkloadDTO, selector map[strin
 	}
 	return WorkloadDetailDTO{
 		Metadata: ConvertMetadata(value), Kind: summary.Kind,
+		ConfigMaps: summary.ConfigMaps, Secrets: summary.Secrets, Resources: summary.Resources,
 		Ready: summary.Ready, Desired: summary.Desired, Available: summary.Available, Updated: summary.Updated,
 		Status: summary.Status, Selector: selector, RestartAt: restartAnnotation(annotations),
 		Conditions: conditions, Containers: ContainerSpecs(containers), Related: append([]ResourceRef(nil), related...),

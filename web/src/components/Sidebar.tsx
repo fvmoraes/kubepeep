@@ -4,14 +4,14 @@ import { PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 
 import { BrandLogo } from './BrandLogo'
 import { BrandWordmark } from './BrandWordmark'
-import { navGroups, settingsNavItem, type NavGroup, type NavItem } from '../navigation/tree'
+import { activeNavItem, navGroups, settingsNavItem, type NavGroup, type NavItem } from '../navigation/tree'
 import { beginViewNavigation } from '../observability/uxMetrics'
 
 // Sidebar preferences stay in memory on purpose: production sources never
 // touch browser storage (see src/security.test.ts). The collapsed/compact
 // state resets when the application restarts.
 function groupOwnsPath(group: NavGroup, pathname: string): boolean {
-  return group.items.some((item) => item.path && (item.path === '/' ? pathname === '/' : pathname.startsWith(item.path)))
+  return group.items.some((item) => item.id === activeNavItem(pathname)?.id)
 }
 
 interface SidebarProps {
@@ -59,8 +59,9 @@ export function Sidebar({ version, compact, onToggleCompact, collapsedGroups, on
           onClick={(event) => { if (event.button === 0 && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) beginViewNavigation(item.path!) }}
           end={item.path === '/' || item.path === '/workloads'}
           data-tip={compact ? item.tip ?? item.label : undefined}
-          className={({ isActive }) => `flex h-8 items-center gap-2.5 rounded-md px-2.5 text-sm transition-colors ${
-            isActive
+          aria-current={activeNavItem(location.pathname)?.id === item.id ? 'page' : false}
+          className={() => `flex h-8 items-center gap-2.5 rounded-md px-2.5 text-sm transition-colors ${
+            activeNavItem(location.pathname)?.id === item.id
               ? 'bg-kp-accent-bg text-kp-mauve font-medium'
               : 'text-kp-subtext hover:bg-kp-surface-3 hover:text-kp-text'
           } ${compact ? 'justify-center px-0' : ''}`}
@@ -70,7 +71,7 @@ export function Sidebar({ version, compact, onToggleCompact, collapsedGroups, on
         </NavLink>
       )
     }
-  }, [compact])
+  }, [compact, location.pathname])
 
   return (
     <aside

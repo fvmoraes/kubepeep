@@ -108,6 +108,7 @@ test('keeps filters functional and exposes the complete Pod workspace tabs', asy
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto('/pods')
   await expect(page.getByRole('table', { name: 'Authorized Pod pages' })).toBeVisible()
+  await page.getByText('More filters', { exact: true }).click()
   await page.getByLabel('Namespace', { exact: true }).fill('payments')
   await page.getByLabel('Search this bounded page').fill('api-01')
   await page.getByRole('button', { name: 'Apply filters' }).click()
@@ -117,7 +118,7 @@ test('keeps filters functional and exposes the complete Pod workspace tabs', asy
   await page.getByRole('button', { name: 'Open Pod api-01 in payments' }).click()
   const workspace = page.getByRole('dialog', { name: 'Pod api-01' })
   await expect(workspace).toBeVisible()
-  for (const tab of ['Overview', 'Logs', 'YAML', 'Events', 'Metrics', 'Containers', 'Actions']) {
+  for (const tab of ['Overview', 'Investigation', 'Logs', 'YAML', 'Events', 'Metrics', 'Containers', 'Data / Env', 'Actions']) {
     await expect(workspace.getByRole('tab', { name: tab })).toBeVisible()
   }
   await workspace.getByRole('tab', { name: 'Containers' }).click()

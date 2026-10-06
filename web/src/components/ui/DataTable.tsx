@@ -60,7 +60,7 @@ export function DataTable<T>({
   const rowVirtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: () => compact ? 32 : 40,
+    estimateSize: () => compact ? 44 : 56,
     getItemKey: (index) => getRowKey ? getRowKey(rows[index], index) : index,
     overscan: 2,
     enabled: virtualized,
@@ -70,7 +70,7 @@ export function DataTable<T>({
   // A zero-size viewport (SSR/tests or a temporarily hidden panel) should
   // still show the first bounded slice until the observer measures the pane.
   const visibleVirtualRows = virtualized && virtualRows.length === 0
-    ? rows.slice(0, 20).map((_, index) => ({ index, start: index * (compact ? 32 : 40), end: (index + 1) * (compact ? 32 : 40) }))
+    ? rows.slice(0, 20).map((_, index) => ({ index, start: index * (compact ? 44 : 56), end: (index + 1) * (compact ? 44 : 56) }))
     : virtualRows
   useEffect(() => {
     recordFirstRowRendered(rows)

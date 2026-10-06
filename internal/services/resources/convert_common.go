@@ -77,7 +77,7 @@ func ContainerSpecs(values []corev1.Container) []ContainerSpecDTO {
 			name := nullableString(port.Name)
 			ports = append(ports, ContainerPortDTO{Name: name, ContainerPort: port.ContainerPort, Protocol: normalizeProtocol(port.Protocol)})
 		}
-		result = append(result, ContainerSpecDTO{Name: value.Name, Image: value.Image, Ports: ports})
+		result = append(result, ContainerSpecDTO{Name: value.Name, Image: value.Image, Ports: ports, Resources: containerBudget(value.Resources), Environment: containerEnvironment(value.Env), EnvFrom: containerEnvFrom(value.EnvFrom)})
 	}
 	return result
 }

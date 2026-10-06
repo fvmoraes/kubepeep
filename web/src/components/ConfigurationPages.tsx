@@ -1,7 +1,7 @@
 import { useGenerationCursor } from './resource/useListCursor'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate, useParams } from 'react-router'
+import { useParams } from 'react-router'
 
 import {
   getHPAs,
@@ -23,7 +23,6 @@ import { Badge, DataTable, type DataTableColumn } from './ui'
 import { ResourceListControls } from './ResourceListControls'
 import { CollectionFooter, QueryState, SelectionGate } from './resource/states'
 import { ResourcePage } from './resource/ResourcePage'
-import { ResourceTabStrip } from './resource/ResourceTabStrip'
 import type { ListSortOption } from './ResourceListControls'
 import { TableLink } from './resource/TableLink'
 import { age } from './resource/format'
@@ -65,7 +64,6 @@ export function ConfigurationPage() {
   const globalNamespace = useGlobalNamespace()
   const workspace = useResourceWorkspace()
   const { tab: tabParam, namespace, name } = useParams<{ tab?: string; namespace?: string; name?: string }>()
-  const navigate = useNavigate()
   const queryClient = useQueryClient()
   const generation = selection?.generation
   const [draft, setDraft] = useState<ListState>(initialListState)
@@ -124,7 +122,6 @@ export function ConfigurationPage() {
 
   return (
     <ResourcePage title="Configuration" description="Quotas, limits, autoscalers and disruption budgets in the active scope; absence and unknown stay distinct from zero.">
-      <ResourceTabStrip ariaLabel="Configuration resource type" panelId="configuration-panel" active={tab} onChange={(value) => { setDraft(initialListState); setApplied(initialListState); setCursor(''); navigate(`/configuration/${value}`) }} tabs={configurationTabs.map((id) => ({ id, label: id }))} />
       <ResourceListControls search={draft.search} appliedSearch={applied.search} onSearchChange={(value) => setDraft({ ...draft, search: value })} onApply={(interactionId) => { setApplied(bindListInteraction({ ...draft }, interactionId)); setCursor('') }} onRefresh={() => queryClient.invalidateQueries({ queryKey: ['resources', tab] })} onClear={() => { setDraft(initialListState); setApplied(initialListState); setCursor('') }} sort={draft.sort} order={draft.order} appliedSort={applied.sort} appliedOrder={applied.order} defaultSort="identity" defaultOrder="asc" hasPendingChanges={draft.search !== applied.search || draft.sort !== applied.sort || draft.order !== applied.order} sortOptions={configurationSortOptions} onSortChange={(value) => setDraft({ ...draft, sort: value })} onOrderChange={(value) => setDraft({ ...draft, order: value })} />
       <SelectionGate pending={status.isPending} error={status.error} selected={Boolean(selection)}>
         <QueryState pending={activeQuery.isPending} error={activeQuery.error} empty={active?.items.length === 0}>

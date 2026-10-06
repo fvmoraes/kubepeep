@@ -10,7 +10,7 @@
   color: var(--color-kp-text);
   background: var(--color-kp-base);
   font-family: var(--font-sans);
-  font-size: var(--text-base);
+  font-size: 100%;
   line-height: 1.5;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -19,6 +19,7 @@
 
 * { box-sizing: border-box; }
 body {
+  font-size: var(--text-base);
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
@@ -27,7 +28,7 @@ body {
   overflow-x: clip;
 }
 
-button, a, input, select, textarea { font: inherit; }
+/* Tailwind Preflight supplies inherited control fonts within the base layer. */
 h1, h2, h3, h4 { font-weight: 600; letter-spacing: -0.01em; }
 ::placeholder { color: var(--color-kp-text-disabled); }
 
@@ -46,7 +47,7 @@ a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible
 }
 
 /* Technical values: monospace stays only where it carries meaning. */
-.mono { font-family: var(--font-mono); font-size: var(--text-mono-relative); }
+.mono { font-family: var(--font-mono); }
 code, kbd, pre { font-family: var(--font-mono); }
 code { font-size: var(--text-mono-relative); color: var(--color-kp-sky); }
 
@@ -124,7 +125,6 @@ kbd {
   min-height: 100vh;
   display: grid;
   grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
-  transition: grid-template-columns 120ms ease;
 }
 .app-shell--compact { grid-template-columns: var(--sidebar-width-compact) minmax(0, 1fr); }
 .app-shell > aside { height: 100vh; position: sticky; top: 0; }
@@ -265,4 +265,41 @@ main {
 @keyframes toast-in {
   from { opacity: 0; transform: translateY(6px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+/* Shared route navigation and stable, zoomable operational controls. */
+.resource-family-nav { display: flex; gap: 2px; overflow-x: auto; min-width: 0; margin-bottom: 20px; border-bottom: 1px solid var(--color-kp-overlay-0); }
+.resource-family-nav a, .resource-family-nav > span { flex: 0 0 auto; padding: 10px 12px; white-space: nowrap; font-size: var(--text-sm); color: var(--color-kp-overlay-text); border-bottom: 2px solid transparent; text-decoration: none; }
+.resource-family-nav a[aria-current="page"] { color: var(--color-kp-text); border-bottom-color: var(--color-kp-mauve); font-weight: 500; }
+.resource-family-nav a:hover { color: var(--color-kp-text); background: var(--color-kp-surface-1); }
+.resource-family-nav [aria-disabled] { color: var(--color-kp-text-disabled); }
+.resource-specific-filters { flex-basis: 100%; min-width: 0; padding-top: 8px; border-top: 1px solid var(--color-kp-divider); }
+.resource-specific-filters summary { cursor: pointer; width: fit-content; font-size: var(--text-sm); color: var(--color-kp-subtext); }
+.resource-specific-filters input, .resource-specific-filters select { min-height: 36px; max-width: 100%; }
+.list-controls-form { max-height: none; overflow: visible; }
+.workspace-header { flex-wrap: wrap; height: auto; min-height: 48px; }
+.workspace-body, .workspace-body > *, main > * { min-width: 0; }
+@media (max-width: 760px) {
+  .app-shell > aside > nav { max-height: 64px; align-items: center; flex-direction: row; gap: 4px; }
+  .app-shell > aside > nav section > div { display: flex; gap: 4px; }
+  .app-shell > aside > nav a { flex-shrink: 0; }
+  main { padding-bottom: 88px; }
+  .workspace-panel { inset: 12px 12px 76px; }
+}
+
+.resource-usage { display: grid; gap: 4px; min-width: 180px; font-variant-numeric: tabular-nums; }
+.resource-usage-value { white-space: nowrap; font-size: var(--text-xs); }
+.resource-usage-track { height: 6px; overflow: hidden; border-radius: 3px; background: var(--color-kp-overlay-0); }
+.resource-usage-track > span { display: block; height: 100%; background: var(--color-kp-green); }
+.resource-usage[data-tone="warning"] .resource-usage-track > span { background: var(--color-kp-yellow); }
+.resource-usage[data-tone="danger"] .resource-usage-track > span { background: var(--color-kp-red); }
+.yaml-editor { width: 100%; min-height: 400px; resize: vertical; tab-size: 2; padding: 16px; font-family: var(--font-mono); font-size: var(--text-sm); line-height: 1.6; color: var(--color-kp-text); background: var(--color-kp-crust); border: 1px solid var(--color-kp-overlay-1); border-radius: var(--radius-md); }
+@media (max-width: 760px) {
+  .app-shell > aside > nav > div:first-child { overflow-x: auto; overflow-y: hidden; }
+  .app-shell > aside > nav > div:first-child > div { display: flex; align-items: center; gap: 4px; }
+  .app-shell > aside > nav > div:last-child > div { display: flex; }
+  .app-shell > aside > nav > div:last-child button { display: none; }
+  .app-shell > aside > nav section { display: flex; align-items: center; flex-shrink: 0; }
+  .app-shell > aside > nav section > button { display: flex; width: auto; white-space: nowrap; }
+  .app-shell > aside > nav section > div { margin: 0; }
 }

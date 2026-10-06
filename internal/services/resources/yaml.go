@@ -56,6 +56,7 @@ func MarshalReadOnlyYAML(value any) ([]byte, error) {
 		sanitized = copy
 	case *appsv1.Deployment:
 		copy := object.DeepCopy()
+		copy.APIVersion, copy.Kind = "apps/v1", "Deployment"
 		copy.ManagedFields = nil
 		sanitized = copy
 	case *appsv1.StatefulSet:

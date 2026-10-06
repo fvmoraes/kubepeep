@@ -29,10 +29,9 @@ func buildMetrics(values []metricsv1beta1.PodMetrics, capturedAt time.Time, empt
 		if metric.Window.Duration <= 0 {
 			return MetricsDTO{}, errInvalidMetric
 		}
-		if window == 0 {
+		// Metrics Server samples each Pod independently; windows need not match.
+		if metric.Window.Duration > window {
 			window = metric.Window.Duration
-		} else if window != metric.Window.Duration {
-			return MetricsDTO{}, errInvalidMetric
 		}
 		pod := PodMetricDTO{
 			Namespace:  metric.Namespace,
@@ -179,11 +178,8 @@ func (s *MetricsService) Collect(ctx context.Context, selection Selection) Dashb
 		}
 		items, window, complete, truncated, listErr := s.loadNamespace(requestContext, namespace, remaining)
 		if window > 0 && len(items) > 0 {
-			if sampleWindow == 0 {
+			if window > sampleWindow {
 				sampleWindow = window
-			} else if sampleWindow != window {
-				addBlockError(&block, namespace, errInvalidMetric)
-				continue
 			}
 		} else if window > observationWindow {
 			// Empty successful lists carry an observation interval rather than
@@ -243,10 +239,8 @@ func (s *MetricsService) loadNamespace(ctx context.Context, namespace string, ma
 		}
 		if len(response.Items) > 0 {
 			if pageWindow > 0 {
-				if sampleWindow == 0 {
+				if pageWindow > sampleWindow {
 					sampleWindow = pageWindow
-				} else if sampleWindow != pageWindow {
-					return result, sampleWindow, false, false, errInvalidMetric
 				}
 			}
 		} else if pageWindow > observationWindow {

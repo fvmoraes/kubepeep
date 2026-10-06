@@ -3,7 +3,7 @@
 - Status: aceito
 - Data: 2026-09-04
 - Commit: `5ac7320` (implementação integral)
-- Especificação: [`../../plan/v0_reference/KubePeep_UI_UX_Design_System_e_Recursos_Kubernetes.md`](../../plan/v0_reference/KubePeep_UI_UX_Design_System_e_Recursos_Kubernetes.md)
+- Contrato vigente: [design system](../architecture/design-system.md). A especificação original permanece no histórico Git.
 
 ## Contexto
 

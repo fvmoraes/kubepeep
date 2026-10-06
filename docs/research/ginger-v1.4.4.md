@@ -2,7 +2,7 @@
 
 > Pesquisa histórica datada: versões, ambiente e gates abaixo referem-se
 > ao spike F1. Para build e distribuição atuais, consultar
-> [desenvolvimento](../development.md) e [download](../download.md).
+> [desenvolvimento](../guides/development.md) e [download](../download.md).
 
 Status: concluída em 2026-07-27
 

@@ -9,11 +9,13 @@ interface. It uses your existing kubeconfig and Kubernetes RBAC identity.
 
 Inspect workloads, Pods, Events, networking, ConfigMaps and Secret metadata;
 read bounded logs; and use restart, scale, Pod deletion, Pod/Service port-forward and exec
-when authorized. Secret values are never exposed. The Metrics API is optional.
+when authorized. Secret values can be revealed explicitly in the Data tab with
+permission to read that object; they are not cached or persisted. Deployments
+support editing and saving YAML with update permission. The Metrics API is optional.
 
-The expanded resource catalog for version 1 is tracked in the
-[execution plan](plan/README.md). Navigation placeholders do not represent
-implemented resources; see the [current product scope](docs/product-spec.md).
+See the [current product scope](docs/reference/product-spec.md) for the resource
+catalog and supported operations. Navigation placeholders do not represent
+implemented resources.
 
 ## Install and run
 
@@ -50,8 +52,8 @@ there. Updates and data removal require explicit actions.
 
 The local API enforces Host/Origin checks, CSRF and bounded requests. Kubernetes
 authorizes each operation; mutable actions are checked again immediately before
-execution. Read the [security model](docs/security.md) and
-[RBAC requirements](docs/rbac-requirements.md) for the precise contracts.
+execution. Read the [security model](docs/reference/security.md) and
+[RBAC requirements](docs/reference/rbac-requirements.md) for the precise contracts.
 
 ## Development
 
@@ -61,18 +63,18 @@ make verify
 make dev-desktop             # requires the Wails CLI and native dependencies
 ```
 
-The [development guide](docs/development.md) documents toolchain versions,
+The [development guide](docs/guides/development.md) documents toolchain versions,
 builds, test gates, repository layout and private artifacts. Desktop details
-are in the [desktop build guide](docs/desktop-build.md).
+are in the [desktop build guide](docs/guides/desktop-build.md).
 
 **Golden rule: commit only. Never push automatically.** Run
 `./scripts/security_check.sh HEAD` before committing; use an approved GitHub
-commit identity as documented in [security](docs/security.md#11-repositório-e-cadeia-de-desenvolvimento).
+commit identity as documented in [security](docs/reference/security.md#11-repositório-e-cadeia-de-desenvolvimento).
 Publishing requires a separate, explicit user decision.
 
-Start at the [documentation index](docs/README.md) for architecture, API and
-data contracts, or the completed [v0.7 plan](plan/README.md) for implementation
-phases and evidence.
+Start at the [documentation index](docs/README.md) for guides, architecture and
+API contracts. Dated implementation reports live in the
+[documentation archive](docs/archive/README.md).
 
 ## Troubleshooting
 
@@ -84,7 +86,7 @@ phases and evidence.
   Refresh permissions after an RBAC change; an unavailable optional block does
   not make the local application unhealthy.
 - If the desktop window cannot open, check the platform dependencies in the
-  [build guide](docs/desktop-build.md). `kubePeep serve` provides web mode.
+  [build guide](docs/guides/desktop-build.md). `kubePeep serve` provides web mode.
 
 ## License
 

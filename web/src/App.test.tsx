@@ -175,7 +175,8 @@ describe('application shell', () => {
       expect.stringContaining('CustomResourceDefinitions'),
       expect.stringContaining('PriorityClasses'),
       expect.stringContaining('RuntimeClasses'),
-      expect.stringContaining('Admission Webhooks'),
+      expect.stringContaining('Mutating Webhooks'),
+      expect.stringContaining('Validating Webhooks'),
       expect.stringContaining('Settings'),
     ])
 

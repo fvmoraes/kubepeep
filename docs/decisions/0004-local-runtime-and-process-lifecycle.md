@@ -32,7 +32,7 @@ O diretório `runtime/` conterá:
 
 O schema, entropia, tree canônica, parsing estrito e resultados/exit codes dos
 comandos são normativos em
-[`../architecture.md`](../architecture.md#72-tree-e-estado-de-instância).
+[`../architecture.md`](../architecture/overview.md#72-tree-e-estado-de-instância).
 
 O root que contém `runtime/`, banco, configuração, logs e cache é
 `~/.kubePeep/` em Unix e `%LOCALAPPDATA%\kubePeep\` em Windows. O adapter
@@ -89,7 +89,7 @@ O wire contract é fixo: `GET /_kubepeep/control/v1/status` e
 `POST /_kubepeep/control/v1/stop`, header privado
 `X-KubePeep-Control-Token`, request vazio e `ControlIdentityDTO` de seis campos.
 Paths, guards, códigos HTTP, timeout e headers estão especificados em
-[`../api.md`](../api.md#83-canal-interno-de-controle); a implementação F3 não
+[`../api.md`](../reference/api.md#83-canal-interno-de-controle); a implementação F3 não
 escolhe variantes novas.
 
 ### Cleanup

@@ -55,5 +55,5 @@ e os dois executáveis da prova para o mesmo diretório; a saída vai para
 
 Nada deste diretório é código de produção. As implementações atuais estão em
 `internal/` na raiz do repositório; os ADRs preservam as decisões e requisitos
-originados nestes probes. As fases da versão 1 estão em
-[`../../plan/`](../../plan/).
+originados nestes probes. O estado atual do produto está na
+[documentação](../../docs/README.md).

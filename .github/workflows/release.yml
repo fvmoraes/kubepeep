@@ -126,7 +126,7 @@ jobs:
           fi
 
           if [ "$type" = "auto" ]; then
-            type=$(./scripts/release.sh bump-type "${previous_tag}")
+            type=$(./scripts/release/version.sh bump-type "${previous_tag}")
           fi
 
           if [ "$type" = "skip" ]; then
@@ -163,7 +163,7 @@ jobs:
         run: |
           set -euo pipefail
           previous=${PREVIOUS_TAG:-0.0.0}
-          version=$(./scripts/release.sh next-version "$previous" "$BUMP_TYPE")
+          version=$(./scripts/release/version.sh next-version "$previous" "$BUMP_TYPE")
           [[ "$version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || {
             echo "::error::Version '$version' is not valid SemVer"; exit 1
           }
@@ -187,8 +187,8 @@ jobs:
         run: |
           set -euo pipefail
           date=$(date -u +%Y-%m-%d)
-          ./scripts/release.sh notes "${PREVIOUS_TAG}" "$VERSION" "$BUMP_TYPE" > release-notes.md
-          ./scripts/release.sh changelog "$VERSION" "$date" "${PREVIOUS_TAG}"
+          ./scripts/release/version.sh notes "${PREVIOUS_TAG}" "$VERSION" "$BUMP_TYPE" > release-notes.md
+          ./scripts/release/version.sh changelog "$VERSION" "$date" "${PREVIOUS_TAG}"
           echo "Release notes prepared for ${VERSION}."
 
       - name: Update wails.json product version
@@ -284,7 +284,7 @@ jobs:
 
       - name: Apply the release version to native package metadata
         shell: bash
-        run: ./scripts/release.sh metadata "$VERSION"
+        run: ./scripts/release/version.sh metadata "$VERSION"
 
       - name: Build the frontend (embedded via go:embed)
         run: make web-build
@@ -307,7 +307,7 @@ jobs:
       # O binário desktop é compilado dentro de um container Ubuntu 22.04 para
       # compatibilidade de glibc (2.35) com Ubuntu 22.04+/Debian 12+, usando a
       # tag `webkit2_41` (libwebkit2gtk-4.1, disponível no 22.04+). Padrão
-      # documentado em docs/desktop-build.md.
+      # documentado em docs/guides/desktop-build.md.
       - name: Build the Wails desktop binary (native container)
         env:
           BUILD_DATE: ${{ steps.build-date.outputs.date }}
@@ -354,13 +354,13 @@ jobs:
           export PKG_VERSION="${{ env.VERSION }}" PKG_ARCH="${{ matrix.nfpm_arch }}"
           export NFPM_LOG=debug
           set +e
-          "$(go env GOPATH)/bin/nfpm" package -p deb -f build/linux/nfpm.yaml -t "dist/kubepeep-linux-${{ matrix.arch }}.deb" 2>&1 | tee nfpm-deb.log
+          "$(go env GOPATH)/bin/nfpm" package -p deb -f packaging/linux/nfpm.yaml -t "dist/kubepeep-linux-${{ matrix.arch }}.deb" 2>&1 | tee nfpm-deb.log
           deb_rc=${PIPESTATUS[0]}
           if [ "$deb_rc" -ne 0 ]; then
             tail -c 3500 nfpm-deb.log | while IFS= read -r line; do echo "::error title=nfpm-deb::$line"; done
             exit "$deb_rc"
           fi
-          "$(go env GOPATH)/bin/nfpm" package -p rpm -f build/linux/nfpm.yaml -t "dist/kubepeep-linux-${{ matrix.arch }}.rpm" 2>&1 | tee nfpm-rpm.log
+          "$(go env GOPATH)/bin/nfpm" package -p rpm -f packaging/linux/nfpm.yaml -t "dist/kubepeep-linux-${{ matrix.arch }}.rpm" 2>&1 | tee nfpm-rpm.log
           rpm_rc=${PIPESTATUS[0]}
           if [ "$rpm_rc" -ne 0 ]; then
             tail -c 3500 nfpm-rpm.log | while IFS= read -r line; do echo "::error title=nfpm-rpm::$line"; done
@@ -384,7 +384,7 @@ jobs:
           rm -rf dist/staging
 
       - name: Scan Linux desktop binaries and packages
-        run: ./scripts/release_artifact_check.sh build/bin dist
+        run: ./scripts/release/check-artifacts.sh build/bin dist
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -438,7 +438,7 @@ jobs:
 
       - name: Apply the release version to native package metadata
         shell: bash
-        run: ./scripts/release.sh metadata "$VERSION"
+        run: ./scripts/release/version.sh metadata "$VERSION"
 
       - name: Install Wails CLI
         run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
@@ -535,7 +535,7 @@ jobs:
       - name: Scan Windows desktop binaries and installers
         shell: bash
         # The ZIP payload is also extracted by the central Ubuntu gate.
-        run: ./scripts/release_artifact_check.sh build/bin
+        run: ./scripts/release/check-artifacts.sh build/bin
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -596,7 +596,7 @@ jobs:
 
       - name: Apply the release version to native package metadata
         shell: bash
-        run: ./scripts/release.sh metadata "$VERSION"
+        run: ./scripts/release/version.sh metadata "$VERSION"
 
       - name: Build the frontend (embedded via go:embed)
         run: make web-build
@@ -640,7 +640,7 @@ jobs:
           ls -la dist
 
       - name: Scan macOS app bundles and archives
-        run: ./scripts/release_artifact_check.sh build/bin dist
+        run: ./scripts/release/check-artifacts.sh build/bin dist
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -704,7 +704,7 @@ jobs:
             runs=$(gh api --paginate \
               "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/check-runs?per_page=100" \
               --jq '.check_runs[] | [.id, .name, (.conclusion // "pending")] | @tsv' 2>/dev/null | sort -n -k1,1) || runs=""
-            if check_state=$(printf '%s\n' "$runs" | ./scripts/release_check_status.sh); then
+            if check_state=$(printf '%s\n' "$runs" | ./scripts/release/check-status.sh); then
               echo "verify.yml (build-and-test, restricted-kind, native-runtime matrix) concluded successfully for ${GITHUB_SHA}."
               break
             else
@@ -779,7 +779,7 @@ jobs:
           echo "All ${#expected[@]} expected assets present."
 
       - name: Scan downloaded release artifacts before creating a tag
-        run: ./scripts/release_artifact_check.sh dist
+        run: ./scripts/release/check-artifacts.sh dist
 
       - name: Smoke the release candidate binary
         run: |

@@ -43,7 +43,7 @@ Estados possíveis por componente:
 
 O estado agregado pode ser `degraded` por uma dependência externa e ainda
 responder HTTP 200; somente `unhealthy` local controla HTTP 503. O contrato
-canônico, incluindo códigos públicos, permanece em `docs/api.md`.
+canônico, incluindo códigos públicos, permanece em `docs/reference/api.md`.
 
 Semântica HTTP:
 

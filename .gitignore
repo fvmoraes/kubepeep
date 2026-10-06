@@ -97,11 +97,57 @@ Thumbs.db
 *.swo
 *~
 
+# Local AI assistants, skills, hooks and project memory
+.agent/
+.agents/
+.codex/
+.impeccable/
+.impecable/
+.claude/
+.cursor/
+.windsurf/
+.kiro/
+.gemini/
+.opencode/
+.continue/
+.cline/
+.roo/
+.kilocode/
+.aider/
+.serena/
+.dwyt/
+.headroom/
 .codebase-memory/
-# Optional installed agent dependencies; sources are recorded in skills-lock.json
-.agents/skills/
+/semantic-review/
+
+# AI instructions and dependency manifests (including nested projects)
+AGENTS.md
+AGENTS.local.md
+AGENTS.override.md
+CLAUDE.md
+CLAUDE.local.md
+GEMINI.md
+QWEN.md
+skills-lock.json
+.cursorrules
+.windsurfrules
+.clinerules
+.roorules
+.aider.conf.yml
+.aiderignore
+.aider.chat.history.md
+.aider.input.history
+.aider.tags.cache*/
+
+# GitHub Copilot instructions; keep GitHub Actions versioned
+/.github/copilot-instructions.md
+/.github/instructions/
+/.github/agents/
+/.github/prompts/
+/.github/skills/
 
 # dwyt start
 *mcp.json
 *opencode.json
+*opencode.jsonc
 # dwyt end

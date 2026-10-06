@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   # Core validation. Keep this check name: release.yml polls it together with
-# native-runtime and restricted-kind as the blocking set.
+  # native-runtime and restricted-kind as the blocking set.
   build-and-test:
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -83,8 +83,11 @@ jobs:
 
       - name: Verify Unix installer
         run: |
-          sh -n install.sh scripts/install_test.sh
-          ./scripts/install_test.sh
+          sh -n install.sh test/install/unix.sh
+          ./test/install/unix.sh
+
+      - name: Verify documentation links
+        run: make docs-check
 
       - name: Test and build embedded binary
         env:
@@ -98,10 +101,10 @@ jobs:
 
       - name: Verify release gates and scan the embedded binary
         run: |
-          ./scripts/release_test.sh
-          ./scripts/release_gate_harness.sh
-          ./scripts/release_artifact_check_test.sh
-          ./scripts/release_artifact_check.sh dist
+          ./test/release/version.sh
+          ./test/release/gates.sh
+          ./test/release/artifacts.sh
+          ./scripts/release/check-artifacts.sh dist
 
       - name: Run the race detector
         env:
@@ -206,7 +209,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $lines = & ./scripts/install_test.ps1 2>&1
+          $lines = & ./test/install/windows.ps1 2>&1
           $scriptSucceeded = $?
           $exitCode = if ($scriptSucceeded -and ($null -eq $LASTEXITCODE -or $LASTEXITCODE -eq 0)) {
             0

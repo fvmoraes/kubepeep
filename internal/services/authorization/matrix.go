@@ -32,7 +32,7 @@ type PartialError struct {
 	Message   string    `json:"message"`
 }
 
-// CapabilityMatrix is the data payload described by docs/api.md.
+// CapabilityMatrix is the data payload described by docs/reference/api.md.
 type CapabilityMatrix struct {
 	Generation string         `json:"generation"`
 	Decisions  []Capability   `json:"decisions"`

@@ -269,7 +269,7 @@ test('storage tabs render honest states and navigate (R23-R27/V2)', async ({ pag
   // No fictitious namespace fan-out for cluster-scoped lists.
   await expect(page.getByText('Cluster-scoped result')).toBeVisible()
 
-  await page.getByRole('tab', { name: 'persistent-volume-claims' }).click()
+  await page.getByRole('navigation', { name: 'Storage resources', exact: true }).getByRole('link', { name: 'PersistentVolumeClaims', exact: true }).click()
   await expect(page).toHaveURL(/\/storage\/persistent-volume-claims$/)
   // Denial is authoritative: never an empty result.
   await expect(page.getByText('Access to this resource was denied.')).toBeVisible()

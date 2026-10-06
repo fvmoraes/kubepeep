@@ -44,7 +44,8 @@ const navCatalog = [
   ['/administration/customresourcedefinitions', 'CustomResourceDefinitions', 'Administration'],
   ['/administration/priority-classes', 'PriorityClasses', 'Administration'],
   ['/administration/runtime-classes', 'RuntimeClasses', 'Administration'],
-  ['/administration/mutating-webhook-configurations', 'Admission Webhooks', 'Administration'],
+  ['/administration/mutating-webhook-configurations', 'Mutating Webhooks', 'Administration'],
+  ['/administration/validating-webhook-configurations', 'Validating Webhooks', 'Administration'],
   ['/settings', 'Settings', 'Settings'],
 ] as const
 
@@ -125,9 +126,9 @@ test('serves the application shell and preserves History API navigation', async 
   }
 
   // Meta+b returns to the previous local history entry (the last catalog page
-  // before Settings, which is now the Admission Webhooks destination).
+  // before Settings, which is now the Validating Webhooks destination).
   await page.keyboard.press('Meta+b')
-  await expect(page).toHaveURL(/\/administration\/mutating-webhook-configurations$/)
+  await expect(page).toHaveURL(/\/administration\/validating-webhook-configurations$/)
 })
 
 test('keeps the dashboard useful with partial data and an explicit bounded log scan', async ({ page }) => {
@@ -250,6 +251,7 @@ test('filters Pods, persists allowlisted saved filters and builds the Logs catal
   await expect(page.getByRole('heading', { name: 'Pods' })).toBeVisible()
   await expect.poll(() => podRequests.length).toBeGreaterThan(0)
   const initialPodRequests = podRequests.length
+  await page.getByText('More filters', { exact: true }).click()
   await page.getByLabel('Namespace', { exact: true }).fill('payments')
   await page.getByLabel('Workload owner').fill('api')
   await page.getByLabel('Node').fill('worker-1')
