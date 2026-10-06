@@ -1,3 +1,4 @@
+import { ResourceFamilyNav } from './components/resource/ResourceFamilyNav'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { Waypoints } from 'lucide-react'
@@ -395,7 +396,7 @@ function Shell() {
             }))} onClearRecent={() => { clearRecentTargets(); void persistShellPrefs((currentPrefs) => { currentPrefs.recent = { version: 1, items: [] }; return currentPrefs }) }} getResources={() => commandResourceEntries(queryClient, selection?.generation)} onRefresh={refreshActiveReads} />
           </div>
         </header>
-          <main id="main-content"><DefaultScopeGate selection={selection} selectionPending={selectionPendingForRoute}><Suspense fallback={<StatePanel kind="loading" title="Opening section">The shell remains available while this section loads.</StatePanel>}><Outlet /></Suspense></DefaultScopeGate></main>
+          <main id="main-content"><ResourceFamilyNav /><DefaultScopeGate selection={selection} selectionPending={selectionPendingForRoute}><Suspense fallback={<StatePanel kind="loading" title="Opening section">The shell remains available while this section loads.</StatePanel>}><Outlet /></Suspense></DefaultScopeGate></main>
       </div>
         {workspace.open ? <Suspense fallback={<div role="status" className="workspace-panel p-4 text-sm text-kp-overlay-text">Opening resource…</div>}><ResourceWorkspaceOverlay /></Suspense> : null}
     </div>

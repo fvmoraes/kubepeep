@@ -114,6 +114,7 @@ func Register(applicationRouter *router.Router, dependencies Dependencies) {
 		apiRouter.GET("/resources/{collection}/{namespace}/{name}/yaml-diff", resourceHandler.ResourceYAMLDiff)
 		apiRouter.GET("/secrets", resourceHandler.Secrets)
 		apiRouter.GET("/secrets/{namespace}/{name}", resourceHandler.SecretDetail)
+		apiRouter.GET("/secrets/{namespace}/{name}/data", resourceHandler.SecretData)
 		apiRouter.GET("/nodes", resourceHandler.Nodes)
 		apiRouter.GET("/nodes/{name}", resourceHandler.NodeDetail)
 		apiRouter.GET("/nodes/{name}/yaml", resourceHandler.NodeYAML)
@@ -186,6 +187,7 @@ func Register(applicationRouter *router.Router, dependencies Dependencies) {
 		if dependencies.Actions != nil {
 			apiRouter.POST("/workloads/{kind}/{namespace}/{name}/restart", actions.Restart)
 			apiRouter.PUT("/workloads/{kind}/{namespace}/{name}/scale", actions.Scale)
+			apiRouter.PUT("/workloads/{kind}/{namespace}/{name}/yaml", actions.UpdateDeploymentYAML)
 			apiRouter.PUT("/workloads/{kind}/{namespace}/{name}/suspend", actions.UpdateCronJobSuspend)
 			apiRouter.POST("/workloads/{kind}/{namespace}/{name}/trigger", actions.TriggerCronJob)
 			apiRouter.DELETE("/workloads/{kind}/{namespace}/{name}", actions.DeleteWorkload)
@@ -303,6 +305,11 @@ func resourceAllowedMethods(path string) (string, bool) {
 	case len(parts) == 4 && parts[0] == "workloads":
 		return "GET, HEAD", true
 	case len(parts) == 5 && parts[0] == "workloads" && parts[4] == "yaml":
+		if parts[1] == "deployments" {
+			return "GET, HEAD, PUT", true
+		}
+		return "GET, HEAD", true
+	case len(parts) == 4 && parts[0] == "secrets" && parts[3] == "data":
 		return "GET, HEAD", true
 	case len(parts) == 3 && parts[0] == "pods":
 		return "GET, HEAD", true

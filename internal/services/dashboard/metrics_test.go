@@ -40,15 +40,15 @@ func TestBuildMetricsNormalizesQuantitiesAndRanksDeterministically(t *testing.T)
 	}
 }
 
-func TestBuildMetricsRejectsNegativeMismatchedAndMissingWindow(t *testing.T) {
+func TestBuildMetricsRejectsNegativeAndMissingWindowButAcceptsIndependentSamples(t *testing.T) {
 	t.Parallel()
 	now := time.Now()
 	negative := podMetric("ns", "pod", time.Minute, containerMetric("app", "-1m", "1Mi"))
 	if _, err := BuildMetrics([]metricsv1beta1.PodMetrics{negative}, now); err == nil {
 		t.Fatal("negative quantity accepted")
 	}
-	if _, err := BuildMetrics([]metricsv1beta1.PodMetrics{podMetric("ns", "a", time.Minute, containerMetric("a", "1m", "1Mi")), podMetric("ns", "b", 2*time.Minute, containerMetric("b", "1m", "1Mi"))}, now); err == nil {
-		t.Fatal("mismatched windows accepted")
+	if _, err := BuildMetrics([]metricsv1beta1.PodMetrics{podMetric("ns", "a", time.Minute, containerMetric("a", "1m", "1Mi")), podMetric("ns", "b", 2*time.Minute, containerMetric("b", "1m", "1Mi"))}, now); err != nil {
+		t.Fatalf("independent sampling windows rejected: %v", err)
 	}
 	if _, err := BuildMetrics(nil, now); err == nil {
 		t.Fatal("missing positive window accepted")

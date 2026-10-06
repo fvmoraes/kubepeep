@@ -493,7 +493,31 @@ export interface ContainerPort {
   protocol: string
 }
 
+export interface ResourceBudget {
+  cpuRequestMillicores: number | null
+  cpuLimitMillicores: number | null
+  memoryRequestBytes: number | null
+  memoryLimitBytes: number | null
+}
+
+export interface EnvironmentSource {
+  kind: 'Secret' | 'ConfigMap' | 'Field' | 'Resource'
+  name: string
+  key?: string
+  prefix?: string
+  optional: boolean
+}
+
+export interface EnvironmentVariable {
+  name: string
+  value: string | null
+  source?: EnvironmentSource
+}
+
 export interface ContainerSpec {
+  resources?: ResourceBudget
+  environment?: EnvironmentVariable[]
+  envFrom?: EnvironmentSource[]
   name: string
   image: string
   ports: ContainerPort[]
@@ -502,6 +526,8 @@ export interface ContainerSpec {
 export type WorkloadStatus = 'Healthy' | 'Progressing' | 'Degraded' | 'Suspended' | 'Completed' | 'Failed' | 'Unknown'
 
 export interface Workload {
+  owner?: ResourceOwner
+  resources?: ResourceBudget
   namespace: string
   kind: 'Deployment' | 'StatefulSet' | 'DaemonSet' | 'Job' | 'CronJob' | 'ReplicaSet'
   name: string
@@ -514,6 +540,9 @@ export interface Workload {
 }
 
 export interface WorkloadDetail {
+  resources?: ResourceBudget
+  configMaps?: string[]
+  secrets?: string[]
   metadata: ResourceMetadata
   kind: Workload['kind']
   ready: number | null
@@ -539,6 +568,10 @@ export interface ResourceOwner {
 }
 
 export interface Pod {
+  containerResources?: Record<string, ResourceBudget>
+  resources?: ResourceBudget
+  configMaps?: string[]
+  secrets?: string[]
   namespace: string
   name: string
   status: 'Running' | 'Pending' | 'Succeeded' | 'Failed' | 'Unknown'
@@ -902,7 +935,15 @@ export interface LimitRange {
   truncated: boolean
 }
 
+export interface HPAResourceTarget {
+  resource: 'cpu' | 'memory'
+  container?: string
+  utilization: number | null
+  averageValue: number | null
+}
+
 export interface HorizontalPodAutoscaler {
+  resourceTargets?: HPAResourceTarget[]
   namespace: string
   name: string
   targetKind: string

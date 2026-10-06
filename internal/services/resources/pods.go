@@ -11,19 +11,22 @@ import (
 )
 
 type PodDTO struct {
-	Namespace   string            `json:"namespace"`
-	Name        string            `json:"name"`
-	Labels      map[string]string `json:"labels,omitempty"`
-	Status      string            `json:"status"`
-	Ready       ReadyDTO          `json:"ready"`
-	Restarts    int64             `json:"restarts"`
-	Node        *string           `json:"node"`
-	IP          *string           `json:"ip"`
-	Owner       *OwnerDTO         `json:"owner"`
-	AgeSeconds  int64             `json:"ageSeconds"`
-	Problematic bool              `json:"problematic"`
-	ConfigMaps  []string          `json:"configMaps,omitempty"`
-	PVCs        []string          `json:"pvcs,omitempty"`
+	ContainerResources map[string]ResourceBudgetDTO `json:"containerResources,omitempty"`
+	Resources          ResourceBudgetDTO            `json:"resources"`
+	Secrets            []string                     `json:"secrets,omitempty"`
+	Namespace          string                       `json:"namespace"`
+	Name               string                       `json:"name"`
+	Labels             map[string]string            `json:"labels,omitempty"`
+	Status             string                       `json:"status"`
+	Ready              ReadyDTO                     `json:"ready"`
+	Restarts           int64                        `json:"restarts"`
+	Node               *string                      `json:"node"`
+	IP                 *string                      `json:"ip"`
+	Owner              *OwnerDTO                    `json:"owner"`
+	AgeSeconds         int64                        `json:"ageSeconds"`
+	Problematic        bool                         `json:"problematic"`
+	ConfigMaps         []string                     `json:"configMaps,omitempty"`
+	PVCs               []string                     `json:"pvcs,omitempty"`
 }
 
 func (PodDTO) resourceListItem() {}
@@ -57,18 +60,21 @@ func ConvertPod(value *corev1.Pod, now time.Time) PodDTO {
 	owner := directOwner(value.OwnerReferences)
 	status := normalizePodPhase(value.Status.Phase)
 	summary := PodDTO{
-		Namespace:  value.Namespace,
-		Name:       value.Name,
-		Labels:     limitedStringMap(value.Labels),
-		Status:     status,
-		Ready:      ReadyDTO{Current: ready, Desired: int64(len(value.Spec.Containers))},
-		Restarts:   restarts,
-		Node:       nullableString(value.Spec.NodeName),
-		IP:         nullableString(value.Status.PodIP),
-		Owner:      owner,
-		AgeSeconds: ageSeconds(value.CreationTimestamp.Time, now),
-		ConfigMaps: podConfigMapRefs(value.Spec),
-		PVCs:       podPVCRefs(value.Spec),
+		Namespace:          value.Namespace,
+		Resources:          podBudget(value.Spec),
+		ContainerResources: podContainerBudgets(value.Spec),
+		Secrets:            podSecretRefs(value.Spec),
+		Name:               value.Name,
+		Labels:             limitedStringMap(value.Labels),
+		Status:             status,
+		Ready:              ReadyDTO{Current: ready, Desired: int64(len(value.Spec.Containers))},
+		Restarts:           restarts,
+		Node:               nullableString(value.Spec.NodeName),
+		IP:                 nullableString(value.Status.PodIP),
+		Owner:              owner,
+		AgeSeconds:         ageSeconds(value.CreationTimestamp.Time, now),
+		ConfigMaps:         podConfigMapRefs(value.Spec),
+		PVCs:               podPVCRefs(value.Spec),
 	}
 	summary.Problematic = podProblematic(value, summary)
 	return summary
@@ -77,7 +83,7 @@ func ConvertPod(value *corev1.Pod, now time.Time) PodDTO {
 func podConfigMapRefs(spec corev1.PodSpec) []string {
 	values := make([]string, 0)
 	add := func(value string) {
-		if value == "" || len(values) >= 64 {
+		if value == "" {
 			return
 		}
 		for _, existing := range values {
@@ -102,6 +108,9 @@ func podConfigMapRefs(spec corev1.PodSpec) []string {
 	containers := make([]corev1.Container, 0, len(spec.InitContainers)+len(spec.Containers))
 	containers = append(containers, spec.InitContainers...)
 	containers = append(containers, spec.Containers...)
+	for _, ephemeral := range spec.EphemeralContainers {
+		containers = append(containers, corev1.Container{Env: ephemeral.Env, EnvFrom: ephemeral.EnvFrom})
+	}
 	for _, container := range containers {
 		for _, source := range container.EnvFrom {
 			if source.ConfigMapRef != nil {
@@ -213,7 +222,7 @@ func ephemeralContainerDTOs(specs []corev1.EphemeralContainer, statuses []corev1
 	}
 	result := make([]PodContainerDTO, 0, len(specs))
 	for _, spec := range specs {
-		converted := ContainerSpecDTO{Name: spec.Name, Image: spec.Image, Ports: []ContainerPortDTO{}}
+		converted := ContainerSpecDTO{Name: spec.Name, Image: spec.Image, Ports: []ContainerPortDTO{}, Resources: containerBudget(spec.Resources), Environment: containerEnvironment(spec.Env), EnvFrom: containerEnvFrom(spec.EnvFrom)}
 		result = append(result, podContainer(converted, byName[spec.Name], "ephemeral"))
 	}
 	return result

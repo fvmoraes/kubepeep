@@ -123,6 +123,8 @@ func translateError(err error) *Error {
 		return publicError(CodeClientCanceled, 0, false, err)
 	case errors.Is(err, context.DeadlineExceeded), apierrors.IsTimeout(err), apierrors.IsServerTimeout(err):
 		return publicError(CodeUpstreamTimeout, http.StatusGatewayTimeout, true, err)
+	case apierrors.IsBadRequest(err), apierrors.IsInvalid(err):
+		return publicError(CodeValidationFailed, http.StatusBadRequest, false, err)
 	case apierrors.IsForbidden(err):
 		return publicError(CodeForbidden, http.StatusForbidden, false, err)
 	case apierrors.IsUnauthorized(err):

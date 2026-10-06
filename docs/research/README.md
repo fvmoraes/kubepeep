@@ -1,8 +1,8 @@
 # Pesquisa
 
 Pesquisa registra fontes, método e limitações na data indicada em cada texto.
-Para comportamento atual, usar os [contratos](../README.md); para execução,
-usar o [plano v1](../../plan/README.md).
+Para comportamento atual, usar os [contratos](../README.md); para executar
+as validações, consultar o [guia de desenvolvimento](../guides/development.md).
 
 | Documento | Contexto |
 | --- | --- |

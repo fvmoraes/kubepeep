@@ -13,7 +13,7 @@ func TestAllowlistExactlyMatchesDocumentedMVPIDs(t *testing.T) {
 		"namespaces.list",
 		"pods.list", "pods.get", "pods.watch", "pods.logs.get", "pods.delete", "pods.exec.create", "pods.portforward.create",
 		"events.list", "events.watch",
-		"deployments.list", "deployments.get", "deployments.watch", "deployments.restart", "deployments.scale", "deployments.delete",
+		"deployments.list", "deployments.get", "deployments.watch", "deployments.update", "deployments.restart", "deployments.scale", "deployments.delete",
 		"statefulsets.list", "statefulsets.get", "statefulsets.watch", "statefulsets.restart", "statefulsets.scale", "statefulsets.delete",
 		"daemonsets.list", "daemonsets.get", "daemonsets.watch", "daemonsets.restart", "daemonsets.delete",
 		"jobs.list", "jobs.get", "jobs.watch", "jobs.delete",

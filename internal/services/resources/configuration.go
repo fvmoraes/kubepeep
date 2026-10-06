@@ -109,18 +109,19 @@ func ConvertLimitRange(value *corev1.LimitRange) LimitRangeDTO {
 // HorizontalPodAutoscalerDTO reports current/desired replicas and conditions.
 // Absence of metrics stays unknown; zero is never invented.
 type HorizontalPodAutoscalerDTO struct {
-	Namespace       string         `json:"namespace"`
-	Name            string         `json:"name"`
-	TargetKind      string         `json:"targetKind"`
-	TargetName      string         `json:"targetName"`
-	MinReplicas     *int32         `json:"minReplicas"`
-	MaxReplicas     int32          `json:"maxReplicas"`
-	CurrentReplicas int32          `json:"currentReplicas"`
-	DesiredReplicas int32          `json:"desiredReplicas"`
-	Conditions      []ConditionDTO `json:"conditions"`
-	MetricNames     []string       `json:"metricNames"`
-	Truncated       bool           `json:"truncated"`
-	AgeSeconds      int64          `json:"ageSeconds"`
+	ResourceTargets []HPAResourceTargetDTO `json:"resourceTargets"`
+	Namespace       string                 `json:"namespace"`
+	Name            string                 `json:"name"`
+	TargetKind      string                 `json:"targetKind"`
+	TargetName      string                 `json:"targetName"`
+	MinReplicas     *int32                 `json:"minReplicas"`
+	MaxReplicas     int32                  `json:"maxReplicas"`
+	CurrentReplicas int32                  `json:"currentReplicas"`
+	DesiredReplicas int32                  `json:"desiredReplicas"`
+	Conditions      []ConditionDTO         `json:"conditions"`
+	MetricNames     []string               `json:"metricNames"`
+	Truncated       bool                   `json:"truncated"`
+	AgeSeconds      int64                  `json:"ageSeconds"`
 }
 
 func (HorizontalPodAutoscalerDTO) resourceListItem() {}
@@ -148,7 +149,7 @@ func ConvertHorizontalPodAutoscaler(value *autoscalingv2.HorizontalPodAutoscaler
 		TargetKind: value.Spec.ScaleTargetRef.Kind, TargetName: value.Spec.ScaleTargetRef.Name,
 		MinReplicas: value.Spec.MinReplicas, MaxReplicas: value.Spec.MaxReplicas,
 		CurrentReplicas: value.Status.CurrentReplicas, DesiredReplicas: value.Status.DesiredReplicas,
-		Conditions: conditions, MetricNames: metricNames,
+		Conditions: conditions, MetricNames: metricNames, ResourceTargets: hpaResourceTargets(value.Spec.Metrics),
 		Truncated:  len(value.Status.Conditions) > maximumHPAConditions || len(value.Spec.Metrics) > maximumHPAMetrics,
 		AgeSeconds: int64(now.Sub(value.CreationTimestamp.Time) / time.Second),
 	}

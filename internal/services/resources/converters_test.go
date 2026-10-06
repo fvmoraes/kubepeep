@@ -16,7 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 )
 
-func TestWorkloadConvertersUseCompactDTOAndOmitPodTemplateSecrets(t *testing.T) {
+func TestWorkloadDetailIncludesDeclaredEnvironmentWithoutAnnotations(t *testing.T) {
 	replicas := int32(2)
 	deployment := &appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "payments", UID: "uid", ResourceVersion: "9", Generation: 1, CreationTimestamp: metav1.NewTime(time.Unix(100, 0)), Annotations: map[string]string{"private": "do-not-return"}}, Spec: appsv1.DeploymentSpec{Replicas: &replicas, Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "api"}}, Template: corev1.PodTemplateSpec{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{"kubectl.kubernetes.io/restartedAt": "2026-08-17T10:00:00Z", "secret": "do-not-return"}}, Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "api", Image: "example/api:1", Env: []corev1.EnvVar{{Name: "PASSWORD", Value: "TOP_SECRET"}}}}}}}, Status: appsv1.DeploymentStatus{ObservedGeneration: 1, Replicas: 2, ReadyReplicas: 2, AvailableReplicas: 2, UpdatedReplicas: 2, Conditions: []appsv1.DeploymentCondition{{Type: appsv1.DeploymentAvailable, Status: corev1.ConditionTrue, Reason: "Ready"}}}}
 	summary := ConvertDeployment(deployment, time.Unix(200, 0))
@@ -26,10 +26,13 @@ func TestWorkloadConvertersUseCompactDTOAndOmitPodTemplateSecrets(t *testing.T) 
 	detail := DeploymentDetail(deployment, nil, time.Unix(200, 0))
 	encoded, _ := json.Marshal(detail)
 	text := string(encoded)
-	for _, prohibited := range []string{"TOP_SECRET", "PASSWORD", "do-not-return", "annotations", "managedFields"} {
+	for _, prohibited := range []string{"do-not-return", "annotations", "managedFields"} {
 		if strings.Contains(text, prohibited) {
 			t.Fatalf("detail leaked %q: %s", prohibited, text)
 		}
+	}
+	if len(detail.Containers[0].Environment) != 1 || detail.Containers[0].Environment[0].Value == nil || *detail.Containers[0].Environment[0].Value != "TOP_SECRET" {
+		t.Fatal("declared env missing from authorized detail")
 	}
 	if detail.RestartAt == nil || *detail.RestartAt != "2026-08-17T10:00:00Z" {
 		t.Fatalf("restartAt = %#v", detail.RestartAt)
@@ -86,8 +89,11 @@ func TestPodDetailKeepsOnlyAllowlistedContainerFields(t *testing.T) {
 	if detail.Summary.Ready.Current != 1 || detail.Summary.Ready.Desired != 2 || !detail.Summary.Problematic || detail.Summary.Owner == nil {
 		t.Fatalf("summary = %#v", detail.Summary)
 	}
+	if len(detail.Containers[0].Spec.Environment) != 1 || detail.Containers[0].Spec.Environment[0].Name != "TOKEN" {
+		t.Fatal("declared pod env missing")
+	}
 	encoded, _ := json.Marshal(detail)
-	for _, prohibited := range []string{"private-command", "secret-value", "TOKEN", "env", "command"} {
+	for _, prohibited := range []string{"private-command", "command"} {
 		if strings.Contains(string(encoded), prohibited) {
 			t.Fatalf("pod detail leaked %q: %s", prohibited, encoded)
 		}

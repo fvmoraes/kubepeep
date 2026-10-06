@@ -12,7 +12,7 @@ the authoritative terms.
 | [coder/websocket](https://github.com/coder/websocket) | 1.8.15 | ISC |
 | [fvmoraes/ginger](https://github.com/fvmoraes/ginger) | 1.4.4 | MIT |
 | [spf13/cobra](https://github.com/spf13/cobra) | 1.10.2 | Apache-2.0 |
-| [golang.org/x/sys](https://cs.opensource.google/go/x/sys) | 0.46.0 | BSD-3-Clause |
+| [golang.org/x/sys](https://cs.opensource.google/go/x/sys) | 0.47.0 | BSD-3-Clause |
 | [go-yaml/yaml](https://github.com/go-yaml/yaml) | 3.0.1 | MIT |
 | [kubernetes/api](https://github.com/kubernetes/api) | 0.35.7 | Apache-2.0 |
 | [kubernetes/apimachinery](https://github.com/kubernetes/apimachinery) | 0.35.7 | Apache-2.0 and bundled BSD-3-Clause code |
@@ -40,6 +40,11 @@ check was applied to the platform-specific modernc modules.
 | [Scheduler](https://github.com/facebook/react) | 0.27.0 | MIT |
 | [React Router](https://github.com/remix-run/react-router) | 8.3.0 | MIT |
 | [cookie-es](https://github.com/unjs/cookie-es) | 3.1.1 | MIT |
+| [Inter Variable via Fontsource](https://github.com/fontsource/font-files/tree/main/fonts/variable/inter) | 5.3.0 | OFL-1.1 |
+| [xterm.js](https://github.com/xtermjs/xterm.js) | 6.0.0 | MIT |
+| [xterm.js fit addon](https://github.com/xtermjs/xterm.js/tree/master/addons/addon-fit) | 0.11.0 | MIT |
+| [React Syntax Highlighter](https://github.com/react-syntax-highlighter/react-syntax-highlighter) | 16.1.1 | MIT |
+| [YAML](https://github.com/eemeli/yaml) | 2.9.1 | ISC |
 
 Build and test tools are development-only and are not required at runtime.
 Their exact versions and licenses remain recorded by the frontend lockfile.

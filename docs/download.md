@@ -19,7 +19,7 @@ Linux packages install `/usr/bin/kubepeep`, the desktop entry and icons, and
 declare GTK 3/WebKit2GTK 4.1 runtime dependencies. Windows setup embeds the
 WebView2 bootstrapper. macOS packages contain `kubePeep.app`; install the app
 in Applications. Desktop library and build details are in
-[desktop-build.md](desktop-build.md).
+[desktop-build.md](guides/desktop-build.md).
 
 CLI archives use `kubePeep` (`kubePeep.exe` on Windows):
 

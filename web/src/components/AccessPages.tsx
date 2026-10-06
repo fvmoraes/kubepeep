@@ -1,7 +1,7 @@
 import { useGenerationCursor } from './resource/useListCursor'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate, useParams } from 'react-router'
+import { useParams } from 'react-router'
 
 import {
   getClusterRoleBindings,
@@ -29,7 +29,6 @@ import { ResourceListControls } from './ResourceListControls'
 import type { ListSortOption } from './ResourceListControls'
 import { CollectionFooter, QueryState, SelectionGate } from './resource/states'
 import { ResourcePage } from './resource/ResourcePage'
-import { ResourceTabStrip } from './resource/ResourceTabStrip'
 import { TableLink } from './resource/TableLink'
 import { age } from './resource/format'
 import { effectiveNamespaces, useGlobalNamespace } from '../context/GlobalNamespace'
@@ -54,17 +53,14 @@ function useActiveSelection() {
 }
 
 interface TabbedFamilyProps {
+  tab: string
   title: string
   description: string
-  ariaLabel: string
-  tabs: readonly string[]
-  tab: string
   queryKeys: string[]
   listQuery: { isPending: boolean; error: unknown }
   result: CollectionResult<unknown> | undefined
   columns: DataTableColumn<unknown>[]
   rowKey: (row: unknown) => string
-  onTabChange: (tab: string) => void
   currentCursor: string
   onCursor: (value: string) => void
   onApply: (interactionId: string) => void
@@ -82,7 +78,6 @@ function TabbedFamilyPage(props: TabbedFamilyProps) {
   const queryClient = useQueryClient()
   return (
     <ResourcePage title={props.title} description={props.description}>
-      <ResourceTabStrip ariaLabel={props.ariaLabel} panelId={`${props.ariaLabel}-panel`} active={props.tab} onChange={props.onTabChange} tabs={props.tabs.map((id) => ({ id, label: id }))} />
       <ResourceListControls search={props.draft.search} appliedSearch={props.applied.search} onSearchChange={(value) => props.onDraft({ ...props.draft, search: value })} onApply={props.onApply} onRefresh={() => queryClient.invalidateQueries({ queryKey: props.queryKeys })} onClear={props.onClear} sort={props.draft.sort} order={props.draft.order} appliedSort={props.applied.sort} appliedOrder={props.applied.order} defaultSort="identity" defaultOrder="asc" hasPendingChanges={props.draft.search !== props.applied.search || props.draft.sort !== props.applied.sort || props.draft.order !== props.applied.order} sortOptions={identityNameSorts} onSortChange={(value) => props.onDraft({ ...props.draft, sort: value })} onOrderChange={(value) => props.onDraft({ ...props.draft, order: value })} />
       <SelectionGate pending={status.isPending} error={status.error} selected={Boolean(selection)}>
         <QueryState pending={props.listQuery.isPending} error={props.listQuery.error} empty={props.result?.items.length === 0}>
@@ -108,7 +103,6 @@ export function AccessControlPage() {
   const globalNamespace = useGlobalNamespace()
   const workspace = useResourceWorkspace()
   const { tab: tabParam, namespace, name } = useParams<{ tab?: string; namespace?: string; name?: string }>()
-  const navigate = useNavigate()
   const generation = selection?.generation
   // BUG FIX: the active tab comes from the :tab route segment. Previously the
   // namespace segment was read here, which made ClusterRoles and
@@ -151,10 +145,8 @@ export function AccessControlPage() {
   return (
     <TabbedFamilyPage
       title="Access Control" description="Roles and bindings as stored RBAC data; listing rules never calculates effective permissions."
-      ariaLabel="Access Control resource type" tabs={accessTabs} tab={tab}
-      queryKeys={['resources', tab]} listQuery={activeQuery} result={active}
+      tab={tab} queryKeys={['resources', tab]} listQuery={activeQuery} result={active}
       columns={columns} rowKey={(row) => { const value = row as { namespace?: string; name: string }; return `${value.namespace ?? ''}/${value.name}` }}
-      onTabChange={(value) => { setDraft(initialListState); setApplied(initialListState); setCursor(''); navigate(`/access/${value}`) }}
       currentCursor={cursor}
       onCursor={setCursor}
       onApply={(interactionId) => { setApplied(bindListInteraction({ ...draft }, interactionId)); setCursor('') }}
@@ -175,7 +167,6 @@ export function AdministrationPage() {
   const { selection } = useActiveSelection()
   const workspace = useResourceWorkspace()
   const { tab: tabParam, name } = useParams<{ tab?: string; name?: string }>()
-  const navigate = useNavigate()
   const generation = selection?.generation
   const tab = useMemo(() => administrationTabFromParams(tabParam ?? '') ?? 'customresourcedefinitions', [tabParam])
   const [draft, setDraft] = useState<ListState>(initialListState)
@@ -235,10 +226,8 @@ export function AdministrationPage() {
   return (
     <TabbedFamilyPage
       title="Administration" description="Cluster administration objects; CRD discovery never implies access to custom resource instances."
-      ariaLabel="Administration resource type" tabs={administrationTabs} tab={tab}
-      queryKeys={['resources', tab]} listQuery={activeQuery} result={active}
+      tab={tab} queryKeys={['resources', tab]} listQuery={activeQuery} result={active}
       columns={columns} rowKey={(row) => (row as { name: string }).name}
-      onTabChange={(value) => { setDraft(initialListState); setApplied(initialListState); setCursor(''); navigate(`/administration/${value}`) }}
       currentCursor={cursor}
       onCursor={setCursor}
       onApply={(interactionId) => { setApplied(bindListInteraction({ ...draft }, interactionId)); setCursor('') }}

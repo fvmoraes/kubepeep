@@ -38,12 +38,7 @@ interface ResourceListControlsProps {
   children?: ReactNode
 }
 
-/**
- * Compact filter toolbar. Filters, search, sort and refresh fit one row of
- * h-7 controls (plus a thin chips row) so the filter area stays within
- * ~20-30% of the viewport and the table remains the protagonist.
- * Child filter fields must render label-less inline inputs/selects.
- */
+/** Shared search/order/actions, with resource-specific fields under More filters. */
 export function ResourceListControls({
   search,
   appliedSearch,
@@ -89,19 +84,22 @@ export function ResourceListControls({
             aria-keyshortcuts="Control+F Meta+F"
             placeholder="Search (Ctrl+F)"
             maxLength={256}
-            className="!h-7 !pl-7 text-sm"
+            className="!h-9 !pl-7 text-sm"
             value={search}
             onChange={(event) => onSearchChange(event.target.value)}
           />
         </div>
-        {children}
-        <Select aria-label="Sort this bounded page" className="!h-7 !w-auto max-w-[11rem] pr-6 text-sm" value={sort} onChange={(event) => onSortChange(event.target.value)}>{sortOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</Select>
-        <Select aria-label="Order" className="!h-7 !w-[6.5rem] pr-6 text-sm" value={order} onChange={(event) => onOrderChange(event.target.value as ListSortOrder)}><option value="asc">Ascending</option><option value="desc">Descending</option></Select>
-        <div className="flex items-center gap-1.5">
-          <Button type="submit" size="sm" disabled={!hasPendingChanges} disabledReason="Change a filter, sort field, or order before applying.">Apply filters</Button>
-          <Button variant="secondary" size="sm" aria-keyshortcuts="Control+R Meta+R" onClick={onRefresh} data-tip="Refresh this page"><RefreshCw size={12} aria-hidden="true" /> Refresh</Button>
-          <Button variant="ghost" size="sm" disabled={!canClear} disabledReason="No filters or ordering changes are available to clear." onClick={onClear}>Clear filters</Button>
+        <Select aria-label="Sort this bounded page" className="!h-9 !w-auto min-w-[12rem] max-w-full pr-6 text-sm" value={sort} onChange={(event) => onSortChange(event.target.value)}>{sortOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</Select>
+        <Select aria-label="Order" className="!h-9 !w-auto min-w-[9rem] pr-6 text-sm" value={order} onChange={(event) => onOrderChange(event.target.value as ListSortOrder)}><option value="asc">Ascending</option><option value="desc">Descending</option></Select>
+        <div className="flex max-w-full flex-wrap items-center gap-1.5">
+          <Button type="submit" size="md" disabled={!hasPendingChanges} disabledReason="Change a filter, sort field, or order before applying.">Apply filters</Button>
+          <Button variant="secondary" size="md" aria-keyshortcuts="Control+R Meta+R" onClick={onRefresh} data-tip="Refresh this page"><RefreshCw size={12} aria-hidden="true" /> Refresh</Button>
+          <Button variant="ghost" size="md" disabled={!canClear} disabledReason="No filters or ordering changes are available to clear." onClick={onClear}>Clear filters</Button>
         </div>
+        {children ? <details className="resource-specific-filters">
+          <summary>More filters{activeFilters.length ? ` (${activeFilters.length})` : ''}</summary>
+          <div className="flex min-w-0 flex-wrap items-center gap-2 pt-3">{children}</div>
+        </details> : null}
       </form>
       <div className={`flex flex-wrap items-center gap-x-3 gap-y-1 px-1 text-xs text-kp-overlay-text ${appliedFilters.length > 0 || hasPendingChanges ? 'list-controls-chips py-1' : ''}`} aria-label="Applied resource list state" aria-live="polite">
         <div className="flex flex-wrap items-center gap-1.5">

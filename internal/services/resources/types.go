@@ -161,9 +161,12 @@ type ContainerPortDTO struct {
 }
 
 type ContainerSpecDTO struct {
-	Name  string             `json:"name"`
-	Image string             `json:"image"`
-	Ports []ContainerPortDTO `json:"ports"`
+	Resources   ResourceBudgetDTO        `json:"resources"`
+	Environment []EnvironmentVariableDTO `json:"environment"`
+	EnvFrom     []EnvironmentSourceDTO   `json:"envFrom"`
+	Name        string                   `json:"name"`
+	Image       string                   `json:"image"`
+	Ports       []ContainerPortDTO       `json:"ports"`
 }
 
 type ReadyDTO struct {

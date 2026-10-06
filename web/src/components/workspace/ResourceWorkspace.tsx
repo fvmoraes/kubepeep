@@ -1,3 +1,6 @@
+import { Link } from 'react-router'
+import { DataEntries, SecretData, WorkloadEnvironment } from './WorkloadData'
+import { PodMetrics, WorkloadMetrics } from './WorkloadMetrics'
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronLeft, ChevronRight, X } from 'lucide-react'
@@ -12,7 +15,6 @@ import {
   getCSINode,
   getCustomResourceDefinition,
   getConfigMapYAML,
-  getDashboardMetrics,
   getEndpointsItem,
   getEndpointSlice,
   getEndpointSliceYAML,
@@ -80,6 +82,7 @@ import { ResourceTabStrip, type ResourceTab } from '../resource/ResourceTabStrip
 import { resourceDetailPath, resourceKindLabel, workloadKindPath } from '../../navigation/paths'
 import { useResourceWorkspace, type WorkspaceEntry } from './ResourceWorkspaceProvider'
 
+const DeploymentYamlEditor = lazy(() => import('./DeploymentYamlEditor').then((module) => ({ default: module.DeploymentYamlEditor })))
 const YamlViewer = lazy(() => import('../YamlViewer').then((module) => ({ default: module.YamlViewer })))
 const PodActions = lazy(() => import('../ResourceActions').then((module) => ({ default: module.PodActions })))
 const WorkloadActions = lazy(() => import('../ResourceActions').then((module) => ({ default: module.WorkloadActions })))
@@ -118,7 +121,7 @@ function refToWorkspaceRef(ref: ResourceRef): { collection: string; kind: string
   if (!ref.name) return null
   const mapped = kindToTarget[ref.kind]
   if (mapped) {
-    const target = { collection: mapped.collection, kind: mapped.kind ?? ref.kind, namespace: ref.namespace ?? null, name: ref.name }
+    const target = { collection: mapped.collection, kind: mapped.kind ?? null, namespace: ref.namespace ?? null, name: ref.name }
     return resourceDetailPath(target) ? target : null
   }
   return null
@@ -127,11 +130,11 @@ function refToWorkspaceRef(ref: ResourceRef): { collection: string; kind: string
 export function tabsFor(entry: WorkspaceEntry): ResourceTab[] {
   const tabs: ResourceTab[] = [{ id: 'overview', label: 'Overview' }]
   if (entry.collection === 'pods') {
-		tabs.push({ id: 'investigation', label: 'Investigation' }, { id: 'logs', label: 'Logs' }, { id: 'yaml', label: 'YAML' }, { id: 'events', label: 'Events' }, { id: 'metrics', label: 'Metrics' }, { id: 'containers', label: 'Containers' }, { id: 'actions', label: 'Actions' })
+		tabs.push({ id: 'investigation', label: 'Investigation' }, { id: 'logs', label: 'Logs' }, { id: 'yaml', label: 'YAML' }, { id: 'events', label: 'Events' }, { id: 'metrics', label: 'Metrics' }, { id: 'containers', label: 'Containers' }, { id: 'data', label: 'Data / Env' }, { id: 'actions', label: 'Actions' })
     return tabs
   }
   if (entry.collection === 'workloads') {
-		tabs.push({ id: 'investigation', label: 'Investigation' })
+		tabs.push({ id: 'investigation', label: 'Investigation' }, { id: 'logs', label: 'Logs' }, { id: 'metrics', label: 'Metrics' }, { id: 'data', label: 'Data / Env' })
     switch (entry.kind) {
       case 'Deployment':
         tabs.push({ id: 'pods', label: 'Pods' }, { id: 'replicasets', label: 'ReplicaSets' }, { id: 'yaml', label: 'YAML' }, { id: 'events', label: 'Events' }, { id: 'rollout', label: 'Rollout' }, { id: 'actions', label: 'Actions' })
@@ -162,6 +165,7 @@ export function tabsFor(entry: WorkspaceEntry): ResourceTab[] {
     tabs.push({ id: 'rules', label: 'Rules' }, { id: 'backends', label: 'Backends' }, { id: 'yaml', label: 'YAML' }, { id: 'events', label: 'Events' }, { id: 'actions', label: 'Actions' })
     return tabs
   }
+  if (entry.collection === 'secrets') { tabs.push({ id: 'data', label: 'Data' }); return tabs }
   if (entry.collection === 'configmaps') {
     tabs.push({ id: 'data', label: 'Data' }, { id: 'yaml', label: 'YAML' })
     return tabs
@@ -450,54 +454,11 @@ function IngressRules({ paths, defaultBackend }: { paths: Array<{ host: string; 
   )
 }
 
-function ConfigMapData({ entries }: { entries: Array<{ key: string; encoding: string; value: string; truncated: boolean }> }) {
-  if (entries.length === 0) return <p className="m-0 text-sm text-kp-overlay-text" role="note">This ConfigMap has no entries.</p>
-  return (
-    <div className="grid gap-2">
-      {entries.map((entry) => (
-        <details key={entry.key} className="rounded-lg border border-kp-overlay-0 bg-kp-surface-1">
-          <summary className="cursor-pointer px-2.5 py-2 text-sm text-kp-sky">{entry.key} · {entry.encoding}{entry.truncated ? ' · truncated' : ''}</summary>
-          <pre className="max-h-[320px] overflow-auto border-t border-kp-overlay-0 px-2.5 py-2 text-xs leading-relaxed text-kp-subtext break-words whitespace-pre-wrap">{entry.value}</pre>
-        </details>
-      ))}
-    </div>
-  )
-}
-
 function PodLogsLink({ detail }: { detail: PodDetail }) {
+  const workspace = useResourceWorkspace()
   const container = detail.containers[0]?.spec.name ?? ''
   const query = new URLSearchParams({ namespace: detail.metadata.namespace, pod: detail.metadata.name, container })
-  return (
-    <p className="m-0 text-sm text-kp-overlay-text" role="note">
-      Open the dedicated log viewer with follow support:
-      <a className="ml-1 text-kp-sky underline-offset-2 hover:underline" href={`/logs?${query.toString()}`}>Open Pod logs</a>
-    </p>
-  )
-}
-
-function PodMetrics({ detail, generation }: { detail: PodDetail; generation: string | undefined }) {
-  const metrics = useQuery({
-    queryKey: ['workspace-pod-metrics', generation, detail.metadata.namespace, detail.metadata.name],
-    queryFn: ({ signal }) => getDashboardMetrics(signal, generation),
-    enabled: Boolean(generation),
-    staleTime: 8_000,
-    refetchInterval: 8_000,
-  })
-  if (metrics.isPending) return <p className="m-0 text-sm text-kp-overlay-text" role="status">Loading Pod metrics…</p>
-  if (metrics.isError) return <p className="m-0 text-sm text-kp-yellow" role="note">Metrics API data is unavailable for this Pod.</p>
-  const pod = metrics.data.block.value.pods.find((item) => item.namespace === detail.metadata.namespace && item.pod === detail.metadata.name)
-  if (!pod) return <p className="m-0 text-sm text-kp-overlay-text" role="note">No current Metrics API sample is available for this Pod.</p>
-  return (
-    <div className="grid content-start gap-3">
-      <Facts facts={[{ label: 'CPU', value: `${pod.cpuMillicores} m` }, { label: 'Memory', value: `${Math.round(pod.memoryBytes / (1024 * 1024))} MiB` }]} />
-      <div className="overflow-x-auto rounded-lg border border-kp-overlay-0 bg-kp-surface-0">
-        <table className="w-full border-collapse text-left text-sm">
-          <thead><tr className="border-b border-kp-overlay-0 text-2xs uppercase tracking-wider text-kp-overlay-text"><th className="px-2.5 py-1.5 font-medium">Container</th><th className="px-2.5 py-1.5 font-medium">CPU</th><th className="px-2.5 py-1.5 font-medium">Memory</th></tr></thead>
-          <tbody>{pod.containers.map((container) => <tr key={container.name} className="border-b border-kp-overlay-0/50 last:border-0"><td className="px-2.5 py-1.5 text-kp-text">{container.name}</td><td className="px-2.5 py-1.5 tabular-nums text-kp-subtext">{container.cpuMillicores} m</td><td className="px-2.5 py-1.5 tabular-nums text-kp-subtext">{Math.round(container.memoryBytes / (1024 * 1024))} MiB</td></tr>)}</tbody>
-        </table>
-      </div>
-    </div>
-  )
+  return <Link className="text-sm text-kp-mauve hover:underline" onClick={workspace.reset} to={`/logs?${query.toString()}`}>Open Pod logs</Link>
 }
 
 function PodContainers({ detail }: { detail: PodDetail }) {
@@ -684,7 +645,7 @@ function overviewFacts(entry: WorkspaceEntry, detail: WorkspaceDetail): Array<{ 
 
 function secretNotice(label: string): string | null {
   if (label === 'Secret') {
-    return 'Secret values, annotations, managed fields and YAML are intentionally unavailable.'
+    return 'Open Data to reveal authorized Secret values.'
   }
   return null
 }
@@ -710,7 +671,7 @@ export function ResourceWorkspaceOverlay() {
   const yaml = useMutation({
     mutationFn: () => fetchYAML(entry as WorkspaceEntry, new AbortController().signal),
   })
-  const entryKey = entry ? `${entry.collection}|${entry.kind ?? ''}|${entry.namespace ?? ''}|${entry.name}` : ''
+  const entryKey = entry ? `${generation ?? ''}|${entry.collection}|${entry.kind ?? ''}|${entry.namespace ?? ''}|${entry.name}` : ''
   useEffect(() => { yaml.reset() }, [entryKey]) // eslint-disable-line react-hooks/exhaustive-deps -- reset cached YAML when the target changes
 
   if (!workspace.open || !entry) return null
@@ -741,6 +702,7 @@ export function ResourceWorkspaceOverlay() {
       if (investigation.isError) return <p className="text-sm text-kp-red" role="alert">{errorMessage(investigation.error)}</p>
       if (investigation.data) return <InvestigationView value={investigation.data} onOpen={openRef} />
     }
+    if (tab === 'data' && activeEntry.collection === 'secrets' && generation && activeEntry.namespace) return <SecretData key={entryKey} namespace={activeEntry.namespace} name={activeEntry.name} generation={generation} />
     if (tab === 'overview') {
       if (detail.isPending || detail.isError || !detail.data) return detailFallback()
       const data = detail.data
@@ -759,7 +721,13 @@ export function ResourceWorkspaceOverlay() {
             {data.type === 'other' ? <p className="m-0 text-xs text-kp-overlay-text" role="note">{secretNotice(data.label) ?? ''}</p> : null}
           </div>
           <div className="grid content-start gap-2 min-w-0">
-            <h3 className="m-0 text-sm text-kp-text">Related resources</h3>
+            {(data.type === 'pod' || data.type === 'workload') ? <>
+              <h3 className="m-0 text-sm text-kp-text">Secrets</h3>
+              <RelatedRefList refs={(data.type === 'pod' ? data.data.summary.secrets ?? [] : data.data.secrets ?? []).map((name) => ({ kind: 'Secret', name, namespace: activeEntry.namespace ?? undefined }))} onOpen={openRef} emptyNote="No Secret references declared." />
+              <h3 className="m-0 mt-2 text-sm text-kp-text">ConfigMaps</h3>
+              <RelatedRefList refs={(data.type === 'pod' ? data.data.summary.configMaps ?? [] : data.data.configMaps ?? []).map((name) => ({ kind: 'ConfigMap', name, namespace: activeEntry.namespace ?? undefined }))} onOpen={openRef} emptyNote="No ConfigMap references declared." />
+            </> : null}
+            <h3 className="m-0 mt-2 text-sm text-kp-text">Related resources</h3>
             {data.type === 'workload' ? <RelatedRefList refs={related} onOpen={openRef} emptyNote="No related objects are visible in the current scope." /> : null}
             {data.type === 'pod' ? <RelatedRefList refs={owner} onOpen={openRef} emptyNote="This Pod has no controller owner." /> : null}
             {data.type === 'pod' && podRefs.length > 0 ? (
@@ -774,6 +742,7 @@ export function ResourceWorkspaceOverlay() {
       )
     }
       if (tab === 'yaml') {
+        if (activeEntry.collection === 'workloads' && activeEntry.kind === 'Deployment' && selection && activeEntry.namespace) return <Suspense fallback={<p role="status">Opening YAML editor…</p>}><DeploymentYamlEditor key={entryKey} namespace={activeEntry.namespace} name={activeEntry.name} selection={selection} /></Suspense>
         return (
           <Suspense fallback={<p role="status" className="text-sm text-kp-overlay-text">Opening YAML viewer…</p>}>
             <YamlViewer
@@ -789,10 +758,12 @@ export function ResourceWorkspaceOverlay() {
     if (tab === 'events') return <WorkspaceEvents entry={activeEntry} generation={generation} />
       if (tab === 'logs') {
         if (detail.data?.type === 'pod') return <PodLogsLink detail={detail.data.data} />
+        if (detail.data?.type === 'workload') return <Link className="text-sm text-kp-mauve hover:underline" onClick={workspace.reset} to={`/logs?${new URLSearchParams({ workload: `${detail.data.data.kind}/${detail.data.data.metadata.namespace}/${detail.data.data.metadata.name}` })}`}>Open workload logs</Link>
         return detailFallback()
       }
       if (tab === 'metrics') {
         if (detail.data?.type === 'pod') return <PodMetrics detail={detail.data.data} generation={generation} />
+        if (detail.data?.type === 'workload') return <WorkloadMetrics detail={detail.data.data} generation={generation} />
         return detailFallback()
       }
       if (tab === 'containers') {
@@ -829,9 +800,11 @@ export function ResourceWorkspaceOverlay() {
       return detailFallback()
     }
     if (tab === 'data') {
+      if (detail.data?.type === 'pod') return <WorkloadEnvironment containers={[...detail.data.data.containers, ...detail.data.data.initContainers, ...detail.data.data.ephemeralContainers].map((container) => container.spec)} namespace={activeEntry.namespace!} onOpen={openRef} />
+      if (detail.data?.type === 'workload') return <WorkloadEnvironment containers={detail.data.data.containers} namespace={activeEntry.namespace!} onOpen={openRef} />
       if (detail.data?.type === 'other') {
-        const data = detail.data.data as { entries?: Array<{ key: string; encoding: string; value: string; truncated: boolean }> }
-        return <ConfigMapData entries={data.entries ?? []} />
+        const data = detail.data.data as { entries?: Array<{ key: string; encoding: 'utf-8' | 'base64'; value: string; truncated: boolean }> }
+        return <DataEntries entries={data.entries ?? []} />
       }
       return detailFallback()
     }

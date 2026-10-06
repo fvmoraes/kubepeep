@@ -152,7 +152,8 @@ export const navGroups: NavGroup[] = [
       { id: 'crds', label: 'CustomResourceDefinitions', path: '/administration/customresourcedefinitions', icon: FileCog, tip: 'CRDs' },
       { id: 'priority-classes', label: 'PriorityClasses', path: '/administration/priority-classes', icon: Layers, tip: 'Priority Classes' },
       { id: 'runtime-classes', label: 'RuntimeClasses', path: '/administration/runtime-classes', icon: Container, tip: 'Runtime Classes' },
-      { id: 'admission-webhooks', label: 'Admission Webhooks', path: '/administration/mutating-webhook-configurations', icon: FileCog, tip: 'Admission Webhooks' },
+      { id: 'admission-webhooks', label: 'Mutating Webhooks', path: '/administration/mutating-webhook-configurations', icon: FileCog, tip: 'Mutating Webhooks' },
+      { id: 'validating-webhooks', label: 'Validating Webhooks', path: '/administration/validating-webhook-configurations', icon: FileCog, tip: 'Validating Webhooks' },
     ],
   },
 ]
@@ -165,4 +166,13 @@ export const settingsNavItem: NavItem = {
   icon: Settings,
   tip: 'Settings',
   keywords: ['preferences'],
+}
+
+export function activeNavItem(pathname: string): NavItem | undefined {
+  const defaultRoutes: Record<string, string> = { '/network': '/network/services', '/config': '/config/configmaps', '/storage': '/storage/persistent-volumes', '/configuration': '/configuration/resource-quotas', '/administration': '/administration/customresourcedefinitions' }
+  const workloadDetail = pathname.match(/^\/workloads\/(deployments|statefulsets|daemonsets|replicasets|jobs|cronjobs)\//)
+  const path = workloadDetail ? `/workloads/kind/${workloadDetail[1]}` : defaultRoutes[pathname] ?? pathname
+  return [...navGroups.flatMap((group) => group.items), settingsNavItem]
+    .filter((item) => item.path && (path === item.path || (item.path !== '/' && path.startsWith(`${item.path}/`))))
+    .sort((left, right) => right.path!.length - left.path!.length)[0]
 }

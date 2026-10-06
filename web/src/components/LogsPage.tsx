@@ -1,3 +1,6 @@
+import { appendLogBatch } from './resource/boundedLogLines'
+import { workloadKindPath } from '../navigation/paths'
+import { ResourceTabStrip } from './resource/ResourceTabStrip'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router'
@@ -27,17 +30,7 @@ function logURL(namespace: string, pod: string, container: string, timestamps: b
   return `/api/v1/pods/${encodeURIComponent(namespace)}/${encodeURIComponent(pod)}/logs/stream?${query.toString()}`
 }
 
-function appendBounded<T extends LogLine>(lines: T[], line: T): T[] {
-  const encoder = new TextEncoder()
-  const next = [...lines, line]
-  let bytes = next.reduce((total, value) => total + encoder.encode(JSON.stringify(value)).byteLength, 0)
-  while (next.length > 1_000 || bytes > 1 << 20) {
-    const removed = next.shift()
-    if (!removed) break
-    bytes -= encoder.encode(JSON.stringify(removed)).byteLength
-  }
-  return next
-}
+function appendBounded<T extends LogLine>(lines: T[], line: T): T[] { return appendLogBatch(lines, [line]) }
 
 function parseSSEBlock(block: string): { event: string; data: string } | null {
   let event = 'message'
@@ -235,12 +228,14 @@ export function LogsPage() {
           <h1 className="text-2xl text-kp-text">Logs</h1>
           <p className="mt-0.5 text-sm text-kp-overlay-text">Current, previous and bounded follow logs. Content stays in memory and is never persisted by the UI.</p>
 		</div>
-		<div className="flex gap-2" role="tablist" aria-label="Log target type"><Button size="sm" variant={mode === 'pod' ? 'primary' : 'secondary'} aria-selected={mode === 'pod'} onClick={() => setMode('pod')}>Pod</Button><Button size="sm" variant={mode === 'workload' ? 'primary' : 'secondary'} aria-selected={mode === 'workload'} onClick={() => setMode('workload')}>Workload aggregate</Button></div>
+		<ResourceTabStrip ariaLabel="Log target type" panelId="log-target-panel" tabs={[{ id: 'pod', label: 'Pod' }, { id: 'workload', label: 'Workload aggregate' }]} active={mode} onChange={(value) => setMode(value as 'pod' | 'workload')} />
       </header>
+      <div id="log-target-panel" role="tabpanel" aria-label={mode === 'pod' ? 'Pod' : 'Workload aggregate'}>
       {status.isPending ? <StatePanel kind="loading" title="Loading active selection">The local service is resolving the current generation.</StatePanel>
         : status.isError ? <StatePanel kind="error" title="Selection unavailable">{message(status.error)}</StatePanel>
           : !selection ? <StatePanel kind="empty" title="Choose a Kubernetes context">Select a context and namespace scope before reading logs.</StatePanel>
 			: <PanelErrorBoundary key={`${selection.generation}-${mode}`} name="Logs">{mode === 'pod' ? <LogsWorkspace selection={selection} params={params} defaults={preferences.data?.logs ?? defaultLogPreferences} preferencesUnavailable={preferences.isError} /> : <WorkloadLogsWorkspace selection={selection} params={params} defaults={preferences.data?.logs ?? defaultLogPreferences} />}</PanelErrorBoundary>}
+      </div>
     </div>
   )
 }
@@ -314,14 +309,14 @@ function WorkloadLogsWorkspace({ selection, params, defaults }: { selection: Sel
 	const workloads = useQuery({ queryKey: ['resources', 'workload-log-catalog', selection.generation], queryFn: ({ signal }) => loadWorkloadCatalog(selection, signal) })
 	const podCatalog = useQuery({ queryKey: ['resources', 'log-target-catalog', selection.generation], queryFn: ({ signal }) => loadLogCatalog(selection, signal) })
 	const selectedWorkload = workloads.data?.values.find((value) => `${value.kind}\0${value.namespace}\0${value.name}` === workloadKey)
-	const detail = useQuery({ queryKey: ['resources', 'workload-log-detail', selection.generation, workloadKey], queryFn: ({ signal }) => getWorkload(selectedWorkload!.kind, selectedWorkload!.namespace, selectedWorkload!.name, signal, selection.generation), enabled: Boolean(selectedWorkload) })
+	const detail = useQuery({ queryKey: ['resources', 'workload-log-detail', selection.generation, workloadKey], queryFn: ({ signal }) => getWorkload(workloadKindPath(selectedWorkload!.kind)!, selectedWorkload!.namespace, selectedWorkload!.name, signal, selection.generation), enabled: Boolean(selectedWorkload) })
 	const relatedPods = (detail.data?.related ?? []).filter((value) => value.kind === 'Pod' && value.namespace === selectedWorkload?.namespace).map((value) => value.name).filter((name) => podCatalog.data?.pods.some((pod) => pod.namespace === selectedWorkload?.namespace && pod.name === name)).sort()
 	const activePods = (selectedPods ?? relatedPods.slice(0, MaximumAggregateStreams)).filter((name) => relatedPods.includes(name))
 	const podDetails = useQuery({ queryKey: ['resources', 'aggregate-pod-details', selection.generation, selectedWorkload?.namespace, activePods], queryFn: ({ signal }) => Promise.all(activePods.map((name) => getPod(selectedWorkload!.namespace, name, signal, selection.generation))), enabled: Boolean(selectedWorkload && activePods.length > 0) })
 	const containers = [...new Set((podDetails.data ?? []).flatMap((value) => [...value.containers, ...value.initContainers, ...value.ephemeralContainers].map((container) => container.spec.name)))].sort()
-	const activeContainers = (selectedContainers ?? containers.slice(0, 1)).filter((value) => containers.includes(value))
+	const activeContainers = (selectedContainers ?? containers).filter((value) => containers.includes(value))
 
-	function flush() { if (timerRef.current) clearTimeout(timerRef.current); timerRef.current=null; const batch=pendingRef.current;pendingRef.current=[];if(batch.length>0)setLines((current)=>batch.reduce((result,line)=>appendBounded(result,line),current)) }
+	function flush() { if (timerRef.current) clearTimeout(timerRef.current); timerRef.current=null; const batch=pendingRef.current;pendingRef.current=[];if(batch.length>0)setLines((current)=>appendLogBatch(current, batch)) }
 	function stop(reason='Aggregate follow stopped.') {controllerRef.current?.abort();controllerRef.current=null;flush();setState({status:'ended',message:reason})}
 	useEffect(() => () => {controllerRef.current?.abort();controllerRef.current=null;if(timerRef.current)clearTimeout(timerRef.current);pendingRef.current=[]}, [])
 	const compatibleTargets = activePods.flatMap((pod) => {
@@ -343,7 +338,7 @@ function WorkloadLogsWorkspace({ selection, params, defaults }: { selection: Sel
 			if (controller.signal.aborted || controllerRef.current !== controller) return
 			const next = responses.flatMap(({ target, response }) => response.lines.map((line) => ({ ...line, pod: target.pod, container: target.container })))
 			next.sort((left, right) => (left.timestamp ?? '').localeCompare(right.timestamp ?? ''))
-			setLines(next.reduce((result, line) => appendBounded(result, line), [] as AggregatedLogLine[]))
+			setLines(appendLogBatch([], next))
 			setState({ status: 'ended', message: `Read ${targets.length} bounded stream${targets.length === 1 ? '' : 's'}.` })
 		} catch (error) {
 			if (!controller.signal.aborted && controllerRef.current === controller) {
@@ -365,7 +360,7 @@ function WorkloadLogsWorkspace({ selection, params, defaults }: { selection: Sel
 			const session = await getSession(controller.signal)
 			if (controller.signal.aborted || controllerRef.current !== controller) return
 			if (session.generation !== selection.generation) throw new APIError(409, { code: 'GENERATION_CHANGED', message: 'The active selection changed.' })
-			setState({ status: 'following', message: `Following ${targets.length} stream${targets.length === 1 ? '' : 's'} with 75 ms batching.` })
+			setState({ status: 'following', message: `Following ${targets.length} stream${targets.length === 1 ? '' : 's'} in real time.` })
 			await Promise.all(targets.map((target) => consumeAggregateStream(target, selection, session, { timestamps, tailLines, since }, controller.signal, (line) => {
 				if (controller.signal.aborted || controllerRef.current !== controller) return
 				pendingRef.current = appendBounded(pendingRef.current, line)
@@ -485,11 +480,11 @@ function LogsWorkspace({ selection, params, defaults, preferencesUnavailable }: 
     if (batch.length === 0) return
     pendingFollowLinesRef.current = []
     if (pausedRef.current) {
-      const next = batch.reduce((buffer, line) => appendBounded(buffer, line), followBufferRef.current)
+      const next = appendLogBatch(followBufferRef.current, batch)
       followBufferRef.current = next
       setFollowBuffer(next)
     } else {
-      setFollowLines((lines) => batch.reduce((current, line) => appendBounded(current, line), lines))
+      setFollowLines((lines) => appendLogBatch(lines, batch))
     }
   }
 
@@ -497,7 +492,7 @@ function LogsWorkspace({ selection, params, defaults, preferencesUnavailable }: 
     flushPendingLines()
     const buffer = followBufferRef.current
     if (buffer.length === 0) return
-    setFollowLines((lines) => buffer.reduce((acc, line) => appendBounded(acc, line), lines))
+    setFollowLines((lines) => appendLogBatch(lines, buffer))
     followBufferRef.current = []
     setFollowBuffer([])
   }

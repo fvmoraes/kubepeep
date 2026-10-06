@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { StoragePage } from './FamilyPages'
 import { ConfigPage, EventsPage, NetworkPage, PodsPage, WorkloadsPage } from './ResourcePages'
+import { ResourceFamilyNav } from './resource/ResourceFamilyNav'
 import { prefetchDefaultPodPreview } from './resource/podPreview'
 import type { SelectionSummary } from '../api/types'
 import { ToastProvider } from './ui/Toast'
@@ -53,6 +54,7 @@ function renderPage(component: React.ReactNode, initialEntries: string[] = ['/']
           <ResourceWorkspaceProvider>
             <GlobalNamespaceProvider generation={selection.selection.generation} scopeId={selection.selection.scopeId} scopeMode={selection.selection.scopeMode}>
               <NamespaceTestControl />
+              <ResourceFamilyNav />
               {component}
               <ResourceWorkspaceOverlay />
             </GlobalNamespaceProvider>
@@ -78,10 +80,10 @@ describe('read-only resource pages', () => {
 
   it('publishes the complete workspace tab catalog for each actionable kind', () => {
     const labels = (collection: string, kind: string | null = null) => tabsFor({ collection, kind, namespace: 'payments', name: 'api', tab: 'overview' }).map((tab) => tab.label)
-    expect(labels('pods', 'Pod')).toEqual(['Overview', 'Investigation', 'Logs', 'YAML', 'Events', 'Metrics', 'Containers', 'Actions'])
-    expect(labels('workloads', 'Deployment')).toEqual(['Overview', 'Investigation', 'Pods', 'ReplicaSets', 'YAML', 'Events', 'Rollout', 'Actions'])
-    expect(labels('workloads', 'StatefulSet')).toEqual(['Overview', 'Investigation', 'Pods', 'PVCs', 'YAML', 'Events', 'Actions'])
-    expect(labels('workloads', 'CronJob')).toEqual(['Overview', 'Investigation', 'Jobs', 'YAML', 'Events', 'Actions'])
+    expect(labels('pods', 'Pod')).toEqual(['Overview', 'Investigation', 'Logs', 'YAML', 'Events', 'Metrics', 'Containers', 'Data / Env', 'Actions'])
+    expect(labels('workloads', 'Deployment')).toEqual(['Overview', 'Investigation', 'Logs', 'Metrics', 'Data / Env', 'Pods', 'ReplicaSets', 'YAML', 'Events', 'Rollout', 'Actions'])
+    expect(labels('workloads', 'StatefulSet')).toEqual(['Overview', 'Investigation', 'Logs', 'Metrics', 'Data / Env', 'Pods', 'PVCs', 'YAML', 'Events', 'Actions'])
+    expect(labels('workloads', 'CronJob')).toEqual(['Overview', 'Investigation', 'Logs', 'Metrics', 'Data / Env', 'Jobs', 'YAML', 'Events', 'Actions'])
     expect(labels('services', 'Service')).toEqual(['Overview', 'Endpoints', 'YAML', 'Events', 'Actions'])
     expect(labels('ingresses', 'Ingress')).toEqual(['Overview', 'Rules', 'Backends', 'YAML', 'Events', 'Actions'])
   })
@@ -605,12 +607,12 @@ describe('read-only resource pages', () => {
       throw new Error(`Unexpected request: ${path}`)
     }))
 
-    renderPage(<ConfigPage />)
+    renderPage(<Routes><Route path="/config/:tab" element={<ConfigPage />} /></Routes>, ['/config/configmaps'])
     expect(sortOptionValues()).toEqual(['identity', 'name', 'createdAt'])
-    fireEvent.click(screen.getByRole('tab', { name: 'secrets' }))
+    fireEvent.click(screen.getByRole('link', { name: 'Secrets' }))
     fireEvent.click(await screen.findByRole('button', { name: 'Open Secret registry in payments' }))
 
-    expect(await screen.findByText(/Secret values, annotations, managed fields and YAML are intentionally unavailable/)).toBeInTheDocument()
+    expect(await screen.findByText(/Open Data to reveal/)).toBeInTheDocument()
     expect(screen.getAllByText('uid-secret').length).toBeGreaterThanOrEqual(1)
     expect(screen.queryByText(/super-secret|annotation-secret|raw-token/)).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Load authorized YAML' })).not.toBeInTheDocument()
@@ -630,7 +632,7 @@ describe('read-only resource pages', () => {
 
     renderPage(<><Routes><Route path="/network/:tab" element={<NetworkPage />} /></Routes><LocationProbe /></>, ['/network/services'])
     await waitFor(() => expect(paths.some((path) => path.startsWith('/api/v1/services?'))).toBe(true))
-    fireEvent.click(screen.getByRole('tab', { name: 'ingresses' }))
+    fireEvent.click(screen.getByRole('link', { name: 'Ingresses' }))
     expect(await screen.findByLabelText('Current route')).toHaveTextContent('/network/ingresses')
     await waitFor(() => expect(paths.some((path) => path.startsWith('/api/v1/ingresses?'))).toBe(true))
   })
@@ -648,7 +650,7 @@ describe('read-only resource pages', () => {
 
     renderPage(<><Routes><Route path="/config/:tab" element={<ConfigPage />} /></Routes><LocationProbe /></>, ['/config/configmaps'])
     await waitFor(() => expect(paths.some((path) => path.startsWith('/api/v1/configmaps?'))).toBe(true))
-    fireEvent.click(screen.getByRole('tab', { name: 'secrets' }))
+    fireEvent.click(screen.getByRole('link', { name: 'Secrets' }))
     expect(await screen.findByLabelText('Current route')).toHaveTextContent('/config/secrets')
     await waitFor(() => expect(paths.some((path) => path.startsWith('/api/v1/secrets?'))).toBe(true))
   })
@@ -663,7 +665,7 @@ describe('read-only resource pages', () => {
       throw new Error(`Unexpected request: ${path}`)
     }))
 
-    renderPage(<NetworkPage />)
+    renderPage(<Routes><Route path="/network/:tab" element={<NetworkPage />} /></Routes>, ['/network/services'])
     await screen.findByLabelText('Search this bounded page')
     expect(sortOptionValues()).toEqual(['identity', 'name', 'type'])
     await waitFor(() => expect(paths.filter((path) => path.startsWith('/api/v1/services?'))).toHaveLength(1))
@@ -672,7 +674,7 @@ describe('read-only resource pages', () => {
     fireEvent.change(screen.getByLabelText('Sort this bounded page'), { target: { value: 'type' } })
     expect(paths.filter((path) => path.startsWith('/api/v1/services?'))).toHaveLength(initialServiceRequests)
 
-    fireEvent.click(screen.getByRole('tab', { name: 'ingresses' }))
+    fireEvent.click(screen.getByRole('link', { name: 'Ingresses' }))
     expect(sortOptionValues()).toEqual(['identity', 'name'])
     expect(screen.getByLabelText('Search this bounded page')).toHaveValue('')
     expect(screen.getByLabelText('Sort this bounded page')).toHaveValue('identity')
@@ -685,7 +687,7 @@ describe('read-only resource pages', () => {
       return query.get('search') === 'public' && query.get('sort') === 'name' && query.get('order') === 'asc'
     })).toBe(true))
 
-    fireEvent.click(screen.getByRole('tab', { name: 'services' }))
+    fireEvent.click(screen.getByRole('link', { name: 'Services' }))
     expect(screen.getByLabelText('Search this bounded page')).toHaveValue('edge')
     expect(screen.getByLabelText('Sort this bounded page')).toHaveValue('type')
     expect(screen.getByRole('status')).toHaveTextContent('Filter changes pending')
@@ -696,7 +698,7 @@ describe('read-only resource pages', () => {
       return query.get('search') === 'edge' && query.get('sort') === 'type' && query.get('order') === 'asc'
     })).toBe(true))
 
-    fireEvent.click(screen.getByRole('tab', { name: 'endpoint-slices' }))
+    fireEvent.click(screen.getByRole('link', { name: 'EndpointSlices' }))
     expect(sortOptionValues()).toEqual(['identity', 'name', 'addressType'])
     await waitFor(() => expect(paths.some((path) => path === '/api/v1/endpoint-slices?limit=100')).toBe(true))
   })
@@ -735,8 +737,8 @@ describe('read-only resource pages', () => {
       throw new Error(`Unexpected request: ${path}`)
     }))
 
-    renderPage(<NetworkPage />)
-    fireEvent.click(screen.getByRole('tab', { name: 'port-forwards' }))
+    renderPage(<Routes><Route path="/network/:tab" element={<NetworkPage />} /></Routes>, ['/network/services'])
+    fireEvent.click(screen.getByRole('link', { name: 'Port Forwarding' }))
 
     expect(await screen.findByText('127.0.0.1:49152')).toBeInTheDocument()
     expect(screen.getByText('development · payments/api-abc → 8080')).toBeInTheDocument()

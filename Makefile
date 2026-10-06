@@ -3,11 +3,12 @@ SHELL := /bin/sh
 APP := kubePeep
 GO ?= go
 NPM ?= npm
+PYTHON ?= python3
 GINGER ?= $(shell $(GO) env GOPATH)/bin/ginger
 WEB_DIR := web
 DIST_DIR := dist
 BINARY := $(DIST_DIR)/$(APP)
-GO_FILES := $(shell find cmd internal test/kind/benchmark test/kind/protocol -type f -name '*.go' 2>/dev/null)
+GO_FILES := $(shell find main.go cmd internal test/kind/benchmark test/kind/protocol -type f -name '*.go' 2>/dev/null)
 GO_PACKAGES := $(shell $(GO) list ./... 2>/dev/null | grep -v '/web/node_modules/')
 VERSION ?= 0.7.0-dev
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
@@ -26,7 +27,7 @@ LDFLAGS := -s -w \
 .PHONY: format format-check lint typecheck test-unit test-integration test-race \
 	test-e2e test web-install web-build build smoke cross-build verify-ginger \
 	verify clean benchmark benchmark-matrix benchmark-protocol benchmark-dataset dev-desktop build-desktop build-desktop-linux \
-	build-desktop-windows build-desktop-darwin release-artifact-check test-release-artifacts test-release-gates
+	build-desktop-windows build-desktop-darwin release-artifact-check test-release-artifacts test-release-gates docs-check test-install
 
 WAILS ?= $(shell $(GO) env GOPATH)/bin/wails
 # WebKitGTK: prefer 4.0 (upstream default); fall back to 4.1 via Wails'
@@ -55,6 +56,13 @@ lint:
 
 typecheck:
 	cd $(WEB_DIR) && $(NPM) run typecheck
+
+docs-check:
+	$(PYTHON) scripts/check_docs.py
+
+test-install: web-build
+	sh -n install.sh test/install/unix.sh
+	./test/install/unix.sh
 
 test-unit: web-build
 	$(GO) test $(GO_PACKAGES)
@@ -100,14 +108,14 @@ smoke: build
 release-artifact-check:
 	@set -- "$(DIST_DIR)"; \
 	if [ -d "build/bin" ]; then set -- "$$@" "build/bin"; fi; \
-	./scripts/release_artifact_check.sh "$$@"
+	./scripts/release/check-artifacts.sh "$$@"
 
 test-release-artifacts:
-	./scripts/release_artifact_check_test.sh
+	./test/release/artifacts.sh
 
 test-release-gates: test-release-artifacts
-	./scripts/release_gate_harness.sh
-	./scripts/release_test.sh
+	./test/release/gates.sh
+	./test/release/version.sh
 
 cross-build: web-build
 	@set -eu; \
@@ -142,7 +150,7 @@ build-desktop-windows:
 build-desktop-darwin:
 	$(WAILS) build $(WAILS_BINDING_FLAGS) -tags "$(DESKTOP_TAGS)" -clean -ldflags "$(LDFLAGS)" -platform darwin/amd64 -o "$(DESKTOP_OUT)/darwin-amd64/kubePeep"
 
-verify: format-check lint typecheck test test-e2e build smoke verify-ginger test-release-gates
+verify: docs-check format-check lint typecheck test test-e2e build smoke verify-ginger test-install test-release-gates
 
 clean:
 	rm -f $(BINARY)

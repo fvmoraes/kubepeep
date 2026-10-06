@@ -922,3 +922,22 @@ export function closePortForward(id: string, expectedGeneration: string, csrfTok
 export function createExecTicket(namespace: string, name: string, body: ExecInit, csrfToken: string, signal?: AbortSignal): Promise<ExecTicket> {
   return mutation<ExecTicket>(`/api/v1/pods/${resourcePath(namespace)}/${resourcePath(name)}/exec`, 'POST', body, csrfToken, signal)
 }
+
+export function getSecretData(namespace: string, name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<ConfigMapDetail> {
+  return resourceRequest<ConfigMapDetail>(`/api/v1/secrets/${resourcePath(namespace)}/${resourcePath(name)}/data`, signal, expectedGeneration)
+}
+
+export interface DeploymentYAMLRequest {
+  confirmed: true
+  action: 'updateDeployment'
+  consequenceCode: 'UPDATE_DEPLOYMENT'
+  target: { clusterProfileId: number; context: string; namespace: string; kind: 'Deployment'; name: string }
+  expectedGeneration: string
+  expectedUid: string
+  expectedResourceVersion: string
+  yaml: string
+}
+
+export function saveDeploymentYAML(namespace: string, name: string, body: DeploymentYAMLRequest, csrfToken: string, signal?: AbortSignal): Promise<{ accepted: boolean; resourceVersion: string }> {
+  return mutation(`/api/v1/workloads/deployments/${resourcePath(namespace)}/${resourcePath(name)}/yaml`, 'PUT', body, csrfToken, signal)
+}

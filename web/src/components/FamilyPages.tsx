@@ -3,7 +3,7 @@ import { bindListInteraction, listInteractionFor } from '../observability/uxMetr
 import { useGenerationCursor, useGenerationCursorMap } from './resource/useListCursor'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, useNavigate, useParams } from 'react-router'
+import { Link, useParams } from 'react-router'
 
 import {
   getCSIDrivers,
@@ -32,7 +32,6 @@ import { ResourceLiveUpdates } from './ResourceLiveUpdates'
 import type { ActiveListFilter, ListSortOrder, ListSortOption } from './ResourceListControls'
 import { CollectionFooter, QueryState, SelectionGate } from './resource/states'
 import { ResourcePage } from './resource/ResourcePage'
-import { ResourceTabStrip } from './resource/ResourceTabStrip'
 import { applyColumnVisibility, ColumnVisibilityControl, usePreferenceColumnVisibility } from './resource/columns'
 import { TableLink } from './resource/TableLink'
 import { Facts } from './resource/Facts'
@@ -238,7 +237,6 @@ export function StoragePage() {
   const globalNamespace = useGlobalNamespace()
   const { status, selection } = useActiveSelection()
   const workspace = useResourceWorkspace()
-  const navigate = useNavigate()
   const { tab: tabParam, namespace, name } = useParams<{ tab?: string; namespace?: string; name?: string }>()
   const generation = selection?.generation
   const tab = useMemo(() => storageTabFromParams(tabParam ?? '') ?? 'persistent-volumes', [tabParam])
@@ -296,7 +294,6 @@ export function StoragePage() {
 		actions={selection && tab === 'persistent-volume-claims' ? <ResourceLiveUpdates key={`persistent-volume-claims/${generation}`} generation={generation!} topics={['persistent-volume-claims']} queryKeys={[['resources', 'persistent-volume-claims']]} /> : undefined}
 	>
       <ColumnVisibilityControl state={storageColumnState} columns={allColumns} />
-      <ResourceTabStrip ariaLabel="Storage resource type" panelId="storage-panel" active={tab} onChange={(value) => navigate(`/storage/${value}`)} tabs={storageTabs.map((id) => ({ id, label: id }))} />
       <FamilyList<StorageRow>
         caption={`Authorized ${tab} page`}
         rows={active?.items ?? []}

@@ -18,7 +18,7 @@ const (
 	ScopeNamespace CapabilityScope = "namespace"
 )
 
-// CapabilitySpec is one immutable entry from the docs/api.md MVP allowlist.
+// CapabilitySpec is one immutable entry from the docs/reference/api.md MVP allowlist.
 type CapabilitySpec struct {
 	ID                 string
 	APIGroup           string
@@ -43,6 +43,7 @@ var capabilityAllowlist = [...]CapabilitySpec{
 	{ID: "deployments.list", APIGroup: "apps", Resource: "deployments", Verb: "list", Scope: ScopeNamespace, ResourceNamePolicy: ResourceNameEmpty},
 	{ID: "deployments.get", APIGroup: "apps", Resource: "deployments", Verb: "get", Scope: ScopeNamespace, ResourceNamePolicy: ResourceNameTarget},
 	{ID: "deployments.watch", APIGroup: "apps", Resource: "deployments", Verb: "watch", Scope: ScopeNamespace, ResourceNamePolicy: ResourceNameEmpty},
+	{ID: "deployments.update", APIGroup: "apps", Resource: "deployments", Verb: "update", Scope: ScopeNamespace, ResourceNamePolicy: ResourceNameTarget},
 	{ID: "deployments.restart", APIGroup: "apps", Resource: "deployments", Verb: "patch", Scope: ScopeNamespace, ResourceNamePolicy: ResourceNameTarget},
 	{ID: "deployments.scale", APIGroup: "apps", Resource: "deployments", Subresource: "scale", Verb: "update", Scope: ScopeNamespace, ResourceNamePolicy: ResourceNameTarget},
 	{ID: "deployments.delete", APIGroup: "apps", Resource: "deployments", Verb: "delete", Scope: ScopeNamespace, ResourceNamePolicy: ResourceNameTarget},
@@ -147,7 +148,7 @@ var capabilityByID = func() map[string]CapabilitySpec {
 	return result
 }()
 
-// Allowlist returns a copy in the canonical docs/api.md order.
+// Allowlist returns a copy in the canonical docs/reference/api.md order.
 func Allowlist() []CapabilitySpec {
 	return append([]CapabilitySpec(nil), capabilityAllowlist[:]...)
 }

@@ -1,43 +1,47 @@
 # Documentação do KubePeep
 
-`docs/` descreve o produto e seus contratos. A execução concluída e o backlog
-estão no [plano v0.7](../plan/README.md), baseado nas
-[referências v0.7](../plan/v0.7_reference/).
+A documentação atual descreve o comportamento implementado e seus contratos.
+Relatos datados ficam no arquivo histórico; decisões arquiteturais têm ADRs
+próprios. Comece pelo [escopo do produto](reference/product-spec.md).
 
-## Usar e desenvolver
-
-| Documento | Conteúdo |
-| --- | --- |
-| [Produto](product-spec.md) | Base disponível, jornadas, estados e limites |
-| [Download e instalação](download.md) | Pacotes, versão explícita, verificação, atualização e remoção |
-| [Desenvolvimento](development.md) | Comandos, layout, validação, arquivos privados e regra de commit |
-| [Build desktop](desktop-build.md) | Wails e dependências por plataforma |
-
-## Contratos e arquitetura
+## Guias
 
 | Documento | Conteúdo |
 | --- | --- |
-| [Arquitetura](architecture.md) | Camadas, composição, geração, lifecycle e transportes |
-| [Desktop](desktop-architecture.md) | Bridge Wails e loopback para streams |
-| [Design system](design-system.md) | Tokens, componentes e resource framework |
-| [API](api.md) | Rotas, envelopes, filtros, paginação e streaming |
-| [Dados](data-model.md) | SQLite, schemas e persistência permitida |
-| [Segurança](security.md) | Loopback, CSRF, RBAC, redaction e conteúdo proibido |
-| [RBAC](rbac-requirements.md) | Capabilities e operações Kubernetes |
-| [Observabilidade](observability.md) | Logs operacionais, métricas e diagnóstico |
-| [Protocolo e tuning](protocol-tuning.md) | Benchmarks, decisões e rollback da Fase 6 |
-| [Candidato v0.7](release-v0.7-candidate.md) | Notas, gates, limitações e decisão de publicação |
+| [Download e instalação](download.md) | Pacotes, versão explícita, checksum, atualização e remoção |
+| [Desenvolvimento](guides/development.md) | Ambiente, comandos, layout e validação |
+| [Build desktop](guides/desktop-build.md) | Wails e dependências nativas por plataforma |
+| [Investigação e diagnóstico](guides/investigation-diagnostics.md) | Problemas, relações, logs e diagnósticos |
+| [Observabilidade](guides/observability.md) | Logs operacionais, métricas e instrumentação |
 
-## Decisões e histórico
+## Arquitetura
 
-- [ADRs](decisions/README.md): decisões arquiteturais numeradas, incluindo
-  o contexto em que foram tomadas e os documentos que as complementam.
-- [Pesquisa](research/README.md): fundamentos e métodos de reprodução;
-  benchmarks datados não são garantia de compatibilidade atual.
-- [Arquivo](archive/README.md): planejamento MVP e relatos sanitizados de
-  fases concluídas; não substituem os checklists e evidências da v0.7.
+| Documento | Conteúdo |
+| --- | --- |
+| [Visão geral](architecture/overview.md) | Camadas, composição, geração, lifecycle e transportes |
+| [Desktop](architecture/desktop.md) | Bridge Wails e loopback para streams |
+| [Modelo de dados](architecture/data-model.md) | SQLite, schemas e persistência permitida |
+| [Design system](architecture/design-system.md) | Tokens, navegação, componentes e resource framework |
+| [ADRs](decisions/README.md) | Decisões arquiteturais e contexto |
 
-Uma alteração de contrato atualiza o documento correspondente no mesmo commit.
-Novas funcionalidades só são descritas como disponíveis após implementação.
-Logs crus, screenshots, JSONs de diagnóstico e resultados de testes ficam
-fora do Git, conforme a [política de desenvolvimento](development.md#o-que-versionar).
+## Referência
+
+| Documento | Conteúdo |
+| --- | --- |
+| [Produto](reference/product-spec.md) | Recursos disponíveis, jornadas, estados e limites |
+| [API](reference/api.md) | Rotas, envelopes, filtros, paginação e streaming |
+| [Segurança](reference/security.md) | Loopback, CSRF, RBAC, redaction e dados sensíveis |
+| [RBAC](reference/rbac-requirements.md) | Capabilities e operações Kubernetes |
+| [Protocolo e tuning](reference/protocol-tuning.md) | Configuração, métodos de medição e rollback |
+
+## Pesquisa e histórico
+
+- [Pesquisa](research/README.md): fontes e métodos de reprodução; medições
+  datadas não garantem compatibilidade atual.
+- [Arquivo](archive/README.md): planejamento do MVP, relatos de fases e
+  evidências da v0.7. Os resultados valem para os commits informados.
+
+Uma alteração de contrato atualiza o documento correspondente. Novas
+funcionalidades só são descritas como disponíveis após implementação.
+`make docs-check` verifica caminhos e âncoras dos links locais. Resultados de
+testes, logs e capturas seguem a [política de versionamento](guides/development.md#o-que-versionar).

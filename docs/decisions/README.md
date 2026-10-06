@@ -1,8 +1,8 @@
 # Decisões arquiteturais
 
 Os ADRs registram decisões no contexto da sua adoção. A arquitetura atual é
-descrita em [architecture.md](../architecture.md); o suporte desktop posterior
-é detalhado em [desktop-architecture.md](../desktop-architecture.md).
+descrita em [architecture.md](../architecture/overview.md); o suporte desktop posterior
+é detalhado em [desktop-architecture.md](../architecture/desktop.md).
 
 | ADR | Decisão |
 | --- | --- |
