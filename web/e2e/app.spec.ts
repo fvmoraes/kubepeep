@@ -96,7 +96,7 @@ test('serves the application shell and preserves History API navigation', async 
 
   await page.keyboard.press('Control+k')
   await expect(page.getByRole('dialog', { name: 'Command center' })).toBeVisible()
-  await page.getByRole('combobox', { name: 'Search application pages' }).fill('Workloads')
+  await page.getByRole('combobox', { name: 'Search pages and resources' }).fill('Workloads')
   await page.keyboard.press('Enter')
   await expect(page).toHaveURL(/\/workloads$/)
   await expect(page.getByRole('heading', { name: 'Workloads' })).toBeVisible()
@@ -107,8 +107,8 @@ test('serves the application shell and preserves History API navigation', async 
   await expect(page.getByRole('dialog')).toHaveCount(0)
 
   await page.keyboard.press('Control+f')
-  await expect(page.getByLabel('Search this bounded page')).toBeFocused()
-  await page.getByRole('button', { name: 'Apply filters' }).focus()
+  await expect(page.getByLabel('Search resources')).toBeFocused()
+  await page.getByRole('heading', { name: 'Workloads' }).click()
   await page.evaluate(() => { (window as Window & { kubePeepShortcutDocument?: string }).kubePeepShortcutDocument = 'same-document' })
   await page.keyboard.press('Control+r')
   await expect.poll(() => page.evaluate(() => (window as Window & { kubePeepShortcutDocument?: string }).kubePeepShortcutDocument)).toBe('same-document')
@@ -197,7 +197,7 @@ test('keeps the dashboard useful with partial data and an explicit bounded log s
   await expect(page.getByText('sensitive value redacted')).toBeVisible()
 })
 
-test('filters Pods, persists allowlisted saved filters and builds the Logs catalog from exact capabilities', async ({ page }) => {
+test('searches Pods, sorts columns and builds the Logs catalog from exact capabilities', async ({ page }) => {
   const generation = 'gen_filters_e2e'
   const empty = { version: 1, items: [] as Array<{ id: string; name: string; query: Record<string, unknown> }> }
   let preferences = {
@@ -250,44 +250,16 @@ test('filters Pods, persists allowlisted saved filters and builds the Logs catal
   await page.goto('/pods')
   await expect(page.getByRole('heading', { name: 'Pods' })).toBeVisible()
   await expect.poll(() => podRequests.length).toBeGreaterThan(0)
-  const initialPodRequests = podRequests.length
-  await page.getByText('More filters', { exact: true }).click()
-  await page.getByLabel('Namespace', { exact: true }).fill('payments')
-  await page.getByLabel('Workload owner').fill('api')
-  await page.getByLabel('Node').fill('worker-1')
-  await page.getByLabel('Search this bounded page').fill('backend')
-  await page.getByLabel('Sort this bounded page').selectOption('restarts')
-  await page.getByLabel('Order').selectOption('desc')
-  await expect(page.getByText('Filter changes pending; apply filters to update the bounded result.', { exact: true })).toBeVisible()
-  expect(podRequests).toHaveLength(initialPodRequests)
-  await page.getByRole('button', { name: 'Apply filters' }).click()
-  await expect.poll(() => podRequests.some((value) => {
-    const query = new URL(value, 'http://127.0.0.1').searchParams
-    return query.get('namespace') === 'payments' && query.get('workload') === 'api' && query.get('node') === 'worker-1' && query.get('search') === 'backend' && query.get('sort') === 'restarts' && query.get('order') === 'desc'
-  })).toBe(true)
-  await expect(page.getByText('Restarts · descending')).toBeVisible()
-
-  const requestsBeforeClear = podRequests.length
-  await page.getByRole('button', { name: 'Clear filters' }).click()
-  await expect(page.getByText('None')).toBeVisible()
-  expect(podRequests.slice(requestsBeforeClear).every((value) => {
-    const query = new URL(value, 'http://127.0.0.1').searchParams
-    return !query.has('namespace') && !query.has('search') && !query.has('sort') && !query.has('order') && !query.has('continue')
-  })).toBe(true)
-
-  await page.getByRole('combobox', { name: 'Saved filter', exact: true }).selectOption('saved-worker')
-  await page.getByRole('button', { name: 'Apply saved filter' }).click()
-  await expect(page.getByLabel('Node')).toHaveValue('worker-9')
-  await expect(page.getByRole('combobox', { name: 'Status', exact: true })).toHaveValue('Failed')
-  await expect(page.getByLabel('Sort this bounded page')).toHaveValue('age')
-  await expect(page.getByLabel('Order')).toHaveValue('desc')
-  await page.getByLabel('Save current filter as').fill('Saved from browser')
-  await page.getByRole('button', { name: 'Save current filter' }).click()
-  await expect(page.getByText('Current bounded filter saved.')).toBeVisible()
-  const savedFromBrowser = preferences.filters.pods.items.find((value) => value.name === 'Saved from browser')
-  expect(savedFromBrowser).toBeDefined()
-  expect(savedFromBrowser?.query).not.toHaveProperty('limit')
-  expect(savedFromBrowser?.query).not.toHaveProperty('continue')
+  await expect(page.getByRole('button', { name: /Apply filters|Refresh/ })).toHaveCount(0)
+  await page.getByLabel('Search resources').fill('backend')
+  await expect.poll(() => podRequests.some((value) => new URL(value, 'http://127.0.0.1').searchParams.get('search') === 'backend')).toBe(true)
+  await page.getByRole('button', { name: 'Restarts', exact: true }).click()
+  await expect(page.getByRole('columnheader', { name: 'Restarts', exact: true })).toHaveAttribute('aria-sort', 'ascending')
+  await page.getByRole('button', { name: 'Restarts', exact: true }).click()
+  await expect(page.getByRole('columnheader', { name: 'Restarts', exact: true })).toHaveAttribute('aria-sort', 'descending')
+  await page.getByLabel('Search resources').fill('')
+  await expect(page.getByLabel('Search resources')).toHaveValue('')
+  await expect(page.getByRole('button', { name: 'Open Pod api-abc in payments' })).toBeVisible()
 
   await expandSidebarGroups(page)
   await page.getByRole('link', { name: 'Logs', exact: true }).click()

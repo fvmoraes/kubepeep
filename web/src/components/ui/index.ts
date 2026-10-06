@@ -1,6 +1,6 @@
 export { Badge, StatusBadge, type BadgeProps, type BadgeVariant } from './Badge'
 export { Banner, ErrorBanner, WarningBanner, InfoBanner, SuccessBanner, type BannerProps, type BannerVariant } from './Banner'
-export { Button, type ButtonProps, type ButtonVariant, type ButtonSize } from './Button'
+export { Button, type ButtonProps, type ButtonVariant } from './Button'
 export { Card, CardContent, CardHeader, CardTitle, type CardProps } from './Card'
 export { Checkbox, type CheckboxProps } from './Checkbox'
 export { DataTable, type DataTableColumn, type DataTableProps } from './DataTable'

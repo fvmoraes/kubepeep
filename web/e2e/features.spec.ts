@@ -113,12 +113,17 @@ test('global search navigates to resources already loaded in the session (F7-04)
   await page.waitForTimeout(300) // allow the bounded pod page cache to populate
 
   await page.keyboard.press('Control+k')
-  const input = page.getByRole('combobox', { name: 'Search application pages' })
+  const input = page.getByRole('combobox', { name: 'Search pages and resources' })
   await input.fill('api-abc')
   const option = page.getByRole('option', { name: /api-abc/ })
   await expect(option).toBeVisible()
   await option.click()
   await expect(page).toHaveURL(/\/pods\/payments\/api-abc$/)
+  await page.keyboard.press('Control+k')
+  await input.fill('api-abc')
+  await expect(option).toHaveCount(1)
+  await expect(page.getByRole('dialog', { name: 'Command center' })).not.toContainText('recent')
+  await expect(page.getByRole('button', { name: 'clear recent' })).toHaveCount(0)
 })
 
 test('favorite star persists through the allowlisted preferences PUT (F7-01)', async ({ page }) => {
@@ -128,7 +133,7 @@ test('favorite star persists through the allowlisted preferences PUT (F7-01)', a
 
   await page.getByRole('button', { name: /Open Pod api-abc in payments/i }).click()
   await expect(page).toHaveURL(/\/pods\/payments\/api-abc$/)
-  await expect(page.getByRole('dialog')).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Pod api-abc' })).toBeVisible()
   const star = page.getByRole('button', { name: 'Add api-abc to favorites' })
   await expect(star).toBeEnabled()
   await star.click()
@@ -138,7 +143,7 @@ test('favorite star persists through the allowlisted preferences PUT (F7-01)', a
   await expect(page.getByRole('button', { name: 'Remove api-abc from favorites' })).toBeVisible()
 
   await page.keyboard.press('Control+k')
-  const input = page.getByRole('combobox', { name: 'Search application pages' })
+  const input = page.getByRole('combobox', { name: 'Search pages and resources' })
   await input.fill('favorite')
   await expect(page.getByRole('option', { name: /deployment · payments|pod · payments/i }).first()).toBeVisible()
 })
@@ -150,7 +155,7 @@ test('yaml diff renders added and removed lines and the absent baseline state (F
 
   await page.getByRole('button', { name: /Open Pod api-abc in payments/i }).click()
   await expect(page).toHaveURL(/\/pods\/payments\/api-abc$/)
-  await expect(page.getByRole('dialog')).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Pod api-abc' })).toBeVisible()
   await page.getByRole('tab', { name: 'YAML' }).click()
   await page.getByRole('button', { name: 'Load authorized YAML' }).click()
   await expect(page.getByLabel('YAML document')).toBeVisible()
@@ -239,7 +244,7 @@ test('nodes lists and details without namespace scope and honors authorization (
 
   await page.getByRole('button', { name: /Open Node worker-1/i }).click()
   await expect(page).toHaveURL(/\/nodes\/worker-1$/)
-  await expect(page.getByRole('dialog')).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Node worker-1' })).toBeVisible()
   await expect(page.getByText('control-plane').first()).toBeVisible()
   await expect(page.getByText('Kubelet', { exact: true })).toBeVisible()
   await expect(page.getByText('1.32.0').first()).toBeVisible()
@@ -381,11 +386,11 @@ for (const transport of ['web', 'desktop-bridge'] as const) {
       await page.getByRole('link', { name: 'Pods', exact: true }).click()
     }
     await page.getByRole('button', { name: 'Open Pod api-abc in payments' }).click()
-    await expect(page.getByRole('dialog')).toContainText('uid-no-events')
+    await expect(page.getByRole('region', { name: 'Pod api-abc' })).toContainText('uid-no-events')
     await expect(page.getByRole('heading', { name: 'Pods', exact: true })).toBeVisible()
     if (transport === 'web') {
       await page.reload()
-      await expect(page.getByRole('dialog')).toContainText('uid-no-events')
+      await expect(page.getByRole('region', { name: 'Pod api-abc' })).toContainText('uid-no-events')
     }
     expect(errors).toEqual([])
   })

@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { useNavigate } from 'react-router'
+import { useLocation, useNavigate, type Location } from 'react-router'
 
 import { collectionListPath, resourceDetailPath, resourceKey } from '../../navigation/paths'
 
@@ -20,6 +20,8 @@ export interface WorkspaceRefInput {
 
 interface WorkspaceContextValue {
   open: boolean
+  /** Keep the source list mounted while the URL identifies the inspected object. */
+  backgroundLocation: Location | null
   active: WorkspaceEntry | null
   canBack: boolean
   canForward: boolean
@@ -44,16 +46,28 @@ function toEntry(ref: WorkspaceRefInput, tab: string): WorkspaceEntry {
 
 export function ResourceWorkspaceProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate()
+  const location = useLocation()
   const [entries, setEntries] = useState<WorkspaceEntry[]>([])
   const [index, setIndex] = useState(-1)
   const [open, setOpen] = useState(false)
+  const [navigationFrom, setNavigationFrom] = useState<string | null>(null)
+  const [origin, setOrigin] = useState<{ location: Location; returnTo: string } | null>(null)
 
   const active = index >= 0 && index < entries.length ? entries[index] : null
+  // A sidebar/browser navigation immediately hides the old detail. The next
+  // inspection starts a fresh history, even if its page loads asynchronously.
+  // Router navigation can commit after our state update. Keep the source
+  // mounted during that transition, so its deep-link effect cannot reopen
+  // the previous object. Unrelated navigation has a different location key.
+  const visible = open && Boolean(active && (resourceDetailPath(active) === location.pathname || navigationFrom === location.key))
 
   const navigateToEntry = useCallback((entry: WorkspaceEntry) => {
     const path = resourceDetailPath(entry)
-    if (path) navigate(path, { replace: true })
-  }, [navigate])
+    if (path) {
+      setNavigationFrom(location.key)
+      navigate(path, { replace: true })
+    }
+  }, [location.key, navigate])
 
   const commit = useCallback((nextEntries: WorkspaceEntry[], nextIndex: number) => {
     setEntries(nextEntries)
@@ -71,7 +85,16 @@ export function ResourceWorkspaceProvider({ children }: { children: ReactNode })
     })
   }, [index])
 
-  const openResource = useCallback((ref: WorkspaceRefInput, tab?: string) => {
+  const inspect = useCallback((ref: WorkspaceRefInput, tab?: string, fromRoute = false) => {
+    if (!resourceDetailPath(ref)) return
+    if (!visible) {
+      setOrigin({
+        location,
+        returnTo: fromRoute ? `${collectionListPath(ref) ?? '/'}${location.search}${location.hash}` : `${location.pathname}${location.search}${location.hash}`,
+      })
+      commit([toEntry(ref, tab ?? defaultWorkspaceTab)], 0)
+      return
+    }
     const key = resourceKey(ref)
     const existing = entries.findIndex((entry) => resourceKey(entry) === key)
     if (existing >= 0) {
@@ -82,22 +105,24 @@ export function ResourceWorkspaceProvider({ children }: { children: ReactNode })
     }
     const nextEntries = [...entries.slice(0, index + 1), toEntry(ref, tab ?? defaultWorkspaceTab)]
     commit(nextEntries, nextEntries.length - 1)
-  }, [commit, entries, index])
+  }, [commit, entries, index, location, visible])
+
+  const openResource = useCallback((ref: WorkspaceRefInput, tab?: string) => inspect(ref, tab), [inspect])
 
   const openFromRoute = useCallback((ref: WorkspaceRefInput, tab?: string) => {
-    if (active && resourceKey(active) === resourceKey(ref)) {
+    if (visible && active && resourceKey(active) === resourceKey(ref)) {
       if (tab && tab !== active.tab) setTab(tab)
       if (!open) setOpen(true)
       return
     }
-    openResource(ref, tab)
-  }, [active, open, openResource, setTab])
+    inspect(ref, tab, true)
+  }, [active, visible, open, inspect, setTab])
 
   const close = useCallback(() => {
+    setNavigationFrom(location.key)
     setOpen(false)
-    const target = active ? collectionListPath(active) : null
-    navigate(target ?? '/', { replace: false })
-  }, [active, navigate])
+    navigate(origin?.returnTo ?? (active ? collectionListPath(active) : null) ?? '/', { replace: true })
+  }, [active, location.key, navigate, origin])
 
   const back = useCallback(() => {
     if (index <= 0) return
@@ -116,14 +141,21 @@ export function ResourceWorkspaceProvider({ children }: { children: ReactNode })
   }, [entries, index, navigateToEntry])
 
   const reset = useCallback(() => {
+    if (visible && origin) {
+      setNavigationFrom(location.key)
+      navigate(origin.returnTo, { replace: true })
+    } else {
+      setNavigationFrom(null)
+      setOrigin(null)
+    }
     setEntries([])
     setIndex(-1)
     setOpen(false)
-  }, [])
+  }, [location.key, navigate, origin, visible])
 
   // Escape closes the workspace; back/forward work from the keyboard too.
   useEffect(() => {
-    if (!open) return
+    if (!visible) return
     function handleKeyDown(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null
       const typing = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)
@@ -142,13 +174,14 @@ export function ResourceWorkspaceProvider({ children }: { children: ReactNode })
     }
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [back, close, forward, open])
+  }, [back, close, forward, visible])
 
   const value = useMemo<WorkspaceContextValue>(() => ({
-    open,
-    active,
-    canBack: index > 0,
-    canForward: index < entries.length - 1,
+    open: visible,
+    backgroundLocation: visible || navigationFrom === location.key ? origin?.location ?? null : null,
+    active: visible ? active : null,
+    canBack: visible && index > 0,
+    canForward: visible && index < entries.length - 1,
     historySize: entries.length,
     openResource,
     openFromRoute,
@@ -157,7 +190,7 @@ export function ResourceWorkspaceProvider({ children }: { children: ReactNode })
     forward,
     setTab,
     reset,
-  }), [active, back, close, entries.length, forward, index, open, openFromRoute, openResource, reset, setTab])
+  }), [active, back, close, entries.length, forward, index, visible, origin, navigationFrom, location.key, openFromRoute, openResource, reset, setTab])
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>
 }

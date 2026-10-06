@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 
-test('returning to Pods keeps the fresh cache and manual HTTP revalidation preserves it', async ({ page }) => {
+test('returning to Pods keeps the fresh cache and automatic HTTP revalidation preserves it', async ({ page }) => {
   const generation = 'gen_phase02'
   const status = {
     version: 'test', commit: 'test', buildDate: 'test', port: 2748,
@@ -27,6 +27,7 @@ test('returning to Pods keeps the fresh cache and manual HTTP revalidation prese
     } }) })
   })
 
+  await page.clock.install()
   await page.goto('/pods')
   await expect(page.getByText('cached-api')).toBeVisible()
   const navigation = page.getByRole('navigation', { name: 'Primary navigation' })
@@ -39,7 +40,8 @@ test('returning to Pods keeps the fresh cache and manual HTTP revalidation prese
   try {
     await expect(page.getByText('cached-api')).toBeVisible({ timeout: 1_000 })
     expect(podRequests).toBe(1)
-    await page.getByRole('button', { name: 'Refresh now' }).click()
+    await expect(page.getByLabel('Resource live updates')).toBeVisible()
+    await page.clock.fastForward(15_000)
     await expect.poll(() => podRequests).toBe(2)
     await expect(page.getByText('cached-api')).toBeVisible({ timeout: 1_000 })
   } finally {

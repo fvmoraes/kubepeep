@@ -41,7 +41,7 @@ continua sujeito ao RBAC de cada recurso e namespace, conforme o
 | Configuration | ConfigMaps com Data, metadados de Secrets e revelação explícita de Data autorizada; referências de Secret/ConfigMap e env nos detalhes de workloads |
 | Operação | Events, logs atuais/anteriores/follow, leitura de YAML permitido e edição de Deployments, ações por kind, ações em massa compatíveis, exec e port-forward |
 | Investigação | Problems Engine, relações locais, logs agregados por workload, busca local e diagnósticos de performance/cluster/namespace |
-| Interface | Menus horizontal e lateral sincronizados, filtros comuns, tipografia ampliada, tabelas virtualizadas, workspace por recurso, paleta, favoritos/recentes e preferências allowlisted |
+| Interface | Menus horizontal e lateral sincronizados, busca textual simples, busca global sem recentes com atalhos por sistema operacional, controles por coluna, linhas de dados compactas, atualização automática, tabelas virtualizadas e detalhes/logs de Pod abaixo da lista, paleta, favoritos e preferências allowlisted |
 | Uso de recursos | Barras de CPU/memória com valor atual/configurado e percentual; alvo de HPA quando disponível, fallback de 80% e indisponibilidade explícita sem Metrics API |
 
 O código de referência é a árvore de navegação em

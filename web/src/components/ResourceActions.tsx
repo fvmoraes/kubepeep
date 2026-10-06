@@ -80,7 +80,7 @@ function CapabilityNotice({ label, value }: { label: string; value: CapabilityDe
         ? 'could not be verified; action disabled'
         : 'checking Kubernetes permission'
   const variant = value === 'allowed' ? 'healthy' : value === 'denied' ? 'danger' : value === 'unknown' ? 'warning' : 'unknown'
-  return <li className="flex items-center gap-1.5 text-xs"><strong className="text-kp-subtext">{label}:</strong> <Badge variant={variant}>{copy}</Badge></li>
+  return <li className="flex items-center gap-1.5 text-content"><strong className="text-kp-subtext">{label}:</strong> <Badge variant={variant}>{copy}</Badge></li>
 }
 
 function useGenerationRequests(generation: string) {
@@ -107,7 +107,6 @@ function CopyValueButton({ label, value }: { label: string; value: string }) {
   return (
     <Button
       variant="ghost"
-      size="sm"
       data-tip={`Copy ${label}`}
       onClick={async () => {
         try {
@@ -305,8 +304,8 @@ export function WorkloadActions({ detail, selection }: { detail: WorkloadDetail;
 
   return (
     <section className="grid gap-2.5 rounded-xl border border-kp-accent-border bg-kp-accent-bg/40 p-3" aria-label="Authorized workload actions">
-      <h3 className="m-0 text-sm text-kp-text">Authorized actions — {detail.kind}</h3>
-      <p className="m-0 text-xs leading-relaxed text-kp-overlay-text">These capability hints never replace the Kubernetes authorization check performed when the action runs. Destructive actions ask for confirmation first.</p>
+      <h3 className="m-0 text-heading text-kp-text">Authorized actions — {detail.kind}</h3>
+      <p className="m-0 text-content leading-relaxed text-kp-overlay-text">These capability hints never replace the Kubernetes authorization check performed when the action runs. Destructive actions ask for confirmation first.</p>
       <ul className="m-0 grid list-none gap-1 p-0" aria-label="Workload action permissions">
         {canRestart ? <CapabilityNotice label="Restart" value={restartDecision} /> : null}
         {canScale ? <CapabilityNotice label="Scale" value={scaleDecision} /> : null}
@@ -314,7 +313,7 @@ export function WorkloadActions({ detail, selection }: { detail: WorkloadDetail;
         {isCronJob ? <CapabilityNotice label="Suspend / Resume" value={suspendDecision} /> : null}
         {isCronJob ? <CapabilityNotice label="Run now" value={runNowDecision} /> : null}
       </ul>
-      {permissions.isError ? <p className="m-0 text-xs text-kp-red">Permission check failed; actions remain disabled.</p> : null}
+      {permissions.isError ? <p className="m-0 text-content text-kp-red">Permission check failed; actions remain disabled.</p> : null}
       <div className="flex flex-wrap items-center gap-2">
         {canRestart ? (
           <Button variant="warning" disabled={restartDecision !== 'allowed' || restart.isPending} onClick={() => setConfirmAction('restart')}>
@@ -323,10 +322,10 @@ export function WorkloadActions({ detail, selection }: { detail: WorkloadDetail;
         ) : null}
         {canScale ? (
           <span className="inline-flex items-center gap-1" aria-label="Replica count controls">
-            <Button variant="ghost" size="sm" aria-label="Decrease replicas" disabled={!canScale || scaleDecision !== 'allowed' || replicas <= 0} onClick={() => setReplicas((value) => Math.max(0, value - 1))}><Minus size={13} aria-hidden="true" /></Button>
+            <Button variant="ghost" aria-label="Decrease replicas" disabled={!canScale || scaleDecision !== 'allowed' || replicas <= 0} onClick={() => setReplicas((value) => Math.max(0, value - 1))}><Minus size={13} aria-hidden="true" /></Button>
             <Input aria-label="Replicas" aria-invalid={!replicasValid} type="number" min="0" max="10000" className="w-16 text-center" value={replicas} onChange={(event) => setReplicas(Number(event.target.value))} />
-            <Button variant="ghost" size="sm" aria-label="Increase replicas" disabled={!canScale || scaleDecision !== 'allowed' || replicas >= 10_000} onClick={() => setReplicas((value) => Math.min(10_000, value + 1))}><Plus size={13} aria-hidden="true" /></Button>
-            <Button variant="secondary" size="sm" disabled={scaleDecision !== 'allowed' || scale.isPending || !replicasValid || replicas === (detail.desired ?? -1)} onClick={() => scale.mutate()}>
+            <Button variant="ghost" aria-label="Increase replicas" disabled={!canScale || scaleDecision !== 'allowed' || replicas >= 10_000} onClick={() => setReplicas((value) => Math.min(10_000, value + 1))}><Plus size={13} aria-hidden="true" /></Button>
+            <Button variant="secondary" disabled={scaleDecision !== 'allowed' || scale.isPending || !replicasValid || replicas === (detail.desired ?? -1)} onClick={() => scale.mutate()}>
               {scale.isPending ? 'Scaling…' : 'Apply replicas'}
             </Button>
           </span>
@@ -353,16 +352,16 @@ export function WorkloadActions({ detail, selection }: { detail: WorkloadDetail;
         <CopyValueButton label="Copy name" value={detail.metadata.name} />
         <CopyValueButton label="Copy namespace" value={detail.metadata.namespace} />
       </div>
-      {canScale && !replicasValid ? <p className="m-0 text-xs text-kp-red">Replicas must be a whole number from 0 through 10,000.</p> : null}
-      {canScale && hpaState === 'present' ? <p className="m-0 rounded-r-md border-l-2 border-kp-yellow-border bg-kp-yellow-bg px-3 py-2 text-xs text-kp-yellow" role="note">HorizontalPodAutoscaler {hpaTarget?.name} targets this workload; manual scaling may be overridden by the autoscaler.</p> : null}
-      {canScale && hpaState === 'unknown' ? <p className="m-0 text-xs text-kp-overlay-text" role="note">Autoscaler presence for this workload is unknown; scaling may conflict with an HPA you cannot list.</p> : null}
+      {canScale && !replicasValid ? <p className="m-0 text-content text-kp-red">Replicas must be a whole number from 0 through 10,000.</p> : null}
+      {canScale && hpaState === 'present' ? <p className="m-0 rounded-r-md border-l-2 border-kp-yellow-border bg-kp-yellow-bg px-3 py-2 text-content text-kp-yellow" role="note">HorizontalPodAutoscaler {hpaTarget?.name} targets this workload; manual scaling may be overridden by the autoscaler.</p> : null}
+      {canScale && hpaState === 'unknown' ? <p className="m-0 text-content text-kp-overlay-text" role="note">Autoscaler presence for this workload is unknown; scaling may conflict with an HPA you cannot list.</p> : null}
       <ConfirmDialog
         open={confirmAction !== null}
         severity={confirmAction === 'restart' ? 'warning' : 'danger'}
         title={`${confirmAction === 'restart' ? 'Restart' : 'Delete'} ${detail.kind}`}
         description={confirmAction === 'restart'
-          ? <span>Kubernetes will update <strong className="mono">{detail.metadata.namespace}/{detail.metadata.name}</strong> and replace its managed Pods.</span>
-          : <span>The object <strong className="mono">{detail.metadata.namespace}/{detail.metadata.name}</strong> will be removed from the cluster.</span>}
+          ? <span>Kubernetes will update <strong>{detail.metadata.namespace}/{detail.metadata.name}</strong> and replace its managed Pods.</span>
+          : <span>The object <strong>{detail.metadata.namespace}/{detail.metadata.name}</strong> will be removed from the cluster.</span>}
         resources={[{ kind: detail.kind, namespace: detail.metadata.namespace, name: detail.metadata.name }]}
         consequenceNote={confirmAction === 'restart' ? 'Managed Pods are recreated according to the controller strategy; availability may change during rollout.' : 'Dependent objects managed by this controller (such as ReplicaSets, Pods and Jobs) are garbage-collected by Kubernetes after deletion. This action cannot be undone.'}
         confirmLabel={`${confirmAction === 'restart' ? 'Restart' : 'Delete'} ${detail.kind}`}
@@ -620,9 +619,9 @@ export function PodActions({ detail, selection }: { detail: PodDetail; selection
 
   return (
     <section className="grid gap-2.5 rounded-xl border border-kp-accent-border bg-kp-accent-bg/40 p-3" aria-label="Authorized pod actions">
-      <h3 className="m-0 text-sm text-kp-text">Authorized actions</h3>
-      <p className="m-0 text-xs leading-relaxed text-kp-overlay-text">Delete is destructive and asks for confirmation. Port-forward binds only to loopback. Exec argv is one item per line and is never joined through a shell.</p>
-      <p className="m-0 rounded-r-md border-l-2 border-kp-yellow-border bg-kp-yellow-bg px-2.5 py-1.5 text-xs text-kp-yellow" role="note">
+      <h3 className="m-0 text-heading text-kp-text">Authorized actions</h3>
+      <p className="m-0 text-content leading-relaxed text-kp-overlay-text">Delete is destructive and asks for confirmation. Port-forward binds only to loopback. Exec argv is one item per line and is never joined through a shell.</p>
+      <p className="m-0 rounded-r-md border-l-2 border-kp-yellow-border bg-kp-yellow-bg px-2.5 py-1.5 text-content text-kp-yellow" role="note">
         Restart Pod removes this Pod so its controller recreates it: {detail.summary.owner ? `${detail.summary.owner.kind}/${detail.summary.owner.name} is the owner.` : 'this Pod is standalone; it will NOT be recreated automatically.'}
       </p>
       <ul className="m-0 grid list-none gap-1 p-0" aria-label="Pod action permissions">
@@ -630,7 +629,7 @@ export function PodActions({ detail, selection }: { detail: PodDetail; selection
         <CapabilityNotice label="Port-forward" value={portForwardDecision} />
         <CapabilityNotice label="Exec" value={execDecision} />
       </ul>
-      {permissions.isError ? <p className="m-0 text-xs text-kp-red">Permission check failed; actions remain disabled.</p> : null}
+      {permissions.isError ? <p className="m-0 text-content text-kp-red">Permission check failed; actions remain disabled.</p> : null}
       <div className="flex flex-wrap items-center gap-2">
         <Button variant="danger" disabled={deleteDecision !== 'allowed' || remove.isPending} onClick={() => setConfirmAction('delete')}>{remove.isPending ? 'Deleting…' : 'Delete Pod'}</Button>
         <Button
@@ -651,7 +650,7 @@ export function PodActions({ detail, selection }: { detail: PodDetail; selection
         title={confirmAction === 'restart' ? 'Restart Pod' : 'Delete Pod'}
         description={confirmAction === 'restart' && detail.summary.owner
           ? <span>The Pod will be removed and recreated by <strong>{detail.summary.owner.kind}/{detail.summary.owner.name}</strong>, its controller.</span>
-          : <span>The Pod <strong className="mono">{detail.metadata.namespace}/{detail.metadata.name}</strong> will be removed from the cluster.</span>}
+          : <span>The Pod <strong>{detail.metadata.namespace}/{detail.metadata.name}</strong> will be removed from the cluster.</span>}
         resources={[{ kind: 'Pod', namespace: detail.metadata.namespace, name: detail.metadata.name }]}
         consequenceNote={confirmAction === 'restart'
           ? 'The replacement Pod is scheduled by Kubernetes; ephemeral local state is lost. This action cannot be undone.'
@@ -662,26 +661,26 @@ export function PodActions({ detail, selection }: { detail: PodDetail; selection
         onCancel={() => setConfirmAction(null)}
       />
       <div className="flex flex-wrap items-end gap-2 border-t border-kp-overlay-0 pt-2.5">
-        <label className="grid gap-1 w-28"><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Remote port</span><Input aria-invalid={!remotePortValid} type="number" min="1" max="65535" value={remotePort} onChange={(event) => setRemotePort(Number(event.target.value))} /></label>
-        <label className="grid gap-1 w-36"><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Local port (optional)</span><Input aria-invalid={!localPortValid} inputMode="numeric" value={localPort} onChange={(event) => setLocalPort(event.target.value)} placeholder="automatic" /></label>
+        <label className="grid gap-1 w-28"><span className="text-column uppercase tracking-wider text-kp-overlay-text">Remote port</span><Input aria-invalid={!remotePortValid} type="number" min="1" max="65535" value={remotePort} onChange={(event) => setRemotePort(Number(event.target.value))} /></label>
+        <label className="grid gap-1 w-36"><span className="text-column uppercase tracking-wider text-kp-overlay-text">Local port (optional)</span><Input aria-invalid={!localPortValid} inputMode="numeric" value={localPort} onChange={(event) => setLocalPort(event.target.value)} placeholder="automatic" /></label>
         <Button variant="secondary" disabled={portForwardDecision !== 'allowed' || portForward.isPending || !remotePortValid || !localPortValid} onClick={() => portForward.mutate()}>{portForward.isPending ? 'Starting…' : 'Start port-forward'}</Button>
       </div>
-      {!remotePortValid || !localPortValid ? <p className="m-0 text-xs text-kp-red">Remote port must be 1–65,535; an explicit local port must be 1,024–65,535.</p> : null}
-      {portForward.data ? <p className="m-0 text-xs text-kp-green" role="status">Loopback listener: <strong className="mono">{portForward.data.localAddress}:{portForward.data.localPort}</strong> → {portForward.data.namespace}/{portForward.data.pod}:{portForward.data.remotePort}.</p> : null}
+      {!remotePortValid || !localPortValid ? <p className="m-0 text-content text-kp-red">Remote port must be 1–65,535; an explicit local port must be 1,024–65,535.</p> : null}
+      {portForward.data ? <p className="m-0 text-content text-kp-green" role="status">Loopback listener: <strong>{portForward.data.localAddress}:{portForward.data.localPort}</strong> → {portForward.data.namespace}/{portForward.data.pod}:{portForward.data.remotePort}.</p> : null}
       <div className="flex flex-wrap items-end gap-2 border-t border-kp-overlay-0 pt-2.5">
-        <label className="grid gap-1 w-36"><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Container</span><Select value={container} onChange={(event) => setContainer(event.target.value)}>{detail.containers.map((value) => <option key={value.spec.name}>{value.spec.name}</option>)}</Select></label>
-        <label className="grid flex-1 gap-1 min-w-[220px]"><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Command argv (one item per line)</span><textarea className="min-h-[76px] w-full rounded-md border border-kp-overlay-0 bg-kp-crust px-2.5 py-1.5 text-sm text-kp-text focus:border-kp-mauve focus:shadow-focus focus:outline-none resize-y leading-relaxed" value={command} onChange={(event) => setCommand(event.target.value)} /></label>
+        <label className="grid gap-1 w-36"><span className="text-column uppercase tracking-wider text-kp-overlay-text">Container</span><Select value={container} onChange={(event) => setContainer(event.target.value)}>{detail.containers.map((value) => <option key={value.spec.name}>{value.spec.name}</option>)}</Select></label>
+        <label className="grid flex-1 gap-1 min-w-[220px]"><span className="text-column uppercase tracking-wider text-kp-overlay-text">Command argv (one item per line)</span><textarea className="min-h-[76px] w-full rounded-md border border-kp-overlay-0 bg-kp-crust px-2.5 py-1.5 text-content text-kp-text focus:border-kp-mauve focus:shadow-focus focus:outline-none resize-y leading-relaxed" value={command} onChange={(event) => setCommand(event.target.value)} /></label>
         <Button variant="secondary" disabled={execDecision !== 'allowed' || exec.isPending || container === '' || !commandValid} onClick={() => exec.mutate()}>{exec.isPending ? 'Authorizing…' : 'Open exec session'}</Button>
       </div>
-      {!commandValid ? <p className="m-0 text-xs text-kp-red">Provide 1–64 argv items, at most 4 KiB each and 32 KiB total, without NUL.</p> : null}
+      {!commandValid ? <p className="m-0 text-content text-kp-red">Provide 1–64 argv items, at most 4 KiB each and 32 KiB total, without NUL.</p> : null}
       {terminal.length > 0 ? (
         <div className="grid gap-2 rounded-lg border border-kp-blue-border bg-kp-crust p-2.5">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="mr-auto text-xs text-kp-sky" aria-live="polite">Exec: {socketState}</span>
-            <Button size="sm" variant="secondary" disabled={socketState !== 'ready'} onClick={closeExec}>Close session</Button>
-            <Button size="sm" variant="secondary" onClick={() => { execTerminalRef.current?.clear(); setTerminal([]) }}>Clear output</Button>
+            <span className="mr-auto text-content text-kp-sky" aria-live="polite">Exec: {socketState}</span>
+            <Button variant="secondary" disabled={socketState !== 'ready'} onClick={closeExec}>Close session</Button>
+            <Button variant="secondary" onClick={() => { execTerminalRef.current?.clear(); setTerminal([]) }}>Clear output</Button>
           </div>
-          <ul className="m-0 grid list-none gap-0.5 p-0 text-xs" aria-label="Exec session status">
+          <ul className="m-0 grid list-none gap-0.5 p-0 text-content" aria-label="Exec session status">
             {terminal.map((line, index) => <li key={`${index}-${line.stream}`} className="mono text-kp-sky">{line.text}</li>)}
           </ul>
           <Suspense fallback={<pre aria-label="Exec terminal output" className="min-h-32" />}>
@@ -694,7 +693,7 @@ export function PodActions({ detail, selection }: { detail: PodDetail; selection
           </Suspense>
         </div>
       ) : null}
-      {[remove, portForward, exec].map((operation, index) => operation.isError ? <p className="m-0 text-xs text-kp-red" key={index}>{mutationError(operation.error)}</p> : null)}
+      {[remove, portForward, exec].map((operation, index) => operation.isError ? <p className="m-0 text-content text-kp-red" key={index}>{mutationError(operation.error)}</p> : null)}
     </section>
   )
 }

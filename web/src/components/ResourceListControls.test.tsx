@@ -1,119 +1,30 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
-
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { afterEach, expect, it, vi } from 'vitest'
 import { ResourceListControls } from './ResourceListControls'
 
-const sortOptions = [
-  { value: 'identity', label: 'Namespace and name' },
-  { value: 'age', label: 'Age' },
-] as const
-
-afterEach(cleanup)
-
-describe('ResourceListControls', () => {
-	it('keeps typing local until the explicit apply action', () => {
-		const onSearchChange = vi.fn()
-		const onApply = vi.fn()
-		render(<ResourceListControls
-			search=""
-			appliedSearch=""
-			onSearchChange={onSearchChange}
-			onApply={onApply}
-			onRefresh={vi.fn()}
-			onClear={vi.fn()}
-			sort="identity"
-			order="asc"
-			appliedSort="identity"
-			appliedOrder="asc"
-			defaultSort="identity"
-			defaultOrder="asc"
-			hasPendingChanges
-			sortOptions={sortOptions}
-			onSortChange={vi.fn()}
-			onOrderChange={vi.fn()}
-		/>)
-
-		const search = screen.getByLabelText('Search this bounded page')
-		for (const value of ['d', 'de', 'dep', 'depl', 'deplo', 'deploy']) {
-			fireEvent.change(search, { target: { value } })
-		}
-		expect(onSearchChange).toHaveBeenCalledTimes(6)
-		expect(onApply).not.toHaveBeenCalled()
-
-		fireEvent.click(screen.getByRole('button', { name: 'Apply filters' }))
-		expect(onApply).toHaveBeenCalledOnce()
-	})
-
-	it('distinguishes applied filters from a pending search and exposes server ordering', () => {
-    const onApply = vi.fn()
-    const onClear = vi.fn()
-    const onSortChange = vi.fn()
-    const onOrderChange = vi.fn()
-
-    render(<ResourceListControls
-      search="draft"
-      appliedSearch="running"
-      onSearchChange={vi.fn()}
-      onApply={onApply}
-      onRefresh={vi.fn()}
-      onClear={onClear}
-      activeFilters={[{ id: 'namespace', label: 'Namespace', value: 'payments, ops' }]}
-      sort="age"
-      order="desc"
-      appliedSort="identity"
-      appliedOrder="asc"
-      defaultSort="identity"
-      defaultOrder="asc"
-      hasPendingChanges
-      sortOptions={sortOptions}
-      onSortChange={onSortChange}
-      onOrderChange={onOrderChange}
-    />)
-
-    expect(screen.getByText('running')).toBeInTheDocument()
-    expect(screen.getByText('payments, ops')).toBeInTheDocument()
-    expect(screen.getByLabelText('Search this bounded page')).toHaveValue('draft')
-    expect(screen.getByLabelText('Search this bounded page')).toHaveAttribute('data-app-shortcut', 'search')
-    expect(screen.getByLabelText('Search this bounded page')).toHaveAttribute('aria-keyshortcuts', 'Control+F Meta+F')
-    expect(screen.getByRole('button', { name: 'Refresh' })).toHaveAttribute('aria-keyshortcuts', 'Control+R Meta+R')
-    expect(within(screen.getByLabelText('Applied resource list state')).queryByText('draft')).not.toBeInTheDocument()
-    expect(screen.getByRole('status')).toHaveTextContent('Filter changes pending')
-    expect(screen.getByText('Namespace and name · ascending')).toBeInTheDocument()
-
-    fireEvent.change(screen.getByLabelText('Sort this bounded page'), { target: { value: 'identity' } })
-    fireEvent.change(screen.getByLabelText('Order'), { target: { value: 'asc' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Apply filters' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }))
-
-    expect(onSortChange).toHaveBeenCalledWith('identity')
-    expect(onOrderChange).toHaveBeenCalledWith('asc')
-    expect(onApply).toHaveBeenCalledOnce()
-    expect(onApply).toHaveBeenCalledWith(expect.stringMatching(/^interaction-\d+$/))
-    expect(onClear).toHaveBeenCalledOnce()
-  })
-
-  it('reports an unfiltered default query and disables redundant clear', () => {
-    render(<ResourceListControls
-      search=""
-      appliedSearch=""
-      onSearchChange={vi.fn()}
-      onApply={vi.fn()}
-      onRefresh={vi.fn()}
-      onClear={vi.fn()}
-      sort="identity"
-      order="asc"
-      appliedSort="identity"
-      appliedOrder="asc"
-      defaultSort="identity"
-      defaultOrder="asc"
-      hasPendingChanges={false}
-      sortOptions={sortOptions}
-      onSortChange={vi.fn()}
-      onOrderChange={vi.fn()}
-    />)
-
-    expect(screen.getByText('None')).toBeInTheDocument()
-    expect(screen.getByText('Namespace and name · ascending')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Clear filters' })).toBeDisabled()
-  })
+afterEach(() => { cleanup(); vi.useRealTimers() })
+it('debounces string search, submits on Enter and cancels on unmount', async () => {
+  vi.useFakeTimers()
+  const apply = vi.fn(), change = vi.fn()
+  const view = render(<ResourceListControls search="" appliedSearch="" onSearchChange={change} onApply={apply} />)
+  expect(screen.queryByRole('button')).not.toBeInTheDocument()
+  fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'api' } })
+  expect(change).toHaveBeenCalledWith('api')
+  view.rerender(<ResourceListControls search="api" appliedSearch="" onSearchChange={change} onApply={apply} />)
+  await act(() => vi.advanceTimersByTimeAsync(249))
+  expect(apply).not.toHaveBeenCalled()
+  await act(() => vi.advanceTimersByTimeAsync(1))
+  expect(apply).toHaveBeenCalledTimes(1)
+  view.rerender(<ResourceListControls search="other" appliedSearch="api" onSearchChange={change} onApply={apply} />)
+  fireEvent.submit(screen.getByRole('form', { name: 'Resource list controls' }))
+  expect(apply).toHaveBeenCalledTimes(2)
+  view.unmount()
+  await act(() => vi.advanceTimersByTimeAsync(500))
+  expect(apply).toHaveBeenCalledTimes(2)
+})
+it('keeps the search shortcut without filter toolbars', () => {
+  render(<ResourceListControls search="" appliedSearch="" onSearchChange={vi.fn()} onApply={vi.fn()} />)
+  expect(screen.getByRole('searchbox')).toHaveAttribute('data-app-shortcut', 'search')
+  expect(screen.queryByRole('combobox')).not.toBeInTheDocument()
+  expect(screen.queryByText('More filters')).not.toBeInTheDocument()
 })

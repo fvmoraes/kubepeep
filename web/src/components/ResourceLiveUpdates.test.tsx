@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { Profiler } from 'react'
-import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { ResourceLiveUpdates } from './ResourceLiveUpdates'
@@ -16,11 +16,10 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe('optional resource SSE', () => {
+describe('automatic resource SSE', () => {
   it('uses fetch with CSRF, invalidates HTTP snapshots, and aborts on unmount', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const invalidate = vi.spyOn(client, 'invalidateQueries')
-    let responseController: ReadableStreamDefaultController<Uint8Array> | undefined
     let streamSignal: AbortSignal | undefined
     const fetch = vi.fn((input: string | URL | Request, init?: RequestInit) => {
       const path = String(input)
@@ -28,7 +27,6 @@ describe('optional resource SSE', () => {
       if (path === '/api/v1/stream?topic=pods') {
         streamSignal = init?.signal as AbortSignal
         const body = new ReadableStream<Uint8Array>({ start(controller) {
-          responseController = controller
           controller.enqueue(new TextEncoder().encode('event: snapshot\ndata: {"generation":"gen_42","final":true}\n\nevent: modified\ndata: {"generation":"gen_42"}\n\n'))
         } })
         return Promise.resolve(new Response(body, { headers: { 'Content-Type': 'text/event-stream; charset=utf-8' } }))
@@ -38,9 +36,8 @@ describe('optional resource SSE', () => {
     vi.stubGlobal('fetch', fetch)
 
     const view = render(<QueryClientProvider client={client}><ResourceLiveUpdates generation="gen_42" topics={['pods']} queryKeys={[["resources", "pods"]]} /></QueryClientProvider>)
-    fireEvent.click(screen.getByRole('button', { name: 'Start live updates' }))
 
-    expect(await screen.findByText(/Live updates active for pods/)).toBeInTheDocument()
+    expect(await screen.findByText('Live')).toBeInTheDocument()
     await waitFor(() => expect(invalidate).toHaveBeenCalledWith(expect.objectContaining({ queryKey: ['resources', 'pods'] })))
     const streamCall = fetch.mock.calls.find(([input]) => String(input).startsWith('/api/v1/stream'))
     expect(streamCall?.[1]).toEqual(expect.objectContaining({
@@ -51,13 +48,11 @@ describe('optional resource SSE', () => {
 
     view.unmount()
     expect(streamSignal?.aborted).toBe(true)
-    responseController?.close()
   })
 
-  it('falls back to explicit refresh without starting implicit polling when watch authorization is unavailable', async () => {
+  it('shows automatic HTTP fallback when watch authorization is unavailable', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const invalidate = vi.spyOn(client, 'invalidateQueries')
-    const setInterval = vi.spyOn(window, 'setInterval')
     vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
       const path = String(input)
       if (path === '/api/v1/session') return Promise.resolve(json({ csrfToken: 'csrf-live', origin: 'http://127.0.0.1:2748', generation: 'gen_42', expiresAt: '2026-08-17T18:00:00Z' }))
@@ -66,14 +61,10 @@ describe('optional resource SSE', () => {
     }))
 
     render(<QueryClientProvider client={client}><ResourceLiveUpdates generation="gen_42" topics={['events']} queryKeys={[["resources", "events"]]} /></QueryClientProvider>)
-    fireEvent.click(screen.getByRole('button', { name: 'Start live updates' }))
 
-    expect(await screen.findByText(/Automatic polling is disabled/)).toBeInTheDocument()
+    expect(await screen.findByText('Auto · 15s')).toBeInTheDocument()
     expect(invalidate).not.toHaveBeenCalled()
-    expect(setInterval).not.toHaveBeenCalledWith(expect.any(Function), 15_000)
-    expect(screen.getByRole('button', { name: 'Retry live updates' })).toBeInTheDocument()
-    fireEvent.click(screen.getByRole('button', { name: 'Refresh now' }))
-    await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(1))
+    expect(screen.queryByRole('button')).not.toBeInTheDocument()
   })
 
   it('coalesces 10k watch deltas into one bounded HTTP refresh', async () => {
@@ -93,8 +84,7 @@ describe('optional resource SSE', () => {
     }))
 
     const view = render(<QueryClientProvider client={client}><Profiler id="live-updates" onRender={(_id, _phase, actualDuration) => { commits += 1; renderCPU += actualDuration }}><ResourceLiveUpdates generation="gen_42" topics={['pods']} queryKeys={[["resources", "pods"]]} /></Profiler></QueryClientProvider>)
-    fireEvent.click(screen.getByRole('button', { name: 'Start live updates' }))
-    expect(await screen.findByText(/Live updates active for pods/)).toBeInTheDocument()
+    expect(await screen.findByText('Live')).toBeInTheDocument()
     const commitsBeforeBurst = commits
     const renderCPUBeforeBurst = renderCPU
     vi.useFakeTimers()
@@ -106,7 +96,7 @@ describe('optional resource SSE', () => {
     await vi.advanceTimersByTimeAsync(0)
     expect(invalidate).not.toHaveBeenCalled()
     await act(async () => { await vi.advanceTimersByTimeAsync(150) })
-    expect(screen.getByText(/watch changes batched/)).toBeInTheDocument()
+    expect(screen.getByLabelText('Resource live updates')).toBeInTheDocument()
     expect(commits - commitsBeforeBurst).toBeLessThan(6)
     expect(renderCPU - renderCPUBeforeBurst).toBeLessThan(500)
     await vi.advanceTimersByTimeAsync(1_849)
@@ -115,6 +105,5 @@ describe('optional resource SSE', () => {
     expect(invalidate).toHaveBeenCalledTimes(1)
 
     view.unmount()
-    responseController?.close()
   })
 })

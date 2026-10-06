@@ -1,3 +1,4 @@
+import { LoadingState } from './ui/LoadingState'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useRef, useState } from 'react'
 
@@ -136,13 +137,13 @@ export function ContextSelector({ selection, onSelected }: ContextSelectorProps)
   }
 
   if (profiles.isPending) {
-    return <div className="flex h-8 items-center text-xs text-kp-overlay-text" role="status">Loading kubeconfigs…</div>
+    return <LoadingState label="Loading kubeconfigs…" layout="inline" />
   }
   if (profiles.isError) {
-    return <div className="flex h-8 items-center text-xs text-kp-red" role="status">{queryError(profiles.error)}</div>
+    return <div className="control flex items-center text-content text-kp-red" role="status">{queryError(profiles.error)}</div>
   }
   if (profileList.length === 0) {
-    return <div className="flex h-8 items-center text-xs text-kp-overlay-text" role="status">No kubeconfig source found</div>
+    return <div className="control flex items-center text-content text-kp-overlay-text" role="status">No kubeconfig source found</div>
   }
 
   return (
@@ -151,7 +152,7 @@ export function ContextSelector({ selection, onSelected }: ContextSelectorProps)
         <Select
           aria-label="Kubeconfig source"
           data-tip={kubeconfigLabel(preferredProfile)}
-          className="!w-auto max-w-[10rem] pr-6 text-sm"
+          className="!w-auto max-w-[10rem] pr-6 text-menu"
           value={effectiveProfileId ?? ''}
           onChange={(event) => {
             selectionController.current?.abort()
@@ -166,7 +167,7 @@ export function ContextSelector({ selection, onSelected }: ContextSelectorProps)
       <Select
         aria-label="Selected cluster"
         data-tip={preferredContext?.cluster ? `Cluster ${preferredContext.cluster}` : 'Choose a context to resolve the cluster'}
-        className="!w-auto max-w-[9rem] pr-6 text-sm text-kp-sky"
+        className="!w-auto max-w-[9rem] pr-6 text-menu text-kp-sky"
         disabled
         value={preferredContext?.cluster ?? ''}
         onChange={() => {}}
@@ -177,7 +178,7 @@ export function ContextSelector({ selection, onSelected }: ContextSelectorProps)
         aria-label="Kubernetes context"
         aria-keyshortcuts="Control+O Meta+O"
         data-app-shortcut="context-selector"
-        className="!w-auto max-w-[11rem] pr-6 text-sm"
+        className="!w-auto max-w-[11rem] pr-6 text-menu"
         value={effectiveContextName}
         disabled={contexts.isPending || contexts.isError || contextList.length === 0 || contextSelection.isPending}
         onChange={(event) => {
@@ -198,11 +199,11 @@ export function ContextSelector({ selection, onSelected }: ContextSelectorProps)
               : 'Choose a context'}</option>
         {contextList.map((context) => <option key={context.name} value={context.name}>{context.name} · {context.cluster}</option>)}
       </Select>
-      {contextSelection.isPending ? <span className="text-xs text-kp-overlay-text" role="status">Switching…</span> : null}
-      {contexts.isError ? <span className="text-xs text-kp-red" role="status">{queryError(contexts.error)}</span> : null}
-      {contexts.data && contextList.length === 0 ? <span className="text-xs text-kp-red" role="status">No contexts exist in this kubeconfig.</span> : null}
-      {session.isError ? <span className="text-xs text-kp-red" role="status">Session bootstrap is unavailable.</span> : null}
-      {selectionError ? <span className="text-xs text-kp-red" role="alert">{selectionError}</span> : null}
+      {contextSelection.isPending ? <span className="text-content text-kp-overlay-text" role="status">Switching…</span> : null}
+      {contexts.isError ? <span className="text-content text-kp-red" role="status">{queryError(contexts.error)}</span> : null}
+      {contexts.data && contextList.length === 0 ? <span className="text-content text-kp-red" role="status">No contexts exist in this kubeconfig.</span> : null}
+      {session.isError ? <span className="text-content text-kp-red" role="status">Session bootstrap is unavailable.</span> : null}
+      {selectionError ? <span className="text-content text-kp-red" role="alert">{selectionError}</span> : null}
     </div>
   )
 }

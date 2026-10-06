@@ -16,16 +16,15 @@ export function TableLink({ 'aria-label': label, onClick, primary, secondary, di
     <Button
       type="button"
       variant="ghost"
-      size="sm"
-      className="-ml-2.5 !h-auto w-max min-w-[10rem] max-w-[28rem] !whitespace-normal justify-start px-2 py-0.5 text-left text-kp-mauve hover:not-disabled:bg-transparent hover:not-disabled:text-kp-mauve-hover"
+      className="-ml-2 w-max min-w-0 max-w-[28rem] !whitespace-nowrap justify-start px-2 text-left text-kp-mauve hover:not-disabled:bg-transparent hover:not-disabled:text-kp-mauve-hover"
       aria-label={label}
       onClick={onClick}
       disabled={Boolean(disabledReason)}
       title={disabledReason}
     >
-      <span className="min-w-0 text-left [overflow-wrap:anywhere]">
-      <strong className="block font-medium hover:underline">{primary}</strong>
-      {secondary ? <small className="block text-xs text-kp-overlay-text">{secondary}</small> : null}
+      <span className="min-w-0 text-left inline-flex items-baseline gap-2 whitespace-nowrap">
+      <strong className="font-bold hover:underline">{primary}</strong>
+      {secondary ? <small className="text-content text-kp-overlay-text">{secondary}</small> : null}
       </span>
     </Button>
   )

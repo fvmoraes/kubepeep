@@ -1,4 +1,6 @@
+import { useRef } from 'react'
 import { Link, useLocation } from 'react-router'
+import { useRevealActiveItem } from '../../hooks/useRevealActiveItem'
 import { activeNavItem, navGroups, settingsNavItem } from '../../navigation/tree'
 import { beginViewNavigation } from '../../observability/uxMetrics'
 
@@ -6,10 +8,12 @@ import { beginViewNavigation } from '../../observability/uxMetrics'
 export function ResourceFamilyNav() {
   const { pathname } = useLocation()
   const active = activeNavItem(pathname)
+  const navigation = useRef<HTMLElement>(null)
+  useRevealActiveItem(navigation, active?.id)
   const group = navGroups.find((entry) => entry.items.some((item) => item.id === active?.id))
   const items = group?.items ?? (active?.id === settingsNavItem.id ? [settingsNavItem] : [])
   if (!items.length) return null
-  return <nav aria-label={`${group?.label ?? 'Settings'} resources`} className="resource-family-nav">
+  return <nav ref={navigation} aria-label={`${group?.label ?? 'Settings'} resources`} className="resource-family-nav">
     {items.map((item) => item.path ? <Link
       key={item.id}
       to={item.path}

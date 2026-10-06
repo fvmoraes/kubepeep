@@ -108,25 +108,25 @@ export function YamlViewer({ value, pending, error, onLoad, diffTarget }: YamlVi
 
   return (
     <section className="mt-3 flex flex-col gap-2 border-t border-kp-overlay-0 pt-3" aria-label="Authorized YAML">
-      <Button variant="secondary" size="sm" className="justify-self-start" disabled={pending} onClick={onLoad}>
+      <Button variant="secondary" className="justify-self-start" disabled={pending} onClick={onLoad}>
         {pending ? 'Loading YAML…' : 'Load authorized YAML'}
       </Button>
-      {error ? <p className="text-sm text-kp-red">{formatError(error)}</p> : null}
+      {error ? <p className="text-content text-kp-red">{formatError(error)}</p> : null}
       {value !== undefined ? (
         <>
           <div className="flex flex-wrap items-center gap-2" role="search">
             <Input aria-label="Search in YAML" placeholder="Search in YAML" value={search} maxLength={128} onChange={(event) => { setSearch(event.target.value); setMatchIndex(0) }} onKeyDown={(event) => { if (event.key === 'Enter') { event.preventDefault(); showMatch(event.shiftKey ? -1 : 1) } }} className="w-44" />
-            <small className="text-xs text-kp-overlay-text" role="status">{search === '' ? '' : matches.length === 0 ? 'no matches' : `${matchIndex + 1} of ${matches.length}`}</small>
-            <Button variant="secondary" size="sm" disabled={matches.length === 0} onClick={() => showMatch(-1)} aria-label="Previous match">↑</Button>
-            <Button variant="secondary" size="sm" disabled={matches.length === 0} onClick={() => showMatch(1)} aria-label="Next match">↓</Button>
-            <Button variant="secondary" size="sm" onClick={() => setWrap((current) => !current)} aria-pressed={wrap}>{wrap ? 'Unwrap' : 'Wrap'}</Button>
-            <Button variant="secondary" size="sm" onClick={() => void copyDocument()} aria-label="Copy YAML to clipboard">{copied ? 'Copied' : 'Copy'}</Button>
-            <Button variant="secondary" size="sm" onClick={downloadDocument} aria-label="Download YAML">Download</Button>
+            <small className="text-content text-kp-overlay-text" role="status">{search === '' ? '' : matches.length === 0 ? 'no matches' : `${matchIndex + 1} of ${matches.length}`}</small>
+            <Button variant="secondary" disabled={matches.length === 0} onClick={() => showMatch(-1)} aria-label="Previous match">↑</Button>
+            <Button variant="secondary" disabled={matches.length === 0} onClick={() => showMatch(1)} aria-label="Next match">↓</Button>
+            <Button variant="secondary" onClick={() => setWrap((current) => !current)} aria-pressed={wrap}>{wrap ? 'Unwrap' : 'Wrap'}</Button>
+            <Button variant="secondary" onClick={() => void copyDocument()} aria-label="Copy YAML to clipboard">{copied ? 'Copied' : 'Copy'}</Button>
+            <Button variant="secondary" onClick={downloadDocument} aria-label="Download YAML">Download</Button>
           </div>
           <div
             ref={containerRef}
             aria-label="YAML document"
-            className={`mono overflow-auto rounded-md border border-kp-overlay-0 bg-kp-crust p-3 text-xs leading-relaxed ${wrap ? 'whitespace-pre-wrap' : ''}`}
+            className={`mono overflow-auto rounded-md border border-kp-overlay-0 bg-kp-crust p-3 text-content leading-relaxed ${wrap ? 'whitespace-pre-wrap' : ''}`}
             role="region"
           >
             {search === '' ? (
@@ -172,13 +172,12 @@ export function YamlViewer({ value, pending, error, onLoad, diffTarget }: YamlVi
           </div>
         </>
       ) : (
-        <p className="text-xs text-kp-overlay-text">YAML is fetched only after this explicit action and remains in memory.</p>
+        <p className="text-content text-kp-overlay-text">YAML is fetched only after this explicit action and remains in memory.</p>
       )}
       {diffTarget ? (
         <div className="flex flex-wrap items-center gap-2">
           <Button
             variant="secondary"
-            size="sm"
             disabled={value === undefined || diffState.kind === 'pending'}
             onClick={() => void loadDiff()}
           >
@@ -187,7 +186,7 @@ export function YamlViewer({ value, pending, error, onLoad, diffTarget }: YamlVi
           {diffState.kind === 'ready' && diffState.diff.truncated ? <Badge variant="warning">truncated</Badge> : null}
         </div>
       ) : null}
-      {diffState.kind === 'error' ? <p className="text-sm text-kp-red">{diffState.message}</p> : null}
+      {diffState.kind === 'error' ? <p className="text-content text-kp-red">{diffState.message}</p> : null}
       {diffState.kind === 'ready' ? (
         diffState.diff.absent ? (
           <p role="status">No last-applied baseline was found; the resource was not applied through kubectl.</p>
@@ -195,7 +194,7 @@ export function YamlViewer({ value, pending, error, onLoad, diffTarget }: YamlVi
           <div
             aria-label="YAML diff against last-applied"
             role="region"
-            className="overflow-auto rounded-md border border-kp-overlay-0 bg-kp-crust p-3 font-mono text-xs leading-relaxed"
+            className="overflow-auto rounded-md border border-kp-overlay-0 bg-kp-crust p-3 font-mono text-content leading-relaxed"
           >
             {diffState.diff.lines.map((line, index) => (
               <div

@@ -9,40 +9,30 @@ export type ButtonVariant =
   | 'ghost'      // transparent — inline, table and toolbar actions
   | 'icon'       // ghost square — icon-only controls
 
-export type ButtonSize = 'sm' | 'md' | 'lg'
-
 export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: ButtonVariant
-  size?: ButtonSize
   children?: ReactNode
   disabledReason?: string
 }
 
-const sizes: Record<ButtonSize, string> = {
-  sm: 'h-7 gap-1.5 px-2.5 text-xs rounded-md',
-  md: 'h-8 gap-2 px-3 text-sm rounded-md',
-  lg: 'h-9 gap-2 px-4 text-base rounded-lg',
-}
-
 const variants: Record<ButtonVariant, string> = {
   primary:
-    'text-white bg-kp-blue border border-kp-blue hover:not-disabled:bg-kp-blue-hover hover:not-disabled:border-kp-blue-hover',
+    'text-kp-sky bg-kp-blue-bg border-kp-blue-border hover:not-disabled:border-kp-sky hover:not-disabled:bg-kp-surface-3',
   secondary:
-    'text-kp-text bg-kp-surface-3 border border-kp-overlay-1 hover:not-disabled:bg-kp-overlay-0 hover:not-disabled:border-kp-overlay-3',
+    'text-kp-subtext bg-kp-surface-1 border-kp-overlay-1 hover:not-disabled:bg-kp-surface-3 hover:not-disabled:text-kp-text hover:not-disabled:border-kp-overlay-3',
   success:
-    'text-white bg-kp-green-solid border border-kp-green-solid hover:not-disabled:bg-kp-green-solid-hover hover:not-disabled:border-kp-green-solid-hover',
+    'text-kp-green bg-kp-green-bg border-kp-green-border hover:not-disabled:border-kp-green hover:not-disabled:bg-kp-surface-3',
   danger:
-    'text-white bg-kp-red-solid border border-kp-red-solid hover:not-disabled:bg-kp-red-solid-hover hover:not-disabled:border-kp-red-solid-hover',
+    'text-kp-red bg-kp-red-bg border-kp-red-border hover:not-disabled:border-kp-red hover:not-disabled:bg-kp-surface-3',
   warning:
-    'text-kp-base bg-kp-amber border border-kp-amber hover:not-disabled:bg-kp-amber-hover hover:not-disabled:border-kp-amber-hover',
+    'text-kp-yellow bg-kp-yellow-bg border-kp-yellow-border hover:not-disabled:border-kp-yellow hover:not-disabled:bg-kp-surface-3',
   ghost:
-    'text-kp-subtext bg-transparent border border-transparent hover:not-disabled:bg-kp-surface-3 hover:not-disabled:text-kp-text',
+    'text-kp-subtext bg-transparent border-transparent hover:not-disabled:bg-kp-surface-3 hover:not-disabled:text-kp-text aria-pressed:font-bold aria-pressed:bg-kp-accent-bg aria-pressed:text-kp-mauve aria-pressed:border-kp-accent-border',
   icon:
-    'h-7 w-7 gap-0 p-0 justify-center text-kp-overlay-text bg-transparent border border-transparent rounded-md hover:not-disabled:bg-kp-surface-3 hover:not-disabled:text-kp-text',
+    'text-kp-overlay-text bg-transparent border-transparent hover:not-disabled:bg-kp-surface-3 hover:not-disabled:text-kp-text aria-pressed:font-bold aria-pressed:bg-kp-accent-bg aria-pressed:text-kp-mauve aria-pressed:border-kp-accent-border',
 }
 
-export function Button({ variant = 'primary', size = 'md', className = '', type, children, disabled, disabledReason, title, ...props }: ButtonProps) {
-  const sizeClass = variant === 'icon' ? '' : sizes[size]
+export function Button({ variant = 'primary', className = '', type, children, disabled, disabledReason, title, ...props }: ButtonProps) {
   const tooltip = disabled
     ? disabledReason ?? title ?? 'This action is unavailable until its current requirements are satisfied.'
     : title
@@ -51,7 +41,7 @@ export function Button({ variant = 'primary', size = 'md', className = '', type,
       type={type ?? 'button'}
       disabled={disabled}
       title={tooltip}
-      className={`inline-flex items-center justify-center font-medium whitespace-nowrap cursor-pointer transition-colors duration-100 disabled:cursor-not-allowed disabled:opacity-45 focus-visible:outline-2 focus-visible:outline-kp-mauve focus-visible:outline-offset-1 ${sizeClass} ${variants[variant]} ${className}`}
+      className={`control inline-flex items-center justify-center border text-content leading-5 font-normal whitespace-nowrap cursor-pointer transition-colors duration-100 disabled:cursor-not-allowed disabled:opacity-45 focus-visible:outline-2 focus-visible:outline-kp-mauve focus-visible:outline-offset-1 ${variant === 'icon' ? 'control-icon p-0' : 'gap-1.5 px-2 py-0'} ${variants[variant]} ${className}`}
       {...props}
     >
       {children}

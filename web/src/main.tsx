@@ -1,3 +1,4 @@
+import { inventoryRefreshInterval } from './components/resource/autoRefresh'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
@@ -16,8 +17,8 @@ const queryClient = new QueryClient({
 })
 
 // Resource lists use the same 30-second freshness window as the authorized
-// backend page cache. Watch deltas and explicit Refresh still invalidate them.
-queryClient.setQueryDefaults(['resources'], { staleTime: 30_000, gcTime: 120_000 })
+// backend page cache. Watch deltas invalidate them; visible inventories also refresh automatically.
+queryClient.setQueryDefaults(['resources'], { staleTime: 30_000, gcTime: 120_000, refetchInterval: inventoryRefreshInterval, refetchIntervalInBackground: false })
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

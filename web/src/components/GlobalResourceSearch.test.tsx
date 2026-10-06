@@ -46,10 +46,10 @@ describe('command center local resource search (F5-06)', () => {
     expect(getResources).not.toHaveBeenCalled()
 
     fireEvent.keyDown(document, { key: 'k', ctrlKey: true })
-    expect(screen.getByText(/absence here does not prove absence in the cluster/i)).toBeInTheDocument()
+    expect(screen.getByText(/resources loaded in the active context/i)).toBeInTheDocument()
     expect(getResources).toHaveBeenCalledTimes(1)
 
-    const input = screen.getByRole('combobox', { name: 'Search application pages' })
+    const input = screen.getByRole('combobox', { name: 'Search pages and resources' })
     fireEvent.change(input, { target: { value: 'api-abc' } })
     await waitFor(() => expect(screen.getByRole('option', { name: /api-abc/ })).toHaveAttribute('aria-selected', 'true'))
     fireEvent.keyDown(input, { key: 'Enter' })
@@ -61,7 +61,7 @@ describe('command center local resource search (F5-06)', () => {
     vi.stubGlobal('fetch', fetchSpy)
     renderPalette(() => resources)
     fireEvent.keyDown(document, { key: 'k', ctrlKey: true })
-    fireEvent.change(screen.getByRole('combobox', { name: 'Search application pages' }), { target: { value: 'payments pod' } })
+    fireEvent.change(screen.getByRole('combobox', { name: 'Search pages and resources' }), { target: { value: 'payments pod' } })
     expect(screen.getByRole('option', { name: /api-abc/ })).toBeInTheDocument()
     await waitFor(() => expect(screen.queryByRole('option', { name: /store/ })).not.toBeInTheDocument())
     expect(fetchSpy).not.toHaveBeenCalled()
@@ -74,7 +74,7 @@ describe('command center local resource search (F5-06)', () => {
 			vi.stubGlobal('fetch', fetchSpy)
 			renderPalette(() => resources)
 			fireEvent.keyDown(document, { key: 'k', ctrlKey: true })
-			fireEvent.change(screen.getByRole('combobox', { name: 'Search application pages' }), { target: { value: 'payments pod' } })
+			fireEvent.change(screen.getByRole('combobox', { name: 'Search pages and resources' }), { target: { value: 'payments pod' } })
 			await act(async () => { await vi.advanceTimersByTimeAsync(30) })
 			expect(screen.getByRole('option', { name: /api-abc/ })).toBeInTheDocument()
 			expect(screen.queryByRole('option', { name: /store/ })).not.toBeInTheDocument()
@@ -84,11 +84,11 @@ describe('command center local resource search (F5-06)', () => {
 		}
 	})
 
-  it('renders saved favorites before pages and resources', () => {
+  it('prioritizes available favorites without duplicating their resource result', () => {
     const favorites: CommandRoute[] = [
       { path: '/workloads/deployments/payments/api', label: 'api', description: 'deployment · payments', keywords: ['favorite', 'deployment'] },
     ]
-    renderPalette(() => resources, () => favorites)
+    renderPalette(() => [...resources, { ...favorites[0], keywords: ['deployment'] }], () => favorites)
     fireEvent.keyDown(document, { key: 'k', ctrlKey: true })
     const options = screen.getAllByRole('option')
     expect(options).toHaveLength(4)

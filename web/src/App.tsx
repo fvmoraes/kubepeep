@@ -4,7 +4,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { Waypoints } from 'lucide-react'
 import { Outlet, Route, Routes, useLocation, useNavigate } from 'react-router'
 
-import { clearRecentTargets, recordPath, recentTargets, subscribeRecentTargets } from './recent/recent'
+import { recordPath, recentTargets } from './recent/recent'
 
 import { getPreferences, getStatus, type Preferences } from './api/client'
 import { mutatePreferences } from './api/preferences'
@@ -14,6 +14,9 @@ import { ContextSelector } from './components/ContextSelector'
 import { DefaultScopeGate } from './components/DefaultScopeGate'
 import { GlobalNamespaceSelect } from './components/GlobalNamespaceSelect'
 import { Sidebar } from './components/Sidebar'
+import { MobileNavigation } from './components/MobileNavigation'
+import { LoadingState } from './components/ui/LoadingState'
+import { useMediaQuery } from './hooks/useMediaQuery'
 import { StatePanel } from './components/StatePanel'
 import { ResourceWorkspaceProvider, useResourceWorkspace } from './components/workspace/ResourceWorkspaceProvider'
 import { GlobalNamespaceProvider, useGlobalNamespace } from './context/GlobalNamespace'
@@ -43,7 +46,7 @@ const ServiceAccountsPage = lazy(() => import('./components/ConfigurationPages')
 const AccessControlPage = lazy(() => import('./components/AccessPages').then((module) => ({ default: module.AccessControlPage })))
 const AdministrationPage = lazy(() => import('./components/AccessPages').then((module) => ({ default: module.AdministrationPage })))
 const SettingsPage = lazy(() => import('./components/SettingsPage').then((module) => ({ default: module.SettingsPage })))
-const ResourceWorkspaceOverlay = lazy(() => import('./components/workspace/ResourceWorkspace').then((module) => ({ default: module.ResourceWorkspaceOverlay })))
+const ResourceWorkspacePanel = lazy(() => import('./components/workspace/ResourceWorkspace').then((module) => ({ default: module.ResourceWorkspacePanel })))
 
 // Command palette catalog: every enabled navigation destination. Group labels
 // disambiguate repeated item names (e.g. the Workloads "Overview").
@@ -229,6 +232,18 @@ function useShellPreferencePersistence(preferencesAvailable: boolean, onSaveErro
 }
 
 function Shell() {
+  const mobile = useMediaQuery('(max-width: 760px), (max-width: 1024px) and (max-height: 500px)')
+  const topbarRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    const header = topbarRef.current
+    const layout = header?.parentElement
+    if (!header || !layout || typeof ResizeObserver === 'undefined') return
+    const measure = () => layout.style.setProperty('--topbar-height', `${header.offsetHeight}px`)
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(header)
+    return () => observer.disconnect()
+  }, [])
   const queryClient = useQueryClient()
   useEffect(() => {
     recordShellReady()
@@ -238,7 +253,6 @@ function Shell() {
   const version = useAppVersion()
   const [compact, setCompact] = useState<boolean>(false)
   const [collapsedGroups, setCollapsedGroups] = useState<string[]>(() => navGroups.map((group) => group.id))
-  const [, setRecentVersion] = useState(0)
   const location = useLocation()
   const status = useQuery({
     queryKey: ['local-status'],
@@ -273,6 +287,7 @@ function Shell() {
   const preferencesData = preferences.data
   const [, setHydrationError] = useState(false)
   const workspace = useResourceWorkspace()
+  const inspectedPath = workspace.open && workspace.active ? resourceDetailPath(workspace.active) : null
 
   // Hydration (V6-05): initial state comes from the backend document; local
   // state only diverges after an explicit user action and is persisted by
@@ -331,14 +346,10 @@ function Shell() {
     // V5-12/V6-04: completed detail navigations become in-memory recents.
     // Secrets and list pages never enter the history; a change is persisted
     // by merging into the current preferences document.
-    if (recordPath(location.pathname)) {
+    if (recordPath(inspectedPath ?? location.pathname)) {
       persistRecent()
     }
-  }, [location.pathname, persistRecent])
-  useEffect(() => {
-    const unsubscribe = subscribeRecentTargets(() => setRecentVersion((value) => value + 1))
-    return () => { unsubscribe() }
-  }, [])
+  }, [inspectedPath, location.pathname, persistRecent])
 
   const toggleGroup = useCallback((id: string) => {
     setCollapsedGroups((current) => {
@@ -370,35 +381,38 @@ function Shell() {
   return (
     <div className={`app-shell ${compact ? 'app-shell--compact' : ''}`}>
       <a className="skip-link" href="#main-content">Skip to main content</a>
-      <Sidebar version={version} compact={compact} onToggleCompact={toggleCompact} collapsedGroups={collapsedGroups} onToggleGroup={toggleGroup} />
+      {!mobile ? <Sidebar version={version} compact={compact} onToggleCompact={toggleCompact} collapsedGroups={collapsedGroups} onToggleGroup={toggleGroup} /> : null}
       <div className="workspace">
-        <header className="topbar">
-          <div className="topbar-controls">
+        <header ref={topbarRef} className="topbar">
+          {mobile ? <div className="mobile-navigation-trigger"><MobileNavigation version={version} compact={false} onToggleCompact={toggleCompact} collapsedGroups={collapsedGroups} onToggleGroup={toggleGroup} /></div> : null}
+          <div className="topbar-controls topbar-selection">
             <ContextSelector selection={selection} />
             <GlobalNamespaceSelect />
             <button
               type="button"
               onClick={() => navigate('/namespaces')}
-              data-tip={selection ? `${selection.cluster} · ${selection.namespaceCount} namespace${selection.namespaceCount === 1 ? '' : 's'} in scope` : 'Select a namespace scope to browse resources'}
-              className="flex h-8 min-w-0 max-w-[15rem] items-center gap-2 rounded-full border border-kp-overlay-0 bg-kp-surface-0 px-3 text-sm text-kp-subtext hover:border-kp-accent-border hover:text-kp-text"
+              title={selection ? `${selection.cluster} · ${selection.namespaceCount} namespace${selection.namespaceCount === 1 ? '' : 's'} in scope` : 'Select a namespace scope to browse resources'}
+              className="control flex min-w-0 max-w-[15rem] items-center gap-1.5 border border-kp-overlay-0 bg-kp-surface-0 px-2 text-menu text-kp-subtext hover:border-kp-accent-border hover:text-kp-text"
             >
               <Waypoints size={14} strokeWidth={1.8} className="shrink-0 text-kp-mauve" aria-hidden="true" />
               <span className="truncate">{scopeLabel(selection)}</span>
             </button>
           </div>
-          <div className="topbar-controls">
+          <div className="topbar-controls topbar-actions">
             <StatusBadge />
-            <CommandCenter routes={commandRoutes} getFavorites={() => favoriteEntries(preferences.data)} getRecent={() => recentTargets().map((entry) => ({
-              path: entry.path,
-              label: entry.name,
-              description: `recent · ${entry.kind}${entry.namespace ? ` · ${entry.namespace}` : ''}`,
-              keywords: [entry.kind, entry.namespace ?? '', 'recent'],
-            }))} onClearRecent={() => { clearRecentTargets(); void persistShellPrefs((currentPrefs) => { currentPrefs.recent = { version: 1, items: [] }; return currentPrefs }) }} getResources={() => commandResourceEntries(queryClient, selection?.generation)} onRefresh={refreshActiveReads} />
+            <CommandCenter routes={commandRoutes} getFavorites={() => favoriteEntries(preferences.data)} getResources={() => commandResourceEntries(queryClient, selection?.generation)} onRefresh={refreshActiveReads} />
           </div>
         </header>
-          <main id="main-content"><ResourceFamilyNav /><DefaultScopeGate selection={selection} selectionPending={selectionPendingForRoute}><Suspense fallback={<StatePanel kind="loading" title="Opening section">The shell remains available while this section loads.</StatePanel>}><Outlet /></Suspense></DefaultScopeGate></main>
+        <main id="main-content">
+          <ResourceFamilyNav />
+          <DefaultScopeGate selection={selection} selectionPending={selectionPendingForRoute}>
+            <Suspense fallback={<LoadingState label="Opening section…" layout="table" />}>
+              <Outlet />
+            </Suspense>
+          </DefaultScopeGate>
+          {workspace.open ? <Suspense fallback={<LoadingState label="Opening resource…" />}><ResourceWorkspacePanel /></Suspense> : null}
+        </main>
       </div>
-        {workspace.open ? <Suspense fallback={<div role="status" className="workspace-panel p-4 text-sm text-kp-overlay-text">Opening resource…</div>}><ResourceWorkspaceOverlay /></Suspense> : null}
     </div>
   )
 }
@@ -412,18 +426,17 @@ function ShellProviders() {
   })
   const selection = status.data?.selection ?? null
   return (
-    <ResourceWorkspaceProvider>
-      <GlobalNamespaceProvider generation={selection?.generation} scopeId={selection?.scopeId ?? null} scopeMode={selection?.scopeMode ?? null}>
-        <Shell />
-      </GlobalNamespaceProvider>
-    </ResourceWorkspaceProvider>
+    <GlobalNamespaceProvider generation={selection?.generation} scopeId={selection?.scopeId ?? null} scopeMode={selection?.scopeMode ?? null}>
+      <Shell />
+    </GlobalNamespaceProvider>
   )
 }
 
-export function App() {
+function WorkspaceRoutes() {
+  const location = useLocation()
+  const workspace = useResourceWorkspace()
   return (
-    <ToastProvider>
-      <Routes>
+      <Routes location={workspace.backgroundLocation ?? location}>
         <Route element={<ShellProviders />}>
           <Route index element={<DashboardPage />} />
           <Route path="events" element={<EventsPage />} />
@@ -466,6 +479,9 @@ export function App() {
           <Route path="*" element={<StatePanel kind="error" title="Page not found">Return to Overview using the navigation.</StatePanel>} />
         </Route>
       </Routes>
-    </ToastProvider>
   )
+}
+
+export function App() {
+  return <ToastProvider><ResourceWorkspaceProvider><WorkspaceRoutes /></ResourceWorkspaceProvider></ToastProvider>
 }

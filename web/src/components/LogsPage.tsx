@@ -1,3 +1,5 @@
+import { LoadingState } from './ui/LoadingState'
+import { consumeAggregateStream, type AggregatedLogLine } from './resource/podLogStream'
 import { appendLogBatch } from './resource/boundedLogLines'
 import { workloadKindPath } from '../navigation/paths'
 import { ResourceTabStrip } from './resource/ResourceTabStrip'
@@ -225,8 +227,8 @@ export function LogsPage() {
     <div className="flex w-full min-w-0 flex-col gap-4">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
-          <h1 className="text-2xl text-kp-text">Logs</h1>
-          <p className="mt-0.5 text-sm text-kp-overlay-text">Current, previous and bounded follow logs. Content stays in memory and is never persisted by the UI.</p>
+          <h1 className="text-title text-kp-text">Logs</h1>
+          <p className="mt-0.5 text-content text-kp-overlay-text">Current, previous and bounded follow logs. Content stays in memory and is never persisted by the UI.</p>
 		</div>
 		<ResourceTabStrip ariaLabel="Log target type" panelId="log-target-panel" tabs={[{ id: 'pod', label: 'Pod' }, { id: 'workload', label: 'Workload aggregate' }]} active={mode} onChange={(value) => setMode(value as 'pod' | 'workload')} />
       </header>
@@ -242,7 +244,6 @@ export function LogsPage() {
 
 const MaximumAggregateStreams = 5
 
-interface AggregatedLogLine extends LogLine { pod: string; container: string }
 
 async function loadWorkloadCatalog(selection: SelectionSummary, signal?: AbortSignal): Promise<{ values: Workload[]; complete: boolean }> {
 	const values: Workload[] = []
@@ -258,38 +259,6 @@ async function loadWorkloadCatalog(selection: SelectionSummary, signal?: AbortSi
 	return { values, complete }
 }
 
-async function consumeAggregateStream(target: { namespace: string; pod: string; container: string }, selection: SelectionSummary, session: { csrfToken: string }, options: { timestamps: boolean; tailLines: number; since: string }, signal: AbortSignal, onLine: (line: AggregatedLogLine) => void) {
-	const url = await streamURL(logURL(target.namespace, target.pod, target.container, options.timestamps, options.tailLines, options.since))
-	signal.throwIfAborted()
-	const response = await fetch(url, { method: 'GET', headers: { Accept: 'text/event-stream', 'X-KubePeep-CSRF': session.csrfToken }, cache: 'no-store', credentials: 'same-origin', signal })
-	if (!response.ok || !response.body) throw new APIError(response.status, { code: 'STREAM_ERROR', message: 'An aggregate log stream could not be opened.' })
-	const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = ''; let metaSeen = false
-	const cancelReader = () => { void reader.cancel().catch(() => {}) }
-	signal.addEventListener('abort', cancelReader, { once: true })
-	try {
-		signal.throwIfAborted()
-		while (true) {
-			const chunk = await reader.read()
-			signal.throwIfAborted()
-			if (chunk.done) return
-			buffer += decoder.decode(chunk.value, { stream: true })
-			if (new TextEncoder().encode(buffer).byteLength > 136 * 1_024) throw new APIError(502, { code: 'INVALID_RESPONSE', message: 'An aggregate stream exceeded the bounded event buffer.' })
-			while (true) {
-				const separator = /\r?\n\r?\n/.exec(buffer); if (!separator) break
-				const event = parseSSEBlock(buffer.slice(0, separator.index)); buffer = buffer.slice(separator.index + separator[0].length); if (!event) continue
-				const payload = JSON.parse(event.data) as Record<string, unknown>
-				if (event.event === 'meta') { if (payload.generation !== selection.generation) throw new APIError(409, { code: 'GENERATION_CHANGED', message: 'An aggregate stream belongs to another generation.' }); metaSeen = true }
-				if (event.event === 'line') { if (!metaSeen) throw new APIError(502, { code: 'INVALID_RESPONSE', message: 'An aggregate stream sent data before metadata.' }); onLine({ pod: target.pod, container: target.container, timestamp: typeof payload.timestamp === 'string' ? payload.timestamp : null, text: typeof payload.text === 'string' ? payload.text : '', truncated: payload.truncated === true }) }
-				if (event.event === 'error') throw new APIError(502, { code: String(payload.code ?? 'STREAM_ERROR'), message: String(payload.message ?? 'An aggregate stream ended.') })
-				if (event.event === 'end') return
-			}
-		}
-	} finally {
-		signal.removeEventListener('abort', cancelReader)
-		await reader.cancel().catch(() => {})
-		reader.releaseLock()
-	}
-}
 
 function WorkloadLogsWorkspace({ selection, params, defaults }: { selection: SelectionSummary; params: URLSearchParams; defaults: Preferences['logs'] }) {
 	const [workloadKey, setWorkloadKey] = useState(() => params.get('workload')?.split('/').join('\0') ?? '')
@@ -387,14 +356,14 @@ function WorkloadLogsWorkspace({ selection, params, defaults }: { selection: Sel
 		{workloads.data&&!workloads.data.complete?<WarningBanner>Workload catalog coverage is partial; absent workloads may exist outside the loaded pages.</WarningBanner>:null}
 		{podCatalog.data&&!podCatalog.data.complete?<WarningBanner>Only Pods with confirmed logs permission in the bounded catalog are offered.</WarningBanner>:null}
 		<section className="grid gap-3 rounded-xl border border-kp-overlay-0 bg-kp-surface-0 p-3">
-			<label className="grid gap-1"><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Workload</span><Select value={workloadKey} onChange={(event)=>{stop('Aggregate target changed; all streams were canceled.');setLines([]);setSelectedPods(null);setSelectedContainers(null);setWorkloadKey(event.target.value)}}><option value="">Choose a workload</option>{workloads.data?.values.map((value)=><option key={`${value.kind}\0${value.namespace}\0${value.name}`} value={`${value.kind}\0${value.namespace}\0${value.name}`}>{value.kind} · {value.namespace} · {value.name}</option>)}</Select></label>
-			<div><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Pods ({activePods.length}/{relatedPods.length})</span><div className="mt-1 flex flex-wrap gap-2">{relatedPods.map((pod)=><Checkbox key={pod} checked={activePods.includes(pod)} disabled={!activePods.includes(pod)&&activePods.length>=MaximumAggregateStreams} onChange={(event)=>{stop();setSelectedPods(event.target.checked?[...activePods,pod]:activePods.filter((value)=>value!==pod))}}>{pod}</Checkbox>)}</div></div>
-			<div><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Containers</span><div className="mt-1 flex flex-wrap gap-2">{containers.map((container)=><Checkbox key={container} checked={activeContainers.includes(container)} onChange={(event)=>{stop();setSelectedContainers(event.target.checked?[...activeContainers,container]:activeContainers.filter((value)=>value!==container))}}>{container}</Checkbox>)}</div></div>
-			<div className="flex flex-wrap items-end gap-2"><label className="grid gap-1 w-24"><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Tail</span><Input type="number" min="1" max="2000" value={tailLines} onChange={(event)=>setTailLines(Number(event.target.value))}/></label><label className="grid gap-1 w-28"><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Since</span><Input value={since} placeholder="15m" onChange={(event)=>setSince(event.target.value)}/></label><Checkbox checked={previous} onChange={(event)=>{stop();setPrevious(event.target.checked)}}>Previous</Checkbox><Checkbox checked={timestamps} onChange={(event)=>setTimestamps(event.target.checked)}>Timestamps</Checkbox></div>
+			<label className="grid gap-1"><span className="text-column uppercase tracking-wider text-kp-overlay-text">Workload</span><Select value={workloadKey} onChange={(event)=>{stop('Aggregate target changed; all streams were canceled.');setLines([]);setSelectedPods(null);setSelectedContainers(null);setWorkloadKey(event.target.value)}}><option value="">Choose a workload</option>{workloads.data?.values.map((value)=><option key={`${value.kind}\0${value.namespace}\0${value.name}`} value={`${value.kind}\0${value.namespace}\0${value.name}`}>{value.kind} · {value.namespace} · {value.name}</option>)}</Select></label>
+			<div><span className="text-column uppercase tracking-wider text-kp-overlay-text">Pods ({activePods.length}/{relatedPods.length})</span><div className="mt-1 flex flex-wrap gap-2">{relatedPods.map((pod)=><Checkbox key={pod} checked={activePods.includes(pod)} disabled={!activePods.includes(pod)&&activePods.length>=MaximumAggregateStreams} onChange={(event)=>{stop();setSelectedPods(event.target.checked?[...activePods,pod]:activePods.filter((value)=>value!==pod))}}>{pod}</Checkbox>)}</div></div>
+			<div><span className="text-column uppercase tracking-wider text-kp-overlay-text">Containers</span><div className="mt-1 flex flex-wrap gap-2">{containers.map((container)=><Checkbox key={container} checked={activeContainers.includes(container)} onChange={(event)=>{stop();setSelectedContainers(event.target.checked?[...activeContainers,container]:activeContainers.filter((value)=>value!==container))}}>{container}</Checkbox>)}</div></div>
+			<div className="flex flex-wrap items-end gap-2"><label className="grid gap-1 w-24"><span className="text-column uppercase tracking-wider text-kp-overlay-text">Tail</span><Input type="number" min="1" max="2000" value={tailLines} onChange={(event)=>setTailLines(Number(event.target.value))}/></label><label className="grid gap-1 w-28"><span className="text-column uppercase tracking-wider text-kp-overlay-text">Since</span><Input value={since} placeholder="15m" onChange={(event)=>setSince(event.target.value)}/></label><Checkbox checked={previous} onChange={(event)=>{stop();setPrevious(event.target.checked)}}>Previous</Checkbox><Checkbox checked={timestamps} onChange={(event)=>setTimestamps(event.target.checked)}>Timestamps</Checkbox></div>
 			{targetsTruncated?<WarningBanner>Selection creates more than {MaximumAggregateStreams} streams. Only the first {MaximumAggregateStreams} deterministic Pod/container pairs will run.</WarningBanner>:null}
 			<div className="flex gap-2"><Button disabled={!ready} onClick={()=>void readAggregate()}>Read aggregate</Button><Button variant="success" disabled={!ready||previous||state.status==='following'} onClick={()=>void followAggregate()}>Follow aggregate</Button><Button variant="danger" disabled={state.status!=='connecting'&&state.status!=='following'} onClick={()=>stop()}>Stop all</Button></div>
 		</section>
-		<section className="grid gap-2 rounded-xl border border-kp-overlay-0 bg-kp-surface-0 p-3"><header><strong className="text-sm text-kp-text">{state.message}</strong><small className="block text-xs text-kp-overlay-text">{visible.length} visible of {lines.length} bounded in-memory lines.</small></header><div className="flex gap-2"><Input type="search" aria-label="Search aggregate logs" placeholder="Text or regular expression" value={search} onChange={(event)=>setSearch(event.target.value)}/><Checkbox checked={regex} onChange={(event)=>setRegex(event.target.checked)}>Regex</Checkbox></div>{regexError?<p className="text-xs text-kp-red">{regexError}</p>:null}<pre className={`mono min-h-[280px] max-h-[62vh] overflow-auto rounded-lg border border-kp-overlay-0 bg-kp-crust p-3 text-xs ${defaults.wrap?'whitespace-pre-wrap break-words':'whitespace-pre'}`} aria-label="Aggregated log output">{visible.map((line,index)=><span key={`${index}-${line.pod}-${line.container}`}><time className="text-kp-overlay-text">{line.timestamp??'no-timestamp'} </time><strong className="text-kp-mauve">{line.pod}</strong> <span className="text-kp-sky">{line.container}</span> │ {line.text}{line.truncated?' [truncated]':''}{'\n'}</span>)}</pre></section>
+		<section className="grid gap-2 rounded-xl border border-kp-overlay-0 bg-kp-surface-0 p-3"><header><strong className="text-content text-kp-text">{state.message}</strong><small className="block text-content text-kp-overlay-text">{visible.length} visible of {lines.length} bounded in-memory lines.</small></header><div className="flex gap-2"><Input type="search" aria-label="Search aggregate logs" placeholder="Text or regular expression" value={search} onChange={(event)=>setSearch(event.target.value)}/><Checkbox checked={regex} onChange={(event)=>setRegex(event.target.checked)}>Regex</Checkbox></div>{regexError?<p className="text-content text-kp-red">{regexError}</p>:null}<pre className={`log-output mono overflow-auto rounded-lg border border-kp-overlay-0 bg-kp-crust p-3 text-content ${defaults.wrap?'whitespace-pre-wrap break-words':'whitespace-pre'}`} aria-label="Aggregated log output">{visible.map((line,index)=><span key={`${index}-${line.pod}-${line.container}`}><time className="text-kp-overlay-text">{line.timestamp??'no-timestamp'} </time><strong className="text-kp-mauve">{line.pod}</strong> <span className="text-kp-sky">{line.container}</span> │ {line.text}{line.truncated?' [truncated]':''}{'\n'}</span>)}</pre></section>
 	</div>
 }
 
@@ -628,17 +597,17 @@ function LogsWorkspace({ selection, params, defaults, preferencesUnavailable }: 
 
   return <>
     {preferencesUnavailable ? <InfoBanner className="mb-3">Saved log preferences are unavailable; safe in-memory defaults are active.</InfoBanner> : null}
-    {catalog.isPending ? <p className="rounded-r-md border-l-2 border-kp-blue-border bg-kp-blue-bg px-3 py-2 text-sm text-kp-sky" role="status">Loading the bounded Pod catalog and exact pods.logs.get capabilities…</p>
+    {catalog.isPending ? <LoadingState label="Loading authorized Pods…" />
       : catalog.isError ? <ErrorBanner title="Authorized log target catalog unavailable">{message(catalog.error)}</ErrorBanner>
-        : catalog.data ? <p className={catalog.data.complete ? 'text-xs text-kp-overlay-text' : 'rounded-r-md border-l-2 border-kp-yellow-border bg-kp-yellow-bg px-3 py-2 text-sm text-kp-yellow'} role="status">{catalog.data.complete
+        : catalog.data ? <p className={catalog.data.complete ? 'text-content text-kp-overlay-text' : 'rounded-r-md border-l-2 border-kp-yellow-border bg-kp-yellow-bg px-3 py-2 text-content text-kp-yellow'} role="status">{catalog.data.complete
           ? `${catalog.data.pods.length} log-authorized Pod${catalog.data.pods.length === 1 ? '' : 's'} available in the complete bounded catalog.`
           : `Partial catalog: ${catalog.data.pods.length} log-authorized Pod${catalog.data.pods.length === 1 ? '' : 's'} from the bounded catalog; ${catalog.data.denied} denied and ${catalog.data.unknown} unknown. Some authorized targets may be absent.`}</p> : null}
     <section aria-label="Log query" className="flex flex-wrap items-end gap-2.5 rounded-xl border border-kp-overlay-0 bg-kp-surface-0 p-3">
-      <label className="grid flex-1 gap-1 min-w-[150px]"><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Namespace</span><Select value={namespaces.includes(namespace) ? namespace : ''} disabled={catalog.isPending || namespaces.length === 0} onChange={(event) => changeTarget(() => { setNamespace(event.target.value); setPod(''); setContainer(''); setPrevious(false) })}><option value="">Choose an authorized namespace</option>{namespaces.map((value) => <option key={value}>{value}</option>)}</Select></label>
-      <label className="grid flex-1 gap-1 min-w-[150px]"><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Pod</span><Select value={selectedPod?.name ?? ''} disabled={namespace === '' || catalogPods.length === 0} onChange={(event) => changeTarget(() => { setPod(event.target.value); setContainer(''); setPrevious(false) })}><option value="">Choose a log-authorized Pod</option>{catalogPods.map((value) => <option key={value.name}>{value.name}</option>)}</Select></label>
-      <label className="grid flex-1 gap-1 min-w-[150px]"><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Container</span><Select value={containers.includes(container) ? container : ''} disabled={!selectedPod || podDetail.isPending || containers.length === 0} onChange={(event) => changeTarget(() => { setContainer(event.target.value); setPrevious(false) })}><option value="">Choose an authorized Pod container</option>{containers.map((value) => <option key={value}>{value}</option>)}</Select></label>
-      <label className="grid gap-1 w-24"><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Tail lines</span><Input type="number" min="1" max="2000" value={tailLines} onChange={(event) => setTailLines(Number(event.target.value))} /></label>
-      <label className="grid gap-1 w-28"><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Since</span><Input aria-invalid={!validSince(since)} placeholder="15m" pattern="[1-9][0-9]*(s|m|h)" value={since} onChange={(event) => setSince(event.target.value)} /></label>
+      <label className="grid flex-1 gap-1 min-w-[150px]"><span className="text-column uppercase tracking-wider text-kp-overlay-text">Namespace</span><Select value={namespaces.includes(namespace) ? namespace : ''} disabled={catalog.isPending || namespaces.length === 0} onChange={(event) => changeTarget(() => { setNamespace(event.target.value); setPod(''); setContainer(''); setPrevious(false) })}><option value="">Choose an authorized namespace</option>{namespaces.map((value) => <option key={value}>{value}</option>)}</Select></label>
+      <label className="grid flex-1 gap-1 min-w-[150px]"><span className="text-column uppercase tracking-wider text-kp-overlay-text">Pod</span><Select value={selectedPod?.name ?? ''} disabled={namespace === '' || catalogPods.length === 0} onChange={(event) => changeTarget(() => { setPod(event.target.value); setContainer(''); setPrevious(false) })}><option value="">Choose a log-authorized Pod</option>{catalogPods.map((value) => <option key={value.name}>{value.name}</option>)}</Select></label>
+      <label className="grid flex-1 gap-1 min-w-[150px]"><span className="text-column uppercase tracking-wider text-kp-overlay-text">Container</span><Select value={containers.includes(container) ? container : ''} disabled={!selectedPod || podDetail.isPending || containers.length === 0} onChange={(event) => changeTarget(() => { setContainer(event.target.value); setPrevious(false) })}><option value="">Choose an authorized Pod container</option>{containers.map((value) => <option key={value}>{value}</option>)}</Select></label>
+      <label className="grid gap-1 w-24"><span className="text-column uppercase tracking-wider text-kp-overlay-text">Tail lines</span><Input type="number" min="1" max="2000" value={tailLines} onChange={(event) => setTailLines(Number(event.target.value))} /></label>
+      <label className="grid gap-1 w-28"><span className="text-column uppercase tracking-wider text-kp-overlay-text">Since</span><Input aria-invalid={!validSince(since)} placeholder="15m" pattern="[1-9][0-9]*(s|m|h)" value={since} onChange={(event) => setSince(event.target.value)} /></label>
       <Checkbox checked={previous} disabled={!previousAvailable} onChange={(event) => { if (followAbortRef.current) stopFollow('Follow stopped because previous logs were selected.'); setPrevious(event.target.checked) }}>Previous container</Checkbox>
       <Checkbox checked={timestamps} onChange={(event) => setTimestamps(event.target.checked)}>Timestamps</Checkbox>
       <div className="flex w-full flex-wrap gap-2">
@@ -646,9 +615,9 @@ function LogsWorkspace({ selection, params, defaults, preferencesUnavailable }: 
         <Button variant="success" disabled={!ready || previous || isFollowing} onClick={() => void startFollow()}>Follow</Button>
         <Button variant="danger" disabled={!isFollowing} onClick={() => stopFollow()}>Stop</Button>
       </div>
-      {!validSince(since) ? <p className="w-full text-xs text-kp-red">Since must use one unit (s, m or h) and cannot exceed 4 hours.</p> : null}
-      {podDetail.isError ? <p className="w-full text-xs text-kp-red">Container catalog unavailable: {message(podDetail.error)}</p> : null}
-      {selectedContainer && !previousAvailable ? <p className="w-full text-xs text-kp-overlay-text">The authorized Pod detail reports no previous instance for this container.</p> : null}
+      {!validSince(since) ? <p className="w-full text-content text-kp-red">Since must use one unit (s, m or h) and cannot exceed 4 hours.</p> : null}
+      {podDetail.isError ? <p className="w-full text-content text-kp-red">Container catalog unavailable: {message(podDetail.error)}</p> : null}
+      {selectedContainer && !previousAvailable ? <p className="w-full text-content text-kp-overlay-text">The authorized Pod detail reports no previous instance for this container.</p> : null}
     </section>
     <SavedFilterControls collection="logs" generation={selection.generation} currentQuery={{
       ...(namespace ? { namespace: [namespace] } : {}),
@@ -664,23 +633,23 @@ function LogsWorkspace({ selection, params, defaults, preferencesUnavailable }: 
     {read.data?.truncated ? <WarningBanner>The bounded log response was truncated by the server.</WarningBanner> : null}
     <section className="grid gap-2.5 rounded-xl border border-kp-overlay-0 bg-kp-surface-0 p-3.5">
       <header className="flex flex-wrap items-start justify-between gap-3">
-        <div><strong className={`block text-sm ${follow.status === 'following' ? 'text-kp-green' : follow.status === 'connecting' ? 'text-kp-sky' : follow.status === 'error' ? 'text-kp-red' : 'text-kp-subtext'}`} aria-live="polite">{paused ? `${follow.message} (paused)` : follow.message}</strong><small className="mt-0.5 block text-xs text-kp-overlay-text">{visibleLines.length} visible of {keptLines.length} line{keptLines.length === 1 ? '' : 's'} kept in the bounded in-memory viewer{paused && followBuffer.length > 0 ? ` · ${followBuffer.length} buffered` : ''}.</small></div>
+        <div><strong className={`block text-content ${follow.status === 'following' ? 'text-kp-green' : follow.status === 'connecting' ? 'text-kp-sky' : follow.status === 'error' ? 'text-kp-red' : 'text-kp-subtext'}`} aria-live="polite">{paused ? `${follow.message} (paused)` : follow.message}</strong><small className="mt-0.5 block text-content text-kp-overlay-text">{visibleLines.length} visible of {keptLines.length} line{keptLines.length === 1 ? '' : 's'} kept in the bounded in-memory viewer{paused && followBuffer.length > 0 ? ` · ${followBuffer.length} buffered` : ''}.</small></div>
         <div className="flex flex-wrap items-center justify-end gap-1.5">
-          <Button size="sm" variant="secondary" disabled={!isFollowing && !paused} aria-label={paused ? 'Continue following logs' : 'Pause following logs'} onClick={() => { if (paused) { flushBuffer(); setPaused(false) } else { setPaused(true) } }}>{paused ? 'Continue' : 'Pause'}</Button>
-          <Button size="sm" variant="secondary" onClick={() => setWrap(!wrap)}>{wrap ? 'Disable wrap' : 'Wrap lines'}</Button>
-          <Button size="sm" variant="secondary" disabled={visibleLines.length === 0} onClick={() => void copyLogs()}>Copy</Button>
-          <Button size="sm" variant="secondary" disabled={visibleLines.length === 0} onClick={downloadLogs}>Download</Button>
-          <Button size="sm" variant="secondary" disabled={lines.length === 0} onClick={() => { setFollowLines([]); clearBuffer(); read.reset(); setPaused(false) }}>Clear</Button>
-          <label className="grid gap-1 w-24"><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Level</span><Select value={levelFilter} aria-label="Filter by log level" onChange={(event) => setLevelFilter(event.target.value as LogLevel | 'all')}><option value="all">all</option><option value="error">error</option><option value="warn">warn</option><option value="info">info</option><option value="debug">debug</option></Select></label>
+          <Button variant="secondary" disabled={!isFollowing && !paused} aria-label={paused ? 'Continue following logs' : 'Pause following logs'} onClick={() => { if (paused) { flushBuffer(); setPaused(false) } else { setPaused(true) } }}>{paused ? 'Continue' : 'Pause'}</Button>
+          <Button variant="secondary" onClick={() => setWrap(!wrap)}>{wrap ? 'Disable wrap' : 'Wrap lines'}</Button>
+          <Button variant="secondary" disabled={visibleLines.length === 0} onClick={() => void copyLogs()}>Copy</Button>
+          <Button variant="secondary" disabled={visibleLines.length === 0} onClick={downloadLogs}>Download</Button>
+          <Button variant="secondary" disabled={lines.length === 0} onClick={() => { setFollowLines([]); clearBuffer(); read.reset(); setPaused(false) }}>Clear</Button>
+          <label className="grid gap-1 w-24"><span className="text-column uppercase tracking-wider text-kp-overlay-text">Level</span><Select value={levelFilter} aria-label="Filter by log level" onChange={(event) => setLevelFilter(event.target.value as LogLevel | 'all')}><option value="all">all</option><option value="error">error</option><option value="warn">warn</option><option value="info">info</option><option value="debug">debug</option></Select></label>
           {levelFilter !== 'all' ? <Badge variant={levelBadgeVariant(levelFilter)} className={levelFilter === 'debug' ? 'text-kp-mauve border-kp-mauve-muted' : ''}>{levelFilter}</Badge> : null}
         </div>
       </header>
-      <label className="grid max-w-[420px] gap-1"><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Search visible logs</span><Input type="search" data-app-shortcut="search" aria-label="Search visible logs" aria-keyshortcuts="Control+F Meta+F" value={search} maxLength={256} onChange={(event) => setSearch(event.target.value)} /></label>
-      <pre className={`mono min-h-[280px] max-h-[62vh] overflow-auto rounded-lg border border-kp-overlay-0 bg-kp-crust p-3.5 text-xs leading-relaxed text-kp-text ${wrap ? 'whitespace-pre-wrap break-words' : 'whitespace-pre'}`} aria-label="Log output">{visibleLines.map((line, index) => {
+      <label className="grid max-w-[420px] gap-1"><span className="text-column uppercase tracking-wider text-kp-overlay-text">Search visible logs</span><Input type="search" data-app-shortcut="search" aria-label="Search visible logs" aria-keyshortcuts="Control+F Meta+F" value={search} maxLength={256} onChange={(event) => setSearch(event.target.value)} /></label>
+      <pre className={`log-output mono overflow-auto rounded-lg border border-kp-overlay-0 bg-kp-crust p-3.5 text-content leading-relaxed text-kp-text ${wrap ? 'whitespace-pre-wrap break-words' : 'whitespace-pre'}`} aria-label="Log output">{visibleLines.map((line, index) => {
         const jsonValue = isJSONObjectLike(line.text)
         return <span key={`${index}-${line.timestamp ?? ''}`}>{timestamps && line.timestamp ? <time className="text-kp-overlay-text">{line.timestamp} </time> : null}{jsonValue ? <HighlightedJSON value={jsonValue} /> : line.text}{line.truncated ? ' [truncated]' : ''}{'\n'}</span>
       })}</pre>
-      {clipboardMessage ? <p className="text-xs text-kp-overlay-text" role="status">{clipboardMessage}</p> : null}
+      {clipboardMessage ? <p className="text-content text-kp-overlay-text" role="status">{clipboardMessage}</p> : null}
     </section>
   </>
 }

@@ -70,10 +70,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               <div className="flex items-start gap-2">
                 <Icon size={15} strokeWidth={1.8} className={`mt-0.5 shrink-0 ${toneColor[toast.tone]}`} aria-hidden="true" />
                 <div className="min-w-0 flex-1">
-                  <p className="m-0 text-sm font-medium text-kp-text">{toast.title}</p>
-                  {toast.detail ? <p className="m-0 text-xs leading-relaxed break-words text-kp-subtext">{toast.detail}</p> : null}
+                  <p className="m-0 text-content font-bold text-kp-text">{toast.title}</p>
+                  {toast.detail ? <p className="m-0 text-content leading-relaxed break-words text-kp-subtext">{toast.detail}</p> : null}
                 </div>
-                <button type="button" onClick={() => dismiss(toast.id)} aria-label="Dismiss notification" className="-m-1 grid h-6 w-6 shrink-0 place-items-center rounded-md text-kp-overlay-text hover:text-kp-text hover:bg-kp-surface-3">
+                <button type="button" onClick={() => dismiss(toast.id)} aria-label="Dismiss notification" className="control control-icon -m-1 grid place-items-center text-kp-overlay-text hover:text-kp-text hover:bg-kp-surface-3">
                   <X size={13} aria-hidden="true" />
                 </button>
               </div>

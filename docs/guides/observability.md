@@ -101,7 +101,7 @@ começaram na F2; não fazem parte da medição histórica da F0. O cache de
 páginas só responde se o watch ativo cobre todas as origens da página e cada
 origem passa novamente pela autorização. Uma primeira página inteira que cabe
 no limite pode ser reconstruída diretamente do snapshot do watch, sem LIST;
-páginas maiores preservam o LIST paginado. Sem watch, Refresh executa LIST.
+páginas maiores preservam o LIST paginado. Sem watch, a revalidação automática executa LIST.
 
 ### 3.3 Endpoint `/metrics`
 
@@ -121,7 +121,7 @@ observability:
 
 | Fonte | Revalidação | Limite/condição |
 | --- | --- | --- |
-| recursos core com stream ativo | WATCH após snapshot inicial | compartilhamento por identidade completa; idle de 45 s; sem polling implícito se WATCH indisponível |
+| recursos core com stream ativo | WATCH após snapshot inicial | compartilhamento por identidade completa; idle de 45 s; revalidação HTTP a cada 15 s para inventários visíveis, inclusive sem WATCH |
 | páginas de coleção cobertas por WATCH | cache em memória por até 30 s | reautorização por origem em cada hit; delta, 403 e troca de geração invalidam |
 | CPU/memória do overview | 8 s | somente após Tier 1; suspenso em background |
 | capabilities/RBAC | TTL de 30–60 s (45 s padrão) | 403/revogação e generation exigem revalidação/invalidação |
@@ -129,7 +129,7 @@ observability:
 | versão Kubernetes (`/version`) | 10 min | chave completa de seleção; somente sucesso saudável é retido; generation/contexto invalidam |
 | análise de logs | sob ação explícita | nunca bloqueia Tier 1 nem inicia varredura global |
 
-O botão Refresh consulta o Kubernetes quando não há watch cobrindo
+A revalidação automática consulta o Kubernetes quando não há watch cobrindo
 integralmente as origens. A UI agrupa deltas em janelas de 2 s antes de
 revalidar a página HTTP; o watch e sua fila fazem coalescing por objeto para
 os tópicos level-driven, preservando Events cronológicos. Páginas completas e
@@ -166,7 +166,7 @@ requests concorrentes na mesma view não sobrescrevem estado entre si.
 | `time_to_first_row` | ms | início da tentativa LIST até o primeiro commit React dos seus itens HTTP |
 | `time_to_first_visible_row` | ms | clique de navegação até o primeiro commit React de linha visível, inclusive preview autorizado |
 | `time_to_page_complete` | ms | conclusão da request da página |
-| `filter_interaction_latency` | ms | Apply até conclusão da página |
+| `filter_interaction_latency` | ms | busca aplicada após debounce/Enter até conclusão da página |
 | `sort_interaction_latency` | ms | Apply de sort/order até conclusão |
 | `rendered_row_count` | linhas | linhas realmente passadas à tabela |
 

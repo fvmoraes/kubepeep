@@ -22,12 +22,16 @@ interface CommandCenterProps {
   getResources?: () => readonly CommandRoute[]
   // Saved favorite targets (F7-01): resolved at open time, rendered first.
   getFavorites?: () => readonly CommandRoute[]
-  getRecent?: () => readonly CommandRoute[]
-  onClearRecent?: () => void
   onRefresh?: () => void | Promise<unknown>
 }
 
 type CommandCenterView = 'commands' | 'help' | null
+
+function isMacOS() {
+  if (typeof navigator === 'undefined') return false
+  // iPadOS can report MacIntel; it must not receive the macOS-only symbol.
+  return /^Mac/i.test(navigator.platform) && (navigator.maxTouchPoints ?? 0) < 2
+}
 
 function isEditableTarget(target: EventTarget | null) {
   if (!(target instanceof HTMLElement)) return false
@@ -76,10 +80,11 @@ function matchesQuery(route: CommandRoute, query: string) {
   return terms.every((term) => searchable.includes(term))
 }
 
-export function CommandCenter({ routes, getFavorites, getRecent, getResources, onRefresh, onClearRecent }: CommandCenterProps) {
+export function CommandCenter({ routes, getFavorites, getResources, onRefresh }: CommandCenterProps) {
   const [sessionResources, setSessionResources] = useState<readonly CommandRoute[]>([])
   const [sessionFavorites, setSessionFavorites] = useState<readonly CommandRoute[]>([])
-  const [sessionRecent, setSessionRecent] = useState<readonly CommandRoute[]>([])
+  const macOS = isMacOS()
+  const modifierLabel = macOS ? '⌘' : 'Ctrl+'
   const navigate = useNavigate()
   const [view, setView] = useState<CommandCenterView>(null)
   const [query, setQuery] = useState('')
@@ -96,22 +101,19 @@ export function CommandCenter({ routes, getFavorites, getRecent, getResources, o
     const timer = setTimeout(() => setDebouncedQuery(query), 30)
     return () => clearTimeout(timer)
   }, [query])
-  const filteredRoutes = useMemo(() => routes.filter((route) => matchesQuery(route, debouncedQuery)), [debouncedQuery, routes])
-  const filteredResources = useMemo(
-    () => (sessionResources.length > 0 ? sessionResources.filter((entry) => matchesQuery(entry, debouncedQuery)) : []),
-    [debouncedQuery, sessionResources],
-  )
-  const filteredFavorites = useMemo(
-    () => (sessionFavorites.length > 0 ? sessionFavorites.filter((entry) => matchesQuery(entry, debouncedQuery)) : []),
-    [debouncedQuery, sessionFavorites],
-  )
-  const filteredRecent = useMemo(
-    () => (sessionRecent.length > 0 ? sessionRecent.filter((entry) => matchesQuery(entry, debouncedQuery)) : []),
-    [debouncedQuery, sessionRecent],
-  )
+  const availableEntries = useMemo(() => {
+    const availablePaths = new Set([...routes, ...sessionResources].map((entry) => entry.path))
+    const seen = new Set<string>()
+    // Favorites can prioritize an available result, never resurrect an old target.
+    return [...sessionFavorites, ...routes, ...sessionResources].filter((entry) => {
+      if (!availablePaths.has(entry.path) || seen.has(entry.path)) return false
+      seen.add(entry.path)
+      return true
+    })
+  }, [routes, sessionResources, sessionFavorites])
   const combinedResults = useMemo(
-    () => [...filteredFavorites, ...filteredRecent, ...filteredRoutes, ...(filteredResources.length > 0 ? filteredResources : [])],
-    [filteredFavorites, filteredRecent, filteredResources, filteredRoutes],
+    () => availableEntries.filter((entry) => matchesQuery(entry, debouncedQuery)),
+    [availableEntries, debouncedQuery],
   )
 
   const open = useCallback((nextView: Exclude<CommandCenterView, null>) => {
@@ -120,11 +122,10 @@ export function CommandCenter({ routes, getFavorites, getRecent, getResources, o
     }
     if (nextView === 'commands') {
       setSessionFavorites(getFavorites?.() ?? [])
-      setSessionRecent(getRecent?.() ?? [])
       setSessionResources(getResources?.() ?? [])
     }
     setView(nextView)
-  }, [getFavorites, getRecent, getResources, view])
+  }, [getFavorites, getResources, view])
 
   const close = useCallback(() => {
     setView(null)
@@ -222,7 +223,7 @@ export function CommandCenter({ routes, getFavorites, getRecent, getResources, o
       event.preventDefault()
       const currentResults = query === debouncedQuery
         ? combinedResults
-        : [...sessionFavorites, ...sessionRecent, ...routes, ...sessionResources].filter((entry) => matchesQuery(entry, query))
+        : availableEntries.filter((entry) => matchesQuery(entry, query))
       if (currentResults.length > 0) chooseRoute(currentResults[Math.min(activeIndex, currentResults.length - 1)])
       return
     }
@@ -236,7 +237,7 @@ export function CommandCenter({ routes, getFavorites, getRecent, getResources, o
     }
   }
 
-  const resultClass = (index: number) => `w-full min-h-[46px] flex items-center justify-between gap-4 px-2.5 py-1.5 rounded-md text-left cursor-pointer border ${
+  const resultClass = (index: number) => `control-row min-w-0 w-full flex items-center justify-between gap-4 px-2 py-1.5 text-left cursor-pointer border ${
     index === activeIndex ? 'bg-kp-surface-3 border-kp-overlay-1' : 'bg-transparent border-transparent'
   }`
 
@@ -244,20 +245,19 @@ export function CommandCenter({ routes, getFavorites, getRecent, getResources, o
     <>
       <Button
         variant="secondary"
-        size="md"
         className="text-kp-overlay-text font-normal"
         aria-label="Open command center"
-        aria-keyshortcuts="Control+K Meta+K"
+        aria-keyshortcuts={macOS ? 'Meta+K' : 'Control+K'}
         onClick={() => open('commands')}
       >
         <Search size={14} aria-hidden="true" />
         <span>Search…</span>
-        <kbd>⌘K</kbd>
+        <kbd aria-label={macOS ? 'Command + K' : 'Control + K'}>{modifierLabel}K</kbd>
       </Button>
 
       {view ? createPortal(
         <div
-          className="fixed z-[var(--z-command-backdrop)] inset-0 grid place-items-start justify-center overflow-y-auto py-[min(12vh,96px)] px-4 bg-black/70 backdrop-blur-sm"
+          className="fixed z-[var(--z-command-backdrop)] inset-0 flex items-start justify-center overflow-y-auto py-[min(8dvh,64px)] px-4 bg-black/70 backdrop-blur-sm"
           onMouseDown={(event) => {
             if (event.target === event.currentTarget) close()
           }}
@@ -270,20 +270,20 @@ export function CommandCenter({ routes, getFavorites, getRecent, getResources, o
             aria-labelledby={titleId}
             aria-describedby={descriptionId}
             onKeyDown={onDialogKeyDown}
-            className={`w-[min(680px,100%)] max-h-[min(720px,78vh)] grid overflow-hidden rounded-xl border border-kp-overlay-1 bg-kp-surface-0 shadow-dialog text-kp-text ${
+            className={`command-dialog w-[min(680px,100%)] max-h-[min(720px,84dvh)] grid overflow-hidden rounded-xl border border-kp-overlay-1 bg-kp-surface-0 shadow-dialog text-kp-text ${
               view === 'commands' ? 'grid-rows-[auto_auto_auto_minmax(0,1fr)_auto]' : 'grid-rows-[auto_auto_minmax(0,1fr)_auto]'
             }`}
           >
             <header className="flex items-center justify-between gap-5 px-4 pt-4 pb-2.5">
               <div>
-                <h2 id={titleId} className="text-xl">{view === 'commands' ? 'Command center' : 'Keyboard shortcuts'}</h2>
+                <h2 id={titleId} className="text-title">{view === 'commands' ? 'Command center' : 'Keyboard shortcuts'}</h2>
               </div>
               <button
                 ref={view === 'help' ? helpCloseRef : undefined}
                 type="button"
                 aria-label="Close command center"
                 onClick={close}
-                className="h-8 w-8 grid place-items-center rounded-md text-kp-overlay-text hover:text-kp-text hover:bg-kp-surface-3"
+                className="control control-icon grid place-items-center text-kp-overlay-text hover:text-kp-text hover:bg-kp-surface-3"
               >
                 <X size={16} aria-hidden="true" />
               </button>
@@ -291,14 +291,14 @@ export function CommandCenter({ routes, getFavorites, getRecent, getResources, o
 
             {view === 'commands' ? (
               <>
-                <p id={descriptionId} className="px-4 pb-2.5 text-xs text-kp-overlay-text leading-relaxed">{sessionResources.length > 0 ? 'Search pages and resources already loaded in this session. Results use identifiers from the bounded local cache; absence here does not prove absence in the cluster.' : 'Search the pages built into this local application. The resource cache is empty or not loaded; absence here does not prove absence in the cluster.'}</p>
+                <p id={descriptionId} className="px-4 pb-2.5 text-content text-kp-overlay-text leading-relaxed">Search all application pages and resources loaded in the active context.</p>
                 <div className="mx-4 mb-3 grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2.5 px-3 rounded-md border border-kp-overlay-1 bg-kp-crust focus-within:border-kp-mauve focus-within:shadow-focus">
                   <Search size={16} aria-hidden="true" className="text-kp-mauve" />
                   <Input
                     ref={inputRef}
                     type="search"
                     role="combobox"
-                    aria-label="Search application pages"
+                    aria-label="Search pages and resources"
                     aria-autocomplete="list"
                     aria-controls={listboxId}
                     aria-expanded="true"
@@ -306,8 +306,8 @@ export function CommandCenter({ routes, getFavorites, getRecent, getResources, o
                     autoComplete="off"
                     spellCheck="false"
                     value={query}
-                    placeholder="Search Overview, Pods, Logs…"
-                    className="border-0 bg-transparent px-0 shadow-none focus:border-0 focus:shadow-none"
+                    placeholder="Search pages, resources, namespaces…"
+                    className="border-0 bg-transparent px-0 shadow-none focus:border-0 focus:shadow-none focus:outline-none!"
                     onChange={(event) => {
                       setQuery(event.target.value)
                       setActiveIndex(0)
@@ -316,10 +316,10 @@ export function CommandCenter({ routes, getFavorites, getRecent, getResources, o
                 </div>
 
                 {combinedResults.length > 0 ? (
-                  <div id={listboxId} role="listbox" aria-label={sessionResources.length > 0 || sessionFavorites.length > 0 || sessionRecent.length > 0 ? 'Favorites, recent targets, application pages and visible resources' : 'Application pages'} className="min-h-0 grid gap-0.5 content-start overflow-y-auto px-2.5 pb-2.5">
-                    {[...filteredFavorites, ...filteredRecent, ...filteredRoutes, ...filteredResources].map((entry, index) => (
+                  <div id={listboxId} role="listbox" aria-label="Application pages and loaded resources" className="min-h-0 grid auto-rows-min gap-0.5 content-start overflow-y-auto px-2.5 pb-2.5">
+                    {combinedResults.map((entry, index) => (
                       <button
-                        key={`${entry.path}-${index}`}
+                        key={entry.path}
                         id={`${listboxId}-option-${index}`}
                         type="button"
                         role="option"
@@ -330,47 +330,46 @@ export function CommandCenter({ routes, getFavorites, getRecent, getResources, o
                         onFocus={() => setActiveIndex(index)}
                         onClick={() => chooseRoute(entry)}
                       >
-                        <span className="block min-w-0"><strong className="block text-sm text-kp-text">{entry.label}</strong><small className="block mt-0.5 text-xs text-kp-overlay-text">{entry.description}</small></span>
-                        <code className="shrink-0 text-xs">{entry.path}</code>
+                        <span className="block min-w-0 [overflow-wrap:anywhere]"><strong className="block text-content text-kp-text">{entry.label}</strong><small className="block mt-0.5 text-content text-kp-overlay-text">{entry.description}</small></span>
+                        <code className="max-w-[35%] shrink-0 truncate text-content" title={entry.path}>{entry.path}</code>
                       </button>
                     ))}
                   </div>
                 ) : (
-                  <p role="status" className="min-h-[110px] grid place-items-center px-6 text-sm text-kp-overlay-text text-center">{sessionResources.length > 0 ? 'No page or loaded resource matches this search.' : 'No application page matches this search.'}</p>
+                  <p role="status" className="min-h-[110px] grid place-items-center px-6 text-content text-kp-overlay-text text-center">{sessionResources.length > 0 ? 'No page or loaded resource matches this search.' : 'No application page matches this search.'}</p>
                 )}
 
-                <footer className="flex items-center gap-3.5 border-t border-kp-overlay-0 bg-kp-surface-1 px-4 py-2 text-xs text-kp-overlay-text">
+                <footer className="flex flex-wrap items-center gap-2 border-t border-kp-overlay-0 bg-kp-surface-1 px-4 py-2 text-content text-kp-overlay-text">
                   <span className="inline-flex items-center gap-1"><ArrowUp size={12} aria-hidden="true" /><ArrowDown size={12} aria-hidden="true" /> move</span>
                   <span className="inline-flex items-center gap-1"><CornerDownLeft size={12} aria-hidden="true" /> open</span>
                   <span className="inline-flex items-center gap-1"><kbd>Esc</kbd> close</span>
-                  {sessionRecent.length > 0 && onClearRecent ? <button type="button" className="inline-flex items-center gap-1.5 text-kp-sky hover:text-kp-text" onClick={() => { onClearRecent(); setSessionRecent([]) }}>clear recent</button> : null}
-                  <button type="button" className="ml-auto inline-flex items-center gap-1.5 text-kp-sky hover:text-kp-text" onClick={() => setView('help')}><Keyboard size={13} aria-hidden="true" /> ? shortcuts</button>
+                  <button type="button" className="control ml-auto inline-flex items-center gap-1.5 px-2 text-content text-kp-sky hover:text-kp-text" onClick={() => setView('help')}><Keyboard size={13} aria-hidden="true" /> ? shortcuts</button>
                 </footer>
               </>
             ) : (
               <>
-                <p id={descriptionId} className="px-4 pb-2.5 text-xs text-kp-overlay-text leading-relaxed">Navigation and focus stay local. Refresh repeats only active read queries; no shortcut mutates Kubernetes resources.</p>
+                <p id={descriptionId} className="px-4 pb-2.5 text-content text-kp-overlay-text leading-relaxed">Navigation and focus stay local. Refresh repeats only active read queries; no shortcut mutates Kubernetes resources.</p>
                 <dl className="min-h-0 grid gap-px overflow-y-auto mx-4 mb-4 content-start">
                   {[
-                    ['⌘/Ctrl K', 'Open page search from anywhere.'],
-                    ['⌘/Ctrl R', 'Refresh active read-only views instead of reloading the browser.'],
-                    ['⌘/Ctrl F', 'Focus and select the current page search; browser Find remains available when no page search exists.'],
-                    ['⌘/Ctrl O', 'Open and focus the Kubernetes context selector when it is available.'],
-                    ['⌘/Ctrl B', 'Go back when local application history has an earlier entry.'],
+                    [`${modifierLabel}K`, 'Open global search from anywhere.'],
+                    [`${modifierLabel}R`, 'Refresh active read-only views instead of reloading the browser.'],
+                    [`${modifierLabel}F`, 'Focus and select the current page search; browser Find remains available when no page search exists.'],
+                    [`${modifierLabel}O`, 'Open and focus the Kubernetes context selector when it is available.'],
+                    [`${modifierLabel}B`, 'Go back when local application history has an earlier entry.'],
                     ['?', 'Open this help outside editable fields.'],
-                    ['↑ ↓', 'Move through matching pages.'],
-                    ['Enter', 'Open the selected page.'],
+                    ['↑ ↓', 'Move through matching pages and resources.'],
+                    ['Enter', 'Open the selected result.'],
                     ['Esc', 'Close and return focus.'],
                     ['Tab', 'Move between controls inside the dialog.'],
                   ].map(([keys, help]) => (
                     <div key={keys} className="grid grid-cols-[minmax(110px,0.4fr)_1fr] items-center gap-4 rounded-md bg-kp-surface-1 px-2.5 py-2">
                       <dt><kbd>{keys}</kbd></dt>
-                      <dd className="m-0 text-xs text-kp-subtext leading-relaxed">{help}</dd>
+                      <dd className="m-0 text-content text-kp-subtext leading-relaxed">{help}</dd>
                     </div>
                   ))}
                 </dl>
                 <footer className="flex items-center justify-end border-t border-kp-overlay-0 bg-kp-surface-1 px-4 py-2">
-                  <button type="button" className="inline-flex items-center gap-1.5 text-kp-sky hover:text-kp-text" onClick={() => setView('commands')}><Search size={13} aria-hidden="true" /> Search pages</button>
+                  <button type="button" className="control inline-flex items-center gap-1.5 px-2 text-content text-kp-sky hover:text-kp-text" onClick={() => setView('commands')}><Search size={13} aria-hidden="true" /> Global search</button>
                 </footer>
               </>
             )}

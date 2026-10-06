@@ -55,7 +55,7 @@ export function Drawer({ open, onClose, title, children, className = '' }: Drawe
           <button
             type="button"
             onClick={onClose}
-            className="h-7 w-7 shrink-0 grid place-items-center rounded-md text-kp-overlay-text hover:text-kp-text hover:bg-kp-surface-3"
+            className="control control-icon grid place-items-center text-kp-overlay-text hover:text-kp-text hover:bg-kp-surface-3"
             aria-label="Close details"
           >
             <X size={16} aria-hidden="true" />

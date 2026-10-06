@@ -1,8 +1,8 @@
 import { ResourceUsage } from './resource/ResourceUsage'
 import { useResourceMetrics, useResourceHPAs, podHPA, podResourceUsage } from './resource/resourceMetrics'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link, useParams, useSearchParams } from 'react-router'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useParams, useSearchParams } from 'react-router'
 import { RotateCcw, ScrollText, Trash2 } from 'lucide-react'
 
 import {
@@ -42,16 +42,16 @@ import type {
   Workload,
   CapabilityMatrix,
 } from '../api/types'
-import { Badge, Button, DataTable, Input, Select, StatusBadge, type DataTableColumn } from './ui'
+import { Badge, Button, DataTable, StatusBadge, type DataTableColumn } from './ui'
 import { ConfirmDialog } from './ui/ConfirmDialog'
 import { useToast } from './ui/Toast'
 import { csrfForGeneration } from '../actions/csrf'
 import { effectiveNamespaces, useGlobalNamespace } from '../context/GlobalNamespace'
 import { bindListInteraction, listInteractionFor } from '../observability/uxMetrics'
 import { ResourceListControls } from './ResourceListControls'
-import type { ActiveListFilter, ListSortOrder, ListSortOption } from './ResourceListControls'
+import type { ListSortOrder } from './ResourceListControls'
 import { ResourceLiveUpdates } from './ResourceLiveUpdates'
-import { SavedFilterControls } from './SavedFilterControls'
+
 import { InfiniteCollectionFooter, QueryState, SelectionGate } from './resource/states'
 import { collectionGcTime, collectionStaleTime, useInfiniteCollection } from './resource/useInfiniteCollection'
 import { podPreviewKey } from './resource/podPreview'
@@ -59,11 +59,14 @@ import { useSelectionBoundKeys } from './resource/useSelectionBoundKeys'
 import { useResourceStreamPreview } from './resource/useResourceStreamPreview'
 import { ResourcePage } from './resource/ResourcePage'
 import { TableLink } from './resource/TableLink'
-import { applyColumnVisibility, ColumnVisibilityControl, usePreferenceColumnVisibility } from './resource/columns'
+import { usePreferenceColumnVisibility } from './resource/columns'
 import { age, dateTime } from './resource/format'
 import { eventBadgeVariant, statusBadgeVariant } from './resource/status'
 import { workloadKindPath } from '../navigation/paths'
 import { useResourceWorkspace } from './workspace/ResourceWorkspaceProvider'
+
+const PodLogsPanel = lazy(() => import('./workspace/PodLogsPanel').then((module) => ({ default: module.PodLogsPanel })))
+function podGroup(pod: Pod) { return pod.owner?.kind === 'Job' || pod.owner?.kind === 'CronJob' ? 1 : 0 }
 
 function useActiveSelection() {
   const status = useQuery({ queryKey: ['local-status'], queryFn: ({ signal }) => getStatus(signal), staleTime: 15_000 })
@@ -85,8 +88,6 @@ function useGenerationRequests(generation: string | undefined) {
   return { run, abortAll }
 }
 
-
-
 const workloadKindTitles: Record<string, Workload['kind']> = {
   deployments: 'Deployment',
   statefulsets: 'StatefulSet',
@@ -96,69 +97,14 @@ const workloadKindTitles: Record<string, Workload['kind']> = {
   replicasets: 'ReplicaSet',
 }
 
-function compactFilterQuery(entries: Array<[string, unknown]>): Record<string, unknown> {
-  const query: Record<string, unknown> = {}
-  for (const [key, value] of entries) {
-    if (value === undefined || value === '' || Array.isArray(value) && value.length === 0) continue
-    query[key] = value
-  }
-  return query
-}
-
-function savedString(query: Record<string, unknown>, key: string, allowed?: readonly string[]): string {
-  const value = query[key]
-  if (typeof value !== 'string' || allowed && !allowed.includes(value)) return ''
-  return value
-}
-
-function savedFirst(query: Record<string, unknown>, key: string, allowed?: readonly string[]): string {
-  const values = query[key]
-  if (!Array.isArray(values) || typeof values[0] !== 'string' || allowed && !allowed.includes(values[0])) return ''
-  return values[0]
-}
-
 function namespaceValues(value: string): string[] {
   return [...new Set(value.split(/[\s,]+/).map((item) => item.trim()).filter(Boolean))]
 }
 
 // Mirrors the backend collection limit for one list request (MaximumNamespaces).
-const maximumNamespaceFilter = 100
-
-function NamespaceFilterInput({ value, onChange }: { value: string; onChange: (value: string) => void }) {
-  const entries = namespaceValues(value)
-  return (
-    <span className="min-w-0">
-      <Input aria-label="Namespace" value={value} maxLength={4096} placeholder="ns filter" className="!h-7 !w-[10rem] text-sm" onChange={(event) => onChange(event.target.value)} />
-      {entries.length > maximumNamespaceFilter ? (
-        <small role="note" className="mt-1 block text-xs text-kp-yellow">
-          {entries.length} namespaces listed; a query accepts at most {maximumNamespaceFilter}. Narrow the filter before applying.
-        </small>
-      ) : null}
-    </span>
-  )
-}
-
-function savedNamespaces(query: Record<string, unknown>): string {
-  const values = query.namespace
-  return Array.isArray(values) ? values.filter((value): value is string => typeof value === 'string').join(', ') : ''
-}
-
-function savedSort(query: Record<string, unknown>, allowed: readonly string[], fallback: string): string {
-  return savedString(query, 'sort', allowed) || fallback
-}
-
-function savedOrder(query: Record<string, unknown>, fallback: ListSortOrder): ListSortOrder {
-  const value = savedString(query, 'order', ['asc', 'desc'])
-  return value === 'asc' || value === 'desc' ? value : fallback
-}
 
 function optionalSort(sort: string, order: ListSortOrder, defaultSort: string, defaultOrder: ListSortOrder): { sort?: string; order?: ListSortOrder } {
   return sort === defaultSort && order === defaultOrder ? {} : { sort, order }
-}
-
-function activeFilter(id: string, label: string, value: string | string[]): ActiveListFilter[] {
-  const display = Array.isArray(value) ? value.join(', ') : value
-  return display === '' ? [] : [{ id, label, value: display }]
 }
 
 const workloadKinds = ['deployments', 'statefulsets', 'daemonsets', 'jobs', 'cronjobs', 'replicasets'] as const
@@ -166,22 +112,6 @@ const workloadStatuses = ['Healthy', 'Progressing', 'Degraded', 'Suspended', 'Co
 const podStatuses = ['Running', 'Pending', 'Succeeded', 'Failed', 'Unknown'] as const
 const restartFilters = ['any', 'gt0', 'gte3', 'gte10'] as const
 const eventTypes = ['Normal', 'Warning', 'Unknown'] as const
-const workloadSorts = ['identity', 'name', 'age', 'status'] as const
-const podSorts = ['identity', 'name', 'age', 'restarts', 'status'] as const
-const eventSorts = ['timestamp', 'count', 'identity'] as const
-const workloadSortOptions: readonly ListSortOption[] = [
-  { value: 'identity', label: 'Namespace, kind and name' },
-  { value: 'name', label: 'Name' },
-  { value: 'age', label: 'Age' },
-  { value: 'status', label: 'Status' },
-]
-const podSortOptions: readonly ListSortOption[] = [
-  { value: 'identity', label: 'Namespace and name' },
-  { value: 'name', label: 'Name' },
-  { value: 'age', label: 'Age' },
-  { value: 'restarts', label: 'Restarts' },
-  { value: 'status', label: 'Status' },
-]
 
 function isPodPreview(value: unknown): value is Pod {
   if (!value || typeof value !== 'object') return false
@@ -229,11 +159,6 @@ const namedPreviewKey = (item: { namespace: string; name: string }) => `${item.n
 const eventPreviewKey = (item: EventResource) => `${item.namespace}/${item.objectKind}/${item.objectName}/${item.timestamp ?? ''}/${item.reason}`
 const compareEventPreview = (left: EventResource, right: EventResource) => (right.timestamp ?? '').localeCompare(left.timestamp ?? '') || eventPreviewKey(left).localeCompare(eventPreviewKey(right))
 const workloadPreviewKey = (item: Workload) => `${item.kind}/${item.namespace}/${item.name}`
-const eventSortOptions: readonly ListSortOption[] = [
-  { value: 'timestamp', label: 'Timestamp' },
-  { value: 'count', label: 'Count' },
-  { value: 'identity', label: 'Object identity' },
-]
 
 interface WorkloadListState {
   search: string
@@ -346,7 +271,7 @@ function mutationError(error: unknown): string {
 function BulkToolbar({ count, children }: { count: number; children: React.ReactNode }) {
   return (
     <div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-kp-accent-border bg-kp-accent-bg/50 px-3 py-2" role="toolbar" aria-label="Bulk actions">
-      <strong className="text-sm text-kp-text">{count} selected</strong>
+      <strong className="text-content text-kp-text">{count} selected</strong>
       {children}
     </div>
   )
@@ -386,12 +311,13 @@ export function WorkloadsPage() {
   const workloadColumnState = usePreferenceColumnVisibility('workloads')
   const workloadColumns: DataTableColumn<Workload>[] = [
     { key: 'namespace', header: 'Namespace', cell: (item) => item.namespace },
-    { key: 'name', header: 'Kind / name', cell: (item) => <TableLink aria-label={`Open ${item.kind} ${item.name} in ${item.namespace}`} onClick={() => workspace.openResource({ collection: 'workloads', kind: item.kind, namespace: item.namespace, name: item.name })} primary={item.name} secondary={item.kind} /> },
+    { key: 'name', header: 'Name', cell: (item) => <TableLink aria-label={`Open ${item.kind} ${item.name} in ${item.namespace}`} onClick={() => workspace.openResource({ collection: 'workloads', kind: item.kind, namespace: item.namespace, name: item.name })} primary={item.name} /> },
+    { key: 'kind', header: 'Type', cell: (item) => item.kind },
     { key: 'ready', header: 'Ready', cell: (item) => `${item.ready ?? '—'} / ${item.desired ?? '—'}` },
     { key: 'available', header: 'Available', cell: (item) => item.available ?? '—' },
     { key: 'updated', header: 'Updated', cell: (item) => item.updated ?? '—' },
     { key: 'status', header: 'Status', cell: (item) => <StatusBadge variant={statusBadgeVariant(item.status)}>{item.status}</StatusBadge> },
-    { key: 'age', header: 'Age', cell: (item) => age(item.ageSeconds) },
+    { key: 'age', sortKey: 'ageSeconds', header: 'Age', cell: (item) => age(item.ageSeconds) },
   ]
   const rowKey = useCallback((item: Workload) => `${item.kind}/${item.namespace}/${item.name}`, [])
 
@@ -498,48 +424,29 @@ export function WorkloadsPage() {
     <ResourcePage
       title="Workloads"
       description="Deployments, StatefulSets, DaemonSets, Jobs and CronJobs in the active scope."
-      actions={selection ? <ResourceLiveUpdates key={`workloads/${generation}`} generation={generation!} topics={['workloads']} queryKeys={[["resources", "workloads"]]} autoStart={list.isPending} onProgress={preview.onProgress} onPreviewReset={preview.onReset} /> : null}
+      actions={selection ? <ResourceLiveUpdates key={`workloads/${generation}`} generation={generation!} topics={['workloads']} queryKeys={[["resources", "workloads"]]} autoStart onProgress={preview.onProgress} onPreviewReset={preview.onReset} /> : null}
     >
-      <ResourceListControls search={draft.search} appliedSearch={applied.search} onSearchChange={(value) => setDraft((current) => ({ ...current, search: value }))} onApply={(interactionId) => { setApplied(bindListInteraction({ ...draft }, interactionId)) }} onRefresh={() => queryClient.invalidateQueries({ queryKey: ['resources', 'workloads'] })} onClear={() => { setDraft({ ...defaultWorkloadList, kind: kindPreset }); setApplied({ ...defaultWorkloadList, kind: kindPreset }) }} activeFilters={[
-        ...activeFilter('namespace', 'Namespace', namespaceValues(applied.namespace)), ...activeFilter('kind', 'Kind', applied.kind), ...activeFilter('status', 'Status', applied.workloadStatus),
-      ]} sort={draft.sort} order={draft.order} appliedSort={applied.sort} appliedOrder={applied.order} defaultSort="identity" defaultOrder="asc" hasPendingChanges={!sameListState(draft, applied)} sortOptions={workloadSortOptions} onSortChange={(value) => setDraft((current) => ({ ...current, sort: value }))} onOrderChange={(value) => setDraft((current) => ({ ...current, order: value }))}>
-        <NamespaceFilterInput value={draft.namespace} onChange={(value) => setDraft((current) => ({ ...current, namespace: value }))} />
-        <Select aria-label="Kind" disabled={Boolean(kindPreset)} className="!h-7 !w-auto max-w-[9rem] pr-6 text-sm" value={draft.kind} onChange={(event) => setDraft((current) => ({ ...current, kind: event.target.value }))}><option value="">All kinds</option><option value="deployments">Deployments</option><option value="replicasets">ReplicaSets</option><option value="statefulsets">StatefulSets</option><option value="daemonsets">DaemonSets</option><option value="jobs">Jobs</option><option value="cronjobs">CronJobs</option></Select>
-        <Select aria-label="Status" className="!h-7 !w-auto max-w-[9rem] pr-6 text-sm" value={draft.workloadStatus} onChange={(event) => setDraft((current) => ({ ...current, workloadStatus: event.target.value }))}><option value="">All statuses</option>{workloadStatuses.map((value) => <option key={value}>{value}</option>)}</Select>
-      </ResourceListControls>
-      {selection ? <SavedFilterControls collection="workloads" generation={generation!} currentQuery={compactFilterQuery([
-        ['namespace', namespaceValues(applied.namespace)], ['search', applied.search], ['kind', applied.kind ? [applied.kind] : []], ['status', applied.workloadStatus ? [applied.workloadStatus] : []], ['sort', applied.sort], ['order', applied.order],
-      ])} onApply={(query) => {
-        const next: WorkloadListState = {
-          search: savedString(query, 'search'),
-          namespace: savedNamespaces(query),
-          kind: kindPreset || savedFirst(query, 'kind', workloadKinds),
-          workloadStatus: savedFirst(query, 'status', workloadStatuses),
-          sort: savedSort(query, workloadSorts, 'identity'),
-          order: savedOrder(query, 'asc'),
-        }
-        setDraft(next)
-        setApplied(next)
-      }} /> : null}
+      <ResourceListControls search={draft.search} appliedSearch={applied.search} onSearchChange={(value) => setDraft((current) => ({ ...current, search: value }))} onApply={(interactionId) => { setApplied(bindListInteraction({ ...draft }, interactionId)) }} />
+
       <SelectionGate pending={status.isPending} error={status.error} selected={Boolean(selection)}>
         <QueryState pending={list.isPending && !previewActive} error={!list.data || collection.authorizationFailed ? list.error : null} empty={visibleItems.length === 0 && !list.hasNextPage}>
           {selectedItems.length > 0 ? (
             <BulkToolbar count={selectedItems.length}>
-              <Button variant="warning" size="sm" disabled={!canBulkRestart || bulkPermissions.isPending} disabledReason="Every selected workload must support rollout restart and be authorized." onClick={() => setBulkAction('restart')}><RotateCcw size={12} aria-hidden="true" /> Restart selected</Button>
-              <Button variant="danger" size="sm" disabled={!canBulkDelete || bulkPermissions.isPending} disabledReason="Delete must be authorized for every selected workload." onClick={() => setBulkAction('delete')}><Trash2 size={12} aria-hidden="true" /> Delete selected</Button>
-              <Button variant="ghost" size="sm" onClick={() => setSelectedKeys(new Set())}>Clear selection</Button>
+              <Button variant="warning" disabled={!canBulkRestart || bulkPermissions.isPending} disabledReason="Every selected workload must support rollout restart and be authorized." onClick={() => setBulkAction('restart')}><RotateCcw size={12} aria-hidden="true" /> Restart selected</Button>
+              <Button variant="danger" disabled={!canBulkDelete || bulkPermissions.isPending} disabledReason="Delete must be authorized for every selected workload." onClick={() => setBulkAction('delete')}><Trash2 size={12} aria-hidden="true" /> Delete selected</Button>
+              <Button variant="ghost" onClick={() => setSelectedKeys(new Set())}>Clear selection</Button>
             </BulkToolbar>
           ) : null}
           <div className="min-w-0 overflow-x-auto rounded-xl border border-kp-overlay-0 bg-kp-surface-0">
-            <ColumnVisibilityControl state={workloadColumnState} columns={workloadColumns} />
-            {previewActive ? <p className="px-3 py-1.5 text-xs text-kp-sky" role="status">Receiving workloads · ✓ {preview.preview!.completed}/{preview.preview!.requested} namespaces · partial preview</p> : null}
-            {list.isPlaceholderData || list.isFetching && !list.isFetchingNextPage ? <p className="px-3 py-1.5 text-xs text-kp-overlay-text" role="status">Refreshing workloads…</p> : null}
+
+            {previewActive ? <p className="px-3 py-1.5 text-content text-kp-sky" role="status">Receiving workloads · ✓ {preview.preview!.completed}/{preview.preview!.requested} namespaces · partial preview</p> : null}
+            {list.isPlaceholderData || list.isFetching && !list.isFetchingNextPage ? <p className="sr-only" role="status">Refreshing workloads…</p> : null}
             <DataTable
               caption="Authorized workload pages"
               rows={visibleItems}
               onScrollProgress={collection.onScrollProgress}
               getRowKey={rowKey}
-              columns={applyColumnVisibility(workloadColumns, workloadColumnState)}
+              columns={workloadColumns} columnVisibility={workloadColumnState}
               selectable={!previewActive}
               selectedKeys={selectedKeys}
               onToggleRow={(key, checked) => {
@@ -582,6 +489,7 @@ export function PodsPage() {
   const toast = useToast()
   const { namespace: paramNamespace, name: paramName } = useParams<{ namespace: string; name: string }>()
   const [params] = useSearchParams()
+  const [aggregateTargets, setAggregateTargets] = useState<{ generation: string; pods: Pod[] } | null>(null)
   const generation = selection?.generation
   const [draft, setDraft] = useState<PodListState>(() => podsStateFromParams(params))
   const [applied, setApplied] = useState<PodListState>(() => podsStateFromParams(params))
@@ -646,15 +554,16 @@ export function PodsPage() {
   const podColumns: DataTableColumn<Pod>[] = [
     { key: 'namespace', header: 'Namespace', cell: (item) => item.namespace },
     { key: 'name', header: 'Pod', cell: (item) => <TableLink aria-label={`Open Pod ${item.name} in ${item.namespace}`} onClick={() => workspace.openResource({ collection: 'pods', namespace: item.namespace, name: item.name })} primary={<>{item.name}{item.problematic ? <Badge variant="danger" className="ml-2">problem</Badge> : null}</>} /> },
+    { key: 'type', header: 'Type', value: (item) => podGroup(item) ? 'Job' : 'Pod', cell: (item) => podGroup(item) ? 'Job' : 'Pod' },
     { key: 'status', header: 'Status', cell: (item) => <StatusBadge variant={statusBadgeVariant(item.status)}>{item.status}</StatusBadge> },
     { key: 'ready', header: 'Ready', cell: (item) => `${item.ready.current}/${item.ready.desired}` },
     { key: 'restarts', header: 'Restarts', cell: (item) => item.restarts },
-    { key: 'cpu', header: 'CPU', cell: (item) => { const value = metricsByPod.get(rowKey(item)); return <ResourceUsage {...podResourceUsage(item, value, 'cpu', podHPA(item, hpaCatalog))} /> } },
-    { key: 'memory', header: 'Memory', cell: (item) => { const value = metricsByPod.get(rowKey(item)); return <ResourceUsage {...podResourceUsage(item, value, 'memory', podHPA(item, hpaCatalog))} /> } },
+    { key: 'cpu', header: 'CPU', value: (item) => metricsByPod.get(rowKey(item))?.cpuMillicores, cell: (item) => { const value = metricsByPod.get(rowKey(item)); return <ResourceUsage {...podResourceUsage(item, value, 'cpu', podHPA(item, hpaCatalog))} /> } },
+    { key: 'memory', header: 'Memory', value: (item) => metricsByPod.get(rowKey(item))?.memoryBytes, cell: (item) => { const value = metricsByPod.get(rowKey(item)); return <ResourceUsage {...podResourceUsage(item, value, 'memory', podHPA(item, hpaCatalog))} /> } },
     { key: 'node', header: 'Node', cell: (item) => item.node ?? '—' },
-    { key: 'owner', header: 'Owner', cell: (item) => item.owner ? <span className="text-sm">{item.owner.kind}/{item.owner.name}</span> : 'standalone' },
+    { key: 'owner', header: 'Owner', cell: (item) => item.owner ? <span className="text-content">{item.owner.kind}/{item.owner.name}</span> : 'standalone' },
     { key: 'ip', header: 'IP', cell: (item) => item.ip ?? '—' },
-    { key: 'age', header: 'Age', cell: (item) => age(item.ageSeconds) },
+    { key: 'age', sortKey: 'ageSeconds', header: 'Age', cell: (item) => age(item.ageSeconds) },
   ]
 
   const bulkPodAction = useMutation({
@@ -702,57 +611,34 @@ export function PodsPage() {
     <ResourcePage
       title="Pods"
       description="Pod inventory with readiness, restarts, owner, metrics and problem evidence in the active scope."
-      actions={<div className="flex items-center gap-2"><Link to="/logs"><Button variant="secondary" size="md"><ScrollText size={14} aria-hidden="true" /> Open logs</Button></Link>{selection ? <ResourceLiveUpdates key={`pods/${generation}`} generation={generation!} topics={['pods']} queryKeys={[["resources", "pods"]]} autoStart={list.isPending} onProgress={preview.onProgress} onPreviewReset={preview.onReset} /> : null}</div>}
+      actions={<div className="flex items-center gap-2">{selection ? <ResourceLiveUpdates key={`pods/${generation}`} generation={generation!} topics={['pods']} queryKeys={[["resources", "pods"]]} autoStart onProgress={preview.onProgress} onPreviewReset={preview.onReset} /> : null}</div>}
     >
-      <ResourceListControls search={draft.search} appliedSearch={applied.search} onSearchChange={(value) => setDraft((current) => ({ ...current, search: value }))} onApply={(interactionId) => setApplied(bindListInteraction({ ...draft }, interactionId))} onRefresh={() => queryClient.invalidateQueries({ queryKey: ['resources', 'pods'] })} onClear={() => { setDraft({ ...defaultPodList }); setApplied({ ...defaultPodList }) }} activeFilters={[
-        ...activeFilter('namespace', 'Namespace', namespaceValues(applied.namespace)), ...activeFilter('workload', 'Workload owner', applied.workload), ...activeFilter('node', 'Node', applied.node), ...activeFilter('status', 'Status', applied.podStatus), ...activeFilter('restarts', 'Restarts', applied.restarts === 'any' ? '' : applied.restarts), ...activeFilter('problematic', 'Problem evidence', applied.problematic === 'true' ? 'problematic only' : applied.problematic === 'false' ? 'without evidence' : ''),
-      ]} sort={draft.sort} order={draft.order} appliedSort={applied.sort} appliedOrder={applied.order} defaultSort="identity" defaultOrder="asc" hasPendingChanges={!sameListState(draft, applied)} sortOptions={podSortOptions} onSortChange={(value) => setDraft((current) => ({ ...current, sort: value }))} onOrderChange={(value) => setDraft((current) => ({ ...current, order: value }))}>
-        <NamespaceFilterInput value={draft.namespace} onChange={(value) => setDraft((current) => ({ ...current, namespace: value }))} />
-        <Input aria-label="Workload owner" value={draft.workload} maxLength={256} placeholder="owner" className="!h-7 !w-[8rem] text-sm" onChange={(event) => setDraft((current) => ({ ...current, workload: event.target.value }))} />
-        <Input aria-label="Node" value={draft.node} maxLength={256} placeholder="node" className="!h-7 !w-[8rem] text-sm" onChange={(event) => setDraft((current) => ({ ...current, node: event.target.value }))} />
-        <Select aria-label="Status" className="!h-7 !w-auto max-w-[8rem] pr-6 text-sm" value={draft.podStatus} onChange={(event) => setDraft((current) => ({ ...current, podStatus: event.target.value }))}><option value="">All statuses</option>{podStatuses.map((value) => <option key={value}>{value}</option>)}</Select>
-        <Select aria-label="Restarts" className="!h-7 !w-auto max-w-[8rem] pr-6 text-sm" value={draft.restarts} onChange={(event) => setDraft((current) => ({ ...current, restarts: event.target.value }))}><option value="any">Any restarts</option><option value="gt0">More than 0</option><option value="gte3">At least 3</option><option value="gte10">At least 10</option></Select>
-        <Select aria-label="Problem evidence" className="!h-7 !w-auto max-w-[10rem] pr-6 text-sm" value={draft.problematic} onChange={(event) => setDraft((current) => ({ ...current, problematic: event.target.value }))}><option value="">All Pods</option><option value="true">Problematic only</option><option value="false">Without evidence</option></Select>
-      </ResourceListControls>
-      {selection ? <SavedFilterControls collection="pods" generation={generation!} currentQuery={compactFilterQuery([
-        ['namespace', namespaceValues(applied.namespace)], ['search', applied.search], ['status', applied.podStatus ? [applied.podStatus] : []], ['workload', applied.workload], ['node', applied.node], ['restarts', applied.restarts === 'any' ? '' : applied.restarts], ['problematic', applied.problematic === '' ? undefined : applied.problematic === 'true'], ['sort', applied.sort], ['order', applied.order],
-      ])} onApply={(query) => {
-        const savedRestarts = savedString(query, 'restarts', restartFilters)
-        const next: PodListState = {
-          search: savedString(query, 'search'),
-          namespace: savedNamespaces(query),
-          podStatus: savedFirst(query, 'status', podStatuses),
-          workload: savedString(query, 'workload'),
-          node: savedString(query, 'node'),
-          restarts: savedRestarts || 'any',
-          problematic: typeof query.problematic === 'boolean' ? String(query.problematic) : '',
-          sort: savedSort(query, podSorts, 'identity'),
-          order: savedOrder(query, 'asc'),
-        }
-        setDraft(next)
-        setApplied(next)
-      }} /> : null}
+      <ResourceListControls search={draft.search} appliedSearch={applied.search} onSearchChange={(value) => setDraft((current) => ({ ...current, search: value }))} onApply={(interactionId) => setApplied(bindListInteraction({ ...draft }, interactionId))} />
+
       <SelectionGate pending={status.isPending} error={status.error} selected={Boolean(selection)}>
         <QueryState pending={list.isPending && visibleItems.length === 0} error={!list.data || authorizationFailed ? list.error : null} empty={visibleItems.length === 0 && !list.hasNextPage}>
           {selectedItems.length > 0 ? (
             <BulkToolbar count={selectedItems.length}>
-              {selectedItems.length === 1 ? (
-                <Link to={`/logs?namespace=${encodeURIComponent(selectedItems[0].namespace)}&pod=${encodeURIComponent(selectedItems[0].name)}`}><Button variant="secondary" size="sm"><ScrollText size={12} aria-hidden="true" /> View logs</Button></Link>
-              ) : null}
-              <Button variant="warning" size="sm" disabled={!canBulkRestart || bulkPermissions.isPending} disabledReason="Every selected Pod must have a controller owner and delete permission." onClick={() => setBulkAction('restart')}><RotateCcw size={12} aria-hidden="true" /> Restart selected</Button>
-              <Button variant="danger" size="sm" disabled={!canBulkDelete || bulkPermissions.isPending} disabledReason="Delete must be authorized for every selected Pod." onClick={() => setBulkAction('delete')}><Trash2 size={12} aria-hidden="true" /> Delete selected</Button>
-              <Button variant="ghost" size="sm" onClick={() => setSelectedKeys(new Set())}>Clear selection</Button>
+              <Button variant="secondary" onClick={() => {
+                if (selectedItems.length === 1) { setAggregateTargets(null); workspace.openResource({ collection: 'pods', namespace: selectedItems[0].namespace, name: selectedItems[0].name }, 'logs') }
+                else { workspace.reset(); setAggregateTargets({ generation: generation!, pods: selectedItems }) }
+              }}><ScrollText size={12} aria-hidden="true" />{selectedItems.length === 1 ? 'View logs' : 'Aggregate logs'}</Button>
+              <Button variant="warning" disabled={!canBulkRestart || bulkPermissions.isPending} disabledReason="Every selected Pod must have a controller owner and delete permission." onClick={() => setBulkAction('restart')}><RotateCcw size={12} aria-hidden="true" /> Restart selected</Button>
+              <Button variant="danger" disabled={!canBulkDelete || bulkPermissions.isPending} disabledReason="Delete must be authorized for every selected Pod." onClick={() => setBulkAction('delete')}><Trash2 size={12} aria-hidden="true" /> Delete selected</Button>
+              <Button variant="ghost" onClick={() => setSelectedKeys(new Set())}>Clear selection</Button>
             </BulkToolbar>
           ) : null}
           <div className="min-w-0 overflow-x-auto rounded-xl border border-kp-overlay-0 bg-kp-surface-0">
-            <ColumnVisibilityControl state={podColumnState} columns={podColumns} />
-            {previewActive ? <p className="px-3 py-1.5 text-xs text-kp-sky" role="status">Receiving Pods · ✓ {preview.preview?.items.length ? preview.preview.completed : 1}/{preview.preview?.items.length ? preview.preview.requested : selection?.namespaceCount ?? 1} namespaces · partial preview</p> : null}
-            {list.isPlaceholderData || list.isFetching && !list.isFetchingNextPage ? <p className="px-3 py-1.5 text-xs text-kp-overlay-text" role="status">Refreshing Pods…</p> : null}
+
+            {previewActive ? <p className="px-3 py-1.5 text-content text-kp-sky" role="status">Receiving Pods · ✓ {preview.preview?.items.length ? preview.preview.completed : 1}/{preview.preview?.items.length ? preview.preview.requested : selection?.namespaceCount ?? 1} namespaces · partial preview</p> : null}
+            {list.isPlaceholderData || list.isFetching && !list.isFetchingNextPage ? <p className="sr-only" role="status">Refreshing Pods…</p> : null}
             <DataTable
               caption="Authorized Pod pages"
               rows={visibleItems}
+              rowGroup={podGroup}
+              virtualize
               getRowKey={rowKey}
-              columns={applyColumnVisibility(podColumns, podColumnState)}
+              columns={podColumns} columnVisibility={podColumnState}
               selectable={!previewActive}
               selectedKeys={selectedKeys}
               onToggleRow={(key, checked) => {
@@ -763,30 +649,34 @@ export function PodsPage() {
                   return next
                 })
               }}
-              onToggleAll={(checked) => {
-                setSelectedKeys(checked ? new Set(listItems.map(rowKey)) : new Set())
+              onToggleAll={(checked, filteredRows) => {
+                setSelectedKeys(checked ? new Set(filteredRows.map(rowKey)) : new Set())
               }}
               onScrollProgress={collection.onScrollProgress}
             />
             {listData ? (
               <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-kp-overlay-0 px-3 py-2.5">
-                <div className="text-xs text-kp-overlay-text">
+                <div className="text-content text-kp-overlay-text">
                   <span className="block text-kp-subtext">{listItems.length} Pods loaded · {list.data?.pages.length ?? 0} page{list.data?.pages.length === 1 ? '' : 's'} retained</span>
                   <small className="block">{listData.page.complete ? 'Collection complete' : `Bounded ${listData.page.filterScope} result`}</small>
                   {snapshotRenewed ? <small className="block text-kp-yellow" role="status">The list snapshot expired and was renewed from the first page.</small> : null}
                   {listData.coverage ? <small className="block">{listData.coverage.completedNamespaces}/{listData.coverage.requestedNamespaces} namespaces completed · {listData.coverage.deniedNamespaces.length} denied</small> : null}
                 </div>
                 <div className="flex gap-2">
-                  <Button variant="secondary" size="sm" disabled={list.data?.pageParams[0] === '' && list.data?.pages.length === 1} disabledReason="Already on the first page." onClick={() => void queryClient.resetQueries({ queryKey: listKey })}>First page</Button>
-                  <Button size="sm" disabled={!list.hasNextPage || list.isFetching || list.isPlaceholderData} disabledReason="The current result has no next page or is refreshing." onClick={() => void collection.loadNextPage()}>{list.isFetchingNextPage ? 'Loading…' : 'Load next page'}</Button>
+                  <Button variant="secondary" disabled={list.data?.pageParams[0] === '' && list.data?.pages.length === 1} disabledReason="Already on the first page." onClick={() => void queryClient.resetQueries({ queryKey: listKey })}>First page</Button>
+                  <Button disabled={!list.hasNextPage || list.isFetching || list.isPlaceholderData} disabledReason="The current result has no next page or is refreshing." onClick={() => void collection.loadNextPage()}>{list.isFetchingNextPage ? 'Loading…' : 'Load next page'}</Button>
                 </div>
-                {collection.nextPageError ? <p className="w-full text-xs text-kp-red" role="alert">The next page could not be loaded. The loaded Pods remain available; retry when ready.</p> : null}
+                {collection.nextPageError ? <p className="w-full text-content text-kp-red" role="alert">The next page could not be loaded. The loaded Pods remain available; retry when ready.</p> : null}
               </footer>
             ) : null}
           </div>
-          {metrics.isError || metrics.data?.block.errors.length ? <p className="mt-1.5 text-xs text-kp-yellow" role="note">Some metrics are unavailable. Check Metrics Server and metrics.k8s.io permissions. Available samples remain visible.</p> : null}
+          {metrics.isError || metrics.data?.block.errors.length ? <p className="mt-1.5 text-content text-kp-yellow" role="note">Some metrics are unavailable. Check Metrics Server and metrics.k8s.io permissions. Available samples remain visible.</p> : null}
         </QueryState>
       </SelectionGate>
+      {aggregateTargets && aggregateTargets.generation === generation && selection && !workspace.open ? <section className="rounded-lg border border-kp-overlay-0 bg-kp-surface-0 p-3" aria-label="Pod aggregate logs">
+        <header className="mb-2 flex items-center justify-between"><strong className="text-content">Selected Pod logs</strong><Button variant="ghost" onClick={() => setAggregateTargets(null)}>Close logs</Button></header>
+        <Suspense fallback={<p role="status">Opening logs…</p>}><PodLogsPanel key={`${generation}/${aggregateTargets.pods.map(rowKey).join('|')}`} pods={aggregateTargets.pods} selection={selection} /></Suspense>
+      </section> : null}
       <ConfirmDialog
         open={bulkAction !== null}
         severity={bulkAction === 'restart' ? 'warning' : 'danger'}
@@ -814,12 +704,12 @@ export function EventsPage() {
   const queryClient = useQueryClient()
   const eventColumnState = usePreferenceColumnVisibility('events')
   const eventColumns: DataTableColumn<EventResource>[] = [
-    { key: 'time', header: 'Time', cell: (item) => dateTime(item.timestamp) },
+    { key: 'time', header: 'Time', value: (item) => item.timestamp, cell: (item) => dateTime(item.timestamp) },
     { key: 'namespace', header: 'Namespace', cell: (item) => item.namespace },
     { key: 'object', header: 'Object', cell: (item) => `${item.objectKind}/${item.objectName}` },
-    { key: 'type', header: 'Type / reason', cell: (item) => <><Badge variant={eventBadgeVariant(item.type)}>{item.type}</Badge><small className="mt-0.5 block text-xs text-kp-overlay-text">{item.reason}</small></> },
+    { key: 'type', header: 'Type / reason', cell: (item) => <><Badge variant={eventBadgeVariant(item.type)}>{item.type}</Badge><small className="mt-0.5 block text-content text-kp-overlay-text">{item.reason}</small></> },
     { key: 'count', header: 'Count', cell: (item) => item.count },
-    { key: 'message', header: 'Message', cell: (item) => <span className="block max-w-[480px] break-words text-sm leading-snug">{item.message}</span> },
+    { key: 'message', header: 'Message', cell: (item) => <span className="block max-w-[480px] break-words text-content leading-snug">{item.message}</span> },
   ]
   const collection = useInfiniteCollection<EventResource>({
     identity: ['resources', 'events', selection?.clusterProfileId, selection?.context, selection?.scopeId, generation, globalNamespace.value, applied.namespace],
@@ -835,43 +725,22 @@ export function EventsPage() {
     <ResourcePage
       title="Events"
       description="Kubernetes events ordered within the bounded page; type, source and count are preserved."
-      actions={selection ? <ResourceLiveUpdates key={`events/${generation}`} generation={generation!} topics={['events']} queryKeys={[["resources", "events"]]} autoStart={list.isPending} onProgress={preview.onProgress} onPreviewReset={preview.onReset} /> : null}
+      actions={selection ? <ResourceLiveUpdates key={`events/${generation}`} generation={generation!} topics={['events']} queryKeys={[["resources", "events"]]} autoStart onProgress={preview.onProgress} onPreviewReset={preview.onReset} /> : null}
     >
-      <ResourceListControls search={draft.search} appliedSearch={applied.search} onSearchChange={(value) => setDraft((current) => ({ ...current, search: value }))} onApply={(interactionId) => { setApplied(bindListInteraction({ ...draft }, interactionId)) }} onRefresh={() => queryClient.invalidateQueries({ queryKey: ['resources', 'events'] })} onClear={() => { setDraft({ ...defaultEventList }); setApplied({ ...defaultEventList }) }} activeFilters={[
-        ...activeFilter('namespace', 'Namespace', namespaceValues(applied.namespace)), ...activeFilter('type', 'Type', applied.eventType), ...activeFilter('objectKind', 'Object kind', applied.objectKind), ...activeFilter('reason', 'Reason', applied.reason),
-      ]} sort={draft.sort} order={draft.order} appliedSort={applied.sort} appliedOrder={applied.order} defaultSort="timestamp" defaultOrder="desc" hasPendingChanges={!sameListState(draft, applied)} sortOptions={eventSortOptions} onSortChange={(value) => setDraft((current) => ({ ...current, sort: value }))} onOrderChange={(value) => setDraft((current) => ({ ...current, order: value }))}>
-        <NamespaceFilterInput value={draft.namespace} onChange={(value) => setDraft((current) => ({ ...current, namespace: value }))} />
-        <Select aria-label="Type" className="!h-7 !w-auto max-w-[8rem] pr-6 text-sm" value={draft.eventType} onChange={(event) => setDraft((current) => ({ ...current, eventType: event.target.value }))}><option value="">All types</option>{eventTypes.map((value) => <option key={value}>{value}</option>)}</Select>
-        <Input aria-label="Object kind" value={draft.objectKind} maxLength={256} placeholder="object kind" className="!h-7 !w-[9rem] text-sm" onChange={(event) => setDraft((current) => ({ ...current, objectKind: event.target.value }))} />
-        <Input aria-label="Reason" value={draft.reason} maxLength={256} placeholder="reason" className="!h-7 !w-[8rem] text-sm" onChange={(event) => setDraft((current) => ({ ...current, reason: event.target.value }))} />
-      </ResourceListControls>
-      {selection ? <SavedFilterControls collection="events" generation={generation!} currentQuery={compactFilterQuery([
-        ['namespace', namespaceValues(applied.namespace)], ['search', applied.search], ['status', applied.eventType ? [applied.eventType] : []], ['sort', applied.sort], ['order', applied.order], ['objectKind', applied.objectKind], ['reason', applied.reason],
-      ])} onApply={(query) => {
-        const next: EventListState = {
-          search: savedString(query, 'search'),
-          namespace: savedNamespaces(query),
-          eventType: savedFirst(query, 'status', eventTypes),
-          objectKind: savedString(query, 'objectKind'),
-          reason: savedString(query, 'reason'),
-          sort: savedSort(query, eventSorts, 'timestamp'),
-          order: savedOrder(query, 'desc'),
-        }
-        setDraft(next)
-        setApplied(next)
-      }} /> : null}
+      <ResourceListControls search={draft.search} appliedSearch={applied.search} onSearchChange={(value) => setDraft((current) => ({ ...current, search: value }))} onApply={(interactionId) => { setApplied(bindListInteraction({ ...draft }, interactionId)) }} />
+
       <SelectionGate pending={status.isPending} error={status.error} selected={Boolean(selection)}>
         <QueryState pending={list.isPending && !previewActive} error={!list.data || collection.authorizationFailed ? list.error : null} empty={visibleItems.length === 0 && !list.hasNextPage}>
           <div className="min-w-0 overflow-x-auto rounded-xl border border-kp-overlay-0 bg-kp-surface-0">
-            <ColumnVisibilityControl state={eventColumnState} columns={eventColumns} />
-            {previewActive ? <p className="px-3 py-1.5 text-xs text-kp-sky" role="status">Receiving events · ✓ {preview.preview!.completed}/{preview.preview!.requested} namespaces · partial preview</p> : null}
-            {list.isPlaceholderData || list.isFetching && !list.isFetchingNextPage ? <p className="px-3 py-1.5 text-xs text-kp-overlay-text" role="status">Refreshing events…</p> : null}
+
+            {previewActive ? <p className="px-3 py-1.5 text-content text-kp-sky" role="status">Receiving events · ✓ {preview.preview!.completed}/{preview.preview!.requested} namespaces · partial preview</p> : null}
+            {list.isPlaceholderData || list.isFetching && !list.isFetchingNextPage ? <p className="sr-only" role="status">Refreshing events…</p> : null}
             <DataTable
               caption="Authorized event pages"
               rows={visibleItems}
               onScrollProgress={collection.onScrollProgress}
               getRowKey={(item, index) => `${item.namespace}/${item.objectKind}/${item.objectName}/${item.timestamp ?? index}`}
-              columns={applyColumnVisibility(eventColumns, eventColumnState)}
+              columns={eventColumns} columnVisibility={eventColumnState}
               stickyHeader
             />
             {collection.lastPage ? <InfiniteCollectionFooter result={collection.lastPage} itemCount={collection.items.length} pageCount={list.data?.pages.length ?? 0} firstPage={list.data?.pageParams[0] === '' && list.data.pages.length === 1} hasNextPage={Boolean(list.hasNextPage)} loading={list.isFetching} refreshing={list.isPlaceholderData} nextPageError={collection.nextPageError} onNext={() => void collection.loadNextPage()} onRestart={() => void queryClient.resetQueries({ queryKey: collection.queryKey })} /> : null}
@@ -901,35 +770,6 @@ const defaultNetworkLists: Record<NetworkResourceTab, SimpleListState> = {
   'ingress-classes': { ...defaultSimpleList },
   'endpoint-slices': { ...defaultSimpleList },
   'network-policies': { ...defaultSimpleList },
-}
-
-const networkSortOptions: Record<NetworkResourceTab, readonly ListSortOption[]> = {
-  services: [
-    { value: 'identity', label: 'Namespace and name' },
-    { value: 'name', label: 'Name' },
-    { value: 'type', label: 'Service type' },
-  ],
-  ingresses: [
-    { value: 'identity', label: 'Namespace and name' },
-    { value: 'name', label: 'Name' },
-  ],
-  'endpoint-slices': [
-    { value: 'identity', label: 'Namespace and name' },
-    { value: 'name', label: 'Name' },
-    { value: 'addressType', label: 'Address type' },
-  ],
-  endpoints: [
-    { value: 'identity', label: 'Namespace and name' },
-    { value: 'name', label: 'Name' },
-  ],
-  'ingress-classes': [
-    { value: 'identity', label: 'Name' },
-    { value: 'name', label: 'Name (natural)' },
-  ],
-  'network-policies': [
-    { value: 'identity', label: 'Namespace and name' },
-    { value: 'name', label: 'Name' },
-  ],
 }
 
 const networkCollections: Record<NetworkResourceTab, string> = {
@@ -992,6 +832,7 @@ export function NetworkPage() {
   const preview = useResourceStreamPreview<NetworkPreviewItem>({ identity: [resourceTab, selection?.clusterProfileId, selection?.context, selection?.scopeId, generation, globalNamespace.value], topic: streamTopic, namespace: globalNamespace.value, isItem: isNetworkPreview, itemKey: namedPreviewKey })
   const previewActive = (resourceTab === 'services' || resourceTab === 'ingresses' || resourceTab === 'endpoint-slices') && activeQuery.isPending && !collection.authorizationFailed && sameListState(applied, defaultSimpleList) && Boolean(preview.preview?.items.length)
   const visibleItems: NetworkItem[] = previewActive ? preview.preview!.items : collection.items
+  const [forwardSearch, setForwardSearch] = useState('')
   const forwards = useQuery({ queryKey: ['port-forwards', generation], queryFn: ({ signal }) => getPortForwards(signal, generation!), enabled: Boolean(selection && tab === 'port-forwards'), refetchInterval: 10_000 })
   const close = useMutation({ mutationFn: (id: string) => requests.run(async (signal) => { const session = await getSession(signal); if (session.generation !== generation) throw new APIError(409, { code: 'GENERATION_CHANGED', message: 'The active selection changed.' }); return closePortForward(id, generation!, session.csrfToken, signal) }), onSuccess: () => { toast.info('Loopback session closed'); queryClient.invalidateQueries({ queryKey: ['port-forwards'] }) }, onError: (error) => toast.error('Failed to close session', mutationError(error)) })
   const [stopAllState, setStopAllState] = useState<'idle' | 'confirm'>('idle')
@@ -1015,57 +856,58 @@ export function NetworkPage() {
     return { closed, failed }
   }, onSuccess: (result) => { setStopAllResult(result); setStopAllState('idle'); toast.info(`Closed ${result.closed} session${result.closed === 1 ? '' : 's'}`, result.failed ? `${result.failed} failed` : undefined); queryClient.invalidateQueries({ queryKey: ['port-forwards'] }) } })
 
-  const networkColumnState = usePreferenceColumnVisibility(`network/${tab}`)
+  const networkColumnState = usePreferenceColumnVisibility(resourceTab)
   const networkColumns: DataTableColumn<NetworkItem>[] = [
-    { key: 'name', header: 'Name', cell: (item) => <TableLink aria-label={`Open ${tab} ${item.name}${'namespace' in item ? ` in ${item.namespace}` : ''}`} onClick={() => workspace.openResource({ collection: networkCollections[resourceTab], namespace: 'namespace' in item ? item.namespace : null, name: item.name })} primary={item.name} secondary={'namespace' in item ? item.namespace : 'cluster'} /> },
+    ...(resourceTab === 'ingress-classes' ? [] : [{ key: 'namespace', header: 'Namespace', cell: (item: NetworkItem) => 'namespace' in item ? item.namespace : '—' }]),
+    { key: 'name', header: 'Name', cell: (item) => <TableLink aria-label={`Open ${tab} ${item.name}${'namespace' in item ? ` in ${item.namespace}` : ''}`} onClick={() => workspace.openResource({ collection: networkCollections[resourceTab], namespace: 'namespace' in item ? item.namespace : null, name: item.name })} primary={item.name} /> },
     { key: 'type', header: 'Type', cell: (item) => ('type' in item ? item.type : 'className' in item ? (item.className ?? 'Ingress') : 'addressType' in item ? item.addressType : 'podSelector' in item ? item.podSelector || 'none' : 'controller' in item ? item.controller : '—') },
     { key: 'summary', header: 'Summary', cell: (item) => ('clusterIPs' in item ? item.clusterIPs.join(', ') : 'hosts' in item ? item.hosts.join(', ') : 'addressType' in item ? `${item.endpoints.length} endpoints` : 'readyCount' in item ? `${item.readyCount} ready / ${item.notReadyCount} not ready${item.truncated ? ' (truncated)' : ''}` : 'ruleSummary' in item ? item.ruleSummary.length + ' rules' : item.default ? 'default class' : '—') },
   ]
 
-
   return (
-    <ResourcePage title="Network" description="Services, Ingresses, EndpointSlices and loopback-only port-forward sessions.">
-      {selection && (tab === 'services' || tab === 'ingresses' || tab === 'endpoint-slices') ? <ResourceLiveUpdates key={`${tab}/${generation}`} generation={generation!} topics={[tab]} queryKeys={[["resources", tab]]} autoStart={activeQuery.isPending} onProgress={preview.onProgress} onPreviewReset={preview.onReset} /> : null}
-      {tab !== 'port-forwards' ? <ResourceListControls search={draft.search} appliedSearch={applied.search} onSearchChange={(value) => setDrafts((current) => ({ ...current, [resourceTab]: { ...current[resourceTab], search: value } }))} onApply={(interactionId) => { setAppliedLists((current) => ({ ...current, [resourceTab]: bindListInteraction({ ...draft }, interactionId) })) }} onRefresh={() => queryClient.invalidateQueries({ queryKey: ['resources', tab] })} onClear={() => { setDrafts((current) => ({ ...current, [resourceTab]: { ...defaultSimpleList } })); setAppliedLists((current) => ({ ...current, [resourceTab]: { ...defaultSimpleList } })) }} sort={draft.sort} order={draft.order} appliedSort={applied.sort} appliedOrder={applied.order} defaultSort="identity" defaultOrder="asc" hasPendingChanges={!sameListState(draft, applied)} sortOptions={networkSortOptions[resourceTab]} onSortChange={(value) => setDrafts((current) => ({ ...current, [resourceTab]: { ...current[resourceTab], sort: value } }))} onOrderChange={(value) => setDrafts((current) => ({ ...current, [resourceTab]: { ...current[resourceTab], order: value } }))} /> : null}
+    <ResourcePage title="Network" description="Services, Ingresses, EndpointSlices and loopback-only port-forward sessions." actions={selection && (tab === 'services' || tab === 'ingresses' || tab === 'endpoint-slices') ? <ResourceLiveUpdates key={`${tab}/${generation}`} generation={generation!} topics={[tab]} queryKeys={[["resources", tab]]} autoStart onProgress={preview.onProgress} onPreviewReset={preview.onReset} /> : null}>
+      {tab !== 'port-forwards' ? <ResourceListControls search={draft.search} appliedSearch={applied.search} onSearchChange={(value) => setDrafts((current) => ({ ...current, [resourceTab]: { ...current[resourceTab], search: value } }))} onApply={(interactionId) => { setAppliedLists((current) => ({ ...current, [resourceTab]: bindListInteraction({ ...draft }, interactionId) })) }} /> : <ResourceListControls search={forwardSearch} appliedSearch={forwardSearch} onSearchChange={setForwardSearch} onApply={() => {}} />}
       <div id="network-panel">
         <SelectionGate pending={status.isPending} error={status.error} selected={Boolean(selection)}>
           {tab === 'port-forwards' ? <QueryState pending={forwards.isPending} error={forwards.error ?? close.error} empty={forwards.data?.length === 0}>
             {stopAllState !== 'idle' ? (
               <div role="alertdialog" aria-labelledby="stop-all-title" className="grid gap-2 rounded-lg border border-kp-red-border bg-kp-red-bg/50 p-3.5">
-                <strong id="stop-all-title" className="text-sm text-kp-text">Close all active loopback sessions?</strong>
-                <p className="m-0 text-xs text-kp-subtext">Only sessions of the current selection are closed; each close re-verifies authorization and reports per session.</p>
+                <strong id="stop-all-title" className="text-content text-kp-text">Close all active loopback sessions?</strong>
+                <p className="m-0 text-content text-kp-subtext">Only sessions of the current selection are closed; each close re-verifies authorization and reports per session.</p>
                 <div className="flex gap-2">
-                  <Button variant="secondary" size="sm" onClick={() => setStopAllState('idle')}>Cancel</Button>
-                  <Button variant="danger" size="sm" disabled={stopAll.isPending} onClick={() => stopAll.mutate()}>{stopAll.isPending ? 'Closing…' : 'Confirm close all'}</Button>
+                  <Button variant="secondary" onClick={() => setStopAllState('idle')}>Cancel</Button>
+                  <Button variant="danger" disabled={stopAll.isPending} onClick={() => stopAll.mutate()}>{stopAll.isPending ? 'Closing…' : 'Confirm close all'}</Button>
                 </div>
               </div>
             ) : null}
-            {stopAllResult ? <p className={stopAllResult.failed === 0 ? 'm-0 text-xs text-kp-green' : 'm-0 text-xs text-kp-yellow'} role="status">{stopAllResult.closed} session{stopAllResult.closed === 1 ? '' : 's'} closed{stopAllResult.failed ? ` · ${stopAllResult.failed} failed` : ''}.</p> : null}
+            {stopAllResult ? <p className={stopAllResult.failed === 0 ? 'm-0 text-content text-kp-green' : 'm-0 text-content text-kp-yellow'} role="status">{stopAllResult.closed} session{stopAllResult.closed === 1 ? '' : 's'} closed{stopAllResult.failed ? ` · ${stopAllResult.failed} failed` : ''}.</p> : null}
             {forwards.data?.some((item) => item.status === 'active') && stopAllState === 'idle' ? (
-              <Button variant="danger" size="sm" className="justify-self-start" onClick={() => setStopAllState('confirm')}>Stop all active sessions</Button>
+              <Button variant="danger" className="justify-self-start" onClick={() => setStopAllState('confirm')}>Stop all active sessions</Button>
             ) : null}
-            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-              {forwards.data?.map((item) => (
-                <article key={item.id} className="grid content-start gap-1.5 rounded-xl border border-kp-overlay-0 bg-kp-surface-0 p-3.5">
-                  <strong className="mono text-base text-kp-text">{item.localAddress}:{item.localPort}</strong>
-                  <span className="text-sm text-kp-subtext break-words">{item.context} · {item.namespace}/{item.pod} → {item.remotePort}</span>
-                  <small className="text-xs text-kp-overlay-text">{item.status} · created {dateTime(item.createdAt)} · expires {dateTime(item.expiresAt)}</small>
-                  {item.endedAt ? <small className="text-xs text-kp-overlay-text">ended {dateTime(item.endedAt)} · {item.endReason ?? item.status}</small> : null}
-                  {item.status === 'active' ? <Button variant="danger" size="sm" className="mt-1 justify-self-start" onClick={() => close.mutate(item.id)}>Close loopback session</Button> : null}
-                </article>
-              ))}
-            </div>
+            <DataTable caption="Loopback sessions" rows={(forwards.data ?? []).filter((item) => [item.namespace, item.pod, item.context, item.localAddress, item.localPort, item.remotePort, item.status].join(' ').toLocaleLowerCase().includes(forwardSearch.toLocaleLowerCase()))} getRowKey={(item) => item.id} columns={[
+              { key: 'namespace', header: 'Namespace', cell: (item) => item.namespace },
+              { key: 'name', sortKey: 'pod', header: 'Pod', cell: (item) => <TableLink aria-label={`Open Pod ${item.pod} in ${item.namespace}`} onClick={() => workspace.openResource({ collection: 'pods', kind: 'Pod', namespace: item.namespace, name: item.pod })} primary={item.pod} /> },
+              { key: 'context', header: 'Context', cell: (item) => item.context },
+              { key: 'local', header: 'Local address', cell: (item) => `${item.localAddress}:${item.localPort}` },
+              { key: 'remotePort', header: 'Remote port', cell: (item) => item.remotePort },
+              { key: 'status', header: 'Status', cell: (item) => <StatusBadge variant={statusBadgeVariant(item.status)}>{item.status}</StatusBadge> },
+              { key: 'createdAt', header: 'Created', cell: (item) => dateTime(item.createdAt) },
+              { key: 'expiresAt', header: 'Expires', cell: (item) => dateTime(item.expiresAt) },
+              { key: 'endedAt', header: 'Ended', cell: (item) => item.endedAt ? dateTime(item.endedAt) : '—' },
+              { key: 'endReason', header: 'End reason', cell: (item) => item.endReason ?? '—' },
+              { key: 'actions', header: 'Actions', cell: (item) => item.status === 'active' ? <Button variant="danger" onClick={() => close.mutate(item.id)}>Close loopback session</Button> : '—' },
+            ]} stickyHeader />
           </QueryState> : <QueryState pending={activeQuery.isPending && !previewActive} error={!activeQuery.data || collection.authorizationFailed ? activeQuery.error : null} empty={visibleItems.length === 0 && !activeQuery.hasNextPage}>
             <div className="min-w-0 overflow-x-auto rounded-xl border border-kp-overlay-0 bg-kp-surface-0">
-              <ColumnVisibilityControl state={networkColumnState} columns={networkColumns} />
-              {previewActive ? <p className="px-3 py-1.5 text-xs text-kp-sky" role="status">Receiving {tab} · ✓ {preview.preview!.completed}/{preview.preview!.requested} namespaces · partial preview</p> : null}
-              {activeQuery.isPlaceholderData || activeQuery.isFetching && !activeQuery.isFetchingNextPage ? <p className="px-3 py-1.5 text-xs text-kp-overlay-text" role="status">Refreshing {tab}…</p> : null}
+
+              {previewActive ? <p className="px-3 py-1.5 text-content text-kp-sky" role="status">Receiving {tab} · ✓ {preview.preview!.completed}/{preview.preview!.requested} namespaces · partial preview</p> : null}
+              {activeQuery.isPlaceholderData || activeQuery.isFetching && !activeQuery.isFetchingNextPage ? <p className="sr-only" role="status">Refreshing {tab}…</p> : null}
               <DataTable
                 caption={`Authorized ${tab} pages`}
                 rows={visibleItems}
                 onScrollProgress={collection.onScrollProgress}
                 getRowKey={(item) => `${'namespace' in item ? `${item.namespace}/` : ''}${item.name}`}
-                columns={applyColumnVisibility(networkColumns, networkColumnState)}
+                key={resourceTab} columns={networkColumns} columnVisibility={networkColumnState}
                 stickyHeader
               />
               {collection.lastPage ? <InfiniteCollectionFooter result={collection.lastPage} itemCount={collection.items.length} pageCount={activeQuery.data?.pages.length ?? 0} firstPage={activeQuery.data?.pageParams[0] === '' && activeQuery.data.pages.length === 1} hasNextPage={Boolean(activeQuery.hasNextPage)} loading={activeQuery.isFetching} refreshing={activeQuery.isPlaceholderData} nextPageError={collection.nextPageError} onNext={() => void collection.loadNextPage()} onRestart={() => void queryClient.resetQueries({ queryKey: collection.queryKey })} /> : null}
@@ -1084,11 +926,6 @@ function configTabFromParams(tab: string): ConfigTab | null {
   return tab === 'configmaps' || tab === 'secrets' ? tab : null
 }
 
-const configSortOptions: readonly ListSortOption[] = [
-  { value: 'identity', label: 'Namespace and name' },
-  { value: 'name', label: 'Name' },
-  { value: 'createdAt', label: 'Creation time' },
-]
 const defaultConfigLists: Record<ConfigTab, SimpleListState> = {
   configmaps: { ...defaultSimpleList },
   secrets: { ...defaultSimpleList },
@@ -1124,11 +961,12 @@ export function ConfigPage() {
     },
   })
 
-  const configColumnState = usePreferenceColumnVisibility(`config/${tab}`)
+  const configColumnState = usePreferenceColumnVisibility(tab)
   const configColumns: DataTableColumn<ConfigItem>[] = [
-    { key: 'name', header: 'Namespace / name', cell: (item) => { const value = 'metadata' in item ? item.metadata : item; return <TableLink aria-label={`Open ${tab === 'secrets' ? 'Secret' : 'ConfigMap'} ${value.name} in ${value.namespace}`} onClick={() => workspace.openResource({ collection: tab, namespace: value.namespace, name: value.name })} primary={value.name} secondary={value.namespace} /> } },
-    { key: 'uid', header: 'UID', cell: (item) => { const value = 'metadata' in item ? item.metadata : item; return <span className="mono text-xs">{value.uid}</span> } },
-    { key: 'created', header: 'Created', cell: (item) => { const value = 'metadata' in item ? item.metadata : item; return dateTime(value.creationTimestamp) } },
+    { key: 'namespace', header: 'Namespace', cell: (item) => ('metadata' in item ? item.metadata : item).namespace },
+    { key: 'name', header: 'Name', value: (item) => ('metadata' in item ? item.metadata : item).name, cell: (item) => { const value = 'metadata' in item ? item.metadata : item; return <TableLink aria-label={`Open ${tab === 'secrets' ? 'Secret' : 'ConfigMap'} ${value.name} in ${value.namespace}`} onClick={() => workspace.openResource({ collection: tab, namespace: value.namespace, name: value.name })} primary={value.name} /> } },
+    { key: 'uid', header: 'UID', cell: (item) => { const value = 'metadata' in item ? item.metadata : item; return <span className="text-content">{value.uid}</span> } },
+    { key: 'created', header: 'Created', value: (item) => ('metadata' in item ? item.metadata : item).creationTimestamp, cell: (item) => { const value = 'metadata' in item ? item.metadata : item; return dateTime(value.creationTimestamp) } },
   ]
   const activeQuery = collection.query
   const preview = useResourceStreamPreview<ConfigMapResource>({ identity: [tab, selection?.clusterProfileId, selection?.context, selection?.scopeId, generation, globalNamespace.value], topic: 'configmaps', namespace: globalNamespace.value, isItem: isConfigMapPreview, itemKey: namedPreviewKey })
@@ -1136,22 +974,21 @@ export function ConfigPage() {
   const visibleItems: ConfigItem[] = previewActive ? preview.preview!.items : collection.items
 
   return (
-    <ResourcePage title="Configuration" description="ConfigMaps and Secrets in the active scope. Open a resource to inspect its data.">
-      {selection && tab === 'configmaps' ? <ResourceLiveUpdates key={`configmaps/${generation}`} generation={generation!} topics={['configmaps']} queryKeys={[["resources", "configmaps"]]} autoStart={activeQuery.isPending} onProgress={preview.onProgress} onPreviewReset={preview.onReset} /> : null}
-      <ResourceListControls search={draft.search} appliedSearch={applied.search} onSearchChange={(value) => setDrafts((current) => ({ ...current, [tab]: { ...current[tab], search: value } }))} onApply={(interactionId) => { setAppliedLists((current) => ({ ...current, [tab]: bindListInteraction({ ...draft }, interactionId) })) }} onRefresh={() => queryClient.invalidateQueries({ queryKey: ['resources', tab] })} onClear={() => { setDrafts((current) => ({ ...current, [tab]: { ...defaultSimpleList } })); setAppliedLists((current) => ({ ...current, [tab]: { ...defaultSimpleList } })) }} sort={draft.sort} order={draft.order} appliedSort={applied.sort} appliedOrder={applied.order} defaultSort="identity" defaultOrder="asc" hasPendingChanges={!sameListState(draft, applied)} sortOptions={configSortOptions} onSortChange={(value) => setDrafts((current) => ({ ...current, [tab]: { ...current[tab], sort: value } }))} onOrderChange={(value) => setDrafts((current) => ({ ...current, [tab]: { ...current[tab], order: value } }))} />
+    <ResourcePage title="Configuration" description="ConfigMaps and Secrets in the active scope. Open a resource to inspect its data." actions={selection && tab === 'configmaps' ? <ResourceLiveUpdates key={`configmaps/${generation}`} generation={generation!} topics={['configmaps']} queryKeys={[["resources", "configmaps"]]} autoStart onProgress={preview.onProgress} onPreviewReset={preview.onReset} /> : null}>
+      <ResourceListControls search={draft.search} appliedSearch={applied.search} onSearchChange={(value) => setDrafts((current) => ({ ...current, [tab]: { ...current[tab], search: value } }))} onApply={(interactionId) => { setAppliedLists((current) => ({ ...current, [tab]: bindListInteraction({ ...draft }, interactionId) })) }} />
       <div id="config-panel">
         <SelectionGate pending={status.isPending} error={status.error} selected={Boolean(selection)}>
           <QueryState pending={activeQuery.isPending && !previewActive} error={!activeQuery.data || collection.authorizationFailed ? activeQuery.error : null} empty={visibleItems.length === 0 && !activeQuery.hasNextPage}>
             <div className="min-w-0 overflow-x-auto rounded-xl border border-kp-overlay-0 bg-kp-surface-0">
-              <ColumnVisibilityControl state={configColumnState} columns={configColumns} />
-              {previewActive ? <p className="px-3 py-1.5 text-xs text-kp-sky" role="status">Receiving ConfigMaps · ✓ {preview.preview!.completed}/{preview.preview!.requested} namespaces · partial preview</p> : null}
-              {activeQuery.isPlaceholderData || activeQuery.isFetching && !activeQuery.isFetchingNextPage ? <p className="px-3 py-1.5 text-xs text-kp-overlay-text" role="status">Refreshing {tab}…</p> : null}
+
+              {previewActive ? <p className="px-3 py-1.5 text-content text-kp-sky" role="status">Receiving ConfigMaps · ✓ {preview.preview!.completed}/{preview.preview!.requested} namespaces · partial preview</p> : null}
+              {activeQuery.isPlaceholderData || activeQuery.isFetching && !activeQuery.isFetchingNextPage ? <p className="sr-only" role="status">Refreshing {tab}…</p> : null}
               <DataTable
                 caption={`Authorized ${tab} metadata pages`}
                 rows={visibleItems}
                 onScrollProgress={collection.onScrollProgress}
                 getRowKey={(item) => { const value = 'metadata' in item ? item.metadata : item; return `${value.namespace}/${value.name}` }}
-                columns={applyColumnVisibility(configColumns, configColumnState)}
+                key={tab} columns={configColumns} columnVisibility={configColumnState}
                 stickyHeader
               />
               {collection.lastPage ? <InfiniteCollectionFooter result={collection.lastPage} itemCount={collection.items.length} pageCount={activeQuery.data?.pages.length ?? 0} firstPage={activeQuery.data?.pageParams[0] === '' && activeQuery.data.pages.length === 1} hasNextPage={Boolean(activeQuery.hasNextPage)} loading={activeQuery.isFetching} refreshing={activeQuery.isPlaceholderData} nextPageError={collection.nextPageError} onNext={() => void collection.loadNextPage()} onRestart={() => void queryClient.resetQueries({ queryKey: collection.queryKey })} /> : null}
@@ -1183,12 +1020,6 @@ interface NodeListState {
 
 const nodeStatuses = ['Ready', 'NotReady', 'Unknown'] as const
 const defaultNodeList: NodeListState = { search: '', nodeStatus: '', sort: 'identity', order: 'asc' }
-const nodeSortOptions: readonly ListSortOption[] = [
-  { value: 'identity', label: 'Name' },
-  { value: 'name', label: 'Name (natural)' },
-  { value: 'age', label: 'Age' },
-  { value: 'status', label: 'Status' },
-]
 
 function nodeStateFromParams(params: URLSearchParams): NodeListState {
   return {
@@ -1203,6 +1034,7 @@ function nodeStateFromParams(params: URLSearchParams): NodeListState {
 export function NodesPage() {
   const { status, selection } = useActiveSelection()
   const workspace = useResourceWorkspace()
+  const columnVisibility = usePreferenceColumnVisibility('nodes')
   const { name } = useParams<{ name: string }>()
   const [params] = useSearchParams()
   const generation = selection?.generation
@@ -1229,17 +1061,14 @@ export function NodesPage() {
       title="Nodes"
       description="Cluster nodes with readiness, roles, capacity and taints; a selected context is enough and no namespace filter applies."
     >
-      <ResourceListControls search={draft.search} appliedSearch={applied.search} onSearchChange={(value) => setDraft((current) => ({ ...current, search: value }))} onApply={(interactionId) => { setApplied(bindListInteraction({ ...draft }, interactionId)) }} onRefresh={() => queryClient.invalidateQueries({ queryKey: ['resources', 'nodes'] })} onClear={() => { setDraft({ ...defaultNodeList }); setApplied({ ...defaultNodeList }) }} activeFilters={[
-        ...activeFilter('status', 'Status', applied.nodeStatus),
-      ]} sort={draft.sort} order={draft.order} appliedSort={applied.sort} appliedOrder={applied.order} defaultSort="identity" defaultOrder="asc" hasPendingChanges={!sameListState(draft, applied)} sortOptions={nodeSortOptions} onSortChange={(value) => setDraft((current) => ({ ...current, sort: value }))} onOrderChange={(value) => setDraft((current) => ({ ...current, order: value }))}>
-        <Select aria-label="Status" className="!h-7 !w-auto max-w-[9rem] pr-6 text-sm" value={draft.nodeStatus} onChange={(event) => setDraft((current) => ({ ...current, nodeStatus: event.target.value }))}><option value="">All statuses</option>{nodeStatuses.map((value) => <option key={value}>{value}</option>)}</Select>
-      </ResourceListControls>
+      <ResourceListControls search={draft.search} appliedSearch={applied.search} onSearchChange={(value) => setDraft((current) => ({ ...current, search: value }))} onApply={(interactionId) => { setApplied(bindListInteraction({ ...draft }, interactionId)) }} />
       <SelectionGate pending={status.isPending} error={status.error} selected={Boolean(selection)}>
         <QueryState pending={list.isPending} error={!list.data || collection.authorizationFailed ? list.error : null} empty={collection.items.length === 0 && !list.hasNextPage}>
           <div className="min-w-0 overflow-x-auto rounded-xl border border-kp-overlay-0 bg-kp-surface-0">
-            {list.isPlaceholderData || list.isFetching && !list.isFetchingNextPage ? <p className="px-3 py-1.5 text-xs text-kp-overlay-text" role="status">Refreshing nodes…</p> : null}
+            {list.isPlaceholderData || list.isFetching && !list.isFetchingNextPage ? <p className="sr-only" role="status">Refreshing nodes…</p> : null}
             <DataTable
               caption="Authorized node pages"
+              columnVisibility={columnVisibility}
               rows={collection.items}
               onScrollProgress={collection.onScrollProgress}
               getRowKey={(item) => item.name}
@@ -1248,7 +1077,7 @@ export function NodesPage() {
                 { key: 'status', header: 'Status', cell: (item) => <StatusBadge variant={statusBadgeVariant(item.status)}>{item.status}</StatusBadge> },
                 { key: 'version', header: 'Version', cell: (item) => item.kubeletVersion || '—' },
                 { key: 'internal-ip', header: 'Internal IP', cell: (item) => item.internalIP ?? '—' },
-                { key: 'age', header: 'Age', cell: (item) => age(item.ageSeconds) },
+                { key: 'age', sortKey: 'ageSeconds', header: 'Age', cell: (item) => age(item.ageSeconds) },
               ]}
               stickyHeader
             />

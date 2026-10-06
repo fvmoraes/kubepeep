@@ -26,6 +26,21 @@ vermelho `#EF4444` (destrutivo), âmbar `#F59E0B` (aviso). `Degraded` é âmbar
 densidade padrão de tabela/menu; Inter Variable como família única, com
 monospace reservado a logs, YAML, código e terminal.
 
+**Atualização em 2026-10-06:** a tipografia foi substituída por Roboto, com
+Roboto Mono para código e terminal. O contrato atual usa somente cinco
+tamanhos (22/18/15/14/13px) e os pesos 400/700, conforme o
+[design system vigente](../architecture/design-system.md#escala-tipográfica-única).
+Botões e campos agora compartilham altura de 28px e cantos de 2px.
+Todas as famílias compartilham a apresentação compacta de Pods: busca textual,
+controles no cabeçalho das colunas, paginação incremental limitada, atualização
+automática e detalhes abaixo da lista. O provider do workspace preserva a
+rota de origem durante a inspeção, incluindo navegação entre tipos de recursos.
+Logs de workload passam a abrir nesse painel; valores de Secret continuam
+exigindo revelação explícita, sem cache ou polling.
+O shell adapta a sidebar para navegação modal nativa até 760px ou em janelas baixas de até 1024×500px. Tabelas e
+detalhes usam limites proporcionais à área visível; carregamento discreto e
+movimento de 120–160ms são compartilhados, com movimento reduzido respeitado.
+
 ### Componentes e framework
 
 `web/src/components/ui/` fornece os átomos (Button com variantes semânticas,

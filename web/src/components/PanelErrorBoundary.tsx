@@ -29,9 +29,9 @@ export class PanelErrorBoundary extends Component<Props, State> {
     if (!this.state.error) return this.props.children
     return (
       <div role="alert" className="grid gap-2 rounded-lg border border-kp-red-border bg-kp-red-bg/50 p-3">
-        <strong className="text-sm text-kp-text">{this.props.name} could not be displayed</strong>
-        <p className="m-0 text-xs text-kp-subtext">Other panels remain available. Retry this panel; if it fails again, use Refresh after checking the local service.</p>
-        <Button variant="secondary" size="sm" className="justify-self-start" onClick={this.retry}>Retry {this.props.name}</Button>
+        <strong className="text-content text-kp-text">{this.props.name} could not be displayed</strong>
+        <p className="m-0 text-content text-kp-subtext">Other panels remain available. Retry this panel; if it fails again, use Refresh after checking the local service.</p>
+        <Button variant="secondary" className="justify-self-start" onClick={this.retry}>Retry {this.props.name}</Button>
       </div>
     )
   }

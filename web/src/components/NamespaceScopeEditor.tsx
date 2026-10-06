@@ -1,3 +1,4 @@
+import { LoadingState } from './ui/LoadingState'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
@@ -255,37 +256,37 @@ export function NamespaceScopeForm({ selection, csrfToken, sessionError, onSessi
       <CardContent className="grid gap-4 p-4">
         <CardHeader>
           <div>
-            <h1 id="scope-editor-title" className="text-xl text-kp-text">{editing ? `Edit ${scope.name}` : 'Create a namespace scope'}</h1>
-            <p className="mt-0.5 text-sm text-kp-overlay-text">Paste the namespaces you work with, review the parsed list, and save once. Saving is local: it never creates Kubernetes objects.</p>
+            <h1 id="scope-editor-title" className="text-title text-kp-text">{editing ? `Edit ${scope.name}` : 'Create a namespace scope'}</h1>
+            <p className="mt-0.5 text-content text-kp-overlay-text">Paste the namespaces you work with, review the parsed list, and save once. Saving is local: it never creates Kubernetes objects.</p>
           </div>
-          <span className="mono text-xs text-kp-overlay-text">{selection.generation}</span>
+          <span className="text-content text-kp-overlay-text">{selection.generation}</span>
         </CardHeader>
 
         <div className="grid gap-3 md:grid-cols-[minmax(100px,0.6fr)_minmax(160px,1fr)_minmax(180px,1.4fr)]" aria-label="Scope origin">
-          <label className="grid gap-1"><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Profile</span><Input aria-label="Scope cluster profile" value={String(selection.clusterProfileId)} readOnly /></label>
-          <label className="grid gap-1"><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Context</span><Input aria-label="Scope context" value={selection.context} readOnly /></label>
-          <label className="grid gap-1"><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Name <span aria-hidden="true" className="text-kp-red">*</span></span><Input aria-label="Scope name" aria-invalid={nameError !== null} value={effectiveName} maxLength={120} onChange={(event) => setName(event.target.value)} placeholder="Finance workloads" /></label>
+          <label className="grid gap-1"><span className="text-column uppercase tracking-wider text-kp-overlay-text">Profile</span><Input aria-label="Scope cluster profile" value={String(selection.clusterProfileId)} readOnly /></label>
+          <label className="grid gap-1"><span className="text-column uppercase tracking-wider text-kp-overlay-text">Context</span><Input aria-label="Scope context" value={selection.context} readOnly /></label>
+          <label className="grid gap-1"><span className="text-column uppercase tracking-wider text-kp-overlay-text">Name <span aria-hidden="true" className="text-kp-red">*</span></span><Input aria-label="Scope name" aria-invalid={nameError !== null} value={effectiveName} maxLength={120} onChange={(event) => setName(event.target.value)} placeholder="Finance workloads" /></label>
         </div>
 
         <fieldset className="m-0 flex flex-wrap items-center gap-2 border-0 p-0">
-          <legend className="mb-1.5 w-full text-2xs uppercase tracking-wider text-kp-overlay-text">Mode</legend>
+          <legend className="mb-1.5 w-full text-column uppercase tracking-wider text-kp-overlay-text">Mode</legend>
           {(['single', 'list', 'all'] as const).map((candidate) => (
             <label key={candidate} className="relative">
               <input type="radio" name="scope-mode" value={candidate} checked={mode === candidate} onChange={() => updateMode(candidate)} className="peer absolute opacity-0 pointer-events-none" />
-              <span className={`block min-w-[86px] rounded-md border px-3 py-1.5 text-center text-sm cursor-pointer transition-colors peer-focus-visible:outline-2 peer-focus-visible:outline-kp-mauve peer-focus-visible:outline-offset-1 ${mode === candidate ? 'border-kp-accent-border bg-kp-accent-bg text-kp-mauve font-medium' : 'border-kp-overlay-1 bg-kp-surface-3 text-kp-subtext hover:border-kp-overlay-3 hover:text-kp-text'}`}>{candidate}</span>
+              <span className={`control inline-flex min-w-16 items-center justify-center border px-2 text-content cursor-pointer transition-colors peer-focus-visible:outline-2 peer-focus-visible:outline-kp-mauve peer-focus-visible:outline-offset-1 ${mode === candidate ? 'border-kp-accent-border bg-kp-accent-bg text-kp-mauve font-bold' : 'border-kp-overlay-1 bg-kp-surface-1 text-kp-subtext hover:bg-kp-surface-3 hover:border-kp-overlay-3 hover:text-kp-text'}`}>{candidate}</span>
             </label>
           ))}
-          <small className="w-full text-xs text-kp-overlay-text">single: exactly one namespace · list: the pasted set · all: everything the identity may list (stored as no wildcard).</small>
+          <small className="w-full text-content text-kp-overlay-text">single: exactly one namespace · list: the pasted set · all: everything the identity may list (stored as no wildcard).</small>
         </fieldset>
 
         {mode === 'all' ? (
-          <div className="rounded-r-md border-l-2 border-kp-yellow-border bg-kp-yellow-bg px-3 py-2.5 text-sm text-kp-yellow leading-relaxed" role="note">
+          <div className="rounded-r-md border-l-2 border-kp-yellow-border bg-kp-yellow-bg px-3 py-2.5 text-content text-kp-yellow leading-relaxed" role="note">
             All mode stores no wildcard. The backend will activate only namespaces returned by Kubernetes after confirming list permission.
           </div>
         ) : (
           <>
             <label className="grid gap-1">
-              <span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Namespace input</span>
+              <span className="text-column uppercase tracking-wider text-kp-overlay-text">Namespace input</span>
               <textarea
                 aria-label="Namespace input"
                 value={rawInput}
@@ -293,29 +294,29 @@ export function NamespaceScopeForm({ selection, csrfToken, sessionError, onSessi
                 rows={8}
                 placeholder={'payments, billing\ninvoices; observability\ncore'}
                 spellCheck={false}
-                className="min-h-[150px] w-full rounded-md border border-kp-overlay-0 bg-kp-crust px-2.5 py-2 text-sm text-kp-text leading-relaxed focus:border-kp-mauve focus:shadow-focus focus:outline-none resize-y"
+                className="min-h-[150px] w-full rounded-md border border-kp-overlay-0 bg-kp-crust px-2.5 py-2 text-content text-kp-text leading-relaxed focus:border-kp-mauve focus:shadow-focus focus:outline-none resize-y"
               />
             </label>
             {rawInput.trim() === '' ? (
-              <p className="m-0 rounded-r-md border-l-2 border-kp-blue-border bg-kp-blue-bg px-3 py-2 text-xs leading-relaxed text-kp-subtext" role="note">
+              <p className="m-0 rounded-r-md border-l-2 border-kp-blue-border bg-kp-blue-bg px-3 py-2 text-content leading-relaxed text-kp-subtext" role="note">
                 Type or paste your real namespace names in the field above — the gray text there is only an example template. Names appear as chips below with live counters.
               </p>
             ) : null}
             <details className="rounded-md border border-kp-overlay-0 bg-kp-surface-1 px-3 py-2">
-              <summary className="cursor-pointer text-xs text-kp-sky">How to format the list</summary>
-              <div className="mt-2 grid gap-1.5 text-xs leading-relaxed text-kp-subtext">
+              <summary className="cursor-pointer text-content text-kp-sky">How to format the list</summary>
+              <div className="mt-2 grid gap-1.5 text-content leading-relaxed text-kp-subtext">
                 <p className="m-0">Separate names with commas, semicolons, spaces or one per line:</p>
-                <pre className="mono m-0 rounded border border-kp-overlay-0 bg-kp-crust px-2 py-1.5 text-2xs text-kp-text">{`payments, billing\ninvoices; observability`}</pre>
+                <pre className="mono m-0 rounded border border-kp-overlay-0 bg-kp-crust px-2 py-1.5 text-content text-kp-text">{`payments, billing\ninvoices; observability`}</pre>
                 <p className="m-0">A JSON string array also works: <code className="mono">["payments", "billing"]</code> or <code className="mono">{'{"namespaces": ["payments"]}'}</code></p>
                 <p className="m-0">Simple YAML sequences are accepted:</p>
-                <pre className="mono m-0 rounded border border-kp-overlay-0 bg-kp-crust px-2 py-1.5 text-2xs text-kp-text">{`---\n- payments\n- billing`}</pre>
+                <pre className="mono m-0 rounded border border-kp-overlay-0 bg-kp-crust px-2 py-1.5 text-content text-kp-text">{`---\n- payments\n- billing`}</pre>
                 <p className="m-0">Lowercase letters, digits, hyphens; 1–63 characters. Invalid names block saving — click a red chip to remove it. Duplicates and empty entries are dropped automatically.</p>
               </div>
             </details>
             {clusterNamespaces.isSuccess && clusterNamespaceItems.length > 0 ? (
               <div className="grid gap-2 rounded-md border border-kp-overlay-0 bg-kp-surface-1 p-2.5" aria-label="Namespaces in this cluster">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Namespaces in this cluster ({clusterNamespaceItems.length})</span>
+                  <span className="text-column uppercase tracking-wider text-kp-overlay-text">Namespaces in this cluster ({clusterNamespaceItems.length})</span>
                   <Input aria-label="Filter cluster namespaces" value={pickerFilter} maxLength={63} placeholder="Filter…" className="w-44" onChange={(event) => setPickerFilter(event.target.value)} />
                 </div>
                 <div className="grid max-h-44 content-start gap-1 overflow-y-auto">
@@ -327,93 +328,93 @@ export function NamespaceScopeForm({ selection, csrfToken, sessionError, onSessi
                         type="button"
                         aria-pressed={picked}
                         onClick={() => picked ? removeItem(namespace.name) : updateRawInput(rawInput === '' ? namespace.name : `${rawInput}\n${namespace.name}`)}
-                        className={`flex h-7 items-center justify-between gap-2 rounded px-2 text-left text-xs transition-colors ${picked ? 'bg-kp-accent-bg text-kp-mauve font-medium' : 'text-kp-subtext hover:bg-kp-surface-3 hover:text-kp-text'}`}
+                        className={`control flex items-center justify-between gap-2 px-2 text-left text-content transition-colors ${picked ? 'bg-kp-accent-bg text-kp-mauve font-bold' : 'text-kp-subtext hover:bg-kp-surface-3 hover:text-kp-text'}`}
                       >
                         <span className="truncate">{namespace.name}</span>
                         {picked ? <span aria-hidden="true">✓</span> : null}
                       </button>
                     )
                   })}
-                  {listedNamespaces.length === 0 ? <p className="m-0 px-2 py-1 text-xs text-kp-overlay-text">No namespace matches this filter.</p> : null}
-                  {clusterNamespaceItems.length >= 500 ? <p className="m-0 px-2 py-1 text-2xs text-kp-overlay-text">Showing the first 500 — filter above or paste the names manually.</p> : null}
+                  {listedNamespaces.length === 0 ? <p className="m-0 px-2 py-1 text-content text-kp-overlay-text">No namespace matches this filter.</p> : null}
+                  {clusterNamespaceItems.length >= 500 ? <p className="m-0 px-2 py-1 text-column text-kp-overlay-text">Showing the first 500 — filter above or paste the names manually.</p> : null}
                 </div>
               </div>
             ) : null}
             {clusterListDenied ? (
-              <p className="m-0 text-xs text-kp-overlay-text" role="note">Namespace listing is denied for this identity — type or paste the names manually.</p>
+              <p className="m-0 text-content text-kp-overlay-text" role="note">Namespace listing is denied for this identity — type or paste the names manually.</p>
             ) : null}
           </>
         )}
 
         <div className="grid grid-cols-2 gap-2 md:grid-cols-4" aria-label="Namespace validation counters">
-          <div className="rounded-lg border border-kp-overlay-0 bg-kp-surface-1 px-2.5 py-2"><strong className="block text-2xl text-kp-text">{shownValidation.validCount}</strong><span className="block text-2xs uppercase tracking-wider text-kp-overlay-text">valid</span></div>
-          <div className="rounded-lg border border-kp-overlay-0 bg-kp-surface-1 px-2.5 py-2"><strong className="block text-2xl text-kp-text">{shownValidation.duplicateCount}</strong><span className="block text-2xs uppercase tracking-wider text-kp-overlay-text">duplicates removed</span></div>
-          <div className="rounded-lg border border-kp-overlay-0 bg-kp-surface-1 px-2.5 py-2"><strong className="block text-2xl text-kp-text">{shownValidation.discardedEmptyCount}</strong><span className="block text-2xs uppercase tracking-wider text-kp-overlay-text">empty removed</span></div>
-          <div className="rounded-lg border border-kp-overlay-0 bg-kp-surface-1 px-2.5 py-2"><strong className="block text-2xl text-kp-text">{shownValidation.invalidCount}</strong><span className="block text-2xs uppercase tracking-wider text-kp-overlay-text">invalid</span></div>
+          <div className="rounded-lg border border-kp-overlay-0 bg-kp-surface-1 px-2.5 py-2"><strong className="block text-title text-kp-text">{shownValidation.validCount}</strong><span className="block text-column uppercase tracking-wider text-kp-overlay-text">valid</span></div>
+          <div className="rounded-lg border border-kp-overlay-0 bg-kp-surface-1 px-2.5 py-2"><strong className="block text-title text-kp-text">{shownValidation.duplicateCount}</strong><span className="block text-column uppercase tracking-wider text-kp-overlay-text">duplicates removed</span></div>
+          <div className="rounded-lg border border-kp-overlay-0 bg-kp-surface-1 px-2.5 py-2"><strong className="block text-title text-kp-text">{shownValidation.discardedEmptyCount}</strong><span className="block text-column uppercase tracking-wider text-kp-overlay-text">empty removed</span></div>
+          <div className="rounded-lg border border-kp-overlay-0 bg-kp-surface-1 px-2.5 py-2"><strong className="block text-title text-kp-text">{shownValidation.invalidCount}</strong><span className="block text-column uppercase tracking-wider text-kp-overlay-text">invalid</span></div>
         </div>
 
         {mode !== 'all' && (parsed.validation.valid.length > 0 || parsed.validation.invalid.length > 0) ? (
-          <div className="flex flex-wrap gap-1.5" aria-label="Parsed namespaces">
+          <div className="flex min-w-0 flex-wrap gap-1.5" aria-label="Parsed namespaces">
             {shownValidation.valid.slice(0, maximumPreviewChips).map((namespace) => (
-              <button key={`valid-${namespace}`} type="button" className="inline-flex items-center gap-1.5 rounded-full border border-kp-blue-border bg-kp-blue-bg px-2.5 py-1 text-xs text-kp-sky cursor-pointer hover:border-kp-overlay-3" onClick={() => removeItem(namespace)} aria-label={`Remove namespace ${namespace}`} title="Remove this namespace from the input">
-                {namespace}<span aria-hidden="true">×</span>
+              <button key={`valid-${namespace}`} type="button" className="control inline-flex max-w-full items-center gap-1.5 border border-kp-blue-border bg-kp-blue-bg px-2 text-content text-kp-sky cursor-pointer hover:border-kp-overlay-3" onClick={() => removeItem(namespace)} aria-label={`Remove namespace ${namespace}`} title={`Remove namespace ${namespace}`}>
+                <span className="truncate">{namespace}</span><span aria-hidden="true">×</span>
               </button>
             ))}
             {shownValidation.invalid.slice(0, maximumPreviewChips).map(({ input, code }) => (
-              <button key={`invalid-${input}`} type="button" className="inline-flex items-center gap-1.5 rounded-full border border-kp-red-border bg-kp-red-bg px-2.5 py-1 text-xs text-kp-red cursor-pointer hover:border-kp-overlay-3" onClick={() => removeItem(input)} aria-label={`Remove ${code === 'NAMESPACE_NOT_FOUND' ? 'namespace not found in cluster' : 'invalid namespace'} ${input}`} title={code === 'NAMESPACE_NOT_FOUND' ? 'Not found in the cluster list — click to remove' : 'Remove this entry from the input'}>
-                {input}<span aria-hidden="true">×</span>
+              <button key={`invalid-${input}`} type="button" className="control inline-flex max-w-full items-center gap-1.5 border border-kp-red-border bg-kp-red-bg px-2 text-content text-kp-red cursor-pointer hover:border-kp-overlay-3" onClick={() => removeItem(input)} aria-label={`Remove ${code === 'NAMESPACE_NOT_FOUND' ? 'namespace not found in cluster' : 'invalid namespace'} ${input}`} title={`${input}: ${code === 'NAMESPACE_NOT_FOUND' ? 'Not found in the cluster list — click to remove' : 'Remove this entry from the input'}`}>
+                <span className="truncate">{input}</span><span aria-hidden="true">×</span>
               </button>
             ))}
           </div>
         ) : null}
         {mode !== 'all' && shownValidation.valid.length + shownValidation.invalid.length > maximumPreviewChips ? (
-          <p className="m-0 text-xs text-kp-overlay-text" role="note">
+          <p className="m-0 text-content text-kp-overlay-text" role="note">
             Showing the first {maximumPreviewChips} of {shownValidation.validCount + shownValidation.invalidCount} entries; the counters above cover the whole input.
           </p>
         ) : null}
 
-        <label className="grid max-w-[340px] gap-1">
-          <span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Default namespace</span>
+        <label className="grid min-w-0 max-w-[340px] gap-1">
+          <span className="text-column uppercase tracking-wider text-kp-overlay-text">Default namespace</span>
           <Select aria-label="Default namespace" value={effectiveDefaultNamespace} onChange={(event) => setDefaultNamespace(event.target.value)} disabled={shownValidation.valid.length === 0}>
             <option value="">Choose a valid namespace</option>
             {shownValidation.valid.map((namespace) => <option key={namespace} value={namespace}>{namespace}</option>)}
           </Select>
         </label>
 
-        {modeSwitched ? <p className="m-0 text-xs text-kp-sky" role="status">Switched to list mode: more than one namespace was entered.</p> : null}
-        {mode !== 'all' && autoCheckState === 'running' ? <p className="m-0 text-xs text-kp-overlay-text" role="status">Checking the names against the cluster…</p> : null}
-        {mode !== 'all' && autoCheckState === 'error' && rawInput.trim() !== '' ? <p className="m-0 text-xs text-kp-yellow" role="status">The automatic cluster check could not run — use “Validate with cluster” to retry.</p> : null}
+        {modeSwitched ? <p className="m-0 text-content text-kp-sky" role="status">Switched to list mode: more than one namespace was entered.</p> : null}
+        {mode !== 'all' && autoCheckState === 'running' ? <p className="m-0 text-content text-kp-overlay-text" role="status">Checking the names against the cluster…</p> : null}
+        {mode !== 'all' && autoCheckState === 'error' && rawInput.trim() !== '' ? <p className="m-0 text-content text-kp-yellow" role="status">The automatic cluster check could not run — use “Validate with cluster” to retry.</p> : null}
         {existence ? (
-          <p className={`m-0 rounded-r-md border-l-2 px-3 py-2 text-xs leading-relaxed ${existence.tone === 'amber' ? 'border-kp-yellow-border bg-kp-yellow-bg text-kp-yellow' : 'border-kp-blue-border bg-kp-blue-bg text-kp-subtext'}`} role="status">
+          <p className={`m-0 rounded-r-md border-l-2 px-3 py-2 text-content leading-relaxed ${existence.tone === 'amber' ? 'border-kp-yellow-border bg-kp-yellow-bg text-kp-yellow' : 'border-kp-blue-border bg-kp-blue-bg text-kp-subtext'}`} role="status">
             {existence.text}
           </p>
         ) : null}
         {serverValidation?.existence.checked === false && serverValidation.existence.reasonCode !== 'LOCAL_VALIDATION_ONLY' ? (
-          <p className="m-0 text-xs text-kp-overlay-text" role="status">Existence was not checked: {serverValidation.existence.reasonCode ?? 'permission unavailable'}.</p>
+          <p className="m-0 text-content text-kp-overlay-text" role="status">Existence was not checked: {serverValidation.existence.reasonCode ?? 'permission unavailable'}.</p>
         ) : null}
-        {validation.isError ? <p className="m-0 text-xs text-kp-red" role="alert">{messageFor(validation.error)}</p> : null}
-        {save.isError ? <p className="m-0 text-xs text-kp-red" role="alert">{messageFor(save.error)}</p> : null}
-        {save.isSuccess ? <p className="m-0 text-xs text-kp-green" role="status">Scope “{save.data.name}” was {editing ? 'updated' : 'saved'}.</p> : null}
+        {validation.isError ? <p className="m-0 text-content text-kp-red" role="alert">{messageFor(validation.error)}</p> : null}
+        {save.isError ? <p className="m-0 text-content text-kp-red" role="alert">{messageFor(save.error)}</p> : null}
+        {save.isSuccess ? <p className="m-0 text-content text-kp-green" role="status">Scope “{save.data.name}” was {editing ? 'updated' : 'saved'}.</p> : null}
 
-        {shownModeError ? <p className="m-0 text-xs text-kp-red" role="alert">{shownModeError}</p> : null}
+        {shownModeError ? <p className="m-0 text-content text-kp-red" role="alert">{shownModeError}</p> : null}
         {allModeBlocked ? (
-          <p className="m-0 rounded-r-md border-l-2 border-kp-yellow-border bg-kp-yellow-bg px-3 py-2 text-xs leading-relaxed text-kp-yellow" role="alert">
+          <p className="m-0 rounded-r-md border-l-2 border-kp-yellow-border bg-kp-yellow-bg px-3 py-2 text-content leading-relaxed text-kp-yellow" role="alert">
             All mode requires namespace listing, which is denied for this identity on this cluster — the save would always fail. Use <strong>list</strong> mode and type the namespace names manually.
           </p>
         ) : null}
-        {nameError ? <p className="m-0 text-xs text-kp-red" role="alert">{nameError}</p> : null}
+        {nameError ? <p className="m-0 text-content text-kp-red" role="alert">{nameError}</p> : null}
         {shownValidation.invalid.some((entry) => entry.code === 'NAMESPACE_NOT_FOUND') ? (
-          <p className="m-0 rounded-r-md border-l-2 border-kp-yellow-border bg-kp-yellow-bg px-3 py-2 text-xs leading-relaxed text-kp-yellow" role="note">
+          <p className="m-0 rounded-r-md border-l-2 border-kp-yellow-border bg-kp-yellow-bg px-3 py-2 text-content leading-relaxed text-kp-yellow" role="note">
             Names marked <strong>not found</strong> do not exist in the cluster above — click their chips to remove them, or switch to the right cluster. Saving stays blocked while they are listed.
           </p>
         ) : null}
         {sessionError ? (
           <div className="flex flex-wrap items-center justify-between gap-2 rounded-r-md border-l-2 border-kp-red-border bg-kp-red-bg/50 px-3 py-2.5" role="alert">
-            <span className="text-xs text-kp-red">{sessionError}</span>
-            {onSessionRetry ? <Button variant="secondary" size="sm" onClick={onSessionRetry}>Retry session</Button> : null}
+            <span className="text-content text-kp-red">{sessionError}</span>
+            {onSessionRetry ? <Button variant="secondary" onClick={onSessionRetry}>Retry session</Button> : null}
           </div>
         ) : null}
-        {!csrfToken && !sessionError ? <p className="m-0 text-xs text-kp-overlay-text" role="status">Saving unlocks when the local session is ready.</p> : null}
+        {!csrfToken && !sessionError ? <p className="m-0 text-content text-kp-overlay-text" role="status">Saving unlocks when the local session is ready.</p> : null}
 
         <div className="flex flex-wrap justify-end gap-2">
           {editing ? <Button variant="secondary" onClick={() => onCancel?.()} disabled={save.isPending}>Cancel edit</Button> : null}
@@ -522,33 +523,33 @@ export function NamespaceScopeEditor() {
         <CardContent className="grid gap-3 p-4">
           <CardHeader>
             <div>
-              <h2 id="saved-scopes-title" className="text-xl text-kp-text">Namespace scopes</h2>
-              <p className="mt-0.5 text-sm text-kp-overlay-text">Choose exactly one default for this context. It opens automatically whenever this context becomes active.</p>
+              <h2 id="saved-scopes-title" className="text-heading text-kp-text">Namespace scopes</h2>
+              <p className="mt-0.5 text-content text-kp-overlay-text">Choose exactly one default for this context. It opens automatically whenever this context becomes active.</p>
             </div>
           </CardHeader>
-          {scopes.isPending ? <p className="m-0 text-sm text-kp-overlay-text" role="status">Loading saved scopes…</p> : null}
-          {scopes.isError ? <p className="m-0 text-sm text-kp-red" role="status">Saved scopes are temporarily unavailable.</p> : null}
-          {scopeList.length === 0 && scopes.isSuccess ? <p className="m-0 text-sm text-kp-overlay-text">No saved scopes for this local installation.</p> : null}
+          {scopes.isPending ? <LoadingState label="Loading saved scopes…" layout="inline" /> : null}
+          {scopes.isError ? <p className="m-0 text-content text-kp-red" role="status">Saved scopes are temporarily unavailable.</p> : null}
+          {scopeList.length === 0 && scopes.isSuccess ? <p className="m-0 text-content text-kp-overlay-text">No saved scopes for this local installation.</p> : null}
           {scopeList.length > 0 && !scopeList.some((scope) => scope.isDefault) ? (
-            <p className="m-0 rounded-r-md border-l-2 border-kp-yellow-border bg-kp-yellow-bg px-3 py-2 text-sm text-kp-yellow" role="alert">This context has no default scope. Mark one below before browsing cluster resources.</p>
+            <p className="m-0 rounded-r-md border-l-2 border-kp-yellow-border bg-kp-yellow-bg px-3 py-2 text-content text-kp-yellow" role="alert">This context has no default scope. Mark one below before browsing cluster resources.</p>
           ) : null}
           {scopeList.length ? (
             <ul className="m-0 grid list-none gap-2 p-0">
               {scopeList.map((scope) => (
                 <li key={scope.id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-kp-overlay-0 bg-kp-surface-1 px-3 py-2.5">
-                  <div className="min-w-0"><strong className="block text-sm text-kp-text">{scope.name}</strong><small className="block text-xs text-kp-overlay-text">{scope.context} · {scope.mode} · {scope.namespaces.length} namespaces</small></div>
+                  <div className="min-w-0"><strong className="block text-content text-kp-text">{scope.name}</strong><small className="block text-content text-kp-overlay-text">{scope.context} · {scope.mode} · {scope.namespaces.length} namespaces</small></div>
                   <div className="flex flex-wrap items-center justify-end gap-2">
                     {scope.isDefault ? <Badge variant="info">default</Badge> : (
-                      <Button variant="secondary" size="sm" disabled={!session.data || actionPending} onClick={() => markDefault.mutate(scope)}>Make default</Button>
+                      <Button variant="secondary" disabled={!session.data || actionPending} onClick={() => markDefault.mutate(scope)}>Make default</Button>
                     )}
                     {selection.scopeId === scope.id ? <Badge variant="healthy">active</Badge> : (
-                      <Button size="sm" disabled={!session.data || actionPending} onClick={() => selectScope.mutate(scope)}>Select {scope.name}</Button>
+                      <Button disabled={!session.data || actionPending} onClick={() => selectScope.mutate(scope)}>Select {scope.name}</Button>
                     )}
-                    <Button variant="secondary" size="sm" disabled={actionPending} onClick={() => {
+                    <Button variant="secondary" disabled={actionPending} onClick={() => {
                       setEditingScopeId(scope.id)
                       setDeleteScopeId(null)
                     }}>Edit {scope.name}</Button>
-                    <Button variant="danger" size="sm" disabled={!session.data || actionPending} onClick={() => {
+                    <Button variant="danger" disabled={!session.data || actionPending} onClick={() => {
                       setDeleteScopeId(scope.id)
                       setReplacementScopeId(null)
                       setReturnToSetup(false)
@@ -558,18 +559,18 @@ export function NamespaceScopeEditor() {
               ))}
             </ul>
           ) : null}
-          {selectScope.isError ? <p className="m-0 text-xs text-kp-red" role="alert">{messageFor(selectScope.error)}</p> : null}
-          {markDefault.isError ? <p className="m-0 text-xs text-kp-red" role="alert">{messageFor(markDefault.error)}</p> : null}
-          {deleteScope.isError ? <p className="m-0 text-xs text-kp-red" role="alert">{messageFor(deleteScope.error)}</p> : null}
+          {selectScope.isError ? <p className="m-0 text-content text-kp-red" role="alert">{messageFor(selectScope.error)}</p> : null}
+          {markDefault.isError ? <p className="m-0 text-content text-kp-red" role="alert">{messageFor(markDefault.error)}</p> : null}
+          {deleteScope.isError ? <p className="m-0 text-content text-kp-red" role="alert">{messageFor(deleteScope.error)}</p> : null}
           {deleteTarget ? (
             <div role="alertdialog" aria-labelledby="scope-delete-title" className="grid gap-3 rounded-lg border border-kp-red-border bg-kp-red-bg/50 p-3.5">
               <div>
-                <strong id="scope-delete-title" className="block text-sm text-kp-text">Delete “{deleteTarget.name}”?</strong>
-                <p className="m-0 mt-1 text-xs text-kp-subtext">This removes the local scope definition. Kubernetes resources are not modified.</p>
+                <strong id="scope-delete-title" className="block text-content text-kp-text">Delete “{deleteTarget.name}”?</strong>
+                <p className="m-0 mt-1 text-content text-kp-subtext">This removes the local scope definition. Kubernetes resources are not modified.</p>
               </div>
               {needsResolution ? (
                 <label className="grid max-w-[360px] gap-1">
-                  <span className="text-2xs uppercase tracking-wider text-kp-overlay-text">{deletingDefault ? 'Replacement default scope' : 'Replacement active scope'}</span>
+                  <span className="text-column uppercase tracking-wider text-kp-overlay-text">{deletingDefault ? 'Replacement default scope' : 'Replacement active scope'}</span>
                   <Select aria-label="Replacement scope" value={replacementScopeId ?? ''} onChange={(event) => {
                     setReplacementScopeId(event.target.value ? Number(event.target.value) : null)
                     if (event.target.value) setReturnToSetup(false)
@@ -580,7 +581,7 @@ export function NamespaceScopeEditor() {
                 </label>
               ) : null}
               {deletingDefault ? (
-                <label className="flex max-w-[520px] items-start gap-2 text-xs text-kp-subtext">
+                <label className="flex max-w-[520px] items-start gap-2 text-content text-kp-subtext">
                   <input type="checkbox" checked={returnToSetup} onChange={(event) => {
                     setReturnToSetup(event.target.checked)
                     if (event.target.checked) setReplacementScopeId(null)
@@ -588,7 +589,7 @@ export function NamespaceScopeEditor() {
                   Return this context to default scope setup after deletion. Resource browsing stays blocked until another default is chosen.
                 </label>
               ) : null}
-              {deletingActive && !deletingDefault && replacementCandidates.length === 0 ? <p className="m-0 text-xs text-kp-red">Create another scope before deleting the active scope.</p> : null}
+              {deletingActive && !deletingDefault && replacementCandidates.length === 0 ? <p className="m-0 text-content text-kp-red">Create another scope before deleting the active scope.</p> : null}
               <div className="flex flex-wrap justify-end gap-2">
                 <Button variant="secondary" onClick={() => {
                   setDeleteScopeId(null)

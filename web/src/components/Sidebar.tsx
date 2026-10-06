@@ -20,9 +20,10 @@ interface SidebarProps {
   onToggleCompact: () => void
   collapsedGroups: string[]
   onToggleGroup: (id: string) => void
+  onNavigate?: () => void
 }
 
-export function Sidebar({ version, compact, onToggleCompact, collapsedGroups, onToggleGroup }: SidebarProps) {
+export function Sidebar({ version, compact, onToggleCompact, collapsedGroups, onToggleGroup, onNavigate }: SidebarProps) {
   const location = useLocation()
 
   // The group owning the active route is always rendered expanded (derived,
@@ -45,7 +46,7 @@ export function Sidebar({ version, compact, onToggleCompact, collapsedGroups, on
             key={item.id}
             aria-disabled="true"
             data-tip={compact ? `${item.tip ?? item.label} — available in a future release` : `${item.tip ?? item.label} — available in a future release`}
-            className="flex h-8 items-center gap-2.5 rounded-md px-2.5 text-kp-text-disabled cursor-default select-none"
+            className="control flex items-center gap-2.5 px-2.5 text-menu text-kp-text-disabled cursor-default select-none"
           >
             <Icon size={16} strokeWidth={1.8} aria-hidden="true" />
             {!compact ? <span className="truncate">{item.label}</span> : null}
@@ -56,13 +57,13 @@ export function Sidebar({ version, compact, onToggleCompact, collapsedGroups, on
         <NavLink
           key={item.id}
           to={item.path}
-          onClick={(event) => { if (event.button === 0 && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) beginViewNavigation(item.path!) }}
+          onClick={(event) => { if (event.button === 0 && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) { beginViewNavigation(item.path!); onNavigate?.() } }}
           end={item.path === '/' || item.path === '/workloads'}
           data-tip={compact ? item.tip ?? item.label : undefined}
           aria-current={activeNavItem(location.pathname)?.id === item.id ? 'page' : false}
-          className={() => `flex h-8 items-center gap-2.5 rounded-md px-2.5 text-sm transition-colors ${
+          className={() => `control flex items-center gap-2.5 px-2.5 text-menu transition-colors ${
             activeNavItem(location.pathname)?.id === item.id
-              ? 'bg-kp-accent-bg text-kp-mauve font-medium'
+              ? 'bg-kp-accent-bg text-kp-mauve font-bold'
               : 'text-kp-subtext hover:bg-kp-surface-3 hover:text-kp-text'
           } ${compact ? 'justify-center px-0' : ''}`}
         >
@@ -71,7 +72,7 @@ export function Sidebar({ version, compact, onToggleCompact, collapsedGroups, on
         </NavLink>
       )
     }
-  }, [compact, location.pathname])
+  }, [compact, location.pathname, onNavigate])
 
   return (
     <aside
@@ -82,7 +83,7 @@ export function Sidebar({ version, compact, onToggleCompact, collapsedGroups, on
         {!compact ? (
           <div className="min-w-0 leading-tight">
             <BrandWordmark height={15} />
-            <small className="block text-2xs text-kp-overlay-text" title={`KubePeep ${version}`}>{version}</small>
+            <small className="block text-column text-kp-overlay-text" title={`KubePeep ${version}`}>{version}</small>
           </div>
         ) : null}
       </div>
@@ -103,7 +104,7 @@ export function Sidebar({ version, compact, onToggleCompact, collapsedGroups, on
                       type="button"
                       aria-expanded={!isCollapsed}
                       onClick={() => toggleGroup(group.id)}
-                      className="flex h-6 w-full items-center gap-1 rounded px-1.5 text-2xs font-semibold text-kp-overlay-text uppercase tracking-wider hover:text-kp-subtext"
+                      className="control flex w-full items-center gap-1 px-1.5 text-menu font-bold text-kp-overlay-text uppercase tracking-wider hover:text-kp-subtext"
                     >
                       <svg
                         viewBox="0 0 24 24"
@@ -134,10 +135,10 @@ export function Sidebar({ version, compact, onToggleCompact, collapsedGroups, on
               onClick={onToggleCompact}
               data-tip={compact ? 'Expand sidebar' : 'Collapse sidebar'}
               aria-label={compact ? 'Expand sidebar' : 'Collapse sidebar'}
-              className={`flex h-8 items-center gap-2.5 rounded-md px-2.5 text-kp-overlay-text hover:bg-kp-surface-3 hover:text-kp-text ${compact ? 'justify-center px-0' : ''}`}
+              className={`sidebar-compact-toggle control flex items-center gap-2.5 px-2.5 text-kp-overlay-text hover:bg-kp-surface-3 hover:text-kp-text ${compact ? 'justify-center px-0' : ''}`}
             >
               {compact ? <PanelLeftOpen size={16} strokeWidth={1.8} aria-hidden="true" /> : <PanelLeftClose size={16} strokeWidth={1.8} aria-hidden="true" />}
-              {!compact ? <span className="text-sm">Collapse</span> : null}
+              {!compact ? <span className="text-menu">Collapse</span> : null}
             </button>
           </div>
         </div>

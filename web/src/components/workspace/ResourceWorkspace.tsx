@@ -1,7 +1,8 @@
-import { Link } from 'react-router'
+import { LoadingState } from '../ui/LoadingState'
+import { useMediaQuery } from '../../hooks/useMediaQuery'
 import { DataEntries, SecretData, WorkloadEnvironment } from './WorkloadData'
 import { PodMetrics, WorkloadMetrics } from './WorkloadMetrics'
-import { lazy, Suspense, useEffect, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronLeft, ChevronRight, X } from 'lucide-react'
 
@@ -82,6 +83,8 @@ import { ResourceTabStrip, type ResourceTab } from '../resource/ResourceTabStrip
 import { resourceDetailPath, resourceKindLabel, workloadKindPath } from '../../navigation/paths'
 import { useResourceWorkspace, type WorkspaceEntry } from './ResourceWorkspaceProvider'
 
+const PodLogsPanel = lazy(() => import('./PodLogsPanel').then((module) => ({ default: module.PodLogsPanel })))
+const WorkloadLogsPanel = lazy(() => import('./WorkloadLogsPanel').then((module) => ({ default: module.WorkloadLogsPanel })))
 const DeploymentYamlEditor = lazy(() => import('./DeploymentYamlEditor').then((module) => ({ default: module.DeploymentYamlEditor })))
 const YamlViewer = lazy(() => import('../YamlViewer').then((module) => ({ default: module.YamlViewer })))
 const PodActions = lazy(() => import('../ResourceActions').then((module) => ({ default: module.PodActions })))
@@ -185,12 +188,12 @@ function InvestigationView({ value, onOpen }: { value: Investigation; onOpen: (r
 	]
 	const incomplete = value.coverage.filter((item) => !item.complete)
 	return <div className="grid gap-3">
-		{incomplete.length > 0 ? <p className="rounded-r-md border-l-2 border-kp-yellow-border bg-kp-yellow-bg px-3 py-2 text-xs text-kp-yellow" role="status">Partial local coverage: {incomplete.map((item) => item.topic).join(', ')}. Absence below does not prove absence in the cluster.</p> : null}
+		{incomplete.length > 0 ? <p className="rounded-r-md border-l-2 border-kp-yellow-border bg-kp-yellow-bg px-3 py-2 text-content text-kp-yellow" role="status">Partial local coverage: {incomplete.map((item) => item.topic).join(', ')}. Absence below does not prove absence in the cluster.</p> : null}
 		<div className="grid gap-3 sm:grid-cols-2">
-			{groups.map(([label, resources]) => <section key={label} className="rounded-lg border border-kp-overlay-0 bg-kp-surface-1 p-3"><h3 className="text-sm text-kp-text">{label}</h3>{resources.length === 0 ? <p className="mt-1 text-xs text-kp-overlay-text">No item in the loaded local index.</p> : <ul className="mt-2 grid list-none gap-1 p-0">{resources.map((resource) => {
+			{groups.map(([label, resources]) => <section key={label} className="rounded-lg border border-kp-overlay-0 bg-kp-surface-1 p-3"><h3 className="text-heading text-kp-text">{label}</h3>{resources.length === 0 ? <p className="mt-1 text-content text-kp-overlay-text">No item in the loaded local index.</p> : <ul className="mt-2 grid list-none gap-1 p-0">{resources.map((resource) => {
 				const navigable = resource.kind !== 'Event'
 				const unavailableReason = navigable ? undefined : 'Event navigation is unavailable; inspect the event in the Events page.'
-				return <li key={`${resource.kind}/${resource.namespace ?? ''}/${resource.name}`}><button type="button" disabled={!navigable} title={unavailableReason} className="w-full rounded-md px-2 py-1.5 text-left text-xs text-kp-subtext enabled:hover:bg-kp-surface-2 enabled:hover:text-kp-text disabled:cursor-default" onClick={() => onOpen({ apiGroup: resource.apiGroup, kind: resource.kind, namespace: resource.namespace, name: resource.name })}><strong className="block text-kp-text">{resource.kind} · {resource.name}</strong><span>{resource.namespace ?? 'cluster'}{resource.status ? ` · ${resource.status}` : ''}</span>{unavailableReason ? <span className="mt-1 block text-kp-overlay-text">{unavailableReason}</span> : null}</button></li>
+				return <li key={`${resource.kind}/${resource.namespace ?? ''}/${resource.name}`}><button type="button" disabled={!navigable} title={unavailableReason} className="control-row w-full px-2 py-1.5 text-left text-content text-kp-subtext enabled:hover:bg-kp-surface-2 enabled:hover:text-kp-text disabled:cursor-default" onClick={() => onOpen({ apiGroup: resource.apiGroup, kind: resource.kind, namespace: resource.namespace, name: resource.name })}><strong className="block text-kp-text">{resource.kind} · {resource.name}</strong><span>{resource.namespace ?? 'cluster'}{resource.status ? ` · ${resource.status}` : ''}</span>{unavailableReason ? <span className="mt-1 block text-kp-overlay-text">{unavailableReason}</span> : null}</button></li>
 			})}</ul>}</section>)}
 		</div>
 	</div>
@@ -314,7 +317,7 @@ function yamlDiffTarget(entry: WorkspaceEntry): { collection: string; namespace:
 }
 
 function RelatedRefList({ refs, onOpen, emptyNote }: { refs: ResourceRef[]; onOpen: (ref: ResourceRef) => void; emptyNote: string }) {
-  if (refs.length === 0) return <p className="m-0 text-sm text-kp-overlay-text" role="note">{emptyNote}</p>
+  if (refs.length === 0) return <p className="m-0 text-content text-kp-overlay-text" role="note">{emptyNote}</p>
   return (
     <ul className="m-0 grid list-none gap-1 p-0">
       {refs.map((ref) => (
@@ -327,11 +330,11 @@ function RelatedRefList({ refs, onOpen, emptyNote }: { refs: ResourceRef[]; onOp
 }
 
 function ConditionsTable({ conditions }: { conditions: Array<{ type: string; status: string; reason: string | null; message: string | null; lastTransitionTime: string | null }> }) {
-  if (conditions.length === 0) return <p className="m-0 text-sm text-kp-overlay-text" role="note">No conditions reported.</p>
+  if (conditions.length === 0) return <p className="m-0 text-content text-kp-overlay-text" role="note">No conditions reported.</p>
   return (
     <div className="overflow-x-auto rounded-lg border border-kp-overlay-0">
-      <table className="w-full border-collapse text-left text-sm">
-        <thead><tr className="border-b border-kp-overlay-0 text-2xs uppercase tracking-wider text-kp-overlay-text"><th className="px-2.5 py-1.5 font-medium">Condition</th><th className="px-2.5 py-1.5 font-medium">Status</th><th className="px-2.5 py-1.5 font-medium">Since</th></tr></thead>
+      <table className="w-full border-collapse text-left text-content">
+        <thead><tr className="border-b border-kp-overlay-0 text-column uppercase tracking-wider text-kp-overlay-text"><th className="px-2.5 py-1.5 font-bold">Condition</th><th className="px-2.5 py-1.5 font-bold">Status</th><th className="px-2.5 py-1.5 font-bold">Since</th></tr></thead>
         <tbody>
           {conditions.map((condition) => (
             <tr key={condition.type} className="border-b border-kp-overlay-0/50 last:border-0">
@@ -353,13 +356,13 @@ function WorkspaceEvents({ entry, generation }: { entry: WorkspaceEntry; generat
     enabled: Boolean(generation),
   })
   const events: EventResource[] = (list.data?.items ?? []).filter((item) => item.objectName === entry.name && (entry.kind ? item.objectKind === entry.kind : true))
-  if (list.isPending) return <p className="text-sm text-kp-overlay-text" role="status">Loading events…</p>
-  if (list.isError) return <p className="text-sm text-kp-red" role="alert">{errorMessage(list.error)}</p>
-  if (events.length === 0) return <p className="m-0 text-sm text-kp-overlay-text" role="note">No Kubernetes events reference this resource in the current scope.</p>
+  if (list.isPending) return <LoadingState label="Loading events…" />
+  if (list.isError) return <p className="text-content text-kp-red" role="alert">{errorMessage(list.error)}</p>
+  if (events.length === 0) return <p className="m-0 text-content text-kp-overlay-text" role="note">No Kubernetes events reference this resource in the current scope.</p>
   return (
     <div className="overflow-x-auto rounded-lg border border-kp-overlay-0 bg-kp-surface-0">
-      <table className="w-full border-collapse text-left text-sm">
-        <thead><tr className="border-b border-kp-overlay-0 text-2xs uppercase tracking-wider text-kp-overlay-text"><th className="px-2.5 py-1.5 font-medium">Time</th><th className="px-2.5 py-1.5 font-medium">Type</th><th className="px-2.5 py-1.5 font-medium">Reason</th><th className="px-2.5 py-1.5 font-medium">Message</th></tr></thead>
+      <table className="w-full border-collapse text-left text-content">
+        <thead><tr className="border-b border-kp-overlay-0 text-column uppercase tracking-wider text-kp-overlay-text"><th className="px-2.5 py-1.5 font-bold">Time</th><th className="px-2.5 py-1.5 font-bold">Type</th><th className="px-2.5 py-1.5 font-bold">Reason</th><th className="px-2.5 py-1.5 font-bold">Message</th></tr></thead>
         <tbody>
           {events.map((event, index) => (
             <tr key={`${event.timestamp ?? index}/${event.reason}`} className="border-b border-kp-overlay-0/50 last:border-0">
@@ -387,9 +390,9 @@ function StatefulSetPVCs({ entry, generation, onOpen }: { entry: WorkspaceEntry;
     enabled: Boolean(generation && entry.namespace),
   })
   const claims: PersistentVolumeClaim[] = (list.data?.items ?? []).filter((claim) => claim.name.includes(`-${entry.name}-`))
-  if (list.isPending) return <p className="text-sm text-kp-overlay-text" role="status">Loading claims…</p>
-  if (list.isError) return <p className="text-sm text-kp-red" role="alert">{errorMessage(list.error)}</p>
-  if (claims.length === 0) return <p className="m-0 text-sm text-kp-overlay-text" role="note">No PersistentVolumeClaims match this StatefulSet's volume claim templates.</p>
+  if (list.isPending) return <LoadingState label="Loading claims…" />
+  if (list.isError) return <p className="text-content text-kp-red" role="alert">{errorMessage(list.error)}</p>
+  if (claims.length === 0) return <p className="m-0 text-content text-kp-overlay-text" role="note">No PersistentVolumeClaims match this StatefulSet's volume claim templates.</p>
   return (
     <ul className="m-0 grid list-none gap-1 p-0">
       {claims.map((claim) => (
@@ -412,8 +415,8 @@ function ServiceEndpoints({ entry, generation }: { entry: WorkspaceEntry; genera
     queryFn: ({ signal }) => getEndpointsItem(entry.namespace!, entry.name, signal, generation),
     enabled: Boolean(generation && entry.namespace),
   })
-  if (detail.isPending) return <p className="text-sm text-kp-overlay-text" role="status">Loading endpoints…</p>
-  if (detail.isError) return <p className="text-sm text-kp-red" role="alert">{errorMessage(detail.error)}</p>
+  if (detail.isPending) return <LoadingState label="Loading endpoints…" />
+  if (detail.isError) return <p className="text-content text-kp-red" role="alert">{errorMessage(detail.error)}</p>
   const data = detail.data
   return (
     <Facts facts={[
@@ -426,16 +429,16 @@ function ServiceEndpoints({ entry, generation }: { entry: WorkspaceEntry; genera
 }
 
 function IngressRules({ paths, defaultBackend }: { paths: Array<{ host: string; path: string; pathType: string; backend: { serviceName: string; servicePort: { value: number | string } } }>; defaultBackend: { serviceName: string } | null }) {
-  if (paths.length === 0 && !defaultBackend) return <p className="m-0 text-sm text-kp-overlay-text" role="note">No routing rules are declared.</p>
+  if (paths.length === 0 && !defaultBackend) return <p className="m-0 text-content text-kp-overlay-text" role="note">No routing rules are declared.</p>
   return (
     <div className="overflow-x-auto rounded-lg border border-kp-overlay-0 bg-kp-surface-0">
-      <table className="w-full border-collapse text-left text-sm">
-        <thead><tr className="border-b border-kp-overlay-0 text-2xs uppercase tracking-wider text-kp-overlay-text"><th className="px-2.5 py-1.5 font-medium">Host</th><th className="px-2.5 py-1.5 font-medium">Path</th><th className="px-2.5 py-1.5 font-medium">Type</th><th className="px-2.5 py-1.5 font-medium">Backend</th></tr></thead>
+      <table className="w-full border-collapse text-left text-content">
+        <thead><tr className="border-b border-kp-overlay-0 text-column uppercase tracking-wider text-kp-overlay-text"><th className="px-2.5 py-1.5 font-bold">Host</th><th className="px-2.5 py-1.5 font-bold">Path</th><th className="px-2.5 py-1.5 font-bold">Type</th><th className="px-2.5 py-1.5 font-bold">Backend</th></tr></thead>
         <tbody>
           {paths.map((path, index) => (
             <tr key={`${path.host}/${path.path}/${index}`} className="border-b border-kp-overlay-0/50 last:border-0">
               <td className="px-2.5 py-1.5 text-kp-text">{path.host}</td>
-              <td className="px-2.5 py-1.5 mono text-kp-subtext">{path.path || '/'}</td>
+              <td className="px-2.5 py-1.5 text-kp-subtext">{path.path || '/'}</td>
               <td className="px-2.5 py-1.5 text-kp-subtext">{path.pathType}</td>
               <td className="px-2.5 py-1.5 text-kp-subtext">{path.backend.serviceName}:{path.backend.servicePort.value}</td>
             </tr>
@@ -443,7 +446,7 @@ function IngressRules({ paths, defaultBackend }: { paths: Array<{ host: string; 
           {defaultBackend ? (
             <tr>
               <td className="px-2.5 py-1.5 text-kp-overlay-text">default</td>
-              <td className="px-2.5 py-1.5 mono text-kp-subtext">/</td>
+              <td className="px-2.5 py-1.5 text-kp-subtext">/</td>
               <td className="px-2.5 py-1.5 text-kp-subtext">defaultBackend</td>
               <td className="px-2.5 py-1.5 text-kp-subtext">{defaultBackend.serviceName}</td>
             </tr>
@@ -454,21 +457,15 @@ function IngressRules({ paths, defaultBackend }: { paths: Array<{ host: string; 
   )
 }
 
-function PodLogsLink({ detail }: { detail: PodDetail }) {
-  const workspace = useResourceWorkspace()
-  const container = detail.containers[0]?.spec.name ?? ''
-  const query = new URLSearchParams({ namespace: detail.metadata.namespace, pod: detail.metadata.name, container })
-  return <Link className="text-sm text-kp-mauve hover:underline" onClick={workspace.reset} to={`/logs?${query.toString()}`}>Open Pod logs</Link>
-}
 
 function PodContainers({ detail }: { detail: PodDetail }) {
   const containers = [...detail.initContainers, ...detail.containers, ...detail.ephemeralContainers]
-  if (containers.length === 0) return <p className="m-0 text-sm text-kp-overlay-text" role="note">No containers are declared.</p>
+  if (containers.length === 0) return <p className="m-0 text-content text-kp-overlay-text" role="note">No containers are declared.</p>
   return (
     <div className="overflow-x-auto rounded-lg border border-kp-overlay-0 bg-kp-surface-0">
-      <table className="w-full border-collapse text-left text-sm">
-        <thead><tr className="border-b border-kp-overlay-0 text-2xs uppercase tracking-wider text-kp-overlay-text"><th className="px-2.5 py-1.5 font-medium">Name</th><th className="px-2.5 py-1.5 font-medium">Type</th><th className="px-2.5 py-1.5 font-medium">Image</th><th className="px-2.5 py-1.5 font-medium">State</th><th className="px-2.5 py-1.5 font-medium">Ready</th><th className="px-2.5 py-1.5 font-medium">Restarts</th></tr></thead>
-        <tbody>{containers.map((container) => <tr key={`${container.type}/${container.spec.name}`} className="border-b border-kp-overlay-0/50 last:border-0"><td className="px-2.5 py-1.5 text-kp-text">{container.spec.name}</td><td className="px-2.5 py-1.5 text-kp-subtext">{container.type}</td><td className="max-w-[28rem] truncate px-2.5 py-1.5 mono text-kp-subtext" title={container.spec.image}>{container.spec.image}</td><td className="px-2.5 py-1.5"><StatusBadge variant={statusBadgeVariant(container.state)}>{container.reason ?? container.state}</StatusBadge></td><td className="px-2.5 py-1.5 text-kp-subtext">{container.ready === null ? '—' : container.ready ? 'yes' : 'no'}</td><td className="px-2.5 py-1.5 tabular-nums text-kp-subtext">{container.restartCount}</td></tr>)}</tbody>
+      <table className="w-full border-collapse text-left text-content">
+        <thead><tr className="border-b border-kp-overlay-0 text-column uppercase tracking-wider text-kp-overlay-text"><th className="px-2.5 py-1.5 font-bold">Name</th><th className="px-2.5 py-1.5 font-bold">Type</th><th className="px-2.5 py-1.5 font-bold">Image</th><th className="px-2.5 py-1.5 font-bold">State</th><th className="px-2.5 py-1.5 font-bold">Ready</th><th className="px-2.5 py-1.5 font-bold">Restarts</th></tr></thead>
+        <tbody>{containers.map((container) => <tr key={`${container.type}/${container.spec.name}`} className="border-b border-kp-overlay-0/50 last:border-0"><td className="px-2.5 py-1.5 text-kp-text">{container.spec.name}</td><td className="px-2.5 py-1.5 text-kp-subtext">{container.type}</td><td className="max-w-[28rem] truncate px-2.5 py-1.5 text-kp-subtext" title={container.spec.image}>{container.spec.image}</td><td className="px-2.5 py-1.5"><StatusBadge variant={statusBadgeVariant(container.state)}>{container.reason ?? container.state}</StatusBadge></td><td className="px-2.5 py-1.5 text-kp-subtext">{container.ready === null ? '—' : container.ready ? 'yes' : 'no'}</td><td className="px-2.5 py-1.5 tabular-nums text-kp-subtext">{container.restartCount}</td></tr>)}</tbody>
       </table>
     </div>
   )
@@ -492,7 +489,7 @@ function CopyAction({ label, value }: { label: string; value: string }) {
       setCopied(false)
       setFailed(true)
     }
-  }}>{copied ? 'Copied' : label}</Button>{failed ? <span className="text-xs text-kp-red" role="alert">Copy failed</span> : null}</span>
+  }}>{copied ? 'Copied' : label}</Button>{failed ? <span className="text-content text-kp-red" role="alert">Copy failed</span> : null}</span>
 }
 
 function NetworkActions({ entry, detail, selection, setTab }: { entry: WorkspaceEntry; detail: ServiceDetail | IngressDetail; selection: SelectionSummary; setTab: (tab: string) => void }) {
@@ -502,7 +499,7 @@ function NetworkActions({ entry, detail, selection, setTab }: { entry: Workspace
   const ingress = detail as IngressDetail
   const host = ingress.summary.hosts[0] ?? ''
   const url = host ? `${ingress.summary.tlsHosts.includes(host) ? 'https' : 'http'}://${host}` : ''
-  return <div className="flex flex-wrap items-center gap-2">{url ? <a className="inline-flex h-8 items-center justify-center rounded-md border border-kp-blue bg-kp-blue px-3 text-sm font-medium text-white transition-colors duration-100 hover:bg-kp-blue-hover focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-kp-mauve" href={url} target="_blank" rel="noreferrer">Open URL</a> : <Button disabled disabledReason="This Ingress does not declare a host.">Open URL</Button>}<CopyAction label="Copy Host" value={host} /></div>
+  return <div className="flex flex-wrap items-center gap-2">{url ? <a className="control inline-flex items-center justify-center border border-kp-blue-border bg-kp-blue-bg px-2 text-content font-normal text-kp-sky transition-colors duration-100 hover:border-kp-sky hover:bg-kp-surface-3 focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-kp-mauve" href={url} target="_blank" rel="noreferrer">Open URL</a> : <Button disabled disabledReason="This Ingress does not declare a host.">Open URL</Button>}<CopyAction label="Copy Host" value={host} /></div>
 }
 
 function ServiceActions({ entry, detail, selection, setTab }: { entry: WorkspaceEntry; detail: ServiceDetail; selection: SelectionSummary; setTab: (tab: string) => void }) {
@@ -557,12 +554,12 @@ function ServiceActions({ entry, detail, selection, setTab }: { entry: Workspace
   return <div className="grid gap-3">
     <div className="flex flex-wrap gap-2"><Button onClick={() => setTab('endpoints')}>View Endpoints</Button><CopyAction label="Copy ClusterIP" value={clusterIP} /></div>
     <div className="flex flex-wrap items-end gap-2 border-t border-kp-overlay-0 pt-3">
-      <label className="grid w-40 gap-1"><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Service port</span><Select aria-label="Service port" value={servicePort} onChange={(event) => setServicePort(Number(event.target.value))}>{tcpPorts.length === 0 ? <option value={0}>No TCP ports</option> : tcpPorts.map((port) => <option key={`${port.name ?? ''}/${port.port}`} value={port.port}>{port.name ? `${port.name} · ` : ''}{port.port}</option>)}</Select></label>
-      <label className="grid w-40 gap-1"><span className="text-2xs uppercase tracking-wider text-kp-overlay-text">Local port (optional)</span><Input aria-label="Service local port" aria-invalid={!localValid} inputMode="numeric" value={localPort} onChange={(event) => setLocalPort(event.target.value)} placeholder="automatic" /></label>
+      <label className="grid w-40 gap-1"><span className="text-column uppercase tracking-wider text-kp-overlay-text">Service port</span><Select aria-label="Service port" value={servicePort} onChange={(event) => setServicePort(Number(event.target.value))}>{tcpPorts.length === 0 ? <option value={0}>No TCP ports</option> : tcpPorts.map((port) => <option key={`${port.name ?? ''}/${port.port}`} value={port.port}>{port.name ? `${port.name} · ` : ''}{port.port}</option>)}</Select></label>
+      <label className="grid w-40 gap-1"><span className="text-column uppercase tracking-wider text-kp-overlay-text">Local port (optional)</span><Input aria-label="Service local port" aria-invalid={!localValid} inputMode="numeric" value={localPort} onChange={(event) => setLocalPort(event.target.value)} placeholder="automatic" /></label>
       <Button disabled={!canStart || portForward.isPending} disabledReason={disabledReason} onClick={() => portForward.mutate()}>{portForward.isPending ? 'Starting…' : 'Start port-forward'}</Button>
     </div>
-    {!localValid ? <p className="m-0 text-xs text-kp-red" role="alert">An explicit local port must be 1,024–65,535.</p> : null}
-    <p className="m-0 text-xs text-kp-overlay-text" role="note">KubePeep resolves one ready backing Pod, rechecks exact Pod port-forward permission, and binds only to 127.0.0.1.</p>
+    {!localValid ? <p className="m-0 text-content text-kp-red" role="alert">An explicit local port must be 1,024–65,535.</p> : null}
+    <p className="m-0 text-content text-kp-overlay-text" role="note">KubePeep resolves one ready backing Pod, rechecks exact Pod port-forward permission, and binds only to 127.0.0.1.</p>
   </div>
 }
 
@@ -650,9 +647,11 @@ function secretNotice(label: string): string | null {
   return null
 }
 
-export function ResourceWorkspaceOverlay() {
+export function ResourceWorkspacePanel() {
+  const reducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)')
   const workspace = useResourceWorkspace()
   const entry = workspace.active
+  const panelRef = useRef<HTMLDivElement>(null)
   const status = useQuery({ queryKey: ['local-status'], queryFn: ({ signal }) => getStatus(signal), staleTime: 15_000 })
   const selection = status.data?.selection ?? null
   const generation = selection?.generation
@@ -674,6 +673,10 @@ export function ResourceWorkspaceOverlay() {
   const entryKey = entry ? `${generation ?? ''}|${entry.collection}|${entry.kind ?? ''}|${entry.namespace ?? ''}|${entry.name}` : ''
   useEffect(() => { yaml.reset() }, [entryKey]) // eslint-disable-line react-hooks/exhaustive-deps -- reset cached YAML when the target changes
 
+  useEffect(() => {
+    if (workspace.open) panelRef.current?.scrollIntoView?.({ block: 'nearest', behavior: reducedMotion ? 'instant' : 'smooth' })
+  }, [workspace.open, entryKey, reducedMotion])
+
   if (!workspace.open || !entry) return null
   const activeEntry: WorkspaceEntry = entry
 
@@ -690,16 +693,16 @@ export function ResourceWorkspaceOverlay() {
   }
 
   function detailFallback() {
-    if (!selection) return <p className="text-sm text-kp-overlay-text" role="note">Select a Kubernetes context to inspect resources.</p>
-    if (detail.isPending) return <p className="text-sm text-kp-overlay-text" role="status">Loading authorized detail…</p>
-    if (detail.isError) return <p className="text-sm text-kp-red" role="alert">{errorMessage(detail.error)}</p>
+    if (!selection) return <p className="text-content text-kp-overlay-text" role="note">Select a Kubernetes context to inspect resources.</p>
+    if (detail.isPending) return <LoadingState label="Loading authorized detail…" />
+    if (detail.isError) return <p className="text-content text-kp-red" role="alert">{errorMessage(detail.error)}</p>
     return null
   }
 
   function renderTab(tab: string) {
     if (tab === 'investigation') {
-      if (investigation.isPending) return <p className="text-sm text-kp-overlay-text" role="status">Reading the generation-scoped local relationship index…</p>
-      if (investigation.isError) return <p className="text-sm text-kp-red" role="alert">{errorMessage(investigation.error)}</p>
+      if (investigation.isPending) return <p className="text-content text-kp-overlay-text" role="status">Reading the generation-scoped local relationship index…</p>
+      if (investigation.isError) return <p className="text-content text-kp-red" role="alert">{errorMessage(investigation.error)}</p>
       if (investigation.data) return <InvestigationView value={investigation.data} onOpen={openRef} />
     }
     if (tab === 'data' && activeEntry.collection === 'secrets' && generation && activeEntry.namespace) return <SecretData key={entryKey} namespace={activeEntry.namespace} name={activeEntry.name} generation={generation} />
@@ -718,33 +721,33 @@ export function ResourceWorkspaceOverlay() {
             <Facts facts={overviewFacts(activeEntry, data)} />
             {data.type === 'workload' && data.data.conditions.length > 0 ? <ConditionsTable conditions={data.data.conditions} /> : null}
             {data.type === 'pod' ? <ConditionsTable conditions={data.data.conditions} /> : null}
-            {data.type === 'other' ? <p className="m-0 text-xs text-kp-overlay-text" role="note">{secretNotice(data.label) ?? ''}</p> : null}
+            {data.type === 'other' ? <p className="m-0 text-content text-kp-overlay-text" role="note">{secretNotice(data.label) ?? ''}</p> : null}
           </div>
           <div className="grid content-start gap-2 min-w-0">
             {(data.type === 'pod' || data.type === 'workload') ? <>
-              <h3 className="m-0 text-sm text-kp-text">Secrets</h3>
+              <h3 className="m-0 text-heading text-kp-text">Secrets</h3>
               <RelatedRefList refs={(data.type === 'pod' ? data.data.summary.secrets ?? [] : data.data.secrets ?? []).map((name) => ({ kind: 'Secret', name, namespace: activeEntry.namespace ?? undefined }))} onOpen={openRef} emptyNote="No Secret references declared." />
-              <h3 className="m-0 mt-2 text-sm text-kp-text">ConfigMaps</h3>
+              <h3 className="m-0 mt-2 text-heading text-kp-text">ConfigMaps</h3>
               <RelatedRefList refs={(data.type === 'pod' ? data.data.summary.configMaps ?? [] : data.data.configMaps ?? []).map((name) => ({ kind: 'ConfigMap', name, namespace: activeEntry.namespace ?? undefined }))} onOpen={openRef} emptyNote="No ConfigMap references declared." />
             </> : null}
-            <h3 className="m-0 mt-2 text-sm text-kp-text">Related resources</h3>
+            <h3 className="m-0 mt-2 text-heading text-kp-text">Related resources</h3>
             {data.type === 'workload' ? <RelatedRefList refs={related} onOpen={openRef} emptyNote="No related objects are visible in the current scope." /> : null}
             {data.type === 'pod' ? <RelatedRefList refs={owner} onOpen={openRef} emptyNote="This Pod has no controller owner." /> : null}
             {data.type === 'pod' && podRefs.length > 0 ? (
               <>
-                <h3 className="m-0 mt-2 text-sm text-kp-text">Related events</h3>
+                <h3 className="m-0 mt-2 text-heading text-kp-text">Related events</h3>
                 <RelatedRefList refs={podRefs} onOpen={openRef} emptyNote="" />
               </>
             ) : null}
-            {data.type === 'other' ? <p className="m-0 text-sm text-kp-overlay-text" role="note">Relationship navigation is available for workloads, Pods and Services.</p> : null}
+            {data.type === 'other' ? <p className="m-0 text-content text-kp-overlay-text" role="note">Relationship navigation is available for workloads, Pods and Services.</p> : null}
           </div>
         </div>
       )
     }
       if (tab === 'yaml') {
-        if (activeEntry.collection === 'workloads' && activeEntry.kind === 'Deployment' && selection && activeEntry.namespace) return <Suspense fallback={<p role="status">Opening YAML editor…</p>}><DeploymentYamlEditor key={entryKey} namespace={activeEntry.namespace} name={activeEntry.name} selection={selection} /></Suspense>
+        if (activeEntry.collection === 'workloads' && activeEntry.kind === 'Deployment' && selection && activeEntry.namespace) return <Suspense fallback={<LoadingState label="Opening YAML editor…" />}><DeploymentYamlEditor key={entryKey} namespace={activeEntry.namespace} name={activeEntry.name} selection={selection} /></Suspense>
         return (
-          <Suspense fallback={<p role="status" className="text-sm text-kp-overlay-text">Opening YAML viewer…</p>}>
+          <Suspense fallback={<LoadingState label="Opening YAML viewer…" />}>
             <YamlViewer
               value={yaml.data}
               pending={yaml.isPending}
@@ -757,8 +760,8 @@ export function ResourceWorkspaceOverlay() {
       }
     if (tab === 'events') return <WorkspaceEvents entry={activeEntry} generation={generation} />
       if (tab === 'logs') {
-        if (detail.data?.type === 'pod') return <PodLogsLink detail={detail.data.data} />
-        if (detail.data?.type === 'workload') return <Link className="text-sm text-kp-mauve hover:underline" onClick={workspace.reset} to={`/logs?${new URLSearchParams({ workload: `${detail.data.data.kind}/${detail.data.data.metadata.namespace}/${detail.data.data.metadata.name}` })}`}>Open workload logs</Link>
+        if (detail.data?.type === 'pod' && selection) return <Suspense fallback={<LoadingState label="Opening logs…" />}><PodLogsPanel key={entryKey} pods={[{ namespace: activeEntry.namespace!, name: activeEntry.name }]} selection={selection} /></Suspense>
+          if (detail.data?.type === 'workload' && selection) return <Suspense fallback={<LoadingState label="Opening logs…" />}><WorkloadLogsPanel key={entryKey} detail={detail.data.data} selection={selection} /></Suspense>
         return detailFallback()
       }
       if (tab === 'metrics') {
@@ -772,8 +775,8 @@ export function ResourceWorkspaceOverlay() {
       }
       if (tab === 'actions') {
         if (!detail.data || detail.isPending || detail.isError || !selection) return detailFallback()
-          if (detail.data.type === 'pod') return <Suspense fallback={<p role="status" className="text-sm text-kp-overlay-text">Opening Pod actions…</p>}><PodActions detail={detail.data.data} selection={selection} /></Suspense>
-          if (detail.data.type === 'workload') return <Suspense fallback={<p role="status" className="text-sm text-kp-overlay-text">Opening workload actions…</p>}><WorkloadActions detail={detail.data.data} selection={selection} /></Suspense>
+          if (detail.data.type === 'pod') return <Suspense fallback={<LoadingState label="Opening Pod actions…" />}><PodActions detail={detail.data.data} selection={selection} /></Suspense>
+          if (detail.data.type === 'workload') return <Suspense fallback={<LoadingState label="Opening workload actions…" />}><WorkloadActions detail={detail.data.data} selection={selection} /></Suspense>
           if (detail.data.type === 'other' && (activeEntry.collection === 'services' || activeEntry.collection === 'ingresses')) return <NetworkActions entry={activeEntry} detail={detail.data.data as ServiceDetail | IngressDetail} selection={selection} setTab={workspace.setTab} />
         return null
     }
@@ -821,7 +824,7 @@ export function ResourceWorkspaceOverlay() {
               { label: 'Last restart stamp', value: data.restartAt ? dateTime(data.restartAt) : 'never restarted by KubePeep' },
             ]} />
             <ConditionsTable conditions={data.conditions} />
-            <p className="m-0 text-xs text-kp-overlay-text" role="note">Progressing/Available conditions come from the controller; rollout completion is observed, not promised.</p>
+            <p className="m-0 text-content text-kp-overlay-text" role="note">Progressing/Available conditions come from the controller; rollout completion is observed, not promised.</p>
           </div>
         )
       }
@@ -839,26 +842,27 @@ export function ResourceWorkspaceOverlay() {
 
   return (
     <>
-      <div className="workspace-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) workspace.close() }} aria-hidden="true" />
-      <div className="workspace-panel" role="dialog" aria-modal="true" aria-label={`${kindLabel} ${activeEntry.name}`}>
+      <div ref={panelRef} className="workspace-panel" role="region" aria-label={`${kindLabel} ${activeEntry.name}`}>
         <header className="workspace-header">
+          <div className="workspace-history">
           <Button variant="icon" className="workspace-nav-btn" onClick={workspace.back} disabled={!workspace.canBack} disabledReason="There is no previous resource in this workspace history." aria-label="Go to previous resource">
             <ChevronLeft size={16} aria-hidden="true" />
           </Button>
           <Button variant="icon" className="workspace-nav-btn" onClick={workspace.forward} disabled={!workspace.canForward} disabledReason="There is no next resource in this workspace history." aria-label="Go to next resource">
             <ChevronRight size={16} aria-hidden="true" />
           </Button>
-          <Badge variant="accent">{kindLabel}</Badge>
-          <strong className="mono min-w-0 truncate text-sm text-kp-text">{activeEntry.name}</strong>
-          {activeEntry.namespace ? <span className="shrink-0 text-xs text-kp-overlay-text">ns: {activeEntry.namespace}</span> : <span className="shrink-0 text-xs text-kp-overlay-text">cluster-scoped</span>}
-          <span className="flex-1" />
+          </div>
+          <div className="workspace-identity"><Badge variant="accent">{kindLabel}</Badge>
+          <strong className="min-w-0 truncate text-heading text-kp-text">{activeEntry.name}</strong>
+          {activeEntry.namespace ? <span className="shrink-0 text-content text-kp-overlay-text">ns: {activeEntry.namespace}</span> : <span className="shrink-0 text-content text-kp-overlay-text">cluster-scoped</span>}
+          </div><div className="workspace-actions">
           {favoriteKind ? <FavoriteButton kind={favoriteKind} namespace={activeEntry.namespace ?? undefined} name={activeEntry.name} generation={generation} label={kindLabel} /> : null}
-          <button type="button" onClick={workspace.close} className="h-7 w-7 shrink-0 grid place-items-center rounded-md text-kp-overlay-text hover:text-kp-text hover:bg-kp-surface-3" aria-label="Close resource workspace">
+          <button type="button" onClick={workspace.close} className="control control-icon grid place-items-center text-kp-overlay-text hover:text-kp-text hover:bg-kp-surface-3" aria-label="Close resource workspace">
             <X size={16} aria-hidden="true" />
-          </button>
+          </button></div>
         </header>
         <ResourceTabStrip tabs={tabs} active={activeTab} onChange={workspace.setTab} ariaLabel={`${kindLabel} workspace tabs`} panelId="workspace-tabpanel" />
-        <div className="workspace-body" id="workspace-tabpanel" role="tabpanel">
+        <div key={`${entryKey}|${activeTab}`} className="workspace-body" id="workspace-tabpanel" role="tabpanel">
           {renderTab(activeTab)}
         </div>
       </div>

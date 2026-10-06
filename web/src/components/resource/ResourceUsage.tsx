@@ -14,6 +14,5 @@ export function ResourceUsage({ current, budget, resource, target }: { current?:
     <div className="resource-usage-track" role="meter" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent === null ? undefined : Math.min(100, Math.round(percent))} aria-valuetext={text}>
       <span style={{ width: `${percent === null ? 0 : Math.min(100, Math.max(0, percent))}%` }} />
     </div>
-    {total ? <small className="text-2xs text-kp-overlay-text">{target?.container ? `${target.container} · ` : ''}{basis}{target?.utilization ? ` ${target.utilization}%` : ''}</small> : null}
   </div>
 }

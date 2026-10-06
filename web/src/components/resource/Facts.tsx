@@ -11,8 +11,8 @@ export function Facts({ facts, className = '' }: { facts: Fact[]; className?: st
     <dl className={`grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-kp-overlay-0 bg-kp-overlay-0 ${className}`}>
       {facts.map((fact) => (
         <div key={fact.label} className="min-w-0 bg-kp-surface-1 px-2.5 py-2">
-          <dt className="text-2xs uppercase tracking-wider text-kp-overlay-text">{fact.label}</dt>
-          <dd className="mt-0.5 break-words text-sm text-kp-subtext leading-snug">{fact.value}</dd>
+          <dt className="text-column uppercase tracking-wider text-kp-overlay-text">{fact.label}</dt>
+          <dd className="mt-0.5 break-words text-content text-kp-subtext leading-snug">{fact.value}</dd>
         </div>
       ))}
     </dl>

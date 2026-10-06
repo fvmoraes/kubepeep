@@ -3,9 +3,9 @@ import { forwardRef, type CSSProperties, type SelectHTMLAttributes } from 'react
 export type SelectProps = SelectHTMLAttributes<HTMLSelectElement>
 
 const base = [
-  'h-8 w-full px-2 pr-7',
-  'text-kp-text text-base',
-  'bg-kp-crust border border-kp-overlay-0 rounded-md',
+  'control min-w-0 w-full px-2 pr-7',
+  'text-kp-text text-content',
+  'bg-kp-crust border border-kp-overlay-0',
   'appearance-none bg-no-repeat',
   'focus:outline-none focus:border-kp-mauve focus:shadow-focus',
   'hover:not-focus:border-kp-overlay-1',
