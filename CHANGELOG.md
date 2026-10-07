@@ -7,6 +7,24 @@ versions follow [Semantic Versioning](https://semver.org/) **without the `v`
 prefix** (official tags: `1.4.2`, `1.4.3`, …), and entries are generated
 automatically from Conventional Commits by `.github/workflows/release.yml`.
 
+## [0.10.0] - 2026-10-07
+
+## Added
+- feat: stabilize resource workspace and enable YAML editing
+
+## Changed
+- Merge pull request #26 from fvmoraes/fix/pods-authorization-unavailable
+- test: wait for Windows updater transaction cleanup
+- test: synchronize global resource watch creation
+- chore: remove obsolete prototypes and unused frontend code
+
+## Download
+
+Permanently-updated links: https://github.com/fvmoraes/kubepeep/blob/main/docs/download.md
+
+## Full Changelog
+**Full Changelog**: https://github.com/fvmoraes/kubepeep/compare/0.9.0...0.10.0
+
 ## [0.9.0] - 2026-10-06
 
 ## Added
@@ -666,3 +684,4 @@ Permanently-updated links: https://github.com/fvmoraes/kubepeep/blob/main/docs/d
 [0.6.2]: https://github.com/fvmoraes/kubepeep/releases/tag/0.6.2
 [0.8.0]: https://github.com/fvmoraes/kubepeep/releases/tag/0.8.0
 [0.9.0]: https://github.com/fvmoraes/kubepeep/releases/tag/0.9.0
+[0.10.0]: https://github.com/fvmoraes/kubepeep/releases/tag/0.10.0
