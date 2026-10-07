@@ -1,7 +1,7 @@
 # Documentação do KubePeep
 
 A documentação atual descreve o comportamento implementado e seus contratos.
-Relatos datados ficam no arquivo histórico; decisões arquiteturais têm ADRs
+Relatos datados ficam no histórico Git, com links no índice do arquivo; decisões arquiteturais têm ADRs
 próprios. Comece pelo [escopo do produto](reference/product-spec.md).
 
 ## Guias
@@ -38,8 +38,8 @@ próprios. Comece pelo [escopo do produto](reference/product-spec.md).
 
 - [Pesquisa](research/README.md): fontes e métodos de reprodução; medições
   datadas não garantem compatibilidade atual.
-- [Arquivo](archive/README.md): planejamento do MVP, relatos de fases e
-  evidências da v0.7. Os resultados valem para os commits informados.
+- [Arquivo](archive/README.md): links fixados para o planejamento do MVP,
+  relatos de fases e evidências da v0.7 preservados no Git.
 
 Uma alteração de contrato atualiza o documento correspondente. Novas
 funcionalidades só são descritas como disponíveis após implementação.

@@ -399,7 +399,6 @@ main :where(dd, p) { overflow-wrap: anywhere; }
 .loading-rows > div { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr); gap: 10%; align-items: center; height: 30px; border-bottom: 1px solid var(--color-kp-divider); }
 .loading-rows span { height: 6px; width: 70%; background: var(--color-kp-surface-3); border-radius: 2px; }
 .loading-rows > div:nth-child(even) span:first-child { width: 50%; }
-.loading-skeleton { animation: loading-appear var(--motion-fast) ease-out var(--loading-delay) both; }
 @keyframes loading-appear { from { opacity: 0; } to { opacity: 1; } }
 @keyframes panel-appear { from { opacity: 0.65; } to { opacity: 1; } }
 @keyframes navigation-enter { from { transform: translateX(-12px); opacity: 0.7; } to { transform: translateX(0); opacity: 1; } }

@@ -130,7 +130,9 @@ Decisão: usar `app.New` como container e o router Ginger como handler, mas
 entregar listener, sinais, prontidão e cleanup ao coordenador descrito nos ADRs
 0001 e 0004.
 
-O spike `spikes/phase1` prova o caminho escolhido:
+O spike histórico `spikes/phase1` comprovou o caminho escolhido. Seu código foi
+removido da árvore atual e pode ser recuperado conforme o
+[registro de reprodução](evidence/f1-control/README.md#reprodução):
 
 - Cobra é o único owner do contexto;
 - raiz e `start` compartilham a função;

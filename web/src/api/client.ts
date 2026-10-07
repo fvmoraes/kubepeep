@@ -319,35 +319,6 @@ async function resourceRequest<T>(path: string, signal?: AbortSignal, expectedGe
   return response.data
 }
 
-async function requestYAML(path: string, signal?: AbortSignal): Promise<string> {
-  const method = 'GET'
-  const headers: Record<string, string> = { Accept: 'application/yaml, text/yaml' }
-  const desktop = await desktopRequest(method, path, headers)
-  if (desktop) {
-    const contentType = desktop.headers.get('content-type')?.toLowerCase() ?? ''
-    if (!contentType.includes('yaml')) {
-      throw new APIError(502, { code: 'INVALID_RESPONSE', message: 'The YAML response used an unexpected content type.' })
-    }
-    return desktop.text()
-  }
-  const response = await fetch(path, {
-    method,
-    headers: { Accept: 'application/yaml, text/yaml' },
-    cache: 'no-store',
-    credentials: 'same-origin',
-    signal,
-  })
-  if (!response.ok) {
-    const payload = (await decodeJSON(response)) as APIErrorPayload
-    throw new APIError(response.status, payload, requestIdFrom(response))
-  }
-  const contentType = response.headers.get('content-type')?.toLowerCase() ?? ''
-  if (!contentType.includes('yaml')) {
-    throw new APIError(502, { code: 'INVALID_RESPONSE', message: 'The YAML response used an unexpected content type.' })
-  }
-  return response.text()
-}
-
 function resourcePath(value: string): string {
   return encodeURIComponent(value)
 }
@@ -533,20 +504,12 @@ export function getWorkload(kind: string, namespace: string, name: string, signa
   return resourceRequest<WorkloadDetail>(`/api/v1/workloads/${resourcePath(kind)}/${resourcePath(namespace)}/${resourcePath(name)}`, signal, expectedGeneration)
 }
 
-export function getWorkloadYAML(kind: string, namespace: string, name: string, signal?: AbortSignal): Promise<string> {
-  return requestYAML(`/api/v1/workloads/${resourcePath(kind)}/${resourcePath(namespace)}/${resourcePath(name)}/yaml`, signal)
-}
-
 export function getPods(options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<Pod>> {
   return collectionRequest<Pod>('/api/v1/pods', options, signal, expectedGeneration)
 }
 
 export function getPod(namespace: string, name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<PodDetail> {
   return resourceRequest<PodDetail>(`/api/v1/pods/${resourcePath(namespace)}/${resourcePath(name)}`, signal, expectedGeneration)
-}
-
-export function getPodYAML(namespace: string, name: string, signal?: AbortSignal): Promise<string> {
-  return requestYAML(`/api/v1/pods/${resourcePath(namespace)}/${resourcePath(name)}/yaml`, signal)
 }
 
 export function getPodLogs(namespace: string, name: string, options: LogQuery, signal?: AbortSignal, expectedGeneration?: string): Promise<LogRead> {
@@ -572,20 +535,12 @@ export function getService(namespace: string, name: string, signal?: AbortSignal
   return resourceRequest<ServiceDetail>(`/api/v1/services/${resourcePath(namespace)}/${resourcePath(name)}`, signal, expectedGeneration)
 }
 
-export function getServiceYAML(namespace: string, name: string, signal?: AbortSignal): Promise<string> {
-  return requestYAML(`/api/v1/services/${resourcePath(namespace)}/${resourcePath(name)}/yaml`, signal)
-}
-
 export function getIngresses(options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<IngressResource>> {
   return collectionRequest<IngressResource>('/api/v1/ingresses', options, signal, expectedGeneration)
 }
 
 export function getIngress(namespace: string, name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<IngressDetail> {
   return resourceRequest<IngressDetail>(`/api/v1/ingresses/${resourcePath(namespace)}/${resourcePath(name)}`, signal, expectedGeneration)
-}
-
-export function getIngressYAML(namespace: string, name: string, signal?: AbortSignal): Promise<string> {
-  return requestYAML(`/api/v1/ingresses/${resourcePath(namespace)}/${resourcePath(name)}/yaml`, signal)
 }
 
 export function getEndpointSlices(options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<EndpointSliceResource>> {
@@ -596,20 +551,12 @@ export function getEndpointSlice(namespace: string, name: string, signal?: Abort
   return resourceRequest<EndpointSliceDetail>(`/api/v1/endpoint-slices/${resourcePath(namespace)}/${resourcePath(name)}`, signal, expectedGeneration)
 }
 
-export function getEndpointSliceYAML(namespace: string, name: string, signal?: AbortSignal): Promise<string> {
-  return requestYAML(`/api/v1/endpoint-slices/${resourcePath(namespace)}/${resourcePath(name)}/yaml`, signal)
-}
-
 export function getConfigMaps(options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<ConfigMapResource>> {
   return collectionRequest<ConfigMapResource>('/api/v1/configmaps', options, signal, expectedGeneration)
 }
 
 export function getConfigMap(namespace: string, name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<ConfigMapDetail> {
   return resourceRequest<ConfigMapDetail>(`/api/v1/configmaps/${resourcePath(namespace)}/${resourcePath(name)}`, signal, expectedGeneration)
-}
-
-export function getConfigMapYAML(namespace: string, name: string, signal?: AbortSignal): Promise<string> {
-  return requestYAML(`/api/v1/configmaps/${resourcePath(namespace)}/${resourcePath(name)}/yaml`, signal)
 }
 
 export function getSecrets(options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<SecretMetadata>> {
@@ -628,20 +575,12 @@ export function getNode(name: string, signal?: AbortSignal, expectedGeneration?:
   return resourceRequest<NodeDetail>(`/api/v1/nodes/${resourcePath(name)}`, signal, expectedGeneration)
 }
 
-export function getNodeYAML(name: string, signal?: AbortSignal): Promise<string> {
-  return requestYAML(`/api/v1/nodes/${resourcePath(name)}/yaml`, signal)
-}
-
 export function getLeases(options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<Lease>> {
   return collectionRequest<Lease>('/api/v1/leases', options, signal, expectedGeneration)
 }
 
 export function getLease(namespace: string, name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<LeaseDetail> {
   return resourceRequest<LeaseDetail>(`/api/v1/leases/${resourcePath(namespace)}/${resourcePath(name)}`, signal, expectedGeneration)
-}
-
-export function getLeaseYAML(namespace: string, name: string, signal?: AbortSignal): Promise<string> {
-  return requestYAML(`/api/v1/leases/${resourcePath(namespace)}/${resourcePath(name)}/yaml`, signal)
 }
 
 export function getPersistentVolumes(options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<PersistentVolume>> {
@@ -652,10 +591,6 @@ export function getPersistentVolume(name: string, signal?: AbortSignal, expected
   return resourceRequest<PersistentVolumeDetail>(`/api/v1/persistent-volumes/${resourcePath(name)}`, signal, expectedGeneration)
 }
 
-export function getPersistentVolumeYAML(name: string, signal?: AbortSignal): Promise<string> {
-  return requestYAML(`/api/v1/persistent-volumes/${resourcePath(name)}/yaml`, signal)
-}
-
 export function getPersistentVolumeClaims(options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<PersistentVolumeClaim>> {
   return collectionRequest<PersistentVolumeClaim>('/api/v1/persistent-volume-claims', options, signal, expectedGeneration)
 }
@@ -664,20 +599,12 @@ export function getPersistentVolumeClaim(namespace: string, name: string, signal
   return resourceRequest<PersistentVolumeClaimDetail>(`/api/v1/persistent-volume-claims/${resourcePath(namespace)}/${resourcePath(name)}`, signal, expectedGeneration)
 }
 
-export function getPersistentVolumeClaimYAML(namespace: string, name: string, signal?: AbortSignal): Promise<string> {
-  return requestYAML(`/api/v1/persistent-volume-claims/${resourcePath(namespace)}/${resourcePath(name)}/yaml`, signal)
-}
-
 export function getStorageClasses(options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<StorageClass>> {
   return collectionRequest<StorageClass>('/api/v1/storage-classes', options, signal, expectedGeneration)
 }
 
 export function getStorageClass(name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<StorageClassDetail> {
   return resourceRequest<StorageClassDetail>(`/api/v1/storage-classes/${resourcePath(name)}`, signal, expectedGeneration)
-}
-
-export function getStorageClassYAML(name: string, signal?: AbortSignal): Promise<string> {
-  return requestYAML(`/api/v1/storage-classes/${resourcePath(name)}/yaml`, signal)
 }
 
 export function getCSIDrivers(options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<CSIDriver>> {
@@ -927,21 +854,6 @@ export function getSecretData(namespace: string, name: string, signal?: AbortSig
   return resourceRequest<ConfigMapDetail>(`/api/v1/secrets/${resourcePath(namespace)}/${resourcePath(name)}/data`, signal, expectedGeneration)
 }
 
-export interface DeploymentYAMLRequest {
-  confirmed: true
-  action: 'updateDeployment'
-  consequenceCode: 'UPDATE_DEPLOYMENT'
-  target: { clusterProfileId: number; context: string; namespace: string; kind: 'Deployment'; name: string }
-  expectedGeneration: string
-  expectedUid: string
-  expectedResourceVersion: string
-  yaml: string
-}
-
-export function saveDeploymentYAML(namespace: string, name: string, body: DeploymentYAMLRequest, csrfToken: string, signal?: AbortSignal): Promise<{ accepted: boolean; resourceVersion: string }> {
-  return mutation(`/api/v1/workloads/deployments/${resourcePath(namespace)}/${resourcePath(name)}/yaml`, 'PUT', body, csrfToken, signal)
-}
-
 export interface ResourceYAMLDocument {
   yaml: string
   kind: string
@@ -949,10 +861,15 @@ export interface ResourceYAMLDocument {
   generation: string
 }
 
-export interface ResourceYAMLRequest extends Omit<DeploymentYAMLRequest, 'action' | 'consequenceCode' | 'target'> {
+export interface ResourceYAMLRequest {
+  confirmed: true
   action: 'updateResource'
   consequenceCode: 'UPDATE_RESOURCE'
   target: { clusterProfileId: number; context: string; namespace: string; kind: string; name: string }
+  expectedGeneration: string
+  expectedUid: string
+  expectedResourceVersion: string
+  yaml: string
 }
 
 function resourceYAMLPath(collection: string, namespace: string | null, name: string) {

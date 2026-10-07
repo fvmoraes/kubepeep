@@ -34,14 +34,14 @@
 | --- | --- |
 | `Button` | `primary` (azul) · `secondary` · `success` · `danger` · `warning` · `ghost` · `icon`; altura única de 28px, fundos sutis e bordas semânticas; estados pressionado, foco e desabilitado explícitos |
 | `Badge` / `StatusBadge` | `default/healthy/warning/danger/info/unknown/accent`; 24px, cantos de 2px; StatusBadge inclui dot semântico |
-| `Input` / `Select` / `Checkbox` / `Field` / `SearchInput` | Campos de 28px alinhados às ações, cantos de 2px, bg crust, foco borda mauve + ring; `Field` = label + help + error |
+| `Input` / `Select` / `Checkbox` | Campos de 28px alinhados às ações, cantos de 2px, bg crust, foco borda mauve + ring |
 | `Card` (+Header/Title/Content) | surface-0, borda overlay-0, rounded-xl, sem sombra pesada |
 | `DataTable<T>` | células 14px sem quebra, nomes de colunas 13px em negrito, ordenação asc/desc e filtros por valores carregados no cabeçalho; visibilidade por coluna |
 | `ResourceSplitView` / `ResourceWorkspacePanel` | divisão fixa 40% lista / 60% detalhes em todas as famílias; rolagens internas, histórico local, fechamento com Esc e links diretos |
-| `Tabs` / `ResourceTabStrip` | 28px, underline com accent no ativo; mesma geometria da navegação horizontal e vertical |
+| `ResourceTabStrip` | 28px, underline com accent no ativo; mesma geometria da navegação horizontal e vertical |
 | `Banner` (+Error/Warning/Info/Success) | título humano + mensagem; detalhes técnicos em `<details>` |
 | `PageHeader` | título 22px + descrição + ações — toda página começa por ele (ou `ResourcePage`) |
-| `EmptyState` / `LoadingState` / `Skeleton` | vazio compacto; carregamento discreto compartilhado (`inline`, `block` ou `table`), com placeholders estáticos |
+| `EmptyState` / `LoadingState` | vazio compacto; carregamento discreto compartilhado (`inline`, `block` ou `table`), com placeholders estáticos |
 
 Botões novos usam `Button`, sem variações locais de tamanho. Controles nativos que precisam manter sua semântica (abas, cabeçalhos de tabela e navegação) usam os mesmos tokens de geometria. Resultados compostos da busca e da investigação usam `.control-row`: os mesmos cantos, com altura flexível para preservar descrições e avisos. Indicadores de estado não são ações; usam 24px para manter as linhas de dados compactas.
 

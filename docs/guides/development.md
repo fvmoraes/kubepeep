@@ -57,12 +57,11 @@ Um build local não substitui os testes nativos das demais plataformas.
 | `docs/guides/` | Instruções de desenvolvimento e operação |
 | `docs/architecture/`, `docs/decisions/` | Arquitetura atual, design system e ADRs |
 | `docs/reference/` | Contratos de produto, API, segurança, RBAC e protocolo |
-| `docs/research/`, `docs/archive/` | Pesquisa reproduzível e relatos históricos por versão |
+| `docs/research/`, `docs/archive/` | Pesquisa de arquitetura e índice de relatos preservados no Git |
 | `scripts/` | Smoke, verificação de documentação e segurança |
 | `scripts/release/` | Versionamento, classificação de checks e inspeção de artefatos |
 | `test/install/`, `test/release/` | Harnesses de instaladores e distribuição com fixtures isoladas |
 | `test/kind/` | Manifests sintéticos, integração e benchmarks Kubernetes |
-| `spikes/phase1/` | Módulo histórico isolado que reproduz decisões de lifecycle |
 | `packaging/linux/` | Manifesto nfpm, desktop entry e ícones dos pacotes Linux |
 | `build/` | Ícones consumidos pelo Wails e saídas locais em `build/bin/` |
 | `configs/` | Metadados do scaffold Ginger |
@@ -71,8 +70,9 @@ Um build local não substitui os testes nativos das demais plataformas.
 
 Testes unitários ficam junto do código testado. `test/` reúne verificações que
 atravessam processos, pacotes ou instalação; `web/e2e/` pertence ao frontend.
-O spike continua isolado porque seus probes são citados pelos ADRs e pesquisas;
-não é dependência do módulo de produção nem parte da CI atual.
+Os protótipos da Fase 1 foram removidos da árvore atual. O código histórico e
+as instruções de reprodução permanecem acessíveis no
+[registro de evidências](../research/evidence/f1-control/README.md).
 
 Os dois pacotes `internal/app` e `internal/application` têm responsabilidades
 distintas: o primeiro controla o bootstrap CLI, o segundo compõe o core
@@ -113,6 +113,11 @@ desenvolvimento usam `0.7.0-dev`. Evidências de versões anteriores estão no
 
 Versionar código, testes, fixtures sintéticas, lockfiles do produto, migrations,
 ícones necessários ao build, documentação e receitas de empacotamento.
+Protótipos descartados e relatórios de versões antigas ficam no histórico Git,
+com links por commit em [archive/](../archive/README.md). A documentação atual
+mantém os contratos, ADRs e instruções de reprodução necessários ao produto.
+Componentes e funções substituídos são removidos após conferir consumidores;
+rotas de API ainda documentadas e testes de compatibilidade permanecem ativos.
 Manter fora do Git binários, `dist/`, `build/bin/`, `internal/web/dist/`,
 `node_modules`, caches, cobertura, relatórios Playwright, capturas, releases,
 transcripts e logs. Não ignorar pastas de fonte para esconder saídas de build.

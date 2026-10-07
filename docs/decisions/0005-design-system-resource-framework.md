@@ -44,11 +44,16 @@ movimento de 120–160ms são compartilhados, com movimento reduzido respeitado.
 ### Componentes e framework
 
 `web/src/components/ui/` fornece os átomos (Button com variantes semânticas,
-Badge/StatusBadge, inputs unificados h-8, Card, DataTable, Drawer, Tabs,
+Badge/StatusBadge, inputs unificados de 28px, Card, DataTable,
 Banner×4, PageHeader, EmptyState); `web/src/components/resource/` fornece o
 esqueleto de páginas de recursos (gates de seleção/erro, paginação por
 geração, filter bar, fact grid, mapeamento status→cor). Página nova de
 recurso **não** cria estrutura nem CSS próprios.
+
+Os componentes sem consumidores `Drawer`, `Tabs`, `SearchInput`, `Field` e
+`Skeleton` foram removidos, assim como `CardTitle` e `NamespaceIndicator`.
+Detalhes usam o workspace fixo, abas usam `ResourceTabStrip` e busca usa `Input`
+nos controles compartilhados.
 
 ### Shell e navegação
 

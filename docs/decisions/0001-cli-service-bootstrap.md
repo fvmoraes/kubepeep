@@ -85,9 +85,9 @@ Rejeitado por requisito de produto.
   por `go mod tidy`, testes e build.
 - `ginger generate command probe` em `service` retornou que o generator é
   exclusivo de projetos `--cli`.
-- O spike `spikes/phase1` executa raiz e `start` com o mesmo contrato, inicia
+- O [spike histórico da Fase 1](../research/evidence/f1-control/README.md) executou raiz e `start` com o mesmo contrato, iniciou
   uma aplicação Ginger em listener adquirido previamente; o cancelamento do
-  contexto Cobra encerra o servidor e comprova cleanup. Erro de servidor e
+  contexto Cobra encerrou o servidor e comprovou cleanup. Erro de servidor e
   timeout também foram testados.
 - O código de `pkg/app.Run`/`shutdown` da tag fixada foi inspecionado no commit
   `6073543b6281be01e4bc97d001dd6e11512f70db`.

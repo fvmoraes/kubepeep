@@ -1,5 +1,3 @@
-import { Layers } from 'lucide-react'
-
 import { Select } from './ui'
 import { useGlobalNamespace } from '../context/GlobalNamespace'
 
@@ -29,15 +27,5 @@ export function GlobalNamespaceSelect({ disabled }: { disabled?: boolean }) {
       <option value="">Namespace: All</option>
       {options.map((namespace) => <option key={namespace} value={namespace}>{namespace}</option>)}
     </Select>
-  )
-}
-
-export function NamespaceIndicator() {
-  const { value } = useGlobalNamespace()
-  return (
-    <span className="inline-flex items-center gap-1 text-menu text-kp-overlay-text" data-tip="Active global namespace filter">
-      <Layers size={12} aria-hidden="true" className="text-kp-mauve" />
-      {value === '' ? 'All namespaces' : value}
-    </span>
   )
 }

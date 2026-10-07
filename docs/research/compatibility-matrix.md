@@ -66,7 +66,9 @@ silenciosamente de um toolchain mais novo.
 
 ## Validações executadas
 
-O módulo isolado está em `spikes/phase1`.
+O módulo isolado `spikes/phase1` foi removido da árvore atual. Para reproduzir
+esta matriz, use o checkout histórico descrito no
+[registro da prova](evidence/f1-control/README.md#reprodução).
 
 | Validação | Resultado |
 | --- | --- |
