@@ -40,7 +40,8 @@ check was applied to the platform-specific modernc modules.
 | [Scheduler](https://github.com/facebook/react) | 0.27.0 | MIT |
 | [React Router](https://github.com/remix-run/react-router) | 8.3.0 | MIT |
 | [cookie-es](https://github.com/unjs/cookie-es) | 3.1.1 | MIT |
-| [Inter Variable via Fontsource](https://github.com/fontsource/font-files/tree/main/fonts/variable/inter) | 5.3.0 | OFL-1.1 |
+| [Roboto via Fontsource](https://github.com/fontsource/font-files/tree/main/fonts/google/roboto) | 5.3.0 | OFL-1.1 |
+| [Roboto Mono via Fontsource](https://github.com/fontsource/font-files/tree/main/fonts/google/roboto-mono) | 5.3.0 | OFL-1.1 |
 | [xterm.js](https://github.com/xtermjs/xterm.js) | 6.0.0 | MIT |
 | [xterm.js fit addon](https://github.com/xtermjs/xterm.js/tree/master/addons/addon-fit) | 0.11.0 | MIT |
 | [React Syntax Highlighter](https://github.com/react-syntax-highlighter/react-syntax-highlighter) | 16.1.1 | MIT |
@@ -54,5 +55,5 @@ Their exact versions and licenses remain recorded by the frontend lockfile.
 The DWYT project was reviewed at commit
 `a9386823272b928f2289c9020a9ae5951389e0f1` under MIT. Kube Peep reinterprets
 only general local-application and visual principles; it does not copy DWYT
-business logic or source. The review boundary is documented in
-`docs/research/dwyt.md`.
+business logic or source. The review boundary is documented in the
+[historical research](https://github.com/fvmoraes/kubepeep/blob/1ed16cd0c4c48181754b18fd6f60cbea7486482a/docs/research/dwyt.md).

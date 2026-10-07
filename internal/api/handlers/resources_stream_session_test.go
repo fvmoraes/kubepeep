@@ -34,6 +34,7 @@ type handlerWatchPort struct {
 	mu                sync.Mutex
 	streams           map[string]*handlerWatchStream
 	created           chan string
+	watchRelease      chan struct{}
 	itemsPerNamespace int
 	globalItems       []resourcecore.TopicObject
 }
@@ -83,7 +84,14 @@ func (port *handlerWatchPort) List(_ context.Context, key resourcecore.WatchKey)
 	return resourcecore.WatchSnapshot{ResourceVersion: "rv-" + key.Namespace, Items: items}, nil
 }
 
-func (port *handlerWatchPort) Watch(_ context.Context, key resourcecore.WatchKey, _ string, _ int64, _ bool) (resourcecore.WatchStream, error) {
+func (port *handlerWatchPort) Watch(ctx context.Context, key resourcecore.WatchKey, _ string, _ int64, _ bool) (resourcecore.WatchStream, error) {
+	if port.watchRelease != nil {
+		select {
+		case <-port.watchRelease:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 	stream := &handlerWatchStream{changes: make(chan resourcecore.WatchChange, 16)}
 	port.mu.Lock()
 	port.streams[key.Namespace] = stream
@@ -130,6 +138,9 @@ func (service *liveResourceStreamService) AuthorizeLogs(context.Context, namespa
 func (service *liveResourceStreamService) ReauthorizeLogs(context.Context, namespaces.SelectionBinding, string, string) error {
 	service.logRevalidates.Add(1)
 	return service.logReauthErr
+}
+func (service *liveResourceStreamService) DownloadLogs(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, namespace, pod string, query resourcecore.LogQuery, emit func(resourcecore.LogLineDTO) error) (resourcecore.FollowTerminal, error) {
+	return service.FollowLogs(ctx, binding, resolution, namespace, pod, query, emit)
 }
 func (service *liveResourceStreamService) FollowLogs(ctx context.Context, binding namespaces.SelectionBinding, _ namespaces.ScopeResolution, _, _ string, _ resourcecore.LogQuery, _ func(resourcecore.LogLineDTO) error) (resourcecore.FollowTerminal, error) {
 	<-ctx.Done()
@@ -296,6 +307,7 @@ func TestResourceStreamPublishesListPageBeforeTransactionalSnapshot(t *testing.T
 
 func TestResourceStreamUsesEffectiveGlobalScopeReturnedByAuthorization(t *testing.T) {
 	port := newHandlerWatchPort()
+	port.watchRelease = make(chan struct{})
 	port.globalItems = []resourcecore.TopicObject{
 		resourcecore.PodDTO{Namespace: "alpha", Name: "allowed", Status: "Running"},
 		resourcecore.PodDTO{Namespace: "outside", Name: "excluded", Status: "Running"},
@@ -306,6 +318,7 @@ func TestResourceStreamUsesEffectiveGlobalScopeReturnedByAuthorization(t *testin
 	service := &liveResourceStreamService{manager: manager, authorizedScope: &effective}
 	handler, _, origin, csrf := streamHandlerFixture(t, service, []string{"alpha", "beta"})
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	request := newAuthorizedStreamRequest(ctx, origin, csrf, "")
 	recorder := newLiveResponseRecorder()
 	done := make(chan struct{})
@@ -314,13 +327,16 @@ func TestResourceStreamUsesEffectiveGlobalScopeReturnedByAuthorization(t *testin
 	if strings.Contains(body, `"namespace":"outside"`) || strings.Contains(body, "excluded") {
 		t.Fatalf("global watch leaked an object outside the explicit scope: %s", body)
 	}
+	// LIST can publish its snapshot before the asynchronous WATCH is opened.
+	// Exercise that ordering explicitly instead of relying on the scheduler.
+	close(port.watchRelease)
 	select {
 	case namespace := <-port.created:
 		if namespace != "" {
 			t.Fatalf("watch namespace=%q, want cluster-wide", namespace)
 		}
-	default:
-		t.Fatal("global watch was not created")
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for global watch creation")
 	}
 	if manager.SharedWatchCount() != 1 || len(port.created) != 0 {
 		t.Fatalf("shared=%d queued watch creations=%d", manager.SharedWatchCount(), len(port.created))

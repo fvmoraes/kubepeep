@@ -1702,6 +1702,12 @@ func (port resourceLogPort) Open(ctx context.Context, target resources.LogTarget
 	}
 	tail := options.TailLines
 	logOptions := &corev1.PodLogOptions{Container: target.Container, Previous: options.Previous, Timestamps: options.Timestamps, TailLines: &tail, SinceSeconds: options.SinceSeconds, LimitBytes: &options.LimitBytes, Follow: options.Follow}
+	if tail < 0 {
+		logOptions.TailLines = nil
+	}
+	if options.LimitBytes <= 0 {
+		logOptions.LimitBytes = nil
+	}
 	reader, err := lease.Clients.StreamingKubernetes().CoreV1().Pods(target.Namespace).GetLogs(target.Pod, logOptions).Stream(streamContext.Context())
 	if err != nil {
 		streamContext.Close()
@@ -1788,6 +1794,11 @@ func (backend *ResourceBackend) authorizeLogs(ctx context.Context, binding names
 func (backend *ResourceBackend) FollowLogs(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, namespace, pod string, query resources.LogQuery, emit func(resources.LogLineDTO) error) (resources.FollowTerminal, error) {
 	service := resources.LogService{Port: resourceLogPort{backend: backend, binding: binding}, Authorizer: backend.authorizer, Redactor: backend.redactor, Now: backend.now}
 	return service.Follow(ctx, resourceSelection(binding, resolution), resources.LogTarget{Namespace: namespace, Pod: pod}, query, emit)
+}
+
+func (backend *ResourceBackend) DownloadLogs(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, namespace, pod string, query resources.LogQuery, emit func(resources.LogLineDTO) error) (resources.FollowTerminal, error) {
+	service := resources.LogService{Port: resourceLogPort{backend: backend, binding: binding}, Authorizer: backend.authorizer, Redactor: backend.redactor, Now: backend.now}
+	return service.Download(ctx, resourceSelection(binding, resolution), resources.LogTarget{Namespace: namespace, Pod: pod}, query, emit)
 }
 
 func resourceDomain(code resources.ErrorCode, message string, cause error) error {

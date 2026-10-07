@@ -10,12 +10,22 @@ cleanup e vinte repetições) e Windows amd64 (suíte `control`, exit 0).
 Os transcripts completos e binários ficam privados sob `~/.dwyt/projects/`;
 não são versionados. Esta prova valida o spike, não uma release atual.
 
-O [runner Windows](../../../../spikes/phase1/scripts/run-windows-native.cmd)
-é fonte reproduzível e acompanha o módulo do spike.
+O protótipo foi removido da árvore atual por não ser dependência da aplicação
+nem da CI. O [módulo histórico](https://github.com/fvmoraes/kubepeep/tree/1ed16cd0c4c48181754b18fd6f60cbea7486482a/spikes/phase1)
+e o [runner Windows](https://github.com/fvmoraes/kubepeep/blob/1ed16cd0c4c48181754b18fd6f60cbea7486482a/spikes/phase1/scripts/run-windows-native.cmd)
+permanecem preservados no Git.
 
 ## Reprodução
 
-Na raiz de `spikes/phase1`:
+A partir da raiz do repositório, crie um checkout separado da última revisão
+que contém o protótipo e entre no módulo:
+
+```sh
+git worktree add --detach ../kubepeep-phase1 1ed16cd0c4c48181754b18fd6f60cbea7486482a
+cd ../kubepeep-phase1/spikes/phase1
+```
+
+Nesse módulo histórico:
 
 ```sh
 GOTOOLCHAIN=go1.25.0 \

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"sync/atomic"
 	"testing"
+
+	"github.com/fvmoraes/kubepeep/internal/services/resourcecatalog"
 )
 
 func TestAllowlistExactlyMatchesDocumentedMVPIDs(t *testing.T) {
@@ -52,6 +54,9 @@ func TestAllowlistExactlyMatchesDocumentedMVPIDs(t *testing.T) {
 		"endpoints.list", "endpoints.get",
 		"metrics.pods.list",
 	}
+	for _, resource := range resourcecatalog.All() {
+		want = append(want, resource.UpdateCapability())
+	}
 	allowlist := Allowlist()
 	if len(allowlist) != len(want) {
 		t.Fatalf("allowlist length = %d, want %d", len(allowlist), len(want))
@@ -90,6 +95,22 @@ func isClusterListCapability(id string) bool {
 		return true
 	}
 	return false
+}
+
+func TestYAMLPermissionsUseExactClusterNamesAndAPIGroup(t *testing.T) {
+	for _, test := range []struct{ capability, name, group, resource string }{
+		{"yaml.cluster-roles.update", "system:discovery", "rbac.authorization.k8s.io", "clusterroles"},
+		{"yaml.storage-classes.update", "standard", "storage.k8s.io", "storageclasses"},
+	} {
+		expanded, _, err := ExpandPermissions(PermissionsRequest{Generation: "gen_yaml", CapabilityIDs: []string{test.capability}, ResourceNames: []string{test.name}})
+		if err != nil || len(expanded) != 1 {
+			t.Fatalf("could not resolve cluster permission: %v", err)
+		}
+		key := expanded[0].Key
+		if key.Namespace != "" || key.APIGroup != test.group || key.Resource != test.resource || key.ResourceName != test.name || key.Verb != "update" {
+			t.Fatalf("inexact cluster permission: %#v", key)
+		}
+	}
 }
 
 func TestKeyForCapabilitySeparatesResourceAndSubresource(t *testing.T) {
@@ -186,7 +207,7 @@ func TestExpandPermissionsRejectsInvalidGrammarAndProducts(t *testing.T) {
 		"unused resource name":    withPermissions(base, func(request *PermissionsRequest) { request.ResourceNames = []string{"api"} }),
 		"invalid resource name": withPermissions(base, func(request *PermissionsRequest) {
 			request.CapabilityIDs = []string{"pods.get"}
-			request.ResourceNames = []string{"Bad_Name"}
+			request.ResourceNames = []string{"bad/name"}
 		}),
 		"duplicate resource name": withPermissions(base, func(request *PermissionsRequest) {
 			request.CapabilityIDs = []string{"pods.get"}

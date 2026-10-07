@@ -8,6 +8,7 @@ import (
 	"unicode"
 
 	"github.com/fvmoraes/kubepeep/internal/observability"
+	"github.com/fvmoraes/kubepeep/internal/services/resourcecatalog"
 	"k8s.io/apimachinery/pkg/util/validation"
 )
 
@@ -121,7 +122,7 @@ func ValidateKey(key Key) error {
 	if len(validation.IsDNS1123Label(key.Verb)) != 0 {
 		return validationError()
 	}
-	if key.ResourceName != "" && len(validation.IsDNS1123Subdomain(key.ResourceName)) != 0 {
+	if key.ResourceName != "" && !resourcecatalog.ValidName(key.ResourceName) {
 		return validationError()
 	}
 	return nil

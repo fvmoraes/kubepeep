@@ -17,6 +17,7 @@ import { Sidebar } from './components/Sidebar'
 import { MobileNavigation } from './components/MobileNavigation'
 import { LoadingState } from './components/ui/LoadingState'
 import { useMediaQuery } from './hooks/useMediaQuery'
+import { ResourceSplitView } from './components/workspace/ResourceSplitView'
 import { StatePanel } from './components/StatePanel'
 import { ResourceWorkspaceProvider, useResourceWorkspace } from './components/workspace/ResourceWorkspaceProvider'
 import { GlobalNamespaceProvider, useGlobalNamespace } from './context/GlobalNamespace'
@@ -233,17 +234,6 @@ function useShellPreferencePersistence(preferencesAvailable: boolean, onSaveErro
 
 function Shell() {
   const mobile = useMediaQuery('(max-width: 760px), (max-width: 1024px) and (max-height: 500px)')
-  const topbarRef = useRef<HTMLElement>(null)
-  useEffect(() => {
-    const header = topbarRef.current
-    const layout = header?.parentElement
-    if (!header || !layout || typeof ResizeObserver === 'undefined') return
-    const measure = () => layout.style.setProperty('--topbar-height', `${header.offsetHeight}px`)
-    measure()
-    const observer = new ResizeObserver(measure)
-    observer.observe(header)
-    return () => observer.disconnect()
-  }, [])
   const queryClient = useQueryClient()
   useEffect(() => {
     recordShellReady()
@@ -383,7 +373,7 @@ function Shell() {
       <a className="skip-link" href="#main-content">Skip to main content</a>
       {!mobile ? <Sidebar version={version} compact={compact} onToggleCompact={toggleCompact} collapsedGroups={collapsedGroups} onToggleGroup={toggleGroup} /> : null}
       <div className="workspace">
-        <header ref={topbarRef} className="topbar">
+        <header className="topbar">
           {mobile ? <div className="mobile-navigation-trigger"><MobileNavigation version={version} compact={false} onToggleCompact={toggleCompact} collapsedGroups={collapsedGroups} onToggleGroup={toggleGroup} /></div> : null}
           <div className="topbar-controls topbar-selection">
             <ContextSelector selection={selection} />
@@ -405,12 +395,13 @@ function Shell() {
         </header>
         <main id="main-content">
           <ResourceFamilyNav />
-          <DefaultScopeGate selection={selection} selectionPending={selectionPendingForRoute}>
-            <Suspense fallback={<LoadingState label="Opening section…" layout="table" />}>
-              <Outlet />
-            </Suspense>
-          </DefaultScopeGate>
-          {workspace.open ? <Suspense fallback={<LoadingState label="Opening resource…" />}><ResourceWorkspacePanel /></Suspense> : null}
+          <ResourceSplitView detail={workspace.open ? <Suspense fallback={<LoadingState label="Opening resource…" />}><ResourceWorkspacePanel /></Suspense> : null}>
+            <DefaultScopeGate selection={selection} selectionPending={selectionPendingForRoute}>
+              <Suspense fallback={<LoadingState label="Opening section…" layout="table" />}>
+                <Outlet />
+              </Suspense>
+            </DefaultScopeGate>
+          </ResourceSplitView>
         </main>
       </div>
     </div>

@@ -489,7 +489,7 @@ describe('read-only resource pages', () => {
         { capabilityId: 'deployments.restart', namespace: 'payments', decision: 'allowed' },
         { capabilityId: 'deployments.scale', namespace: 'payments', decision: 'allowed' },
       ] }))
-      if (path === '/api/v1/workloads/deployments/payments/api/yaml') return Promise.resolve(new Response('apiVersion: apps/v1\nkind: Deployment\n', { headers: { 'Content-Type': 'application/yaml' } }))
+      if (path === '/api/v1/resources/deployments/payments/api/yaml') return Promise.resolve(json({ yaml: 'apiVersion: apps/v1\nkind: Deployment\n', kind: 'Deployment', generation, updateCapability: 'yaml.deployments.update' }))
       throw new Error(`Unexpected request: ${path}`)
     })
     vi.stubGlobal('fetch', fetch)
@@ -546,7 +546,7 @@ describe('read-only resource pages', () => {
     await waitFor(() => expect(paths.some((path) => path.includes('search=api'))).toBe(true))
   })
 
-  it('renders Secret detail through an explicit metadata allowlist and never offers YAML', async () => {
+  it('keeps Secret detail metadata-only and offers YAML only through an explicit tab', async () => {
     const paths: string[] = []
     vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
       const path = String(input)
@@ -567,6 +567,7 @@ describe('read-only resource pages', () => {
     expect(await screen.findByText(/Open Data to reveal/)).toBeInTheDocument()
     expect(screen.getAllByText('uid-secret').length).toBeGreaterThanOrEqual(1)
     expect(screen.queryByText(/super-secret|annotation-secret|raw-token/)).not.toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'YAML' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Load authorized YAML' })).not.toBeInTheDocument()
     expect(paths.some((path) => path.includes('/secrets/') && path.endsWith('/yaml'))).toBe(false)
   })

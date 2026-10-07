@@ -62,6 +62,44 @@ func TestGenerationUnaryInheritsParentCancellation(t *testing.T) {
 	}
 }
 
+func TestGenerationUnaryPreservesRequestDeadlineAndValues(t *testing.T) {
+	t.Parallel()
+	type requestKey struct{}
+	parent, cancelParent := context.WithDeadline(context.WithValue(context.Background(), requestKey{}, "request"), time.Now().Add(time.Minute))
+	defer cancelParent()
+	generation := newGeneration(context.Background(), 1, 2*time.Minute)
+	defer generation.cancelWith(context.Canceled)
+	unary, cancelUnary, err := generation.Unary(parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cancelUnary()
+	want, _ := parent.Deadline()
+	got, ok := unary.Deadline()
+	if !ok || !got.Equal(want) || unary.Value(requestKey{}) != "request" {
+		t.Fatalf("request metadata lost: deadline=%v want=%v value=%v", got, want, unary.Value(requestKey{}))
+	}
+}
+
+func TestGenerationUnaryExpiredDeadlineIsNotClientCancellation(t *testing.T) {
+	t.Parallel()
+	parent, cancelParent := context.WithDeadline(context.Background(), time.Now().Add(-time.Second))
+	defer cancelParent()
+	generation := newGeneration(context.Background(), 1, time.Minute)
+	defer generation.cancelWith(context.Canceled)
+	unary, cancelUnary, err := generation.Unary(parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cancelUnary()
+	if !errors.Is(unary.Err(), context.DeadlineExceeded) {
+		t.Fatalf("expired request classified as %v", unary.Err())
+	}
+	if generation.Context().Err() != nil {
+		t.Fatal("one expired request canceled the client generation")
+	}
+}
+
 func TestGenerationStreamRejectsInvalidInputs(t *testing.T) {
 	generation := newGeneration(context.Background(), 1, time.Second)
 	if _, err := (*Generation)(nil).Stream(context.Background(), time.Second); err == nil {

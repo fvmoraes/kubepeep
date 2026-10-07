@@ -22,15 +22,6 @@ export function CardHeader({ children, className = '' }: CardHeaderProps) {
   return <div className={`flex items-center justify-between gap-4 mb-4 ${className}`}>{children}</div>
 }
 
-export interface CardTitleProps {
-  children: ReactNode
-  className?: string
-}
-
-export function CardTitle({ children, className = '' }: CardTitleProps) {
-  return <h2 className={`text-heading text-kp-text ${className}`}>{children}</h2>
-}
-
 export interface CardContentProps {
   children: ReactNode
   className?: string

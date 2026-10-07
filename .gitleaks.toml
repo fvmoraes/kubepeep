@@ -23,6 +23,7 @@ id = "generic-api-key"
     regexes = ['''^dGhlIHNhbXBsZSBub25jZQ==$''']
     paths = [
       '''^internal/api/handlers/actions_exec_wire_test\.go$''',
+      # Removed prototypes still occur in the full-history security scan.
       '''^spikes/phase1/spike/(lifecycle_matrix_test|spike_test|ws_matrix_test)\.go$''',
     ]
 

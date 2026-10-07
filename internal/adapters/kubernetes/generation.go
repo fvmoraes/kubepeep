@@ -87,14 +87,17 @@ func (generation *Generation) Stream(parent context.Context, idleTimeout time.Du
 }
 
 func linkContexts(generation, parent context.Context) (context.Context, context.CancelCauseFunc, func()) {
-	ctx, cancel := context.WithCancelCause(generation)
-	stopParent := context.AfterFunc(parent, func() {
-		cancel(context.Cause(parent))
+	// Keep the caller's deadline and request values visible to client-go (in
+	// particular its rate limiter). Linking only Done loses both and reports
+	// an expired request deadline as context.Canceled.
+	ctx, cancel := context.WithCancelCause(parent)
+	stopGeneration := context.AfterFunc(generation, func() {
+		cancel(context.Cause(generation))
 	})
-	if err := parent.Err(); err != nil {
-		cancel(context.Cause(parent))
+	if err := generation.Err(); err != nil {
+		cancel(context.Cause(generation))
 	}
-	return ctx, cancel, func() { stopParent() }
+	return ctx, cancel, func() { stopGeneration() }
 }
 
 // StreamContext owns an activity-based idle deadline.

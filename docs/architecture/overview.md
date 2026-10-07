@@ -188,8 +188,9 @@ do contexto raiz; o modo inicial é foreground. O coordenador adquire o listener
 instala o mux externo mínimo de health, publica prontidão e executa seu registro
 LIFO de cleanup em cancelamento, erro de Serve e timeout.
 
-O módulo isolado `spikes/phase1/` reproduz a decisão histórica. A produção
-usa `internal/runtime`; validar seu comportamento e os arquivos empacotados
+O protótipo isolado da Fase 1 foi removido da árvore atual; seu código permanece
+no histórico Git, conforme o [registro de evidências](../research/evidence/f1-control/README.md).
+A produção usa `internal/runtime`; validar seu comportamento e os arquivos empacotados
 pelos testes atuais, sem considerar resultados antigos prova de uma release.
 
 ## 7. Contrato operacional CLI

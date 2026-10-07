@@ -185,6 +185,10 @@ func Register(applicationRouter *router.Router, dependencies Dependencies) {
 	if dependencies.Selection != nil && (dependencies.Actions != nil || dependencies.PortForwards != nil || dependencies.Exec != nil) {
 		actions := NewActionHandlers(dependencies.Actions, dependencies.PortForwards, dependencies.Exec, dependencies.Selection)
 		if dependencies.Actions != nil {
+			apiRouter.GET("/resources/{collection}/{namespace}/{name}/yaml", actions.ResourceYAML)
+			apiRouter.PUT("/resources/{collection}/{namespace}/{name}/yaml", actions.ResourceYAML)
+			apiRouter.GET("/resources/{collection}/{name}/yaml", actions.ResourceYAML)
+			apiRouter.PUT("/resources/{collection}/{name}/yaml", actions.ResourceYAML)
 			apiRouter.POST("/workloads/{kind}/{namespace}/{name}/restart", actions.Restart)
 			apiRouter.PUT("/workloads/{kind}/{namespace}/{name}/scale", actions.Scale)
 			apiRouter.PUT("/workloads/{kind}/{namespace}/{name}/yaml", actions.UpdateDeploymentYAML)
@@ -302,6 +306,8 @@ func resourceAllowedMethods(path string) (string, bool) {
 		}
 	}
 	switch {
+	case (len(parts) == 4 || len(parts) == 5) && parts[0] == "resources" && parts[len(parts)-1] == "yaml":
+		return "GET, HEAD", true
 	case len(parts) == 4 && parts[0] == "workloads":
 		return "GET, HEAD", true
 	case len(parts) == 5 && parts[0] == "workloads" && parts[4] == "yaml":
@@ -384,6 +390,8 @@ func actionAllowedMethods(path string) (string, bool) {
 		return "PUT", true
 	case len(parts) == 5 && parts[0] == "workloads" && parts[4] == "trigger":
 		return "POST", true
+	case (len(parts) == 4 || len(parts) == 5) && parts[0] == "resources" && parts[len(parts)-1] == "yaml":
+		return "PUT", true
 	case len(parts) == 4 && parts[0] == "workloads":
 		return "DELETE", true
 	case len(parts) == 3 && parts[0] == "pods":

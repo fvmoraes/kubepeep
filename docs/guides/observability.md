@@ -241,8 +241,9 @@ make benchmark-protocol     # transporte e rate limits no contexto Kind ativo
 ./test/kind/harness.sh validate   # somente com Kind disponível
 ```
 
-O protocolo, dimensões, SHA, ambiente, warmup e repetições ficam em
-`docs/archive/v0.7/performance-baseline.md` e no próprio JSON. Kind real, sintético e Wails
+O protocolo, dimensões, SHA, ambiente, warmup e repetições ficam na
+[baseline histórica](https://github.com/fvmoraes/kubepeep/blob/1ed16cd0c4c48181754b18fd6f60cbea7486482a/docs/archive/v0.7/performance-baseline.md)
+e no próprio JSON. Kind real, sintético e Wails
 nativo são resultados separados.
 
 ## 7. Testes
@@ -274,7 +275,8 @@ no evento. Kinds fora da allowlist viram `Unknown`; isso evita transformar logs
 locais em inventário de objetos Kubernetes.
 
 Os relatórios completos permanecem em `test/kind/.state/`, ignorados pelo Git.
-O resumo comparável e sanitizado está em `performance-baseline.md`; métricas de
+O resumo comparável e sanitizado está na baseline preservada no
+[índice histórico](../archive/README.md#v07); métricas de
 cache/watch de produção continuam vindo dos próprios componentes e de
 Diagnostics, porque o runner direto de `resources.Collect` não instancia esse
 cache nem fabrica reconexões.

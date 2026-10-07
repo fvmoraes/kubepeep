@@ -37,6 +37,14 @@ export function QueryState({ pending, error, empty, children }: { pending: boole
   return children
 }
 
+export function CollectionCoverage({ coverage }: { coverage: CollectionResult<unknown>['coverage'] }) {
+  if (!coverage) return null
+  const failed = coverage.failed.length
+  return <small className={`block ${failed ? 'text-kp-yellow' : ''}`} role={failed ? 'note' : undefined} title={coverage.failed.map((failure) => `${failure.namespace || 'Cluster'}: ${failure.code}`).join('\n')}>
+    {failed ? 'Partial result · ' : ''}{coverage.requestedNamespaces === 0 ? 'Cluster-scoped result' : `${coverage.completedNamespaces}/${coverage.requestedNamespaces} namespaces completed · ${coverage.deniedNamespaces.length} denied`}{failed ? ` · ${failed} failed` : ''}
+  </small>
+}
+
 export function InfiniteCollectionFooter<T>({ result, itemCount, pageCount, firstPage, hasNextPage, loading, refreshing, nextPageError, onNext, onRestart }: {
   result: CollectionResult<T>
   itemCount: number
@@ -56,7 +64,7 @@ export function InfiniteCollectionFooter<T>({ result, itemCount, pageCount, firs
         <span className="block text-kp-subtext">{itemCount} item{itemCount === 1 ? '' : 's'} loaded · {pageCount} page{pageCount === 1 ? '' : 's'} retained</span>
         <small className="block">{result.page.complete ? 'Collection complete' : `Bounded ${result.page.filterScope} result`}{result.page.truncated ? ' · truncated' : ''}</small>
         {result.snapshotRenewed ? <small className="block text-kp-yellow" role="status">The list snapshot expired and was renewed from the first page.</small> : null}
-        {coverage ? <small className="block">{coverage.requestedNamespaces === 0 ? 'Cluster-scoped result' : `${coverage.completedNamespaces}/${coverage.requestedNamespaces} namespaces completed · ${coverage.deniedNamespaces.length} denied`}{coverage.failed.length ? ` · ${coverage.failed.length} failed` : ''}</small> : null}
+        <CollectionCoverage coverage={coverage} />
       </div>
       <div className="flex gap-2">
         <Button variant="secondary" disabled={firstPage} disabledReason="Already on the first page." onClick={onRestart}>First page</Button>

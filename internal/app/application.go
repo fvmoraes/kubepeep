@@ -175,6 +175,10 @@ func New(options Options) (*Application, error) {
 			apiMiddleware.RawChain(application.Logger, security, 4*time.Hour, http.HandlerFunc(resourceStreams.LogFollow)),
 		)
 		application.Router.HandleRaw(
+			"GET /api/v1/pods/{namespace}/{name}/logs/download/stream",
+			apiMiddleware.RawChain(application.Logger, security, 5*time.Minute, http.HandlerFunc(resourceStreams.LogDownload)),
+		)
+		application.Router.HandleRaw(
 			"GET /api/v1/stream",
 			apiMiddleware.RawChain(application.Logger, security, 0, http.HandlerFunc(resourceStreams.Resources)),
 		)

@@ -143,16 +143,19 @@ kbd {
    ------------------------------------------------------------------ */
 
 .app-shell {
-  min-height: 100dvh;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
   display: grid;
   grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
 }
 .app-shell--compact { grid-template-columns: var(--sidebar-width-compact) minmax(0, 1fr); }
 .app-shell > aside { height: 100dvh; position: sticky; top: 0; }
 
-.workspace { min-width: 0; display: flex; flex-direction: column; }
+.workspace { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 
 .topbar {
+  flex-shrink: 0;
   position: sticky;
   z-index: 20;
   top: 0;
@@ -168,11 +171,25 @@ kbd {
 .topbar-controls { display: flex; align-items: center; gap: 8px; min-width: 0; }
 
 main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
   width: 100%;
   max-width: var(--content-max-width);
   margin: 0 auto;
   padding: 20px;
 }
+
+/* Routes scroll independently from their fixed inspector. An empty dock gives
+   the full available height back to the route, without measuring the viewport. */
+main > .resource-family-nav { flex-shrink: 0; }
+.resource-split { display: grid; grid-template-rows: minmax(0, 1fr); flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
+.resource-split:has(> .resource-detail-slot:not(:empty)) { grid-template-rows: minmax(0, 2fr) minmax(0, 3fr); gap: 12px; }
+.resource-list-pane { min-width: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.resource-detail-slot { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+.resource-detail-slot:empty { display: none; }
 
 @media (max-width: 1440px) {
   .topbar { flex-wrap: wrap; height: auto; min-height: var(--header-height); padding: 8px 12px; }
@@ -185,16 +202,15 @@ main {
 }
 
 /* ------------------------------------------------------------------
-   Resource Workspace — one inline detail surface below every resource list.
+   Resource Workspace — fixed detail surface below every resource list.
    ------------------------------------------------------------------ */
 
 .workspace-panel {
   position: relative;
   width: 100%;
   min-width: 0;
-  margin-top: 12px;
-  max-height: min(72dvh, calc(100dvh - var(--topbar-height, var(--header-height)) - 24px));
-  scroll-margin-top: calc(var(--topbar-height, var(--header-height)) + 12px);
+  min-height: 0;
+  flex: 1;
   container-type: inline-size;
   display: flex;
   flex-direction: column;
@@ -214,7 +230,28 @@ main {
   background: var(--color-kp-surface-1);
 }
 
-.workspace-body { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 10px 12px; }
+.workspace-body { display: flex; flex: 1; min-height: 0; overflow: hidden; padding: 10px 12px; }
+.workspace-tab-content { flex: 1; min-width: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.workspace-tab-content--logs { display: flex; flex-direction: column; overflow: hidden; }
+.workspace-tab-content--logs :is(.pod-logs-panel, .workload-logs-panel) { display: flex; flex: 1; flex-direction: column; min-height: 0; overflow: hidden; }
+.pod-logs-controls { flex-shrink: 0; overflow-x: auto; white-space: nowrap; }
+.pod-logs-controls > * { flex-shrink: 0; }
+.workspace-tab-content--logs .log-output { flex: 1; min-height: 0; max-height: none; overscroll-behavior: contain; }
+.workload-log-targets { flex: 0 1 auto; max-height: 40%; overflow: auto; overscroll-behavior: contain; }
+.workspace-tab-content > :is(.yaml-viewer, .resource-yaml-editor) { height: 100%; }
+.workspace-tab-content :is(.yaml-viewer, .resource-yaml-editor) { display: flex; flex-direction: column; min-height: 0; }
+.workspace-tab-content .yaml-viewer { flex: 1; margin: 0; padding: 0; border: 0; }
+.workspace-tab-content :is(.yaml-viewer, .resource-yaml-editor) > * { flex-shrink: 0; }
+.workspace-tab-content .yaml-viewer [role=search] { flex-wrap: nowrap; overflow-x: auto; padding: 2px; }
+.workspace-tab-content .yaml-viewer [role=search] > * { flex-shrink: 0; }
+.workspace-tab-content :is(.yaml-document, .yaml-editor) { flex: 1 1 0; min-height: 0; resize: none; overscroll-behavior: contain; }
+.workspace-tab-content .resource-yaml-editor > .yaml-viewer { flex: 1 1 0; }
+
+@media (max-height: 600px) {
+  .resource-split:has(> .resource-detail-slot:not(:empty)) { grid-template-rows: minmax(0, 3fr) minmax(0, 7fr); }
+  .workspace-body { padding: 6px 8px; }
+  .workspace-tab-content--logs .log-output { padding: 6px 8px; }
+}
 
 .workspace-nav-btn:disabled { opacity: 0.35; cursor: not-allowed; }
 
@@ -340,7 +377,7 @@ main :where(dd, p) { overflow-wrap: anywhere; }
 .workspace-identity > strong { flex: 0 1 auto; }
 .workspace-identity .status-badge { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
 .workspace-panel > [role=tablist] { flex-shrink: 0; }
-.workspace-body { animation: panel-appear var(--motion-fast) var(--ease-responsive); }
+.workspace-tab-content { animation: panel-appear var(--motion-fast) var(--ease-responsive); }
 .log-output { min-height: min(12rem, 35dvh); max-height: 45dvh; scrollbar-gutter: stable; }
 .table-menu, .command-dialog { animation: panel-appear var(--motion-fast) var(--ease-responsive); overscroll-behavior: contain; }
 .yaml-editor { min-height: min(400px, 45dvh); }
@@ -362,7 +399,6 @@ main :where(dd, p) { overflow-wrap: anywhere; }
 .loading-rows > div { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr); gap: 10%; align-items: center; height: 30px; border-bottom: 1px solid var(--color-kp-divider); }
 .loading-rows span { height: 6px; width: 70%; background: var(--color-kp-surface-3); border-radius: 2px; }
 .loading-rows > div:nth-child(even) span:first-child { width: 50%; }
-.loading-skeleton { animation: loading-appear var(--motion-fast) ease-out var(--loading-delay) both; }
 @keyframes loading-appear { from { opacity: 0; } to { opacity: 1; } }
 @keyframes panel-appear { from { opacity: 0.65; } to { opacity: 1; } }
 @keyframes navigation-enter { from { transform: translateX(-12px); opacity: 0.7; } to { transform: translateX(0); opacity: 1; } }
