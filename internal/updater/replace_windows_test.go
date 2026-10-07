@@ -292,20 +292,3 @@ func waitForWindowsFailureStatus(t *testing.T, path, version, stage string) {
 		t.Fatalf("unsafe or unexpected failure status=%q", content)
 	}
 }
-
-func waitForWindowsStatusValue(t *testing.T, path string) string {
-	t.Helper()
-	deadline := time.Now().Add(20 * time.Second)
-	for time.Now().Before(deadline) {
-		content, err := os.ReadFile(path)
-		if err == nil {
-			return string(content)
-		}
-		if !os.IsNotExist(err) {
-			t.Fatal(err)
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for %s", path)
-	return ""
-}
