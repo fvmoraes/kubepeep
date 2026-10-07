@@ -44,6 +44,8 @@ type resourceStreamServiceStub struct {
 	ResourceStreamService
 	authorized int
 	followed   int
+	downloaded int
+	logAuthErr error
 }
 
 func (stub *resourceStreamServiceStub) AuthorizeTopics(_ context.Context, _ namespaces.SelectionBinding, resolution namespaces.ScopeResolution, _ []resourcecore.Topic) (namespaces.ScopeResolution, error) {
@@ -55,10 +57,22 @@ func (stub *resourceStreamServiceStub) ReauthorizeTopics(context.Context, namesp
 
 func (stub *resourceStreamServiceStub) AuthorizeLogs(context.Context, namespaces.SelectionBinding, string, string) error {
 	stub.authorized++
-	return nil
+	return stub.logAuthErr
 }
 func (stub *resourceStreamServiceStub) ReauthorizeLogs(context.Context, namespaces.SelectionBinding, string, string) error {
 	return nil
+}
+func (stub *resourceStreamServiceStub) DownloadLogs(_ context.Context, binding namespaces.SelectionBinding, _ namespaces.ScopeResolution, _, _ string, query resourcecore.LogQuery, emit func(resourcecore.LogLineDTO) error) (resourcecore.FollowTerminal, error) {
+	stub.downloaded++
+	if query.TailLines != 0 || query.Since != "" {
+		return resourcecore.FollowTerminal{}, errors.New("unexpected download filter")
+	}
+	for range 100 {
+		if err := emit(resourcecore.LogLineDTO{Text: "exported"}); err != nil {
+			return resourcecore.FollowTerminal{}, err
+		}
+	}
+	return resourcecore.FollowTerminal{Reason: "completed", Generation: binding.Generation}, nil
 }
 func (stub *resourceStreamServiceStub) FollowLogs(_ context.Context, binding namespaces.SelectionBinding, _ namespaces.ScopeResolution, _ string, _ string, _ resourcecore.LogQuery, emit func(resourcecore.LogLineDTO) error) (resourcecore.FollowTerminal, error) {
 	stub.followed++

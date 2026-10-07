@@ -58,6 +58,96 @@ func TestPodServiceMarksPendingCursorAndTopLimitTruncated(t *testing.T) {
 	}
 }
 
+type recordingOwnerResolver struct{ pods []string }
+
+type concurrentPodEvidence struct{ eventsStarted chan struct{} }
+
+func (port *concurrentPodEvidence) ListPods(ctx context.Context, _ string, _ PageRequest) (PodPage, error) {
+	select {
+	case <-port.eventsStarted:
+		return PodPage{}, nil
+	case <-ctx.Done():
+		return PodPage{}, ctx.Err()
+	}
+}
+
+func (port *concurrentPodEvidence) ListEvents(context.Context, string, PageRequest) (EventPage, error) {
+	close(port.eventsStarted)
+	return EventPage{}, nil
+}
+
+func TestPodEvidenceStartsBothSourcesWithinTheSameBudget(t *testing.T) {
+	t.Parallel()
+	port := &concurrentPodEvidence{eventsStarted: make(chan struct{})}
+	service := NewPodService(port, port, nil, nil, QueryBudget{Timeout: time.Second})
+	block := service.Overview(t.Context(), Selection{Namespaces: []string{"payments"}})
+	if !block.Complete || len(block.Errors) != 0 {
+		t.Fatalf("event collection waited for the Pod budget to expire: %+v", block)
+	}
+}
+
+func (resolver *recordingOwnerResolver) ResolvePodOwner(_ context.Context, pod *corev1.Pod) (*ResourceRef, error) {
+	resolver.pods = append(resolver.pods, pod.Name)
+	return &ResourceRef{Kind: "Deployment", Namespace: pod.Namespace, Name: "api"}, nil
+}
+
+func TestPodCountersDoNotQueryOwners(t *testing.T) {
+	t.Parallel()
+	for _, method := range []string{"overview", "namespace health"} {
+		t.Run(method, func(t *testing.T) {
+			now := time.Now()
+			pod := healthyTestPod(now)
+			pod.Status.ContainerStatuses[0].RestartCount = 3
+			port := &fakePodPort{responses: map[string][]PodPage{"payments": {{Items: []corev1.Pod{pod}}}}}
+			owners := &recordingOwnerResolver{}
+			service := NewPodService(port, &fakeEventPort{}, owners, fixedClock{now}, QueryBudget{})
+			selection := Selection{Namespaces: []string{"payments"}}
+			if method == "overview" {
+				block := service.Overview(context.Background(), selection)
+				if !block.Complete || block.Value.Total != 1 || block.Value.Restarts != 3 {
+					t.Fatalf("counter results changed: %+v", block)
+				}
+			} else {
+				block := service.NamespaceHealth(context.Background(), selection)
+				if !block.Complete || block.Value[pod.Namespace].ContainerRestarts != 3 {
+					t.Fatalf("namespace counts changed: %+v", block)
+				}
+			}
+			if len(owners.pods) != 0 {
+				t.Fatalf("aggregate counters made unnecessary owner requests: %v", owners.pods)
+			}
+		})
+	}
+}
+
+func TestRestartsResolvesOwnersOnlyForRetainedPods(t *testing.T) {
+	t.Parallel()
+	now := time.Now()
+	pods := make([]corev1.Pod, 50)
+	for index := range pods {
+		pods[index] = healthyTestPod(now)
+		pods[index].Name = string(rune('a' + index))
+		pods[index].Status.ContainerStatuses[0].RestartCount = int32(index)
+	}
+	// Two containers from the same Pod lead the ranking.
+	pods[49].Status.InitContainerStatuses = []corev1.ContainerStatus{{Name: "init", RestartCount: 100}}
+	port := &fakePodPort{responses: map[string][]PodPage{"payments": {{Items: pods}}}}
+	owners := &recordingOwnerResolver{}
+	service := NewPodService(port, &fakeEventPort{}, owners, fixedClock{now}, QueryBudget{})
+	block := service.Restarts(context.Background(), Selection{Namespaces: []string{"payments"}}, 2)
+	if len(block.Value) != 2 || block.Value[0].Restarts != 100 || block.Value[1].Restarts != 49 || !block.Truncated {
+		t.Fatalf("restart ranking changed: %+v", block)
+	}
+	if len(owners.pods) != 1 || owners.pods[0] != pods[49].Name {
+		t.Fatalf("expected a single retained Pod lookup, got %v", owners.pods)
+	}
+	for _, row := range block.Value {
+		if row.Owner == nil || row.Owner.Kind != "Deployment" {
+			t.Fatalf("retained row lost resolved owner: %+v", row)
+		}
+	}
+}
+
 func TestEventServiceGroupsOnlyWarningsAndSurfacesFailures(t *testing.T) {
 	t.Parallel()
 	now := time.Now().UTC()

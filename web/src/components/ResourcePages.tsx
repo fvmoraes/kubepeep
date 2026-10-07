@@ -52,7 +52,7 @@ import { ResourceListControls } from './ResourceListControls'
 import type { ListSortOrder } from './ResourceListControls'
 import { ResourceLiveUpdates } from './ResourceLiveUpdates'
 
-import { InfiniteCollectionFooter, QueryState, SelectionGate } from './resource/states'
+import { CollectionCoverage, InfiniteCollectionFooter, QueryState, SelectionGate } from './resource/states'
 import { collectionGcTime, collectionStaleTime, useInfiniteCollection } from './resource/useInfiniteCollection'
 import { podPreviewKey } from './resource/podPreview'
 import { useSelectionBoundKeys } from './resource/useSelectionBoundKeys'
@@ -64,6 +64,7 @@ import { age, dateTime } from './resource/format'
 import { eventBadgeVariant, statusBadgeVariant } from './resource/status'
 import { workloadKindPath } from '../navigation/paths'
 import { useResourceWorkspace } from './workspace/ResourceWorkspaceProvider'
+import { ResourceDetailPortal } from './workspace/ResourceSplitView'
 
 const PodLogsPanel = lazy(() => import('./workspace/PodLogsPanel').then((module) => ({ default: module.PodLogsPanel })))
 function podGroup(pod: Pod) { return pod.owner?.kind === 'Job' || pod.owner?.kind === 'CronJob' ? 1 : 0 }
@@ -660,7 +661,7 @@ export function PodsPage() {
                   <span className="block text-kp-subtext">{listItems.length} Pods loaded · {list.data?.pages.length ?? 0} page{list.data?.pages.length === 1 ? '' : 's'} retained</span>
                   <small className="block">{listData.page.complete ? 'Collection complete' : `Bounded ${listData.page.filterScope} result`}</small>
                   {snapshotRenewed ? <small className="block text-kp-yellow" role="status">The list snapshot expired and was renewed from the first page.</small> : null}
-                  {listData.coverage ? <small className="block">{listData.coverage.completedNamespaces}/{listData.coverage.requestedNamespaces} namespaces completed · {listData.coverage.deniedNamespaces.length} denied</small> : null}
+                  <CollectionCoverage coverage={listData.coverage} />
                 </div>
                 <div className="flex gap-2">
                   <Button variant="secondary" disabled={list.data?.pageParams[0] === '' && list.data?.pages.length === 1} disabledReason="Already on the first page." onClick={() => void queryClient.resetQueries({ queryKey: listKey })}>First page</Button>
@@ -673,10 +674,12 @@ export function PodsPage() {
           {metrics.isError || metrics.data?.block.errors.length ? <p className="mt-1.5 text-content text-kp-yellow" role="note">Some metrics are unavailable. Check Metrics Server and metrics.k8s.io permissions. Available samples remain visible.</p> : null}
         </QueryState>
       </SelectionGate>
-      {aggregateTargets && aggregateTargets.generation === generation && selection && !workspace.open ? <section className="rounded-lg border border-kp-overlay-0 bg-kp-surface-0 p-3" aria-label="Pod aggregate logs">
-        <header className="mb-2 flex items-center justify-between"><strong className="text-content">Selected Pod logs</strong><Button variant="ghost" onClick={() => setAggregateTargets(null)}>Close logs</Button></header>
-        <Suspense fallback={<p role="status">Opening logs…</p>}><PodLogsPanel key={`${generation}/${aggregateTargets.pods.map(rowKey).join('|')}`} pods={aggregateTargets.pods} selection={selection} /></Suspense>
-      </section> : null}
+      {aggregateTargets && aggregateTargets.generation === generation && selection && !workspace.open ? <ResourceDetailPortal><section className="workspace-panel" aria-label="Pod aggregate logs">
+        <header className="workspace-header"><strong className="col-span-2 text-heading">Selected Pod logs</strong><Button variant="ghost" onClick={() => setAggregateTargets(null)}>Close logs</Button></header>
+        <div className="workspace-body"><div className="workspace-tab-content workspace-tab-content--logs">
+          <Suspense fallback={<p role="status">Opening logs…</p>}><PodLogsPanel key={`${generation}/${aggregateTargets.pods.map(rowKey).join('|')}`} pods={aggregateTargets.pods} selection={selection} /></Suspense>
+        </div></div>
+      </section></ResourceDetailPortal> : null}
       <ConfirmDialog
         open={bulkAction !== null}
         severity={bulkAction === 'restart' ? 'warning' : 'danger'}

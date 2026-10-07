@@ -131,6 +131,9 @@ func (service *liveResourceStreamService) ReauthorizeLogs(context.Context, names
 	service.logRevalidates.Add(1)
 	return service.logReauthErr
 }
+func (service *liveResourceStreamService) DownloadLogs(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, namespace, pod string, query resourcecore.LogQuery, emit func(resourcecore.LogLineDTO) error) (resourcecore.FollowTerminal, error) {
+	return service.FollowLogs(ctx, binding, resolution, namespace, pod, query, emit)
+}
 func (service *liveResourceStreamService) FollowLogs(ctx context.Context, binding namespaces.SelectionBinding, _ namespaces.ScopeResolution, _, _ string, _ resourcecore.LogQuery, _ func(resourcecore.LogLineDTO) error) (resourcecore.FollowTerminal, error) {
 	<-ctx.Done()
 	if service.logCanceled != nil {

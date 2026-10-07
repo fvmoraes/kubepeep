@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"maps"
 	"strings"
 	"sync"
 	"time"
@@ -24,6 +25,7 @@ import (
 	"github.com/fvmoraes/kubepeep/internal/services/dashboard"
 	"github.com/fvmoraes/kubepeep/internal/services/namespaces"
 	"github.com/fvmoraes/kubepeep/internal/services/podhealth"
+	resourcecore "github.com/fvmoraes/kubepeep/internal/services/resources"
 )
 
 const maximumInternalContinueBytes = 16 << 10
@@ -70,9 +72,16 @@ type dashboardAdapter struct {
 	authorization authorization.AuthorizationService
 	binding       namespaces.SelectionBinding
 	discovery     *metricsDiscoveryCache
+	requests      *resourcecore.RequestCoalescer
 }
 
 func (adapter *dashboardAdapter) ListPods(ctx context.Context, namespace string, page dashboard.PageRequest) (dashboard.PodPage, error) {
+	result, err := coalesceDashboardPage(ctx, adapter, "pods", namespace, page, adapter.listPods)
+	result.Items = (&corev1.PodList{Items: result.Items}).DeepCopy().Items
+	return result, err
+}
+
+func (adapter *dashboardAdapter) listPods(ctx context.Context, namespace string, page dashboard.PageRequest) (dashboard.PodPage, error) {
 	requestContext, cancel, clients, err := adapter.unary(ctx)
 	if err != nil {
 		return dashboard.PodPage{}, err
@@ -95,6 +104,12 @@ func (adapter *dashboardAdapter) ListPods(ctx context.Context, namespace string,
 }
 
 func (adapter *dashboardAdapter) ListEvents(ctx context.Context, namespace string, page dashboard.PageRequest) (dashboard.EventPage, error) {
+	result, err := coalesceDashboardPage(ctx, adapter, "events", namespace, page, adapter.listEvents)
+	result.Items = append([]dashboard.NormalizedEvent(nil), result.Items...)
+	return result, err
+}
+
+func (adapter *dashboardAdapter) listEvents(ctx context.Context, namespace string, page dashboard.PageRequest) (dashboard.EventPage, error) {
 	requestContext, cancel, clients, err := adapter.unary(ctx)
 	if err != nil {
 		return dashboard.EventPage{}, err
@@ -126,6 +141,18 @@ type workloadContinue struct {
 }
 
 func (adapter *dashboardAdapter) ListWorkloads(ctx context.Context, namespace string, page dashboard.PageRequest) (dashboard.WorkloadPage, error) {
+	result, err := coalesceDashboardPage(ctx, adapter, "workloads", namespace, page, adapter.listWorkloads)
+	result.Deployments = (&appsv1.DeploymentList{Items: result.Deployments}).DeepCopy().Items
+	result.StatefulSets = (&appsv1.StatefulSetList{Items: result.StatefulSets}).DeepCopy().Items
+	result.StatefulSetAvailable = maps.Clone(result.StatefulSetAvailable)
+	result.DaemonSets = (&appsv1.DaemonSetList{Items: result.DaemonSets}).DeepCopy().Items
+	result.Jobs = (&batchv1.JobList{Items: result.Jobs}).DeepCopy().Items
+	result.CronJobs = (&batchv1.CronJobList{Items: result.CronJobs}).DeepCopy().Items
+	result.Issues = append([]dashboard.WorkloadIssue(nil), result.Issues...)
+	return result, err
+}
+
+func (adapter *dashboardAdapter) listWorkloads(ctx context.Context, namespace string, page dashboard.PageRequest) (dashboard.WorkloadPage, error) {
 	state, err := decodeWorkloadContinue(page.Continue)
 	if err != nil {
 		return dashboard.WorkloadPage{}, err

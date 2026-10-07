@@ -28,6 +28,7 @@ type ResourceStreamService interface {
 	AuthorizeLogs(context.Context, namespaces.SelectionBinding, string, string) error
 	ReauthorizeLogs(context.Context, namespaces.SelectionBinding, string, string) error
 	FollowLogs(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, string, string, resourcecore.LogQuery, func(resourcecore.LogLineDTO) error) (resourcecore.FollowTerminal, error)
+	DownloadLogs(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, string, string, resourcecore.LogQuery, func(resourcecore.LogLineDTO) error) (resourcecore.FollowTerminal, error)
 	AuthorizeTopics(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, []resourcecore.Topic) (namespaces.ScopeResolution, error)
 	ReauthorizeTopics(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, []resourcecore.Topic) error
 	Subscribe(context.Context, namespaces.SelectionBinding, namespaces.ScopeResolution, resourcecore.Topic, schema.GroupVersionResource, string) (*resourcecore.Subscription, error)
@@ -77,14 +78,29 @@ func (handler *ResourceStreams) originAllowed(origin string) bool {
 }
 
 func (handler *ResourceStreams) LogFollow(w http.ResponseWriter, r *http.Request) {
+	handler.logs(w, r, false)
+}
+
+func (handler *ResourceStreams) LogDownload(w http.ResponseWriter, r *http.Request) {
+	handler.logs(w, r, true)
+}
+
+func (handler *ResourceStreams) logs(w http.ResponseWriter, r *http.Request, download bool) {
 	if r.Header.Get("Last-Event-ID") != "" {
 		api.WriteError(w, r, validationHTTPError("Log follow does not support Last-Event-ID.", nil))
 		return
 	}
-	query, err := decodeLogQuery(r, true)
+	query, err := decodeLogQuery(r, !download)
 	if err != nil {
 		api.WriteError(w, r, err)
 		return
+	}
+	if download {
+		if r.URL.Query().Has("tailLines") || r.URL.Query().Has("since") {
+			api.WriteError(w, r, validationHTTPError("Log downloads do not accept tailLines or since.", nil))
+			return
+		}
+		query.TailLines = 0
 	}
 	binding, resolution, err := handler.preflight(w, r)
 	if err != nil {
@@ -123,7 +139,21 @@ func (handler *ResourceStreams) LogFollow(w http.ResponseWriter, r *http.Request
 	}
 	done := make(chan followResult, 1)
 	go func() {
-		terminal, followErr := handler.service.FollowLogs(streamContext, binding, resolution, namespace, pod, query, func(line resourcecore.LogLineDTO) error {
+		read := handler.service.FollowLogs
+		if download {
+			read = handler.service.DownloadLogs
+		}
+		terminal, followErr := read(streamContext, binding, resolution, namespace, pod, query, func(line resourcecore.LogLineDTO) error {
+			if download {
+				// Backpressure is expected for finite exports. Cancellation releases
+				// this bounded producer if the browser stops downloading.
+				select {
+				case lines <- line:
+					return nil
+				case <-streamContext.Done():
+					return streamContext.Err()
+				}
+			}
 			select {
 			case lines <- line:
 				return nil

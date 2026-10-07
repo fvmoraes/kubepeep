@@ -198,6 +198,15 @@ manual. Valores desconhecidos ou uso na primeira página retornam
 `filterScope` é `page` ou `collection` conforme §5.3 e sempre existe em
 resposta paginada.
 
+`next` vazio encerra a paginação disponível, mas não implica cobertura
+completa. Se só restarem origens negadas ou indisponíveis, a última página
+autorizada retorna HTTP 200, `complete=false`, `truncated=true`, sem novo
+cursor, e preserva os motivos em `coverage.failed`. Se a falha só for
+descoberta depois de uma página cheia, a página terminal pode ser vazia;
+origens já esgotadas são reautorizadas antes desse resultado parcial.
+Revogação total continua retornando 403/503. Uma nova coleta começa a revisão
+dessas origens novamente.
+
 O cursor é JSON canônico opaco autenticado por HMAC-SHA-256 com segredo
 efêmero do processo. Ele inclui versão, expiração, hash da query, contexto,
 escopo, geração e, quando o estado composto está ativo, apenas uma referência
@@ -386,7 +395,7 @@ contrato da rota declara ranking/ordenação.
   existir, caso em que retorna `FEATURE_UNAVAILABLE`.
 - **Pós-MVP:** reservada, não implementar agora.
 
-Não há rota de Secret YAML, edição YAML, impersonation ou credenciais.
+Edição YAML usa o contrato explícito da seção 16.4, inclusive para Secrets. Não há impersonation ou API de credenciais.
 
 ## 8. Status, sessão e health
 
@@ -1381,6 +1390,7 @@ Nenhuma outra annotation é exposta. O YAML continua separado e sob demanda.
 | `DELETE /api/v1/pods/{namespace}/{name}` | MVP | `PodDeleteRequest`; `ActionAcceptedDTO`, 202 | CSRF + `delete pods` resourceName | 403/404/409 |
 | `GET /api/v1/pods/{namespace}/{name}/logs` | MVP | `LogReadQuery`; `LogReadDTO`, 200 JSON | `get pods/log` | 400/403/404/409/503/504 |
 | `GET /api/v1/pods/{namespace}/{name}/logs/stream` | MVP | `LogFollowQuery`; SSE via `fetch` | CSRF/Origin + `get pods/log` | 400/403/404/409/429/503/504 ou stream events |
+| `GET /api/v1/pods/{namespace}/{name}/logs/download/stream` | MVP | `container`, `previous`, `timestamps`; SSE finito para download | CSRF/Origin + `get pods/log` exato | mesmos guards do follow; `end.reason=completed/limit_reached` |
 | `POST /api/v1/pods/{namespace}/{name}/exec` | MVP | `ExecInit`; `ExecTicketDTO`, 201 | CSRF + `create pods/exec` | Origin/limits |
 | `POST /api/v1/pods/{namespace}/{name}/port-forward` | MVP | `PortForwardCreateRequest`; `PortForwardDTO`, 201 | CSRF + `create pods/portforward` | 400/403/404/409/429/503/504 |
 
@@ -1404,9 +1414,8 @@ Delete:
 }
 ```
 
-Logs comuns retornam somente `LogReadDTO` JSON no MVP; a ação explícita de
-download do frontend cria um Blob em memória a partir desse DTO e não ativa um
-segundo formato/arquivo no servidor:
+Logs comuns retornam `LogReadDTO` JSON. Downloads completos usam a rota SSE
+finita descrita abaixo; nenhum arquivo é criado no servidor:
 
 ```json
 {
@@ -1511,7 +1520,7 @@ Listas multi-namespace podem retornar 200 parcial com coverage/erros; ausência 
 qualquer resultado autoritativo usa o erro HTTP da tabela. `GENERATION_CHANGED`
 é 409 e cursor expirado é 410 conforme §4.
 
-ConfigMap list usa PartialObjectMetadata quando possível para não carregar conteúdo; conteúdo só entra no detalhe autorizado. Lista e detalhe padrão de Secrets exigem `PartialObjectMetadata`; se o servidor não suportar resposta metadata-only, retornar `FEATURE_UNAVAILABLE` em vez de buscar o objeto completo. Secret não possui rota YAML. A rota explícita `/data` consulta o objeto completo apenas após autorização exata, retorna somente entradas limitadas e usa `no-store`.
+ConfigMap list usa PartialObjectMetadata quando possível para não carregar conteúdo; conteúdo só entra no detalhe autorizado. Lista e detalhe padrão de Secrets exigem `PartialObjectMetadata`; se o servidor não suportar resposta metadata-only, retornar `FEATURE_UNAVAILABLE` em vez de buscar o objeto completo. O YAML completo de Secret está disponível somente pela leitura explícita da seção 16.4. A rota explícita `/data` consulta o objeto completo apenas após autorização exata, retorna somente entradas limitadas e usa `no-store`.
 
 Schemas fechados de lista:
 
@@ -1627,7 +1636,7 @@ Rotas namespaced: `GET /api/v1/roles`, `GET /api/v1/role-bindings`,
 `/customresourcedefinitions`, `/priority-classes`, `/runtime-classes`,
 `/mutating-webhook-configurations`, `/validating-webhook-configurations`,
 `/ingress-classes` (listas) e `.../{name}` (detalhe). Autorização
-`list`/`get` por família (capabilities §11). Sem rota YAML nesta fase.
+`list`/`get` por família (capabilities §11). YAML completo e edição usam a rota explícita da seção 16.4.
 
 | DTO | Campos e regras |
 | --- | --- |
@@ -1636,10 +1645,58 @@ Rotas namespaced: `GET /api/v1/roles`, `GET /api/v1/role-bindings`,
 | `CustomResourceDefinitionDTO` | `name`, `group`, `kind`, `scope`, `versions` (máx. 16; `name`/`served`/`storage`), `conditions` (Established/AcceptingNames), `truncated`, `ageSeconds`. Sem schema, defaults ou exemplos; listar CRDs não autoriza ler instâncias CR |
 | `PriorityClassDTO` | `name`, `value`, `globalDefault`, `preemptionPolicy: string|null`, `ageSeconds` |
 | `RuntimeClassDTO` | `name`, `handler`, `overhead` (máx. 32 quantities) ou null, `ageSeconds` |
-| `WebhookConfigurationDTO` | `name`, `webhookCount`, `webhooks` (máx. 32; `name`, `failurePolicy`, `rules` tipadas, `truncated`), `ageSeconds`. CA bundles, URLs e service refs nunca são projetados; sem YAML |
+| `WebhookConfigurationDTO` | `name`, `webhookCount`, `webhooks` (máx. 32; `name`, `failurePolicy`, `rules` tipadas, `truncated`), `ageSeconds`. CA bundles, URLs e service refs nunca são projetados; sem YAML no DTO de detalhe |
 | `IngressClassDTO` | `name`, `controller`, `default` (annotation), `parameters: string|null` (kind/name), `ageSeconds` |
 | `NetworkPolicyDTO` | `namespace`, `name`, `podSelector` serializado, `policyTypes`, `ruleSummary` (máx. 16), `ageSeconds` |
 | `EndpointsDTO` | `namespace`, `name`, `readyCount`, `notReadyCount`, `ports` (máx. 8), `truncated` com sinal visível (máx. 512 endereços), `ageSeconds` |
+
+## 16.4 Editor YAML para todos os objetos disponíveis
+
+O editor compartilhado cobre os **38 tipos** de objeto registrados em
+[resourcecatalog](../../internal/services/resourcecatalog/catalog.go), incluindo
+Pods, todos os workloads, Secrets/ConfigMaps, configuração, rede, armazenamento,
+RBAC e administração. A lista fixa define grupo, versão, plural, kind e escopo;
+o YAML enviado não pode escolher outra API. Recursos customizados fora desse
+catálogo não ganham rotas implicitamente.
+
+| Método/rota | Resposta | Autorização |
+| --- | --- | --- |
+| `GET /api/v1/resources/{collection}/{namespace}/{name}/yaml` | envelope com `yaml`, `kind`, `updateCapability`, `generation` | `get` no nome exato, namespace no escopo ativo |
+| `PUT /api/v1/resources/{collection}/{namespace}/{name}/yaml` | `ActionAcceptedDTO` com nova `resourceVersion` | `update` no nome exato; CSRF/origin e geração atual |
+| `GET /api/v1/resources/{collection}/{name}/yaml` | mesmo envelope | `get` no objeto cluster-scoped exato |
+| `PUT /api/v1/resources/{collection}/{name}/yaml` | mesmo resultado | `update` cluster-scoped exato; sem namespace artificial |
+
+`collection` segue os nomes das rotas de lista; workloads usam seu plural
+(`deployments`, `replicasets`, etc.). A leitura é sob demanda e sem cache,
+retorna o documento completo com `apiVersion`/`kind`, omitindo somente
+`metadata.managedFields`. Nunca se salva a projeção reduzida de um DTO de
+detalhe. Respostas usam `Cache-Control: no-store`.
+
+O PUT usa JSON estrito com `confirmed: true`, `action: "updateResource"`,
+`consequenceCode: "UPDATE_RESOURCE"`, `target` (perfil, contexto, namespace
+ou string vazia para cluster, kind e nome), `expectedGeneration`,
+`expectedUid`, `expectedResourceVersion` e `yaml`. Aceita um único
+documento até **2 MiB**, rejeita chaves duplicadas e mudanças de
+apiVersion/kind/nome/namespace/UID/resourceVersion, e envia `Update` com
+`fieldValidation=Strict`. Kubernetes valida schema, admissão e campos
+imutáveis. O contrato segue a
+[concorrência otimista da API Kubernetes](https://kubernetes.io/docs/reference/using-api/api-concepts/#updates-to-existing-resources).
+
+Cada entrada gera a capability `yaml.{collection}.update` em `/permissions`,
+mapeada para seu grupo/plural/escopo real e `resourceName` exato. Objetos
+cluster-scoped também aceitam nomes individuais, incluindo RBAC como
+`system:discovery`. Isso não concede permissões novas ao usuário.
+
+Erros de validação retornam 400, conflito 409 e RBAC 403, sem ecoar valores
+do documento. A UI preserva o rascunho após falha; não faz force update nem
+retry automático de escrita. Depois de salvar, invalida as listas/detalhes;
+nova leitura explícita carrega a versão atual. Mudança de aba, alvo ou geração
+cancela requests e descarta o documento. Secrets seguem esse fluxo explícito
+e não entram em cache, índice, preferências, auditoria de payload ou diff.
+
+A rota anterior `PUT /workloads/deployments/{namespace}/{name}/yaml`
+permanece compatível com `updateDeployment`/`UPDATE_DEPLOYMENT`;
+a interface utiliza as rotas compartilhadas acima.
 
 ## 17. Port-forwards
 
@@ -1788,7 +1845,46 @@ a próxima linha ultrapassaria o cumulativo, ela não é emitida e o terminal é
 Guards/erros antes de `200 text/event-stream` usam envelope HTTP normal. Depois
 dos headers, `error` ou `end` é o último evento, seguido de flush/close. O
 frontend usa parser incremental para enviar `X-KubePeep-CSRF` sem token na URL;
-reconexão é explícita e respeita generation ID.
+reconexão respeita generation ID. Nos painéis de Pod/Workload e nos agregados
+da lista de Pods, ela é automática, por alvo, com espera de 1–10 segundos.
+O cliente retoma com `since` a partir do último timestamp e remove a
+sobreposição já recebida; isso não garante recuperar logs rotacionados nem
+intervalos que ultrapassem o tail máximo. Uma conexão sem atividade por 45 s
+é cancelada e reaberta. Negação, falha de autenticação ou geração diferente
+encerram a sessão; autorização temporariamente indisponível limpa a captura
+e tenta novamente. Cada nova abertura passa pelos guards completos.
+
+#### Downloads no painel de logs
+
+- **Session logs**: captura recebida desde a abertura do painel/alvo, incluindo
+  o tail inicial, independente das 1.000 linhas / 1 MiB retidas no visualizador.
+  Pausar congela apenas o desenho; o stream e a captura continuam ativos.
+- **Visible logs**: linhas retidas que correspondem à busca atual (inclui as
+  linhas filtradas fora da área de rolagem), sem nova leitura do cluster.
+- **All logs**: nova leitura de todo o log atual retido pelo Kubernetes para os
+  containers selecionados, sem `tailLines` nem `since`.
+- **Previous logs**: mesma leitura completa, com `previous=true`, da instância
+  anterior do container. Não representa todo o histórico de reinícios.
+
+Os dois últimos usam `GET /logs/download/stream`. A query aceita apenas
+`container`, `previous` e `timestamps`; filtros de tail/tempo são rejeitados.
+Os eventos são `meta`, `line`, `heartbeat`, `error` e `end`, como no follow.
+`end.reason=completed` confirma EOF; `limit_reached` e/ou `truncated=true`
+indicam conteúdo parcial. EOF de transporte sem terminal não conclui download.
+O backend não acumula a resposta: sanitiza cada linha, com fila de 15 eventos,
+backpressure cancelável, autorização periódica, escopo e geração. A rota usa
+o transporte loopback de streams também no desktop.
+
+Downloads têm orçamento de 64 MiB por stream e duração máxima de 5 minutos;
+linhas/eventos preservam os limites de 64/68 KiB. A captura da sessão e a
+exportação agregada têm, cada uma, teto de 64 MiB no cliente. Esses buffers
+temporários são adicionais ao visualizador e não entram no cache de recursos.
+O frontend exporta alvos sequencialmente, permite cancelar a leitura e não
+salva arquivo em erro, revogação ou troca de alvo. Conteúdo truncado é indicado
+na interface e no sufixo `-partial.log`. Sessão/valores permanecem somente em
+memória até o download explícito ou descarte ao fechar/trocar contexto.
+“All” alcança apenas o que a API do Kubernetes ainda retém; veja a
+[arquitetura de logs do Kubernetes](https://kubernetes.io/docs/concepts/cluster-administration/logging/).
 
 ### 18.2 Atualizações de recursos
 
@@ -2143,13 +2239,13 @@ estão em [investigation-diagnostics.md](../guides/investigation-diagnostics.md)
 
 Pós-MVP somente após nova especificação:
 
-- edição/aplicação de YAML;
-- CRUD genérico Kubernetes;
+- criação de objetos por YAML e aplicação em lote;
+- CRUD para tipos fora do catálogo de recursos da aplicação;
 - autenticação própria;
 - API remota;
 - histórico de sessões;
 - in-cluster config como prioridade;
-- valores de Secret.
+- persistência ou carregamento automático de valores de Secret.
 
 Não reservar uma rota funcional que sugira suporte atual.
 
@@ -2185,7 +2281,7 @@ Critérios cobertos pelo contrato: **MVP-01**, **MVP-05–20**, **MVP-22**.
 - [x] Paginação multi-namespace declara cobertura e truncamento.
 - [x] `FORBIDDEN` representa somente negação autoritativa; rejeição local usa
   `CSRF_REJECTED`, ainda que ambas tenham HTTP 403.
-- [x] Secret não possui rota YAML nem fallback para objeto completo.
+- [x] Listas/detalhes de Secret não fazem fallback para objeto completo; Data e YAML são leituras explícitas autorizadas e sem cache.
 - [x] SSE e `exec` têm protocolo, biblioteca e cadeia HTTP decididos.
 - [x] Os helpers Ginger foram avaliados; extensões próprias estão delimitadas.
 - [ ] Exemplos passam por validação de schema gerado quando o harness existir.

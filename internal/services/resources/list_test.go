@@ -87,11 +87,102 @@ func TestCollectKeepsAllowedNamespacesAndNeverCallsDeniedOrigin(t *testing.T) {
 	}
 }
 
+func TestCollectEndsPartialPaginationAfterAuthorizedOrigins(t *testing.T) {
+	for _, strategy := range []string{"namespace-sequential", "lazy-merge"} {
+		for _, decision := range []authorization.Decision{authorization.DecisionUnknown, authorization.DecisionDenied} {
+			for _, blocked := range []string{"a-blocked", "z-blocked"} {
+				for _, perOrigin := range []int{5, 7} {
+					name := fmt.Sprintf("%s/%s/%s/items-%d", strategy, decision, blocked, perOrigin)
+					t.Run(name, func(t *testing.T) {
+						t.Parallel()
+						origins, err := OriginsFor(CollectionPods, []string{blocked, "b-healthy", "c-healthy"}, nil)
+						if err != nil {
+							t.Fatal(err)
+						}
+						auth := &fakeAuthorization{decisions: map[string]authorization.Decision{blocked: decision}}
+						lister := &pagingOriginLister{perOrigin: perOrigin, served: map[string]int{}}
+						request := CollectionRequest[testListItem]{
+							Selection: Selection{Generation: "gen", Context: "ctx", Scope: "scope"},
+							Options:   ListOptions{Limit: 5, Sort: "identity", Order: OrderAscending},
+							Origins:   origins, Authorizer: auth, Lister: lister,
+							NativeIdentityOrder: strategy == "namespace-sequential",
+							Less:                func(a, b testListItem) bool { return a < b },
+						}
+						seen := make(map[testListItem]bool)
+						var last ListResult[testListItem]
+						for page := 0; page < 5; page++ {
+							last, err = Collect(t.Context(), request)
+							if err != nil {
+								t.Fatalf("page %d discarded a partial collection: %v", page+1, err)
+							}
+							for _, item := range last.Items {
+								if seen[item] {
+									t.Fatalf("duplicate item %q", item)
+								}
+								seen[item] = true
+							}
+							if last.Cursor == nil || last.Cursor.Complete() {
+								break
+							}
+							request.Cursor = last.Cursor
+						}
+						if last.Cursor != nil && !last.Cursor.Complete() {
+							t.Fatal("pagination kept a cursor whose only remaining origin is blocked")
+						}
+						if len(seen) != 2*perOrigin || lister.served[blocked] != 0 {
+							t.Fatalf("collected %d items, served %v", len(seen), lister.served)
+						}
+						if last.Page.Complete || !last.Page.Truncated || len(last.Coverage.Failed) != 1 || last.Coverage.Failed[0].Namespace != blocked {
+							t.Fatalf("partial coverage lost: page=%+v coverage=%+v", last.Page, last.Coverage)
+						}
+						// A new collection retries the previously blocked origin after access recovers.
+						auth.decisions[blocked] = authorization.DecisionAllowed
+						request.Cursor = nil
+						request.Options.Limit = 100
+						request.Lister = &pagingOriginLister{perOrigin: perOrigin, served: map[string]int{}}
+						recovered, err := Collect(t.Context(), request)
+						if err != nil || !recovered.Page.Complete || len(recovered.Items) != 3*perOrigin {
+							t.Fatalf("new collection did not recover: items=%d page=%+v err=%v", len(recovered.Items), recovered.Page, err)
+						}
+					})
+				}
+			}
+		}
+	}
+}
+
 func TestCollectFailsClosedWhenNoAuthorizationIsKnown(t *testing.T) {
 	auth := &fakeAuthorization{decisions: map[string]authorization.Decision{"allowed": authorization.DecisionUnknown, "denied": authorization.DecisionUnknown}}
 	_, err := Collect(context.Background(), collectRequest(auth, &fakeStringLister{pages: map[string]OriginPage[testListItem]{}, errs: map[string]error{}}))
 	if ErrorCodeOf(err) != CodeAuthorizationUnavailable {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestCollectDoesNotTrustPreviouslyCompletedOriginsAfterRevocation(t *testing.T) {
+	for _, testCase := range []struct {
+		name     string
+		decision authorization.Decision
+		want     ErrorCode
+	}{
+		{name: "denied", decision: authorization.DecisionDenied, want: CodeForbidden},
+		{name: "unknown", decision: authorization.DecisionUnknown, want: CodeAuthorizationUnavailable},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			auth := &fakeAuthorization{decisions: map[string]authorization.Decision{"denied": testCase.decision, "allowed": testCase.decision}}
+			lister := &fakeStringLister{pages: map[string]OriginPage[testListItem]{}, errs: map[string]error{}}
+			request := collectRequest(auth, lister)
+			request.NativeIdentityOrder = true
+			request.Options.Sort = "identity"
+			request.Options.Order = OrderAscending
+			cursor := NewCompositeCursor[testListItem](request.Origins)
+			cursor.Origins[0].Exhausted = true
+			request.Cursor = &cursor
+			result, err := Collect(t.Context(), request)
+			if ErrorCodeOf(err) != testCase.want || len(result.Items) != 0 || len(lister.calls) != 0 {
+				t.Fatalf("stale grant reused: result=%+v calls=%d err=%v", result, len(lister.calls), err)
+			}
+		})
 	}
 }
 

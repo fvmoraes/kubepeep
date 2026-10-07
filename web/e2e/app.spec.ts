@@ -197,6 +197,44 @@ test('keeps the dashboard useful with partial data and an explicit bounded log s
   await expect(page.getByText('sensitive value redacted')).toBeVisible()
 })
 
+for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+  test(`keeps dashboard collection failures compact at ${viewport.width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize(viewport)
+    const errors = Array.from({ length: 22 }, (_, index) => ({ namespace: `namespace-with-a-long-name-${index}`, code: index === 0 ? 'FORBIDDEN' : 'UPSTREAM_TIMEOUT', message: index === 0 ? 'Access denied.' : 'Collection timed out.' }))
+    const block = (value: unknown, extra = {}) => ({ value, complete: true, truncated: false, coverage: null, errors: [], ...extra })
+    const counters = Object.fromEntries(['namespaces', 'podsTotal', 'podsHealthy', 'podsProblematic', 'workloadsDegraded', 'restarts', 'warningEvents', 'possibleLogMatches'].map((name) => [name, { state: 'unavailable', value: null }]))
+    await page.route('**/api/v1/**', async (route) => {
+      const path = new URL(route.request().url()).pathname
+      let data: unknown = []
+      if (path === '/api/v1/status') data = {
+        version: 'test', commit: 'test', buildDate: 'test', port: 2748,
+        components: Object.fromEntries(['application', 'sqlite', 'kubeconfig', 'context', 'cluster', 'metrics'].map((name) => [name, { status: 'healthy', code: 'TEST', message: 'ready', checkedAt: null }])),
+        selection: { clusterProfileId: 1, context: 'development', cluster: 'test', scopeId: 1, scopeName: 'All', scopeMode: 'list', scopeSource: 'saved', defaultNamespace: 'allowed', namespaceCount: 22, generation: 'gen_e2e' },
+      }
+      else if (path === '/api/v1/dashboard/summary') data = block(counters, { complete: false, errors: [...errors, ...errors] })
+      else if (path.startsWith('/api/v1/dashboard/')) data = block([])
+      else if (path === '/api/v1/metrics') data = block({ collectedAt: '', windowSeconds: 0, pods: [], topCPU: [], topMemory: [] })
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data, meta: { generation: 'gen_e2e', collectedAt: '2026-08-10T12:00:00Z' } }) })
+    })
+    await page.goto('/')
+    const section = page.getByRole('region', { name: 'Summary', exact: true })
+    const disclosure = section.locator('summary')
+    await expect(disclosure).toHaveText('Collection issues · 1 denied · 21 timed out')
+    const list = section.getByRole('list', { name: 'Partial collection errors', includeHidden: true })
+    await expect(list).toBeHidden()
+    await expect(section.getByText('Pods', { exact: true })).toBeVisible()
+    await page.screenshot({ path: testInfo.outputPath('dashboard-errors-collapsed.png') })
+    await disclosure.focus()
+    await page.keyboard.press('Enter')
+    await expect(list).toBeVisible()
+    await expect(list.locator('li')).toHaveCount(22)
+    expect(await list.evaluate((element) => element.clientHeight)).toBeLessThanOrEqual(192)
+    expect(await list.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true)
+    expect(await section.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true)
+    await page.screenshot({ path: testInfo.outputPath('dashboard-errors-expanded.png') })
+  })
+}
+
 test('searches Pods, sorts columns and builds the Logs catalog from exact capabilities', async ({ page }) => {
   const generation = 'gen_filters_e2e'
   const empty = { version: 1, items: [] as Array<{ id: string; name: string; query: Record<string, unknown> }> }

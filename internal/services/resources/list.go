@@ -148,6 +148,27 @@ func Collect[T ListItem](ctx context.Context, request CollectionRequest[T]) (_ L
 	}
 	cursor = paginationState.Cursor
 	outcomes := page.outcomes
+	if request.Cursor != nil {
+		// The final window may contain only failed origins, after authorized
+		// origins were exhausted on earlier pages. Recheck those completed
+		// origins before classifying this as a collection-wide authorization
+		// failure. This never reads more objects or trusts an old grant.
+		visited := make(map[string]bool, len(outcomes))
+		hasAllowed := false
+		for _, outcome := range outcomes {
+			visited[outcome.page.Origin.Key()] = true
+			hasAllowed = hasAllowed || outcome.capability.Decision == authorization.DecisionAllowed
+		}
+		if !hasAllowed {
+			completed := make([]int, 0, len(cursor.Origins))
+			for index, state := range cursor.Origins {
+				if state.Exhausted && len(state.Buffered) == 0 && !visited[state.Origin.Key()] {
+					completed = append(completed, index)
+				}
+			}
+			outcomes = append(outcomes, authorizeBatch(requestContext, request, cursor, completed)...)
+		}
+	}
 	type aggregate struct {
 		origin        Origin
 		capability    authorization.Capability
@@ -249,6 +270,22 @@ func Collect[T ListItem](ctx context.Context, request CollectionRequest[T]) (_ L
 	result.Cursor = &next
 	result.Page.Complete = next.Complete() && len(result.Coverage.Failed) == 0
 	result.Page.Truncated = !next.Complete() || len(result.Coverage.Failed) > 0
+	if !next.Complete() {
+		// Do not advertise another page when only known failures remain.
+		// Keep the coverage incomplete, and retry those origins on a fresh
+		// collection instead of turning its last partial page into a 403/503.
+		result.Cursor = nil
+		for _, state := range next.Origins {
+			if state.Exhausted && len(state.Buffered) == 0 {
+				continue
+			}
+			current := aggregates[state.Origin.Key()]
+			if current == nil || current.capability.Decision == authorization.DecisionAllowed && (current.failure == nil || len(state.Buffered) > 0) {
+				result.Cursor = &next
+				break
+			}
+		}
+	}
 	result.CollectedAt = time.Now().UTC()
 	return result, nil
 }

@@ -31,6 +31,7 @@ type DashboardBackend struct {
 	discovery     *metricsDiscoveryCache
 	metrics       *observability.Registry
 	resources     *ResourceBackend
+	requests      *resourcecore.RequestCoalescer
 
 	scanMu         sync.Mutex
 	scanSequence   uint64
@@ -58,6 +59,7 @@ func newDashboardBackend(clients dashboardClientProvider, authorizer authorizati
 		clients: clients, authorization: authorizer,
 		queryBudget: queryBudget.Normalized(), logBudget: dashboard.DefaultLogBudget(), now: time.Now,
 		discovery:   newMetricsDiscoveryCache(defaultDiscoveryCacheTTL, time.Now),
+		requests:    resourcecore.NewRequestCoalescer(),
 		scanCounter: dashboard.EmptyCounter(dashboard.CounterNotCollected),
 	}
 }
@@ -95,6 +97,8 @@ func (backend *DashboardBackend) NamespaceHealth(ctx context.Context, binding na
 }
 
 func (backend *DashboardBackend) Problems(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution) dashboard.DashboardBlockDTO[[]dashboard.ProblemPodDTO] {
+	ctx, cancel := context.WithTimeout(ctx, backend.queryBudget.Timeout)
+	defer cancel()
 	_, adapter := backend.service(binding)
 	selection := dashboardSelection(binding, resolution)
 	type podResult struct {
@@ -560,7 +564,7 @@ func resolveLogTargetOwners(ctx context.Context, resolver dashboard.OwnerResolve
 }
 
 func (backend *DashboardBackend) service(binding namespaces.SelectionBinding) (*dashboard.DashboardService, *dashboardAdapter) {
-	adapter := &dashboardAdapter{clients: backend.clients, authorization: backend.authorization, binding: binding, discovery: backend.discovery}
+	adapter := &dashboardAdapter{clients: backend.clients, authorization: backend.authorization, binding: binding, discovery: backend.discovery, requests: backend.requests}
 	pods := dashboard.NewPodService(adapter, adapter, adapter, nil, backend.queryBudget)
 	return &dashboard.DashboardService{
 		Pods:      pods,

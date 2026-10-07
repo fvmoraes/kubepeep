@@ -77,10 +77,10 @@ test.beforeEach(async ({ context }) => {
         ephemeralContainers: [],
         relatedEvents: [],
       }
-    } else if (url.pathname === '/api/v1/pods/payments/api-abc/yaml') {
-      // Served as raw YAML text, not the JSON envelope.
-      await route.fulfill({ status: 200, contentType: 'application/yaml; charset=utf-8', body: 'apiVersion: v1\nkind: Pod\nmetadata:\n  name: api-abc\n  namespace: payments\n  annotations:\n    example: "1"\nspec:\n  replicas: 1\n' })
-      return
+    } else if (url.pathname === '/api/v1/resources/pods/payments/api-abc/yaml') {
+      data = { generation, kind: 'Pod', updateCapability: 'yaml.pods.update', yaml: 'apiVersion: v1\nkind: Pod\nmetadata:\n  name: api-abc\n  namespace: payments\n  uid: uid-api\n  resourceVersion: "17"\n  annotations:\n    example: "1"\nspec:\n  containers:\n  - name: api\n    image: example/api:1\n' }
+    } else if (url.pathname === '/api/v1/permissions') {
+      data = { generation, decisions: [], truncated: false }
     } else if (url.pathname === '/api/v1/resources/pods/payments/api-abc/yaml-diff') {
       data = {
         absent: false, truncated: false,
@@ -90,8 +90,6 @@ test.beforeEach(async ({ context }) => {
           { kind: 'added', text: '  example: "2"' },
         ],
       }
-    } else if (url.pathname === '/api/v1/resources/deployments/payments/api/yaml-diff') {
-      data = { absent: true, truncated: false, lines: [] }
     } else if (url.pathname === '/api/v1/nodes' && url.searchParams.has('limit')) {
       data = [node]
       responseMeta = { generation, page: { limit: 100, next: '', complete: true, truncated: false, filterScope: 'page' }, coverage: { requestedNamespaces: 0, completedNamespaces: 0, deniedNamespaces: [], failed: [] } }
@@ -166,8 +164,12 @@ test('yaml diff renders added and removed lines and the absent baseline state (F
   await expect(diff).toContainText('-   example: "1"')
   await expect(diff).toContainText('+   example: "2"')
 
-  await page.goto('/workloads')
-  await page.waitForTimeout(300)
+  await page.route('**/api/v1/resources/pods/payments/api-abc/yaml-diff', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: { absent: true, truncated: false, lines: [] }, meta }) })
+  })
+  await page.getByRole('button', { name: 'Diff vs last-applied' }).click()
+  await expect(page.getByText('No last-applied baseline was found;', { exact: false })).toBeVisible()
+  await expect(diff).toHaveCount(0)
 })
 
 test('bulk namespace paste previews counts and saves one scope without cluster discovery (U12)', async ({ page, context }) => {

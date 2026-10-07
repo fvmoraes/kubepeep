@@ -14,7 +14,7 @@
    devolvê-las à UI ou registrá-las.
 3. Impedir que páginas externas usem a API local como ponte para o cluster.
 4. Falhar fechado quando uma permissão não puder ser determinada.
-5. Não expor valores de Secret em nenhuma camada do MVP.
+5. Expor valores de Secret somente por leitura explícita autorizada, sem cache, índice, persistência ou log de conteúdo.
 6. Limitar carga, memória e duração de listas, scans, streams e sessões.
 7. Encerrar recursos quando contexto, escopo, página ou processo mudar.
 8. Instalar e atualizar somente artefatos cuja integridade foi validada.
@@ -113,9 +113,9 @@ Cada seta exige validação e sanitização nos dois sentidos pertinentes.
 | Pública | versão do KubePeep, nomes de campos | sim | opcional | sim | sim |
 | Operacional allowlisted | nome de contexto, paths de kubeconfig, nome de escopo, preferências | sim | sim | somente quando necessário | sim |
 | Cluster não sensível | nomes/status de recursos autorizados | sim, com limite | não | somente identificadores allowlisted | sim, `no-store` |
-| Sensível transitória | logs, YAML permitido, saída de `exec` | sim, pelo menor tempo | nunca | nunca como payload | sim, `no-store` |
+| Sensível transitória | logs, YAML autorizado (inclusive Secret), Data explícito de Secret, saída de `exec` | sim, pelo menor tempo | nunca | nunca como payload | sim, `no-store` |
 | Credencial Kubernetes | token, certificado, chave, senha, Authorization header | apenas dentro de `client-go`/plugin que precisa | nunca | nunca | nunca para o browser |
-| Proibida no MVP | valor de Secret, kubeconfig completo, comando/saída de `exec` persistido | não deve entrar no modelo de produto | nunca | nunca | nunca |
+| Proibida no MVP | kubeconfig completo, Secret ou comando/saída de `exec` persistido | não deve entrar no modelo de produto | nunca | nunca | nunca |
 
 Paths de kubeconfig são sensíveis de baixa criticidade: podem ser persistidos por requisito, mas são omitidos de respostas desnecessárias e sanitizados em logs.
 
@@ -295,7 +295,7 @@ Não criar um segundo serviço de autorização na Fase 7.
 
 ### 10.1 Política de Secret
 
-A lista e o detalhe padrão de Secret continuam metadata-only, sem rota YAML. O DTO metadata-only usa allowlist:
+A lista e o detalhe padrão de Secret continuam metadata-only. O editor YAML completo é uma leitura explícita separada (§10.4). O DTO metadata-only usa allowlist:
 
 ```text
 apiVersion
@@ -319,7 +319,7 @@ O DTO não inclui:
 - objeto bruto ou `unstructured`;
 - valores derivados, hashes ou tamanhos de cada entrada.
 
-O adapter solicita `PartialObjectMetadata` à API Kubernetes e converte diretamente para o DTO allowlisted. Se o servidor não suportar uma resposta metadata-only, a funcionalidade fica indisponível em vez de buscar o objeto Secret completo. Um conversor YAML genérico nunca recebe Secret.
+O adapter solicita `PartialObjectMetadata` à API Kubernetes e converte diretamente para o DTO allowlisted. Se o servidor não suportar uma resposta metadata-only, a funcionalidade fica indisponível em vez de buscar o objeto Secret completo. O conversor legado de YAML de leitura continua recusando Secret; o editor explícito usa uma leitura exata separada, sem cache.
 
 ### 10.2 Leitura explícita de dados de Secret
 
@@ -333,9 +333,29 @@ O adapter solicita `PartialObjectMetadata` à API Kubernetes e converte diretame
 - Sem persistência ou log de payload.
 - Campos gerenciados ou excessivos podem ser omitidos se o contrato declarar.
 
-### 10.4 Edição de Deployment
+### 10.4 Edição YAML de objetos
 
-O PUT de YAML exige confirmação, CSRF/origin, geração atual e revalidação de `deployments.update` para namespace/nome exatos. Aceita um único documento `apps/v1 Deployment`, até 2 MiB, com parsing estrito. Nome, namespace, UID e resourceVersion devem coincidir com a versão carregada. Conflitos retornam 409; YAML/validação inválidos retornam 400 com mensagem fixa. Auditoria nunca inclui o documento.
+O editor atende todos os tipos registrados no catálogo da aplicação, incluindo
+Secrets, RBAC e objetos cluster-scoped. A leitura completa requer clique em
+**Load authorized YAML**, autorização `get` exata, geração atual e escopo;
+somente `managedFields` é removido. Não se usa a projeção curada de um detalhe
+para atualizar o objeto.
+
+O PUT exige confirmação, CSRF/origin, geração atual e revalidação de `update`
+no grupo/recurso/namespace/nome exatos. A capability de UI é
+`yaml.{collection}.update`; nunca se deriva o endpoint do YAML do usuário.
+Aceita um único documento até 2 MiB, rejeita chaves duplicadas e usa validação
+estrita no Kubernetes. API version, kind, nome, namespace, UID e resourceVersion
+devem coincidir com o alvo e a versão carregada. Conflitos retornam 409;
+YAML/schema/campo imutável inválido retorna 400 com mensagem fixa. Não existe
+force update ou retry automático de escrita. Auditoria nunca inclui documento
+ou mensagens de parser/admission que possam ecoar valores.
+
+Secret YAML fica apenas no estado local da aba; não entra em React Query,
+cache de recursos, watch, índice ou armazenamento. Fechar/mudar aba, recurso ou
+geração aborta requests e descarta o conteúdo. Cópia e download são ações
+explícitas do usuário. O diff de Secrets continua indisponível. Ver contrato em
+[api.md](api.md#164-editor-yaml-para-todos-os-objetos-disponíveis).
 
 ## 11. Logs Kubernetes
 
@@ -577,7 +597,7 @@ Assinatura de artefatos além de SHA-256 é melhoria futura, salvo decisão post
 | XSS | React escaping + CSP + sem HTML não confiável | testes de payload |
 | vazamento de plugin `exec` | sanitização central | fixture com token sintético |
 | cache RBAC obsoleto | TTL + revalidação + operação real | integração com mudança de regra |
-| Secret por conversor genérico | DTO allowlist e ausência de rota YAML | testes JSON/YAML/memória |
+| Secret exposto automaticamente | DTO metadata-only; Data/YAML explícitos, autorização exata, estado efêmero | testes JSON/YAML/memória |
 | log com credencial | redaction antes do DTO/log | corpus adversarial |
 | scan DoS | budgets e limites de bytes | teste de carga/cancelamento |
 | stream órfão | registry + contextos hierárquicos | leak/cleanup test |
@@ -706,16 +726,13 @@ implementação e a identidade continuam sendo próprias do KubePeep.
 ### 20.2 YAML e diff
 
 - YAML continua sob `get`, `no-store`, tamanho/timeout e memória efêmera.
-- Secret não possui viewer, busca, cópia, download, favorito, coluna ou diff;
-  `data` e `stringData` nunca chegam ao frontend.
+- Secret possui viewer/editor somente após leitura explícita, com busca/cópia/download locais; não possui diff nem payload em índices/caches.
 - Diff exige leitura autorizada independente dos dois lados e mostra suas
   origens. A normalização de `managedFields`/status é opt-in e não pode ocultar
   que campos foram removidos da comparação.
 - Renderização, syntax highlighting e busca não enviam conteúdo a worker,
   serviço, CDN ou telemetria externos.
-- Edição/aplicação genérica não faz parte deste gate. Uma fase futura precisará
-  de server-side dry-run, preview, `resourceVersion`, confirmação, RBAC e
-  recusa de Secret antes de qualquer request mutável.
+- Edição de objetos existentes segue §10.4, com identidade imutável, resourceVersion, confirmação e RBAC. Criação/aplicação em lote permanecem fora desse contrato.
 
 ### 20.3 Logs agregados
 

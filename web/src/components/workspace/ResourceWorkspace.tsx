@@ -1,8 +1,7 @@
 import { LoadingState } from '../ui/LoadingState'
-import { useMediaQuery } from '../../hooks/useMediaQuery'
 import { DataEntries, SecretData, WorkloadEnvironment } from './WorkloadData'
 import { PodMetrics, WorkloadMetrics } from './WorkloadMetrics'
-import { lazy, Suspense, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronLeft, ChevronRight, X } from 'lucide-react'
 
@@ -15,32 +14,24 @@ import {
   getCSIDriver,
   getCSINode,
   getCustomResourceDefinition,
-  getConfigMapYAML,
   getEndpointsItem,
   getEndpointSlice,
-  getEndpointSliceYAML,
   getEvents,
   getPermissions,
   getHPA,
   getIngress,
   getIngressClass,
-  getIngressYAML,
   getInvestigation,
   getLease,
-  getLeaseYAML,
   getLimitRange,
   getMutatingWebhookConfiguration,
   getNamespaceObject,
   getNetworkPolicy,
   getNode,
-  getNodeYAML,
   getPod,
-  getPodYAML,
   getPersistentVolume,
   getPersistentVolumeClaim,
-  getPersistentVolumeClaimYAML,
   getPersistentVolumeClaims,
-  getPersistentVolumeYAML,
   getPriorityClass,
   getRole,
   getRoleBinding,
@@ -48,14 +39,11 @@ import {
   getSecret,
   getService,
   getServiceAccount,
-  getServiceYAML,
   getStatus,
   getStorageClass,
-  getStorageClassYAML,
   getValidatingWebhookConfiguration,
   getVolumeAttachment,
   getWorkload,
-  getWorkloadYAML,
   getResourceQuota,
   getPDB,
 } from '../../api/client'
@@ -85,15 +73,9 @@ import { useResourceWorkspace, type WorkspaceEntry } from './ResourceWorkspacePr
 
 const PodLogsPanel = lazy(() => import('./PodLogsPanel').then((module) => ({ default: module.PodLogsPanel })))
 const WorkloadLogsPanel = lazy(() => import('./WorkloadLogsPanel').then((module) => ({ default: module.WorkloadLogsPanel })))
-const DeploymentYamlEditor = lazy(() => import('./DeploymentYamlEditor').then((module) => ({ default: module.DeploymentYamlEditor })))
-const YamlViewer = lazy(() => import('../YamlViewer').then((module) => ({ default: module.YamlViewer })))
+const ResourceYamlEditor = lazy(() => import('./ResourceYamlEditor').then((module) => ({ default: module.ResourceYamlEditor })))
 const PodActions = lazy(() => import('../ResourceActions').then((module) => ({ default: module.PodActions })))
 const WorkloadActions = lazy(() => import('../ResourceActions').then((module) => ({ default: module.WorkloadActions })))
-
-const yamlCollections = new Set([
-  'pods', 'services', 'ingresses', 'endpoint-slices', 'configmaps',
-  'leases', 'persistent-volume-claims', 'persistent-volumes', 'storage-classes', 'nodes',
-])
 
 const kindToTarget: Record<string, { collection: string; kind?: string }> = {
   Pod: { collection: 'pods' },
@@ -168,7 +150,7 @@ export function tabsFor(entry: WorkspaceEntry): ResourceTab[] {
     tabs.push({ id: 'rules', label: 'Rules' }, { id: 'backends', label: 'Backends' }, { id: 'yaml', label: 'YAML' }, { id: 'events', label: 'Events' }, { id: 'actions', label: 'Actions' })
     return tabs
   }
-  if (entry.collection === 'secrets') { tabs.push({ id: 'data', label: 'Data' }); return tabs }
+  if (entry.collection === 'secrets') { tabs.push({ id: 'data', label: 'Data' }, { id: 'yaml', label: 'YAML' }); return tabs }
   if (entry.collection === 'configmaps') {
     tabs.push({ id: 'data', label: 'Data' }, { id: 'yaml', label: 'YAML' })
     return tabs
@@ -177,7 +159,7 @@ export function tabsFor(entry: WorkspaceEntry): ResourceTab[] {
     tabs.push({ id: 'conditions', label: 'Conditions' }, { id: 'yaml', label: 'YAML' }, { id: 'events', label: 'Events' })
     return tabs
   }
-  if (yamlCollections.has(entry.collection)) tabs.push({ id: 'yaml', label: 'YAML' })
+  tabs.push({ id: 'yaml', label: 'YAML' })
   if (entry.namespace) tabs.push({ id: 'events', label: 'Events' })
   return tabs
 }
@@ -279,42 +261,6 @@ async function fetchDetail(entry: WorkspaceEntry, signal: AbortSignal, generatio
   }
 }
 
-async function fetchYAML(entry: WorkspaceEntry, signal: AbortSignal): Promise<string> {
-  const ns = entry.namespace
-  const name = entry.name
-  switch (entry.collection) {
-    case 'pods':
-      return getPodYAML(ns!, name, signal)
-    case 'workloads':
-      return getWorkloadYAML(workloadKindPath(entry.kind!)!, ns!, name, signal)
-    case 'services':
-      return getServiceYAML(ns!, name, signal)
-    case 'ingresses':
-      return getIngressYAML(ns!, name, signal)
-    case 'endpoint-slices':
-      return getEndpointSliceYAML(ns!, name, signal)
-    case 'configmaps':
-      return getConfigMapYAML(ns!, name, signal)
-    case 'nodes':
-      return getNodeYAML(name, signal)
-    case 'leases':
-      return getLeaseYAML(ns!, name, signal)
-    case 'persistent-volumes':
-      return getPersistentVolumeYAML(name, signal)
-    case 'persistent-volume-claims':
-      return getPersistentVolumeClaimYAML(ns!, name, signal)
-    case 'storage-classes':
-      return getStorageClassYAML(name, signal)
-    default:
-      throw new Error('YAML is not offered for this resource type.')
-  }
-}
-
-function yamlDiffTarget(entry: WorkspaceEntry): { collection: string; namespace: string; name: string } | undefined {
-  if (!entry.namespace) return undefined
-  const collection = entry.collection === 'workloads' ? workloadKindPath(entry.kind!) : entry.collection
-  return collection ? { collection, namespace: entry.namespace, name: entry.name } : undefined
-}
 
 function RelatedRefList({ refs, onOpen, emptyNote }: { refs: ResourceRef[]; onOpen: (ref: ResourceRef) => void; emptyNote: string }) {
   if (refs.length === 0) return <p className="m-0 text-content text-kp-overlay-text" role="note">{emptyNote}</p>
@@ -648,10 +594,8 @@ function secretNotice(label: string): string | null {
 }
 
 export function ResourceWorkspacePanel() {
-  const reducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)')
   const workspace = useResourceWorkspace()
   const entry = workspace.active
-  const panelRef = useRef<HTMLDivElement>(null)
   const status = useQuery({ queryKey: ['local-status'], queryFn: ({ signal }) => getStatus(signal), staleTime: 15_000 })
   const selection = status.data?.selection ?? null
   const generation = selection?.generation
@@ -667,15 +611,7 @@ export function ResourceWorkspacePanel() {
     enabled: Boolean(workspace.open && entry?.namespace && generation && (entry.collection === 'pods' || entry.collection === 'workloads')),
     staleTime: 5_000,
   })
-  const yaml = useMutation({
-    mutationFn: () => fetchYAML(entry as WorkspaceEntry, new AbortController().signal),
-  })
   const entryKey = entry ? `${generation ?? ''}|${entry.collection}|${entry.kind ?? ''}|${entry.namespace ?? ''}|${entry.name}` : ''
-  useEffect(() => { yaml.reset() }, [entryKey]) // eslint-disable-line react-hooks/exhaustive-deps -- reset cached YAML when the target changes
-
-  useEffect(() => {
-    if (workspace.open) panelRef.current?.scrollIntoView?.({ block: 'nearest', behavior: reducedMotion ? 'instant' : 'smooth' })
-  }, [workspace.open, entryKey, reducedMotion])
 
   if (!workspace.open || !entry) return null
   const activeEntry: WorkspaceEntry = entry
@@ -744,20 +680,11 @@ export function ResourceWorkspacePanel() {
         </div>
       )
     }
-      if (tab === 'yaml') {
-        if (activeEntry.collection === 'workloads' && activeEntry.kind === 'Deployment' && selection && activeEntry.namespace) return <Suspense fallback={<LoadingState label="Opening YAML editor…" />}><DeploymentYamlEditor key={entryKey} namespace={activeEntry.namespace} name={activeEntry.name} selection={selection} /></Suspense>
-        return (
-          <Suspense fallback={<LoadingState label="Opening YAML viewer…" />}>
-            <YamlViewer
-              value={yaml.data}
-              pending={yaml.isPending}
-              error={yaml.error}
-              onLoad={() => yaml.mutate(undefined)}
-              diffTarget={yamlDiffTarget(activeEntry)}
-            />
-          </Suspense>
-        )
-      }
+    if (tab === 'yaml' && selection) {
+      const collection = activeEntry.collection === 'workloads' ? workloadKindPath(activeEntry.kind!) : activeEntry.collection
+      if (!collection) return null
+      return <Suspense fallback={<LoadingState label="Opening YAML editor…" />}><ResourceYamlEditor key={entryKey} collection={collection} namespace={activeEntry.namespace} name={activeEntry.name} selection={selection} /></Suspense>
+    }
     if (tab === 'events') return <WorkspaceEvents entry={activeEntry} generation={generation} />
       if (tab === 'logs') {
         if (detail.data?.type === 'pod' && selection) return <Suspense fallback={<LoadingState label="Opening logs…" />}><PodLogsPanel key={entryKey} pods={[{ namespace: activeEntry.namespace!, name: activeEntry.name }]} selection={selection} /></Suspense>
@@ -842,7 +769,7 @@ export function ResourceWorkspacePanel() {
 
   return (
     <>
-      <div ref={panelRef} className="workspace-panel" role="region" aria-label={`${kindLabel} ${activeEntry.name}`}>
+      <div className="workspace-panel" role="region" aria-label={`${kindLabel} ${activeEntry.name}`}>
         <header className="workspace-header">
           <div className="workspace-history">
           <Button variant="icon" className="workspace-nav-btn" onClick={workspace.back} disabled={!workspace.canBack} disabledReason="There is no previous resource in this workspace history." aria-label="Go to previous resource">
@@ -862,8 +789,10 @@ export function ResourceWorkspacePanel() {
           </button></div>
         </header>
         <ResourceTabStrip tabs={tabs} active={activeTab} onChange={workspace.setTab} ariaLabel={`${kindLabel} workspace tabs`} panelId="workspace-tabpanel" />
-        <div key={`${entryKey}|${activeTab}`} className="workspace-body" id="workspace-tabpanel" role="tabpanel">
-          {renderTab(activeTab)}
+        <div className="workspace-body">
+          <div key={`${entryKey}|${activeTab}`} className={`workspace-tab-content${activeTab === 'logs' ? ' workspace-tab-content--logs' : ''}`} id="workspace-tabpanel" role="tabpanel" tabIndex={0}>
+            {renderTab(activeTab)}
+          </div>
         </div>
       </div>
     </>

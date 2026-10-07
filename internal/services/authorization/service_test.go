@@ -523,7 +523,7 @@ func TestValidateKeyRejectsMalformedAttributes(t *testing.T) {
 		withKey(valid, func(key *Key) { key.Resource = "Pods/Exec" }),
 		withKey(valid, func(key *Key) { key.Subresource = "bad/sub" }),
 		withKey(valid, func(key *Key) { key.Verb = "" }),
-		withKey(valid, func(key *Key) { key.ResourceName = "Bad_Name" }),
+		withKey(valid, func(key *Key) { key.ResourceName = "bad/name" }),
 	}
 	for _, key := range invalid {
 		if ErrorCodeOf(ValidateKey(key)) != CodeValidationFailed {

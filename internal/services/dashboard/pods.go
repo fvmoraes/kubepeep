@@ -474,15 +474,30 @@ func (s *PodService) Restarts(ctx context.Context, selection Selection, limit in
 	pods := s.loadPods(requestContext, selection)
 	copyBlockState(&result, pods)
 	now := s.clock.Now()
+	podsByName := make(map[string]*corev1.Pod, len(pods.Value))
 	for index := range pods.Value {
-		owner := s.resolveOwner(requestContext, &pods.Value[index])
-		result.Value = append(result.Value, PodRestarts(&pods.Value[index], owner, now)...)
+		pod := &pods.Value[index]
+		podsByName[pod.Namespace+"/"+pod.Name] = pod
+		result.Value = append(result.Value, PodRestarts(pod, DirectPodOwner(pod), now)...)
 	}
 	SortRestarts(result.Value)
 	if len(result.Value) > limit {
 		result.Value = result.Value[:limit]
 		result.Truncated = true
 		result.Complete = false
+	}
+	// Owner enrichment cannot affect restart ranking. Resolve only the Pods
+	// retained in the bounded result, once per Pod even with many containers.
+	owners := make(map[string]*ResourceRef)
+	for index := range result.Value {
+		row := &result.Value[index]
+		key := row.Namespace + "/" + row.Pod
+		owner, found := owners[key]
+		if !found {
+			owner = s.resolveOwner(requestContext, podsByName[key])
+			owners[key] = owner
+		}
+		row.Owner = cloneResourceRef(owner)
 	}
 	return result
 }
@@ -493,10 +508,9 @@ func (s *PodService) Problems(ctx context.Context, selection Selection) Dashboar
 	}
 	requestContext, cancel := context.WithTimeout(ctx, s.budget.Timeout)
 	defer cancel()
-	pods := s.loadPods(requestContext, selection)
+	pods, events := s.loadPodEvidence(requestContext, selection)
 	result := blockWithValue(make([]ProblemPodDTO, 0), pods.Coverage)
 	copyBlockState(&result, pods)
-	events := s.loadEvents(requestContext, selection)
 	mergeBlockState(&result, events.Complete, events.Truncated, events.Errors)
 	if result.Coverage != nil && events.Coverage != nil {
 		mergeCoverage(result.Coverage, events.Coverage)
@@ -518,10 +532,9 @@ func (s *PodService) Overview(ctx context.Context, selection Selection) Dashboar
 	}
 	requestContext, cancel := context.WithTimeout(ctx, s.budget.Timeout)
 	defer cancel()
-	pods := s.loadPods(requestContext, selection)
+	pods, events := s.loadPodEvidence(requestContext, selection)
 	result := blockWithValue(PodOverview{}, pods.Coverage)
 	copyBlockState(&result, pods)
-	events := s.loadEvents(requestContext, selection)
 	mergeBlockState(&result, events.Complete, events.Truncated, events.Errors)
 	if result.Coverage != nil && events.Coverage != nil {
 		mergeCoverage(result.Coverage, events.Coverage)
@@ -539,8 +552,8 @@ func (s *PodService) Overview(ctx context.Context, selection Selection) Dashboar
 		for _, status := range pod.Status.EphemeralContainerStatuses {
 			result.Value.Restarts += int64(maxInt32(status.RestartCount, 0))
 		}
-		owner := s.resolveOwner(requestContext, pod)
-		if _, problematic := ClassifyProblemPod(pod, events.Value, owner, now); problematic {
+		// The overview only uses the classification, never its owner field.
+		if _, problematic := ClassifyProblemPod(pod, events.Value, nil, now); problematic {
 			result.Value.Problematic++
 		} else if podIsPositivelyHealthy(pod) {
 			result.Value.Healthy++
@@ -555,10 +568,9 @@ func (s *PodService) NamespaceHealth(ctx context.Context, selection Selection) D
 	}
 	requestContext, cancel := context.WithTimeout(ctx, s.budget.Timeout)
 	defer cancel()
-	pods := s.loadPods(requestContext, selection)
+	pods, events := s.loadPodEvidence(requestContext, selection)
 	result := blockWithValue(make(map[string]PodNamespaceHealth), pods.Coverage)
 	copyBlockState(&result, pods)
-	events := s.loadEvents(requestContext, selection)
 	mergeBlockState(&result, events.Complete, events.Truncated, events.Errors)
 	if result.Coverage != nil && events.Coverage != nil {
 		mergeCoverage(result.Coverage, events.Coverage)
@@ -566,7 +578,6 @@ func (s *PodService) NamespaceHealth(ctx context.Context, selection Selection) D
 	now := s.clock.Now()
 	for index := range pods.Value {
 		pod := &pods.Value[index]
-		owner := s.resolveOwner(requestContext, pod)
 		entry := result.Value[pod.Namespace]
 		for _, status := range pod.Status.ContainerStatuses {
 			entry.ContainerRestarts += int64(maxInt32(status.RestartCount, 0))
@@ -577,7 +588,7 @@ func (s *PodService) NamespaceHealth(ctx context.Context, selection Selection) D
 		for _, status := range pod.Status.EphemeralContainerStatuses {
 			entry.ContainerRestarts += int64(maxInt32(status.RestartCount, 0))
 		}
-		if _, problematic := ClassifyProblemPod(pod, events.Value, owner, now); problematic {
+		if _, problematic := ClassifyProblemPod(pod, events.Value, nil, now); problematic {
 			entry.ProblematicPods++
 		}
 		result.Value[pod.Namespace] = entry
@@ -634,6 +645,16 @@ func (s *PodService) resolveOwner(ctx context.Context, pod *corev1.Pod) *Resourc
 		}
 	}
 	return DirectPodOwner(pod)
+}
+
+// Both sources share the block deadline but neither has to wait for the other
+// to consume it. Concurrent dashboard blocks can also share matching reads.
+func (s *PodService) loadPodEvidence(ctx context.Context, selection Selection) (DashboardBlockDTO[[]corev1.Pod], DashboardBlockDTO[[]NormalizedEvent]) {
+	pods := make(chan DashboardBlockDTO[[]corev1.Pod], 1)
+	events := make(chan DashboardBlockDTO[[]NormalizedEvent], 1)
+	go func() { pods <- s.loadPods(ctx, selection) }()
+	go func() { events <- s.loadEvents(ctx, selection) }()
+	return <-pods, <-events
 }
 
 func (s *PodService) loadPods(ctx context.Context, selection Selection) DashboardBlockDTO[[]corev1.Pod] {

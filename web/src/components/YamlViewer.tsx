@@ -63,7 +63,8 @@ export function YamlViewer({ value, pending, error, onLoad, diffTarget }: YamlVi
     const container = containerRef.current
     if (!container) return
     const target = container.querySelectorAll('[data-yaml-line]')[match.line] as HTMLElement | undefined
-    target?.scrollIntoView({ block: 'center' })
+    if (!target) return
+    container.scrollTop += target.getBoundingClientRect().top - container.getBoundingClientRect().top - (container.clientHeight - target.offsetHeight) / 2
   }
 
   function showMatch(step: number) {
@@ -107,7 +108,7 @@ export function YamlViewer({ value, pending, error, onLoad, diffTarget }: YamlVi
   }
 
   return (
-    <section className="mt-3 flex flex-col gap-2 border-t border-kp-overlay-0 pt-3" aria-label="Authorized YAML">
+    <section className="yaml-viewer mt-3 flex flex-col gap-2 border-t border-kp-overlay-0 pt-3" aria-label="Authorized YAML">
       <Button variant="secondary" className="justify-self-start" disabled={pending} onClick={onLoad}>
         {pending ? 'Loading YAML…' : 'Load authorized YAML'}
       </Button>
@@ -126,7 +127,7 @@ export function YamlViewer({ value, pending, error, onLoad, diffTarget }: YamlVi
           <div
             ref={containerRef}
             aria-label="YAML document"
-            className={`mono overflow-auto rounded-md border border-kp-overlay-0 bg-kp-crust p-3 text-content leading-relaxed ${wrap ? 'whitespace-pre-wrap' : ''}`}
+            className={`yaml-document mono overflow-auto rounded-md border border-kp-overlay-0 bg-kp-crust p-3 text-content leading-relaxed ${wrap ? 'whitespace-pre-wrap' : ''}`}
             role="region"
           >
             {search === '' ? (
@@ -194,7 +195,7 @@ export function YamlViewer({ value, pending, error, onLoad, diffTarget }: YamlVi
           <div
             aria-label="YAML diff against last-applied"
             role="region"
-            className="overflow-auto rounded-md border border-kp-overlay-0 bg-kp-crust p-3 font-mono text-content leading-relaxed"
+            className="yaml-document overflow-auto rounded-md border border-kp-overlay-0 bg-kp-crust p-3 font-mono text-content leading-relaxed"
           >
             {diffState.diff.lines.map((line, index) => (
               <div

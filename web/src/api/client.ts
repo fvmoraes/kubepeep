@@ -941,3 +941,31 @@ export interface DeploymentYAMLRequest {
 export function saveDeploymentYAML(namespace: string, name: string, body: DeploymentYAMLRequest, csrfToken: string, signal?: AbortSignal): Promise<{ accepted: boolean; resourceVersion: string }> {
   return mutation(`/api/v1/workloads/deployments/${resourcePath(namespace)}/${resourcePath(name)}/yaml`, 'PUT', body, csrfToken, signal)
 }
+
+export interface ResourceYAMLDocument {
+  yaml: string
+  kind: string
+  updateCapability: string
+  generation: string
+}
+
+export interface ResourceYAMLRequest extends Omit<DeploymentYAMLRequest, 'action' | 'consequenceCode' | 'target'> {
+  action: 'updateResource'
+  consequenceCode: 'UPDATE_RESOURCE'
+  target: { clusterProfileId: number; context: string; namespace: string; kind: string; name: string }
+}
+
+function resourceYAMLPath(collection: string, namespace: string | null, name: string) {
+  const target = namespace ? `${resourcePath(namespace)}/${resourcePath(name)}` : resourcePath(name)
+  return `/api/v1/resources/${resourcePath(collection)}/${target}/yaml`
+}
+
+export async function getResourceYAML(collection: string, namespace: string | null, name: string, generation: string, signal?: AbortSignal): Promise<ResourceYAMLDocument> {
+  const document = await request<ResourceYAMLDocument>(resourceYAMLPath(collection, namespace, name), { signal })
+  if (document.generation !== generation) throw new APIError(409, { code: 'GENERATION_CHANGED', message: 'The active selection changed. Load YAML again.' })
+  return document
+}
+
+export function saveResourceYAML(collection: string, namespace: string | null, name: string, body: ResourceYAMLRequest, csrfToken: string, signal?: AbortSignal): Promise<{ accepted: boolean; resourceVersion: string }> {
+  return mutation(resourceYAMLPath(collection, namespace, name), 'PUT', body, csrfToken, signal)
+}

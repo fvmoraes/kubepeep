@@ -1,5 +1,7 @@
 package authorization
 
+import "github.com/fvmoraes/kubepeep/internal/services/resourcecatalog"
+
 // ResourceNamePolicy controls whether /permissions may form a product with the
 // resourceName query parameter for a capability.
 type ResourceNamePolicy string
@@ -29,7 +31,7 @@ type CapabilitySpec struct {
 	ResourceNamePolicy ResourceNamePolicy
 }
 
-var capabilityAllowlist = [...]CapabilitySpec{
+var baseCapabilityAllowlist = [...]CapabilitySpec{
 	{ID: "namespaces.list", Resource: "namespaces", Verb: "list", Scope: ScopeCluster, ResourceNamePolicy: ResourceNameEmpty},
 	{ID: "pods.list", Resource: "pods", Verb: "list", Scope: ScopeNamespace, ResourceNamePolicy: ResourceNameEmpty},
 	{ID: "pods.get", Resource: "pods", Verb: "get", Scope: ScopeNamespace, ResourceNamePolicy: ResourceNameTarget},
@@ -140,6 +142,18 @@ var capabilityAllowlist = [...]CapabilitySpec{
 	{ID: "metrics.pods.list", APIGroup: "metrics.k8s.io", Resource: "pods", Verb: "list", Scope: ScopeNamespace, ResourceNamePolicy: ResourceNameEmpty},
 }
 
+var capabilityAllowlist = func() []CapabilitySpec {
+	specs := append([]CapabilitySpec(nil), baseCapabilityAllowlist[:]...)
+	for _, resource := range resourcecatalog.All() {
+		scope := ScopeCluster
+		if resource.Namespaced {
+			scope = ScopeNamespace
+		}
+		specs = append(specs, CapabilitySpec{ID: resource.UpdateCapability(), APIGroup: resource.Group, Resource: resource.Resource, Verb: "update", Scope: scope, ResourceNamePolicy: ResourceNameTarget})
+	}
+	return specs
+}()
+
 var capabilityByID = func() map[string]CapabilitySpec {
 	result := make(map[string]CapabilitySpec, len(capabilityAllowlist))
 	for _, specification := range capabilityAllowlist {
@@ -166,7 +180,7 @@ func KeyForCapability(generation, namespace, id, resourceName string) (Key, erro
 		return Key{}, validationError()
 	}
 	if specification.Scope == ScopeCluster {
-		if namespace != "" || resourceName != "" {
+		if namespace != "" {
 			return Key{}, validationError()
 		}
 	} else if namespace == "" {

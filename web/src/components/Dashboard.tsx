@@ -48,15 +48,13 @@ import { PanelErrorBoundary } from './PanelErrorBoundary'
 import { Badge, Button, DataTable, Select, type BadgeVariant } from './ui'
 import { WarningBanner } from './ui/Banner'
 import { useResourceWorkspace } from './workspace/ResourceWorkspaceProvider'
+import { resourceRefreshInterval } from './resource/autoRefresh'
 
 const dashboardQueryDefaults = {
   staleTime: 30_000,
   refetchOnWindowFocus: false,
   refetchIntervalInBackground: false,
-  refetchInterval: (query: { state: { error: Error | null } }): number | false => {
-    const error = query.state.error
-    return error instanceof APIError && (error.status === 401 || error.status === 403 || ['GENERATION_CHANGED', 'AUTHORIZATION_UNAVAILABLE'].includes(error.code)) ? false : 15_000
-  },
+  refetchInterval: (query: { state: { error: Error | null } }) => resourceRefreshInterval(query.state.error),
   retry: false,
 } as const
 
@@ -166,6 +164,11 @@ function queryFailure(error: Error, optional: boolean): ReactNode {
 
 function PartialFeedback({ block }: { block: DashboardBlock<unknown> }) {
   const coverage = block.coverage
+  const errors = [...new Map(block.errors.map((error) => [JSON.stringify([error.namespace, error.code, error.message]), error])).values()]
+  const issueLabels: Record<string, string> = { FORBIDDEN: 'denied', UPSTREAM_TIMEOUT: 'timed out', CLIENT_CANCELED: 'canceled', CLUSTER_UNAVAILABLE: 'unavailable', AUTHORIZATION_UNAVAILABLE: 'authorization unconfirmed' }
+  const counts = new Map<string, number>()
+  for (const error of errors) counts.set(error.code, (counts.get(error.code) ?? 0) + 1)
+  const issueSummary = [...counts].map(([code, count]) => `${count} ${issueLabels[code] ?? code}`).join(' · ')
   return (
     <>
       {block.truncated || !block.complete ? (
@@ -179,14 +182,19 @@ function PartialFeedback({ block }: { block: DashboardBlock<unknown> }) {
           {coverage.deniedNamespaces.length > 0 ? ` ${coverage.deniedNamespaces.length} denied.` : ''}
         </p>
       ) : null}
-      {block.errors.length > 0 ? (
-        <ul className="mb-3 grid list-none gap-1 p-0 text-content text-kp-subtext" aria-label="Partial collection errors">
-          {block.errors.map((error, index) => (
-            <li key={`${error.namespace ?? 'global'}-${error.code}-${index}`} className="rounded-md border border-kp-red-border bg-kp-red-bg px-2 py-1">
-              <code>{error.code}</code>{error.namespace ? ` · ${error.namespace}` : ''}: {error.message}
-            </li>
-          ))}
-        </ul>
+      {errors.length > 0 ? (
+        <details className="mb-3 min-w-0 text-content text-kp-subtext">
+          <summary className="cursor-pointer break-words py-1 text-kp-yellow focus-visible:outline focus-visible:outline-kp-yellow">
+            Collection issues · {issueSummary}
+          </summary>
+          <ul className="mt-1 grid max-h-48 list-none gap-1 overflow-y-auto p-0" aria-label="Partial collection errors">
+            {errors.map((error, index) => (
+              <li key={`${error.namespace ?? 'global'}-${error.code}-${index}`} className="break-words border border-kp-red-border bg-kp-red-bg px-2 py-1">
+                <code>{error.code}</code>{error.namespace ? ` · ${error.namespace}` : ''}: {error.message}
+              </li>
+            ))}
+          </ul>
+        </details>
       ) : null}
     </>
   )

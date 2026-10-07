@@ -3,6 +3,7 @@ package authorization
 import (
 	"context"
 
+	"github.com/fvmoraes/kubepeep/internal/services/resourcecatalog"
 	"k8s.io/apimachinery/pkg/util/validation"
 )
 
@@ -110,6 +111,14 @@ func ExpandPermissions(request PermissionsRequest) ([]ExpandedCapability, bool, 
 
 	for _, specification := range specifications {
 		if specification.Scope == ScopeCluster {
+			if specification.ResourceNamePolicy == ResourceNameTarget && len(request.ResourceNames) != 0 {
+				for _, name := range request.ResourceNames {
+					if err := appendDecision(specification.ID, "", name); err != nil {
+						return nil, false, err
+					}
+				}
+				continue
+			}
 			if err := appendDecision(specification.ID, "", ""); err != nil {
 				return nil, false, err
 			}
@@ -180,7 +189,7 @@ func validateUniqueNamespaces(namespaces []string, active map[string]struct{}) e
 func validateResourceNames(resourceNames []string) error {
 	seen := make(map[string]struct{}, len(resourceNames))
 	for _, resourceName := range resourceNames {
-		if len(validation.IsDNS1123Subdomain(resourceName)) != 0 {
+		if !resourcecatalog.ValidName(resourceName) {
 			return validationError()
 		}
 		if _, duplicate := seen[resourceName]; duplicate {

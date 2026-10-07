@@ -23,6 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/httpstream"
 	remotecommandconsts "k8s.io/apimachinery/pkg/util/remotecommand"
+	"k8s.io/client-go/dynamic"
 	kubeclient "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
@@ -45,6 +46,7 @@ var (
 // transport from the active kubeconfig.
 type ActionClient struct {
 	unary     kubeclient.Interface
+	dynamic   dynamic.Interface
 	streaming kubeclient.Interface
 	config    *rest.Config
 }
@@ -59,6 +61,7 @@ func (clients *Clients) ActionClient() (*ActionClient, error) {
 	}
 	return &ActionClient{
 		unary:     clients.unary.kubernetes,
+		dynamic:   clients.unary.dynamic,
 		streaming: clients.streaming.kubernetes,
 		config:    config,
 	}, nil

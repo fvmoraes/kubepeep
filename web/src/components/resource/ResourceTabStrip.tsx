@@ -27,8 +27,7 @@ export function ResourceTabStrip({ tabs, active, onChange, ariaLabel, panelId }:
               event.preventDefault()
               onChange(tabs[next].id)
               const button = event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]
-              button?.focus()
-              button?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' })
+              button?.focus({ preventScroll: true })
             }}
             className={`control -mb-px whitespace-nowrap border-b-2 px-2 text-menu cursor-pointer transition-colors ${
               isActive

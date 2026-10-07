@@ -18,7 +18,7 @@ function mockLogs(mode: 'stream' | 'fallback' = 'stream') {
     if (path.includes('/logs/stream')) {
       signals.push(init!.signal as AbortSignal)
       expect(init!.headers).toMatchObject({ 'X-KubePeep-CSRF': 'csrf-logs' })
-      if (mode === 'fallback') return new Response('', { status: 503 })
+      if (mode === 'fallback' && signals.length === 1) return new Response('', { status: 503 })
       return new Response(new ReadableStream<Uint8Array>({ start(controller) {
         controllers.push(controller)
         controller.enqueue(new TextEncoder().encode(`event: meta\ndata: {"generation":"gen_logs"}\n\nevent: line\ndata: {"text":"hello from selected Pod"}\n\n`))
@@ -61,15 +61,21 @@ it('bounds aggregation to five exact targets and stops sibling streams on a gene
   await waitFor(() => expect(mock.canceled).toHaveLength(5))
 })
 
-it('falls back to bounded HTTP reads and cancels polling when paused', async () => {
+it('reconnects live streams and keeps receiving while the display is paused', async () => {
   const mock = mockLogs('fallback')
   open([{ namespace: 'payments', name: 'api' }])
-  await waitFor(() => expect(screen.getByLabelText('Log output')).toHaveTextContent('snapshot'))
-  expect(screen.getByRole('status')).toHaveTextContent('Auto · 5s')
+  await waitFor(() => expect(screen.getByLabelText('Log output')).toHaveTextContent('hello from selected Pod'))
+  expect(mock.signals).toHaveLength(2)
+  expect(mock.paths.some((path) => path.includes('/logs?'))).toBe(false)
+  expect(screen.getByRole('status')).toHaveTextContent('Live')
   fireEvent.click(screen.getByRole('button', { name: 'Pause' }))
-  const count = mock.paths.length
   vi.useFakeTimers()
-  await act(() => vi.advanceTimersByTimeAsync(10_000))
-  expect(mock.paths).toHaveLength(count)
-  expect(screen.getByRole('status')).toHaveTextContent('Paused')
+  await act(async () => {
+    mock.controllers[0].enqueue(new TextEncoder().encode('event: line\ndata: {"text":"received while paused"}\n\n'))
+    await vi.advanceTimersByTimeAsync(100)
+  })
+  expect(mock.signals.at(-1)?.aborted).toBe(false)
+  expect(screen.getByLabelText('Log output')).not.toHaveTextContent('received while paused')
+  fireEvent.click(screen.getByRole('button', { name: 'Resume' }))
+  expect(screen.getByLabelText('Log output')).toHaveTextContent('received while paused')
 })
