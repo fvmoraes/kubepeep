@@ -7,6 +7,22 @@ versions follow [Semantic Versioning](https://semver.org/) **without the `v`
 prefix** (official tags: `1.4.2`, `1.4.3`, …), and entries are generated
 automatically from Conventional Commits by `.github/workflows/release.yml`.
 
+## [0.11.0] - 2026-10-09
+
+## Added
+- feat: unify resource workspaces and add dynamic Kubernetes views
+
+## Changed
+- Merge pull request #32 from fvmoraes/codex/v0.11.0
+- test: align Kind denial checks with live Kubernetes reads
+
+## Download
+
+Permanently-updated links: https://github.com/fvmoraes/kubepeep/blob/main/docs/download.md
+
+## Full Changelog
+**Full Changelog**: https://github.com/fvmoraes/kubepeep/compare/0.10.0...0.11.0
+
 ## [Unreleased]
 
 ### Added
@@ -739,3 +755,4 @@ Permanently-updated links: https://github.com/fvmoraes/kubepeep/blob/main/docs/d
 [0.8.0]: https://github.com/fvmoraes/kubepeep/releases/tag/0.8.0
 [0.9.0]: https://github.com/fvmoraes/kubepeep/releases/tag/0.9.0
 [0.10.0]: https://github.com/fvmoraes/kubepeep/releases/tag/0.10.0
+[0.11.0]: https://github.com/fvmoraes/kubepeep/releases/tag/0.11.0
