@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strings"
 
 	"github.com/fvmoraes/kubepeep/internal/services/actions"
@@ -19,8 +20,14 @@ import (
 	sigsyaml "sigs.k8s.io/yaml"
 )
 
-func (client *ActionClient) yamlClient(target actions.MutationTarget, collection string) (dynamic.ResourceInterface, resourcecatalog.Resource, error) {
+func (client *ActionClient) yamlClient(target actions.MutationTarget, collection string, versions ...string) (dynamic.ResourceInterface, resourcecatalog.Resource, error) {
 	resource, ok := resourcecatalog.Lookup(collection)
+	if len(versions) > 0 {
+		if !slices.Contains(resourcecatalog.Versions(resource), versions[0]) {
+			return nil, resource, apierrors.NewBadRequest("unsupported resource version")
+		}
+		resource.Version = versions[0]
+	}
 	if client == nil || client.dynamic == nil {
 		return nil, resource, errActionsClientUnavailable
 	}
@@ -42,6 +49,18 @@ func (client *ActionClient) ReadResourceYAML(ctx context.Context, target actions
 		return "", err
 	}
 	value, err := endpoint.Get(ctx, target.Name, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) && resource.Group == resourcecatalog.GatewayGroup {
+		for _, version := range resourcecatalog.Versions(resource)[1:] {
+			endpoint, resource, err = client.yamlClient(target, collection, version)
+			if err != nil {
+				break
+			}
+			value, err = endpoint.Get(ctx, target.Name, metav1.GetOptions{})
+			if !apierrors.IsNotFound(err) {
+				break
+			}
+		}
+	}
 	if err != nil {
 		return "", fmt.Errorf("read resource YAML: %w", err)
 	}
@@ -89,9 +108,30 @@ func resourceYAML(command actions.ResourceYAMLCommand, resource resourcecatalog.
 }
 
 func (client *ActionClient) UpdateResourceYAML(ctx context.Context, command actions.ResourceYAMLCommand) (actions.MutationResult, error) {
+	if len(command.YAML) == 0 || len(command.YAML) > actions.MaximumResourceYAMLBytes {
+		return actions.MutationResult{}, apierrors.NewBadRequest("invalid YAML or resource identity")
+	}
 	endpoint, resource, err := client.yamlClient(command.Target, command.Collection)
 	if err != nil {
 		return actions.MutationResult{}, err
+	}
+	if resource.Group == resourcecatalog.GatewayGroup {
+		var header struct {
+			APIVersion string `json:"apiVersion"`
+		}
+		// Read only the routing version here. resourceYAML below validates the
+		// complete document strictly, including duplicate keys and identity.
+		if err := sigsyaml.Unmarshal([]byte(command.YAML), &header); err != nil {
+			return actions.MutationResult{}, apierrors.NewBadRequest("invalid YAML")
+		}
+		groupVersion, parseErr := schema.ParseGroupVersion(header.APIVersion)
+		if parseErr != nil || groupVersion.Group != resource.Group {
+			return actions.MutationResult{}, apierrors.NewBadRequest("invalid API group")
+		}
+		endpoint, resource, err = client.yamlClient(command.Target, command.Collection, groupVersion.Version)
+		if err != nil {
+			return actions.MutationResult{}, err
+		}
 	}
 	value, err := resourceYAML(command, resource)
 	if err != nil {

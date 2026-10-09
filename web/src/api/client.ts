@@ -93,7 +93,13 @@ CronJobTriggerActionRequest,
 Workload,
 WorkloadDetail,
 PriorityClass,
+GatewayResource,
+HelmRelease,
+HelmDocument,
+HelmMutation,
 } from './types'
+import type { GatewayCollection } from '../navigation/gateway'
+import type { HelmDriver } from '../navigation/helm'
 import { cancelListRequest, associateListRequestRows, beginListRequest, completeListRequest } from '../observability/uxMetrics'
 import { desktopRequest } from './desktop'
 
@@ -341,6 +347,10 @@ export function getClusterProfiles(signal?: AbortSignal): Promise<ClusterProfile
   return request<ClusterProfile[]>('/api/v1/cluster/profiles', { method: 'GET', signal })
 }
 
+export function importKubeconfig(body: { path?: string; content?: string }, csrfToken: string): Promise<ClusterProfile> {
+  return mutation<ClusterProfile>('/api/v1/cluster/profiles/import', 'POST', body, csrfToken)
+}
+
 export function getActiveClusterProfile(signal?: AbortSignal): Promise<ClusterProfile> {
   return request<ClusterProfile>('/api/v1/cluster/profile', { method: 'GET', signal })
 }
@@ -500,8 +510,9 @@ export function getWorkloads(options: ResourceListQuery = {}, signal?: AbortSign
   return collectionRequest<Workload>('/api/v1/workloads', options, signal, expectedGeneration)
 }
 
-export function getWorkload(kind: string, namespace: string, name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<WorkloadDetail> {
-  return resourceRequest<WorkloadDetail>(`/api/v1/workloads/${resourcePath(kind)}/${resourcePath(namespace)}/${resourcePath(name)}`, signal, expectedGeneration)
+export async function getWorkload(kind: string, namespace: string, name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<WorkloadDetail> {
+  const data = await resourceRequest<WorkloadDetail>(`/api/v1/workloads/${resourcePath(kind)}/${resourcePath(namespace)}/${resourcePath(name)}`, signal, expectedGeneration)
+  return { ...data, conditions: data.conditions ?? [], containers: data.containers ?? [], related: data.related ?? [] }
 }
 
 export function getPods(options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<Pod>> {
@@ -886,3 +897,36 @@ export async function getResourceYAML(collection: string, namespace: string | nu
 export function saveResourceYAML(collection: string, namespace: string | null, name: string, body: ResourceYAMLRequest, csrfToken: string, signal?: AbortSignal): Promise<{ accepted: boolean; resourceVersion: string }> {
   return mutation(resourceYAMLPath(collection, namespace, name), 'PUT', body, csrfToken, signal)
 }
+export function getResourceDiscovery(refresh = false, signal?: AbortSignal, expectedGeneration?: string): Promise<ResourceDiscovery> {
+  return resourceRequest<ResourceDiscovery>(`/api/v1/resource-discovery${refresh ? '?refresh=true' : ''}`, signal, expectedGeneration)
+}
+export function getDynamicResources(resource: DynamicResource, options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<DynamicRow>> {
+  return collectionRequest<DynamicRow>(`/api/v1/dynamic-resources/${dynamicResourceSegments(resource)}`, options, signal, expectedGeneration)
+}
+export function getDynamicResource(resource: DynamicResource, namespace: string | null, name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<DynamicRow> {
+  return resourceRequest<DynamicRow>(`/api/v1/dynamic-resources/${dynamicResourceSegments(resource)}/${resourcePath(namespace || '_')}/${resourcePath(name)}`, signal, expectedGeneration)
+}
+export function getDynamicYAML(resource: DynamicResource, namespace: string | null, name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<{ yaml: string; generation: string }> {
+  return resourceRequest(`/api/v1/dynamic-resources/${dynamicResourceSegments(resource)}/${resourcePath(namespace || '_')}/${resourcePath(name)}/yaml`, signal, expectedGeneration)
+}
+export function getGatewayResources(collection: GatewayCollection, options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<GatewayResource>> {
+  return collectionRequest<GatewayResource>(`/api/v1/${collection}`, options, signal, expectedGeneration)
+}
+export function getGatewayResource(collection: GatewayCollection, namespace: string | null, name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<GatewayResource> {
+  return resourceRequest<GatewayResource>(`/api/v1/${collection}/${namespace ? resourcePath(namespace) + '/' : ''}${resourcePath(name)}`, signal, expectedGeneration)
+}
+
+export function getHelmReleases(driver: HelmDriver, options: ResourceListQuery = {}, signal?: AbortSignal, expectedGeneration?: string): Promise<CollectionResult<HelmRelease>> {
+  return collectionRequest<HelmRelease>(`/api/v1/helm/releases/${driver}`, options, signal, expectedGeneration)
+}
+export function getHelmRelease(driver: HelmDriver, namespace: string, name: string, signal?: AbortSignal, expectedGeneration?: string): Promise<HelmRelease> {
+  return resourceRequest<HelmRelease>(`/api/v1/helm/releases/${driver}/${resourcePath(namespace)}/${resourcePath(name)}`, signal, expectedGeneration)
+}
+export function getHelmDocument(driver: HelmDriver, namespace: string, name: string, format: 'values' | 'manifest', signal?: AbortSignal, expectedGeneration?: string): Promise<HelmDocument> {
+  return resourceRequest<HelmDocument>(`/api/v1/helm/releases/${driver}/${resourcePath(namespace)}/${resourcePath(name)}/${format}`, signal, expectedGeneration)
+}
+export function applyHelmRelease(driver: HelmDriver, namespace: string, name: string, body: HelmMutation, csrfToken: string, signal?: AbortSignal): Promise<{ accepted: boolean; revision: number; status: string }> {
+  return mutation(`/api/v1/helm/releases/${driver}/${resourcePath(namespace)}/${resourcePath(name)}`, 'POST', body, csrfToken, signal)
+}
+import type { DynamicResource, DynamicRow, ResourceDiscovery } from './types'
+import { dynamicResourceSegments } from '../navigation/dynamic'

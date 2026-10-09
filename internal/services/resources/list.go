@@ -3,6 +3,7 @@ package resources
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sort"
 	"time"
 
@@ -57,6 +58,9 @@ type CollectionRequest[T ListItem] struct {
 	RequestedNamespaces int
 	Fanout              int
 	Retry               RetryPolicy
+	// PreferredNamespace is collected before the other authorized origins.
+	// Cursor origins retain their canonical identity and authorization boundary.
+	PreferredNamespace string
 	// NativeIdentityOrder is set only by adapters whose LIST continuation is
 	// monotonic for the same namespace/name comparator used by Less.
 	NativeIdentityOrder bool
@@ -64,8 +68,12 @@ type CollectionRequest[T ListItem] struct {
 	// only for real Kubernetes authorizers; a denied/unknown probe falls back
 	// to the ordinary per-namespace matrix.
 	GlobalGrantFastPath bool
-	globalListGrant     *authorization.Capability
-	pressure            *apiPressure
+	// ReadThroughUnknown is enabled only for real Kubernetes listers. An
+	// inconclusive SSAR then requires a successful bounded LIST probe before
+	// either fresh or previously buffered DTOs may be returned.
+	ReadThroughUnknown bool
+	globalListGrant    *authorization.Capability
+	pressure           *apiPressure
 }
 
 type originOutcome[T ListItem] struct {
@@ -179,6 +187,7 @@ func Collect[T ListItem](ctx context.Context, request CollectionRequest[T]) (_ L
 	var firstReadFailure *PartialErrorDTO
 	completedNamespaces := make(map[string]struct{})
 	deniedNamespaces := make(map[string]struct{})
+	firstDenialMessage := ""
 	for _, outcome := range outcomes {
 		key := outcome.page.Origin.Key()
 		current := aggregates[key]
@@ -213,16 +222,36 @@ func Collect[T ListItem](ctx context.Context, request CollectionRequest[T]) (_ L
 		case authorization.DecisionDenied:
 			known++
 			deniedNamespaces[namespace] = struct{}{}
-			result.Coverage.Failed = append(result.Coverage.Failed, PartialErrorDTO{Namespace: namespace, Code: CodeForbidden, Message: "Access to this resource was denied."})
+			message := fmt.Sprintf("Kubernetes permission review denied LIST on %s in namespace %q. Check the current identity's Role or ClusterRole bindings.", current.origin.Resource, namespace)
+			if namespace == "" {
+				message = fmt.Sprintf("Kubernetes permission review denied cluster-wide LIST on %s. Check the current identity's ClusterRole bindings.", current.origin.Resource)
+			}
+			if current.failure != nil {
+				message = current.failure.Message
+			}
+			if firstDenialMessage == "" {
+				firstDenialMessage = message
+			}
+			result.Coverage.Failed = append(result.Coverage.Failed, PartialErrorDTO{Namespace: namespace, Code: CodeForbidden, Message: message})
 			continue
 		case authorization.DecisionUnknown:
 			unknown++
-			result.Coverage.Failed = append(result.Coverage.Failed, PartialErrorDTO{Namespace: namespace, Code: CodeAuthorizationUnavailable, Message: "Authorization could not be confirmed."})
+			failure := current.failure
+			if failure == nil {
+				review := authorization.ReviewFailure(current.capability)
+				failure = &PartialErrorDTO{Namespace: namespace, Code: ErrorCode(review.Code), Message: review.Message}
+			}
+			result.Coverage.Failed = append(result.Coverage.Failed, *failure)
+			if firstReadFailure == nil {
+				firstReadFailure = failure
+			}
 			continue
 		case authorization.DecisionAllowed:
 			known++
 			allowed++
-			allowedOrigins[origin.Key()] = true
+			// A real 403/401 overrides a cached allowed review. Do not leak a
+			// cursor's buffered rows after Kubernetes rejects the live request.
+			allowedOrigins[origin.Key()] = current.failure == nil || current.failure.Code != CodeForbidden && current.failure.Code != CodeAuthenticationUnavailable
 		}
 		if current.failure != nil {
 			failure := *current.failure
@@ -239,9 +268,12 @@ func Collect[T ListItem](ctx context.Context, request CollectionRequest[T]) (_ L
 	}
 	if allowed == 0 {
 		if known > 0 && len(deniedNamespaces) > 0 && unknown == 0 {
-			return result, domainError(CodeForbidden, "Access to this resource was denied.", nil)
+			return result, domainError(CodeForbidden, firstDenialMessage, nil)
 		}
-		return result, domainError(CodeAuthorizationUnavailable, "Authorization could not be confirmed.", nil)
+		if firstReadFailure != nil {
+			return result, domainError(firstReadFailure.Code, firstReadFailure.Message, nil)
+		}
+		return result, domainError(CodeAuthorizationUnavailable, authorization.ReviewFailure(authorization.Capability{}).Message, nil)
 	}
 	if authoritativeSuccesses == 0 {
 		if firstReadFailure != nil {
@@ -258,7 +290,7 @@ func Collect[T ListItem](ctx context.Context, request CollectionRequest[T]) (_ L
 		result.Coverage.CompletedNamespaces = request.RequestedNamespaces
 	}
 	_, endMerge := observability.StartSpan(ctx, "resources.merge")
-	items, next, err := mergeAuthorizedOriginPages(cursor, nil, request.Options.Limit, request.Less, allowedOrigins)
+	items, next, err := mergePreferredNamespace(cursor, request, allowedOrigins)
 	endMerge(err)
 	if err != nil {
 		return result, err
@@ -288,6 +320,24 @@ func Collect[T ListItem](ctx context.Context, request CollectionRequest[T]) (_ L
 	}
 	result.CollectedAt = time.Now().UTC()
 	return result, nil
+}
+
+func mergePreferredNamespace[T ListItem](cursor CompositeCursor[T], request CollectionRequest[T], allowed map[string]bool) ([]T, CompositeCursor[T], error) {
+	if request.PreferredNamespace == "" {
+		return mergeAuthorizedOriginPages(cursor, nil, request.Options.Limit, request.Less, allowed)
+	}
+	preferred := make(map[string]bool)
+	for _, state := range cursor.Origins {
+		if state.Origin.Namespace == request.PreferredNamespace && allowed[state.Origin.Key()] {
+			preferred[state.Origin.Key()] = true
+		}
+	}
+	items, next, err := mergeAuthorizedOriginPages(cursor, nil, request.Options.Limit, request.Less, preferred)
+	if err != nil || len(items) == request.Options.Limit {
+		return items, next, err
+	}
+	rest, next, err := mergeAuthorizedOriginPages(next, nil, request.Options.Limit-len(items), request.Less, allowed)
+	return append(items, rest...), next, err
 }
 
 // originChunkLimit bounds the per-origin page size for one collection window.

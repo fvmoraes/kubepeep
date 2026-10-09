@@ -6,11 +6,11 @@ import { inventoryRefreshInterval, resourceRefreshInterval } from './autoRefresh
 it('polls bounded inventories but never denied queries or explicit data/detail reads', () => {
   const client = new QueryClient()
   const query = client.getQueryCache().build(client, { queryKey: ['resources', 'pods'] })
-  expect(inventoryRefreshInterval(query)).toBe(15_000)
+  expect(inventoryRefreshInterval(query)).toBe(10_000)
   query.setData({ page: { next: '' }, items: [] })
-  expect(inventoryRefreshInterval(query)).toBe(15_000)
+  expect(inventoryRefreshInterval(query)).toBe(10_000)
   query.setData({ pages: [{ items: [] }], pageParams: [''] })
-  expect(inventoryRefreshInterval(query)).toBe(15_000)
+  expect(inventoryRefreshInterval(query)).toBe(10_000)
   query.setState({ error: new APIError(403, { code: 'FORBIDDEN', message: 'Denied' }) })
   expect(inventoryRefreshInterval(query)).toBe(false)
   query.setState({ error: null })
@@ -22,9 +22,9 @@ it('polls bounded inventories but never denied queries or explicit data/detail r
 })
 
 it.each([
-  [503, 'AUTHORIZATION_UNAVAILABLE', 15_000],
-  [504, 'UPSTREAM_TIMEOUT', 15_000],
-  [401, 'AUTHENTICATION_UNAVAILABLE', false],
+  [503, 'AUTHORIZATION_UNAVAILABLE', 10_000],
+  [504, 'UPSTREAM_TIMEOUT', 10_000],
+  [401, 'AUTHENTICATION_UNAVAILABLE', 10_000],
   [403, 'FORBIDDEN', false],
   [409, 'GENERATION_CHANGED', false],
 ] as const)('uses a bounded recovery interval for %s/%s', (status, code, interval) => {

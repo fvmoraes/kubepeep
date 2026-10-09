@@ -7,6 +7,8 @@ import (
 	"errors"
 	"sync/atomic"
 	"time"
+
+	"github.com/fvmoraes/kubepeep/internal/services/authorization"
 )
 
 const (
@@ -63,6 +65,9 @@ func retryListPage[T ListItem](ctx context.Context, lister OriginLister[T], requ
 	policy = normalizeRetryPolicy(policy)
 	var lastErr error
 	for attempt := 0; attempt < policy.Attempts; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return OriginPage[T]{Origin: request.Origin}, err
+		}
 		page, err := lister.ListPage(ctx, request)
 		if err == nil {
 			return page, nil
@@ -71,10 +76,10 @@ func retryListPage[T ListItem](ctx context.Context, lister OriginLister[T], requ
 		if ErrorCodeOf(err) == CodeRateLimited && policy.OnThrottle != nil {
 			policy.OnThrottle()
 		}
-		if ErrorCodeOf(err) != CodeRateLimited || attempt+1 >= policy.Attempts {
+		if !retryableRead(err) || attempt+1 >= policy.Attempts {
 			return page, err
 		}
-		if pressure != nil {
+		if pressure != nil && ErrorCodeOf(err) == CodeRateLimited {
 			pressure.recordThrottle()
 		}
 		delay := policy.Base << attempt
@@ -109,6 +114,42 @@ func retryListPage[T ListItem](ctx context.Context, lister OriginLister[T], requ
 		}
 	}
 	return OriginPage[T]{Origin: request.Origin}, lastErr
+}
+
+func retryableRead(err error) bool {
+	if errors.Is(err, context.Canceled) {
+		return false
+	}
+	var domain *DomainError
+	if !errors.As(err, &domain) {
+		failure := authorization.TranslateOperationError(err)
+		return failure != nil && failure.Retryable
+	}
+	switch ErrorCodeOf(err) {
+	case CodeRateLimited, CodeClusterUnavailable, CodeUpstreamTimeout, CodeAuthenticationUnavailable:
+		return true
+	default:
+		return false
+	}
+}
+
+// RetryRead retries only idempotent remote reads. Each API request remains
+// bounded; the frontend's ten-second refresh owns continued recovery.
+func RetryRead[T any](ctx context.Context, read func(context.Context) (T, error)) (T, error) {
+	policy := normalizeRetryPolicy(RetryPolicy{})
+	var zero T
+	for attempt := 0; ; attempt++ {
+		if err := ctx.Err(); err != nil {
+			return zero, err
+		}
+		value, err := read(ctx)
+		if err == nil || !retryableRead(err) || attempt+1 >= policy.Attempts {
+			return value, err
+		}
+		if err := policy.Wait(ctx, policy.Jitter(policy.Base<<attempt)); err != nil {
+			return zero, err
+		}
+	}
 }
 
 func waitForRetry(ctx context.Context, delay time.Duration) error {

@@ -90,6 +90,9 @@ var rulesByCollection = map[Collection]collectionRules{
 // ResolveNamespaces because it needs the active selection.
 func NormalizeListOptions(collection Collection, options ListOptions) (ListOptions, error) {
 	rules, ok := rulesByCollection[collection]
+	if _, dynamic := ParseDynamicCollection(collection); dynamic {
+		rules, ok = collectionRules{sorts: []string{"identity", "name"}, defaultSort: "identity", defaultOrder: OrderAscending}, true
+	}
 	if !ok {
 		return ListOptions{}, validationError("collection is not supported")
 	}

@@ -202,7 +202,11 @@ func (s *Service) check(ctx context.Context, key Key, bypassCache bool) Capabili
 
 	review, reviewError := s.reviewer.ReviewAccess(ctx, key)
 	decision, reason := classifyReview(review, reviewError)
-	result := capabilityFor(key, decision, reason, s.now().Add(s.ttl))
+	ttl := s.ttl
+	if decision == DecisionUnknown {
+		ttl = UnknownTTL
+	}
+	result := capabilityFor(key, decision, reason, s.now().Add(ttl))
 
 	s.mu.Lock()
 	call.result = result
@@ -231,6 +235,8 @@ func classifyReview(review AccessReviewResult, err error) (Decision, ReasonCode)
 			return DecisionUnknown, ReasonSARTimeout
 		case CodeAuthenticationUnavailable:
 			return DecisionUnknown, ReasonSARAuthenticationUnavailable
+		case CodeForbidden:
+			return DecisionUnknown, ReasonSARForbidden
 		default:
 			return DecisionUnknown, ReasonSARUnavailable
 		}
@@ -318,7 +324,7 @@ func (s *Service) Revalidate(ctx context.Context, key Key, kind OperationKind) (
 		return capability, forbiddenError(nil)
 	}
 	if capability.Decision == DecisionUnknown && kind != OperationRead {
-		return capability, authorizationUnavailableError(nil)
+		return capability, ReviewFailure(capability)
 	}
 	return capability, nil
 }

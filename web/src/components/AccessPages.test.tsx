@@ -32,7 +32,7 @@ function renderPage(element: React.ReactNode, path: string, route: string) {
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[path]}>
         <ResourceWorkspaceProvider>
-          <GlobalNamespaceProvider generation={selection.generation} scopeId={selection.scopeId} scopeMode={selection.scopeMode}>
+          <GlobalNamespaceProvider generation={selection.generation} scopeId={selection.scopeId} scopeMode={selection.scopeMode} defaultNamespace={selection.defaultNamespace}>
             <Routes><Route path={route} element={element} /></Routes>
           </GlobalNamespaceProvider>
         </ResourceWorkspaceProvider>

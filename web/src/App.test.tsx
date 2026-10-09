@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -128,9 +128,7 @@ describe('application shell', () => {
     renderApp()
 
     fireEvent.click(screen.getByRole('button', { name: 'Open command center' }))
-    // The topbar global namespace selector contributes one option of its own;
-    // it is not part of the command-center route catalog.
-    const optionTexts = screen.getAllByRole('option').map((option) => option.textContent).filter((text) => text !== 'Namespace: All')
+    const optionTexts = within(screen.getByRole('dialog', { name: 'Command center' })).getAllByRole('option').map((option) => option.textContent)
     expect(optionTexts).toEqual([
       expect.stringContaining('Overview'),
       expect.stringContaining('Nodes'),
@@ -145,12 +143,15 @@ describe('application shell', () => {
       expect.stringContaining('StatefulSets'),
       expect.stringContaining('Jobs'),
       expect.stringContaining('CronJobs'),
+      expect.stringContaining('Custom resources'),
+      expect.stringContaining('Releases'),
       expect.stringContaining('Services'),
       expect.stringContaining('Endpoints'),
       expect.stringContaining('EndpointSlices'),
       expect.stringContaining('Ingresses'),
       expect.stringContaining('IngressClasses'),
       expect.stringContaining('NetworkPolicies'),
+      expect.stringContaining('Gateway API'),
       expect.stringContaining('Port Forwarding'),
       expect.stringContaining('ConfigMaps'),
       expect.stringContaining('Secrets'),

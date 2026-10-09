@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/fvmoraes/kubepeep/internal/services/clusterprofiles"
@@ -70,4 +71,52 @@ func contains(value, part string) bool {
 		}
 	}
 	return false
+}
+
+type fakeProfileImporter struct {
+	fakeClusterProfiles
+	calls     int
+	importErr error
+}
+
+func (f *fakeProfileImporter) Import(context.Context, clusterprofiles.ImportRequest) (clusterprofiles.DTO, error) {
+	f.calls++
+	return clusterprofiles.DTO{ID: 2, Name: "Imported", KubeconfigFiles: []clusterprofiles.FileDTO{{Position: 0, DisplayPath: "~/.kube/config"}}}, f.importErr
+}
+
+func TestKubeconfigImportRequestBoundary(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name, body    string
+		err           error
+		status, calls int
+	}{
+		{"source", `{"path":"~/clusters/dev.yaml"}`, nil, 200, 1},
+		{"content", `{"content":"private-value"}`, nil, 200, 1},
+		{"conflict", `{"content":"private-value"}`, clusterprofiles.ErrImportConflict, 409, 1},
+		{"relative references", `{"content":"private-value"}`, clusterprofiles.ErrImportRelativePaths, 400, 1},
+		{"invalid config", `{"content":"private-value"}`, clusterprofiles.ErrImportInvalid, 400, 1},
+		{"internal error", `{"content":"private-value"}`, errors.New("private-value"), 503, 1},
+		{"unknown field", `{"path":"~/config", "arbitrary":"private-value"}`, nil, 400, 0},
+		{"trailing body", `{"path":"~/config"} {}`, nil, 400, 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			service := &fakeProfileImporter{importErr: tc.err}
+			request := httptest.NewRequest(http.MethodPost, "/api/v1/cluster/profiles/import", strings.NewReader(tc.body))
+			recorder := httptest.NewRecorder()
+			NewClusterProfiles(service).Import(recorder, request)
+			if recorder.Code != tc.status || service.calls != tc.calls {
+				t.Fatalf("status=%d calls=%d", recorder.Code, service.calls)
+			}
+			if strings.Contains(recorder.Body.String(), "private-value") {
+				t.Fatal("import response exposed private content")
+			}
+			if recorder.Header().Get("Cache-Control") != "no-store" {
+				t.Fatal("import response must not be cached")
+			}
+		})
+	}
+	if methods, exists := allowedMethods("/api/v1/cluster/profiles/import"); !exists || methods != "POST" {
+		t.Fatalf("import methods = %q, %v", methods, exists)
+	}
 }

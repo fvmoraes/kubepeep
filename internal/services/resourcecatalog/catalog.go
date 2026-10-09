@@ -23,6 +23,16 @@ func (r Resource) APIVersion() string {
 func (r Resource) UpdateCapability() string { return "yaml." + r.Collection + ".update" }
 
 var resources = []Resource{
+	{"gateway-classes", "gateway.networking.k8s.io", "v1", "gatewayclasses", "GatewayClass", false},
+	{"gateways", "gateway.networking.k8s.io", "v1", "gateways", "Gateway", true},
+	{"http-routes", "gateway.networking.k8s.io", "v1", "httproutes", "HTTPRoute", true},
+	{"grpc-routes", "gateway.networking.k8s.io", "v1", "grpcroutes", "GRPCRoute", true},
+	{"tcp-routes", "gateway.networking.k8s.io", "v1", "tcproutes", "TCPRoute", true},
+	{"tls-routes", "gateway.networking.k8s.io", "v1", "tlsroutes", "TLSRoute", true},
+	{"udp-routes", "gateway.networking.k8s.io", "v1", "udproutes", "UDPRoute", true},
+	{"reference-grants", "gateway.networking.k8s.io", "v1", "referencegrants", "ReferenceGrant", true},
+	{"backend-tls-policies", "gateway.networking.k8s.io", "v1", "backendtlspolicies", "BackendTLSPolicy", true},
+	{"listener-sets", "gateway.networking.k8s.io", "v1", "listenersets", "ListenerSet", true},
 	{"pods", "", "v1", "pods", "Pod", true},
 	{"deployments", "apps", "v1", "deployments", "Deployment", true},
 	{"statefulsets", "apps", "v1", "statefulsets", "StatefulSet", true},

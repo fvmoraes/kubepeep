@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/fvmoraes/kubepeep/internal/services/resourcecatalog"
 	"regexp"
 	"sort"
 	"strings"
@@ -16,15 +17,16 @@ const maximumPreferenceJSONBytes = 64 << 10
 var dashboardSectionIDs = []string{"summary", "problems", "restarts", "workloads", "events", "logScan", "metrics"}
 
 type PreferencesDTO struct {
-	Version   int                  `json:"version"`
-	UI        UIPreferences        `json:"ui"`
-	Logs      LogPreferences       `json:"logs"`
-	Dashboard DashboardPreferences `json:"dashboard"`
-	Filters   FilterPreferences    `json:"filters"`
-	Favorites FavoriteSet          `json:"favorites"`
-	Shell     ShellPreferences     `json:"shell"`
-	Columns   ColumnPreferences    `json:"columns"`
-	Recent    RecentSet            `json:"recent"`
+	Version     int                  `json:"version"`
+	UI          UIPreferences        `json:"ui"`
+	Logs        LogPreferences       `json:"logs"`
+	Dashboard   DashboardPreferences `json:"dashboard"`
+	Filters     FilterPreferences    `json:"filters"`
+	Favorites   FavoriteSet          `json:"favorites"`
+	Shell       ShellPreferences     `json:"shell"`
+	Columns     ColumnPreferences    `json:"columns"`
+	Recent      RecentSet            `json:"recent"`
+	CustomViews []CustomViewContext  `json:"customViews,omitempty"`
 }
 
 // favoriteKindAllowlist bounds favorite targets to resources whose detail
@@ -52,8 +54,15 @@ type FavoriteItem struct {
 	Name      string `json:"name"`
 }
 type UIPreferences struct {
-	Language string `json:"language"`
+	Language      string         `json:"language"`
+	ContextColors []ContextColor `json:"contextColors,omitempty"`
 }
+type ContextColor struct {
+	ClusterProfileID int64  `json:"clusterProfileId"`
+	Context          string `json:"context"`
+	Color            string `json:"color"`
+}
+
 type LogPreferences struct {
 	Wrap       bool `json:"wrap"`
 	Timestamps bool `json:"timestamps"`
@@ -91,6 +100,7 @@ type ShellPreferences struct {
 // identifiers are valid; arbitrary object paths are rejected (V6-02).
 type ColumnPreferences struct {
 	Hidden map[string][]string `json:"hidden"`
+	Order  map[string][]string `json:"order,omitempty"`
 }
 
 // RecentSet stores recently visited targets with identity only. Secrets are
@@ -109,7 +119,7 @@ type RecentItem struct {
 
 var navigationGroupIDs = []string{"cluster", "workloads", "helm", "network", "configuration", "storage", "access-control", "observability", "administration"}
 
-var columnCollectionIDs = []string{"workloads", "pods", "events", "services", "ingresses", "endpoint-slices", "configmaps", "secrets", "nodes", "leases", "persistent-volumes", "persistent-volume-claims", "volume-attachments", "storage-classes", "csi-nodes", "csi-drivers", "service-accounts", "resource-quotas", "limit-ranges", "hpas", "pdbs", "roles", "role-bindings", "cluster-roles", "cluster-role-bindings", "customresourcedefinitions", "priority-classes", "runtime-classes", "mutating-webhook-configurations", "validating-webhook-configurations", "ingress-classes", "network-policies", "endpoints"}
+var columnCollectionIDs = []string{"permissions", "port-forwards", "workloads", "pods", "events", "services", "ingresses", "endpoint-slices", "configmaps", "secrets", "nodes", "leases", "persistent-volumes", "persistent-volume-claims", "volume-attachments", "storage-classes", "csi-nodes", "csi-drivers", "service-accounts", "resource-quotas", "limit-ranges", "hpas", "pdbs", "roles", "role-bindings", "cluster-roles", "cluster-role-bindings", "customresourcedefinitions", "priority-classes", "runtime-classes", "mutating-webhook-configurations", "validating-webhook-configurations", "ingress-classes", "network-policies", "endpoints"}
 
 var recentKindAllowlist = []string{"pod", "deployment", "statefulset", "daemonset", "job", "cronjob", "replicasets", "lease", "persistentvolumeclaim", "role", "rolebinding", "networkpolicy", "endpoints", "node", "persistentvolume", "storageclass", "ingressclass", "priorityclass", "runtimeclass", "customresourcedefinition", "mutatingwebhookconfiguration", "validatingwebhookconfiguration", "service", "ingress", "endpointslice", "configmap"}
 
@@ -178,11 +188,17 @@ func (service *PreferenceService) Put(ctx context.Context, value PreferencesDTO)
 }
 
 func ValidatePreferences(value PreferencesDTO) error {
+	if err := validateCustomViews(value.CustomViews); err != nil {
+		return err
+	}
 	if value.Version != 1 {
 		return validationError("preference version must be 1")
 	}
 	if value.UI.Language != "en" && value.UI.Language != "pt-BR" {
 		return validationError("language has an invalid value")
+	}
+	if err := validateContextColors(value.UI.ContextColors); err != nil {
+		return err
 	}
 	if value.Logs.TailLines < 1 || value.Logs.TailLines > 2000 {
 		return validationError("tailLines must be between 1 and 2000")
@@ -226,11 +242,28 @@ func validateShellPreferences(shell ShellPreferences) error {
 var columnIDPattern = regexp.MustCompile(`^[a-z0-9-]{1,32}$`)
 
 func validateColumnPreferences(columns ColumnPreferences) error {
-	if len(columns.Hidden) > len(columnCollectionIDs) {
+	// Order uses the same bounded collection/column identifiers as visibility.
+	if len(columns.Order) > 0 {
+		if err := validateColumnPreferences(ColumnPreferences{Hidden: columns.Order}); err != nil {
+			return err
+		}
+		for _, order := range columns.Order {
+			seen := make(map[string]bool, len(order))
+			for _, id := range order {
+				if seen[id] {
+					return validationError("column order contains duplicate identifiers")
+				}
+				seen[id] = true
+			}
+		}
+	}
+	if len(columns.Hidden) > len(columnCollectionIDs)+512 {
 		return validationError("column hidden map exceeds the collection catalog")
 	}
 	for collection, hidden := range columns.Hidden {
-		if !contains(columnCollectionIDs, collection) {
+		_, dynamic := ParseDynamicCollection(Collection(collection))
+		_, registered := resourcecatalog.Lookup(collection)
+		if !contains(columnCollectionIDs, collection) && !dynamic && !registered && collection != "helm-releases" && collection != "helm-configmap-releases" {
 			return validationError("column collection has an invalid value")
 		}
 		if len(hidden) > 32 {
@@ -430,8 +463,9 @@ func stringSlice(value any) ([]string, bool) {
 }
 
 func preferenceRecords(value PreferencesDTO) ([]PreferenceRecord, error) {
-	pairs := map[string]any{"ui.language": value.UI.Language, "logs.wrap": value.Logs.Wrap, "logs.timestamps": value.Logs.Timestamps, "logs.tail_lines": value.Logs.TailLines, "dashboard.log_scan_window": value.Dashboard.LogScanWindow, "dashboard.section_order": value.Dashboard.SectionOrder, "dashboard.hidden_sections": value.Dashboard.HiddenSections, "filters.workloads": value.Filters.Workloads, "filters.pods": value.Filters.Pods, "filters.events": value.Filters.Events, "filters.logs": value.Filters.Logs, "favorites": favoritesOrDefault(value.Favorites), "shell.sidebar_compact": value.Shell.SidebarCompact, "shell.collapsed_groups": value.Shell.CollapsedGroups, "columns.hidden": value.Columns.Hidden, "recent": recentOrDefault(value.Recent)}
+	pairs := map[string]any{"ui.language": value.UI.Language, "ui.context_colors": value.UI.ContextColors, "logs.wrap": value.Logs.Wrap, "logs.timestamps": value.Logs.Timestamps, "logs.tail_lines": value.Logs.TailLines, "dashboard.log_scan_window": value.Dashboard.LogScanWindow, "dashboard.section_order": value.Dashboard.SectionOrder, "dashboard.hidden_sections": value.Dashboard.HiddenSections, "filters.workloads": value.Filters.Workloads, "filters.pods": value.Filters.Pods, "filters.events": value.Filters.Events, "filters.logs": value.Filters.Logs, "favorites": favoritesOrDefault(value.Favorites), "shell.sidebar_compact": value.Shell.SidebarCompact, "shell.collapsed_groups": value.Shell.CollapsedGroups, "columns.hidden": value.Columns.Hidden, "columns.order": value.Columns.Order, "recent": recentOrDefault(value.Recent)}
 	keys := make([]string, 0, len(pairs))
+	pairs["custom_views"] = value.CustomViews
 	for key := range pairs {
 		keys = append(keys, key)
 	}
@@ -449,6 +483,8 @@ func preferenceRecords(value PreferencesDTO) ([]PreferenceRecord, error) {
 
 func applyPreferenceRecord(value *PreferencesDTO, record PreferenceRecord) error {
 	switch record.Key {
+	case "custom_views":
+		return json.Unmarshal(record.ValueJSON, &value.CustomViews)
 	case "ui.language":
 		return json.Unmarshal(record.ValueJSON, &value.UI.Language)
 	case "logs.wrap":
@@ -479,6 +515,10 @@ func applyPreferenceRecord(value *PreferencesDTO, record PreferenceRecord) error
 		return json.Unmarshal(record.ValueJSON, &value.Shell.CollapsedGroups)
 	case "columns.hidden":
 		return json.Unmarshal(record.ValueJSON, &value.Columns.Hidden)
+	case "ui.context_colors":
+		return json.Unmarshal(record.ValueJSON, &value.UI.ContextColors)
+	case "columns.order":
+		return json.Unmarshal(record.ValueJSON, &value.Columns.Order)
 	case "recent":
 		return json.Unmarshal(record.ValueJSON, &value.Recent)
 	default:
@@ -520,4 +560,24 @@ func recentOrDefault(set RecentSet) RecentSet {
 		kept = kept[:maximumRecentItems]
 	}
 	return RecentSet{Version: 1, Items: kept}
+}
+
+var contextColorPattern = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)
+
+func validateContextColors(colors []ContextColor) error {
+	if len(colors) > 200 {
+		return validationError("too many context colors")
+	}
+	seen := make(map[string]bool, len(colors))
+	for _, item := range colors {
+		if item.ClusterProfileID <= 0 || strings.TrimSpace(item.Context) == "" || len(item.Context) > 1024 || !utf8.ValidString(item.Context) || !contextColorPattern.MatchString(item.Color) {
+			return validationError("context color is invalid")
+		}
+		key := fmt.Sprintf("%d:%s", item.ClusterProfileID, item.Context)
+		if seen[key] {
+			return validationError("duplicate context color")
+		}
+		seen[key] = true
+	}
+	return nil
 }

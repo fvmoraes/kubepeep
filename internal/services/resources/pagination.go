@@ -206,7 +206,62 @@ func (LazyMerge[T]) Next(ctx context.Context, state PaginationState[T]) (Paginat
 	return result, state, nil
 }
 
+// NamespacePriority finishes the default namespace's page before scheduling
+// any other namespace. Each phase retains the usual bounded strategy, and
+// writes its progress back to the canonical cursor without changing tokens.
+type NamespacePriority[T ListItem] struct{}
+
+func (NamespacePriority[T]) Name() string { return "namespace-priority" }
+
+func (NamespacePriority[T]) Next(ctx context.Context, state PaginationState[T]) (PaginationPage[T], PaginationState[T], error) {
+	result := PaginationPage[T]{outcomes: []originOutcome[T]{}}
+	available := 0
+	for _, preferred := range []bool{true, false} {
+		phase := PaginationState[T]{Request: state.Request, Cursor: CompositeCursor[T]{Version: state.Cursor.Version}}
+		phase.Request.PreferredNamespace = ""
+		phase.Request.Options.Limit -= available
+		indices := []int{}
+		origins := []Origin{}
+		for index, origin := range state.Cursor.Origins {
+			if (origin.Origin.Namespace == state.Request.PreferredNamespace) == preferred {
+				indices = append(indices, index)
+				origins = append(origins, origin.Origin)
+				phase.Cursor.Origins = append(phase.Cursor.Origins, origin)
+			}
+		}
+		if len(indices) == 0 {
+			continue
+		}
+		page, next, err := selectPaginationStrategy(phase.Request, origins).Next(ctx, phase)
+		if err != nil {
+			return result, state, err
+		}
+		result.outcomes = append(result.outcomes, page.outcomes...)
+		allowed := make(map[string]bool)
+		for _, outcome := range page.outcomes {
+			allowed[outcome.page.Origin.Key()] = outcome.capability.Decision == authorization.DecisionAllowed
+		}
+		for index, original := range indices {
+			state.Cursor.Origins[original] = next.Cursor.Origins[index]
+		}
+		available += authorizedBufferedCount(next.Cursor, allowed)
+		// Publish the default namespace's first results immediately. Filling a
+		// nominal page from other namespaces would delay useful rows behind
+		// unrelated slow or failing API calls. The cursor resumes those origins.
+		if preferred && state.Request.Cursor == nil && available > 0 {
+			break
+		}
+		if available >= state.Request.Options.Limit {
+			break
+		}
+	}
+	return result, state, nil
+}
+
 func selectPaginationStrategy[T ListItem](request CollectionRequest[T], origins []Origin) PaginationStrategy[T] {
+	if request.PreferredNamespace != "" && !globalOrigins(origins) {
+		return NamespacePriority[T]{}
+	}
 	if globalOrigins(origins) {
 		return GlobalNative[T]{}
 	}
@@ -240,7 +295,25 @@ func authorizeOrigin[T ListItem](ctx context.Context, request CollectionRequest[
 		Resource:   origin.Resource,
 		Verb:       "list",
 	})
-	return originOutcome[T]{page: OriginPage[T]{Origin: origin}, capability: capability}
+	outcome := originOutcome[T]{page: OriginPage[T]{Origin: origin}, capability: capability}
+	if capability.Decision != authorization.DecisionUnknown || !request.ReadThroughUnknown {
+		return outcome
+	}
+	// This probe runs against the same real Kubernetes endpoint and selectors
+	// as the eventual read. Its data is deliberately discarded: success grants
+	// this request only, never the authorization cache or mutation capability.
+	_, err := retryListPage(ctx, request.Lister, PageRequest{Origin: origin, Limit: 1, LabelSelector: request.Options.LabelSelector, FieldSelector: request.Options.FieldSelector}, request.Retry, request.pressure)
+	if err == nil {
+		outcome.capability.Decision = authorization.DecisionAllowed
+		outcome.capability.ReasonCode = authorization.ReasonOperationAllowed
+	} else {
+		outcome.err = err
+		if ErrorCodeOf(err) == CodeForbidden {
+			outcome.capability.Decision = authorization.DecisionDenied
+			outcome.capability.ReasonCode = authorization.ReasonOperationDenied
+		}
+	}
+	return outcome
 }
 
 func fetchOrigin[T ListItem](ctx context.Context, request CollectionRequest[T], state OriginCursor[T], limit int64, capability authorization.Capability) originOutcome[T] {
@@ -253,6 +326,10 @@ func fetchOrigin[T ListItem](ctx context.Context, request CollectionRequest[T], 
 	}, request.Retry, request.pressure)
 	if page.Origin.Key() == "///" {
 		page.Origin = state.Origin
+	}
+	if err != nil && ErrorCodeOf(err) == CodeForbidden {
+		capability.Decision = authorization.DecisionDenied
+		capability.ReasonCode = authorization.ReasonOperationDenied
 	}
 	return originOutcome[T]{page: page, capability: capability, err: err, queried: true, authoritative: err == nil}
 }
@@ -294,9 +371,7 @@ func runOriginWorkers[T ListItem](ctx context.Context, request CollectionRequest
 				outcome := authorizeOrigin(ctx, request, state.Origin)
 				outcome.authoritative = state.Exhausted || len(state.Buffered) > 0
 				if allowed, ok := known[state.Origin.Key()]; ok {
-					if allowed {
-						outcome.capability.Decision = authorization.DecisionAllowed
-					} else {
+					if !allowed {
 						results <- indexedOutcome[T]{index: index, outcome: outcome}
 						continue
 					}

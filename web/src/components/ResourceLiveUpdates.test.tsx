@@ -62,7 +62,7 @@ describe('automatic resource SSE', () => {
 
     render(<QueryClientProvider client={client}><ResourceLiveUpdates generation="gen_42" topics={['events']} queryKeys={[["resources", "events"]]} /></QueryClientProvider>)
 
-    expect(await screen.findByText('Auto · 15s')).toBeInTheDocument()
+    expect(await screen.findByText('Auto · 10s')).toBeInTheDocument()
     expect(invalidate).not.toHaveBeenCalled()
     expect(screen.queryByRole('button')).not.toBeInTheDocument()
   })
@@ -99,7 +99,7 @@ describe('automatic resource SSE', () => {
     expect(screen.getByLabelText('Resource live updates')).toBeInTheDocument()
     expect(commits - commitsBeforeBurst).toBeLessThan(6)
     expect(renderCPU - renderCPUBeforeBurst).toBeLessThan(500)
-    await vi.advanceTimersByTimeAsync(1_849)
+    await vi.advanceTimersByTimeAsync(9_849)
     expect(invalidate).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(1)
     expect(invalidate).toHaveBeenCalledTimes(1)

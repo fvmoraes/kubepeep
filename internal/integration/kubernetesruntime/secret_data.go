@@ -23,12 +23,12 @@ func (backend *ResourceBackend) GetSecretData(ctx context.Context, binding names
 		if err != nil {
 			return resources.ConfigMapDetailDTO{}, mapMetadataError(err, "Secret data is unavailable.")
 		}
-		// Reuse the bounded UTF-8/base64 data projection without metadata labels
-		// or annotations. Binary entries retain their explicit encoding.
-		data := make(map[string]string, len(value.Data))
-		for key, content := range value.Data {
-			data[key] = string(content)
+		// Secret.data is Base64 on the Kubernetes wire, even for readable UTF-8
+		// bytes. Preserve that representation instead of silently decoding it.
+		detail := resources.ConvertConfigMapDetail(&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: value.Namespace, Name: value.Name, UID: value.UID, ResourceVersion: value.ResourceVersion}, BinaryData: value.Data})
+		for index := range detail.Entries {
+			detail.Entries[index].Field = "data"
 		}
-		return resources.ConvertConfigMapDetail(&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: value.Namespace, Name: value.Name, UID: value.UID, ResourceVersion: value.ResourceVersion}, Data: data}), nil
+		return detail, nil
 	})
 }

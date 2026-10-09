@@ -40,6 +40,7 @@ type resourceClientSet struct {
 	streamingDynamic dynamic.Interface
 	metadata         metadata.Interface
 	streamMetadata   metadata.Interface
+	views            *kubeadapter.ResourceViewClient
 }
 
 type resourceClientProvider interface {
@@ -52,6 +53,23 @@ func (backend *ResourceBackend) unary(ctx context.Context, binding namespaces.Se
 		return nil, nil, resourceClientSet{}, resourceDomain(resources.CodeFeatureUnavailable, "The Kubernetes resource reader is unavailable.", nil)
 	}
 	return backend.clients.Unary(ctx, binding)
+}
+
+// A rejected credential must not stay pinned in a cached client across read
+// retries. Capture the matching selection's descriptor so an old generation
+// cannot evict credentials for an unrelated context.
+func (backend *ResourceBackend) recoverReadAuthentication(binding namespaces.SelectionBinding, err error) {
+	if backend == nil || backend.runtime == nil || resources.ErrorCodeOf(err) != resources.CodeAuthenticationUnavailable {
+		return
+	}
+	runtime := backend.runtime
+	runtime.mu.RLock()
+	candidate := runtime.candidate
+	matches := runtime.binding.Generation == binding.Generation && runtime.binding.Context == binding.Context && runtime.binding.ClusterProfileID == binding.ClusterProfileID
+	runtime.mu.RUnlock()
+	if matches && candidate != nil && candidate.resolution != nil && runtime.cache != nil {
+		runtime.cache.InvalidateOnError(candidate.resolution.Descriptor(), err)
+	}
 }
 
 func (provider runtimeResourceClientProvider) Unary(ctx context.Context, binding namespaces.SelectionBinding) (context.Context, context.CancelFunc, resourceClientSet, error) {
@@ -70,6 +88,7 @@ func (provider runtimeResourceClientProvider) Unary(ctx context.Context, binding
 		kubernetes: lease.Clients.UnaryKubernetes(), streaming: lease.Clients.StreamingKubernetes(),
 		dynamic: lease.Clients.UnaryDynamic(), streamingDynamic: lease.Clients.StreamingDynamic(),
 		metadata: lease.Clients.UnaryMetadata(), streamMetadata: lease.Clients.StreamingMetadata(),
+		views: lease.Clients.ResourceViews(),
 	}
 	if clients.kubernetes == nil || clients.metadata == nil {
 		cancel()
@@ -880,26 +899,13 @@ func (backend *ResourceBackend) listVolumeAttachmentPage(ctx context.Context, bi
 }
 
 func (backend *ResourceBackend) GetNode(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, name string) (resources.NodeDetailDTO, error) {
-	if name == "" {
-		return resources.NodeDetailDTO{}, resourceDomain(resources.CodeValidationFailed, "The resource target is incomplete.", nil)
-	}
-	capability := backend.authorizer.Check(ctx, authorization.Key{Generation: binding.Generation, APIGroup: "", Resource: "nodes", Verb: "get", ResourceName: name})
-	switch capability.Decision {
-	case authorization.DecisionDenied:
-		return resources.NodeDetailDTO{}, resourceDomain(resources.CodeForbidden, "Access to this resource was denied.", nil)
-	case authorization.DecisionUnknown:
-		return resources.NodeDetailDTO{}, resourceDomain(resources.CodeAuthorizationUnavailable, "Authorization could not be confirmed.", nil)
-	}
-	requestContext, cancel, clients, err := backend.unary(ctx, binding)
-	if err != nil {
-		return resources.NodeDetailDTO{}, err
-	}
-	defer cancel()
-	value, err := clients.kubernetes.CoreV1().Nodes().Get(requestContext, name, metav1.GetOptions{})
-	if err != nil {
-		return resources.NodeDetailDTO{}, mapResourceError(err)
-	}
-	return resources.ConvertNodeDetail(value, backend.now().UTC()), nil
+	return clusterGet(ctx, backend, binding, resources.Origin{Version: "v1", Resource: "nodes"}, name, func(ctx context.Context, clients resourceClientSet) (resources.NodeDetailDTO, error) {
+		value, err := clients.kubernetes.CoreV1().Nodes().Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			return resources.NodeDetailDTO{}, mapResourceError(err)
+		}
+		return resources.ConvertNodeDetail(value, backend.now().UTC()), nil
+	})
 }
 
 // clusterGet is the shared cluster-scoped detail path: exact-name
@@ -913,15 +919,17 @@ func clusterGet[T resources.DetailItem](ctx context.Context, backend *ResourceBa
 	switch capability.Decision {
 	case authorization.DecisionDenied:
 		return zero, resourceDomain(resources.CodeForbidden, "Access to this resource was denied.", nil)
-	case authorization.DecisionUnknown:
-		return zero, resourceDomain(resources.CodeAuthorizationUnavailable, "Authorization could not be confirmed.", nil)
 	}
-	requestContext, cancel, clients, err := backend.unary(ctx, binding)
-	if err != nil {
-		return zero, err
-	}
-	defer cancel()
-	return get(requestContext, clients)
+	return resources.RetryRead(ctx, func(ctx context.Context) (T, error) {
+		requestContext, cancel, clients, err := backend.unary(ctx, binding)
+		if err != nil {
+			return zero, err
+		}
+		defer cancel()
+		value, err := get(requestContext, clients)
+		backend.recoverReadAuthentication(binding, err)
+		return value, err
+	})
 }
 
 func (backend *ResourceBackend) GetLease(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, namespace, name string) (resources.LeaseDetailDTO, error) {
@@ -1189,8 +1197,6 @@ func clusterYAMLDocument(ctx context.Context, backend *ResourceBackend, binding 
 	switch capability.Decision {
 	case authorization.DecisionDenied:
 		return nil, resourceDomain(resources.CodeForbidden, "Access to this resource was denied.", nil)
-	case authorization.DecisionUnknown:
-		return nil, resourceDomain(resources.CodeAuthorizationUnavailable, "Authorization could not be confirmed.", nil)
 	}
 	requestContext, cancel, clients, err := backend.unary(ctx, binding)
 	if err != nil {
@@ -1243,8 +1249,6 @@ func (backend *ResourceBackend) NodeYAMLDocument(ctx context.Context, binding na
 	switch capability.Decision {
 	case authorization.DecisionDenied:
 		return nil, resourceDomain(resources.CodeForbidden, "Access to this resource was denied.", nil)
-	case authorization.DecisionUnknown:
-		return nil, resourceDomain(resources.CodeAuthorizationUnavailable, "Authorization could not be confirmed.", nil)
 	}
 	requestContext, cancel, clients, err := backend.unary(ctx, binding)
 	if err != nil {
@@ -1362,7 +1366,11 @@ func (function resourceGetterFunc[T]) Get(ctx context.Context, origin resources.
 }
 
 func getAuthorized[T resources.DetailItem](ctx context.Context, backend *ResourceBackend, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, origin resources.Origin, name string, get resourceGetterFunc[T]) (T, error) {
-	return resources.GetAuthorized(ctx, resources.GetRequest[T]{Selection: resourceSelection(binding, resolution), Origin: origin, Name: name, Getter: get, Authorizer: backend.authorizer})
+	return resources.GetAuthorized(ctx, resources.GetRequest[T]{Selection: resourceSelection(binding, resolution), Origin: origin, Name: name, Getter: resourceGetterFunc[T](func(ctx context.Context, origin resources.Origin, name string) (T, error) {
+		value, err := get(ctx, origin, name)
+		backend.recoverReadAuthentication(binding, err)
+		return value, err
+	}), Authorizer: backend.authorizer, ReadThroughUnknown: true})
 }
 
 func (backend *ResourceBackend) GetWorkload(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, kind, namespace, name string) (resources.WorkloadDetailDTO, error) {
@@ -1408,7 +1416,8 @@ func (backend *ResourceBackend) authorizeGet(ctx context.Context, binding namesp
 	case authorization.DecisionDenied:
 		return resourceDomain(resources.CodeForbidden, "Access to this resource was denied.", nil)
 	default:
-		return resourceDomain(resources.CodeAuthorizationUnavailable, "Authorization could not be confirmed.", nil)
+		// The real GET remains the authorization boundary when SSAR is unavailable.
+		return nil
 	}
 }
 
@@ -1788,7 +1797,8 @@ func (backend *ResourceBackend) authorizeLogs(ctx context.Context, binding names
 	case authorization.DecisionDenied:
 		return resourceDomain(resources.CodeForbidden, "Access to pod logs was denied.", nil)
 	default:
-		return resourceDomain(resources.CodeAuthorizationUnavailable, "Authorization could not be confirmed.", nil)
+		failure := authorization.ReviewFailure(capability)
+		return resourceDomain(resources.ErrorCode(failure.Code), failure.Message, nil)
 	}
 }
 func (backend *ResourceBackend) FollowLogs(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, namespace, pod string, query resources.LogQuery, emit func(resources.LogLineDTO) error) (resources.FollowTerminal, error) {
@@ -1833,11 +1843,15 @@ func mapResourceError(err error) error {
 	if apierrors.IsNotFound(err) {
 		return resourceDomain(resources.CodeNotFound, "The Kubernetes resource was not found.", err)
 	}
-	if apierrors.IsForbidden(err) {
-		return resourceDomain(resources.CodeForbidden, "Access to this resource was denied.", err)
+	if apierrors.IsForbidden(err) || apierrors.IsUnauthorized(err) {
+		failure := authorization.TranslateOperationError(err)
+		return resourceDomain(resources.ErrorCode(failure.Code), failure.Message, err)
+	}
+	if kubeadapter.IsRebuildableAuthenticationError(err) {
+		return resourceDomain(resources.CodeAuthenticationUnavailable, "The kubeconfig authentication plugin could not supply valid credentials. Refresh its login and verify that the configured executable is available.", err)
 	}
 	if apierrors.IsTimeout(err) || apierrors.IsServerTimeout(err) || errors.Is(err, context.DeadlineExceeded) {
-		return resourceDomain(resources.CodeUpstreamTimeout, "The Kubernetes request timed out.", err)
+		return resourceDomain(resources.CodeUpstreamTimeout, authorization.TranslateOperationError(err).Message, err)
 	}
 	if errors.Is(err, context.Canceled) {
 		return resourceDomain(resources.CodeGenerationChanged, "The active selection changed.", err)
@@ -1846,14 +1860,15 @@ func mapResourceError(err error) error {
 	if errors.As(err, &safe) {
 		switch safe.Code {
 		case kubeadapter.CodeAuthenticationUnavailable:
-			return resourceDomain(resources.CodeAuthenticationUnavailable, "Kubernetes authentication is unavailable.", err)
+			return resourceDomain(resources.CodeAuthenticationUnavailable, "The kubeconfig credential provider could not authenticate. Refresh the login or repair the authentication plugin for this context.", err)
 		case kubeadapter.CodeRequestTimeout:
 			return resourceDomain(resources.CodeUpstreamTimeout, "The Kubernetes request timed out.", err)
 		case kubeadapter.CodeGenerationChanged, kubeadapter.CodeRequestCanceled:
 			return resourceDomain(resources.CodeGenerationChanged, "The active selection changed.", err)
 		}
 	}
-	return resourceDomain(resources.CodeClusterUnavailable, "The Kubernetes API could not complete the request.", err)
+	failure := authorization.TranslateOperationError(err)
+	return resourceDomain(resources.ErrorCode(failure.Code), failure.Message, err)
 }
 
 var _ resources.LogPort = resourceLogPort{}

@@ -7,15 +7,21 @@ KubePeep is a local Kubernetes dashboard with a native desktop window (Wails)
 and a loopback web mode. Both share a Go backend and an embedded React
 interface. It uses your existing kubeconfig and Kubernetes RBAC identity.
 
-Inspect workloads, Pods, Events, networking, ConfigMaps and Secret metadata;
-read bounded logs; and use restart, scale, Pod deletion, Pod/Service port-forward and exec
-when authorized. Secret values can be revealed explicitly in the Data tab with
-permission to read that object; they are not cached or persisted. Deployments
-support editing and saving YAML with update permission. The Metrics API is optional.
+Inspect workloads, Pods, Events, networking, storage, configuration, access
+control, Helm releases and Gateway API resources. Pin native resources or CRDs
+as custom views for each context. Lists use compact initial columns, saved
+column preferences and automatic refresh every 10 seconds; details open in a
+fixed bottom overlay occupying 70% of the window height.
+
+Read bounded logs and use restart, scale, Pod deletion, port-forward, exec and
+YAML editing on supported native resource pages when authorized. ConfigMaps and
+Secrets can be edited through explicit YAML reads, preserving UTF-8/Base64
+fields. Secret values and YAML documents are not cached or persisted. Dynamic
+resource views provide read-only YAML. The Metrics API is optional.
 
 See the [current product scope](docs/reference/product-spec.md) for the resource
-catalog and supported operations. Navigation placeholders do not represent
-implemented resources.
+catalog and supported operations, and the [resource workspace guide](docs/guides/resource-workspaces.md)
+for configuration, navigation, editing and custom views.
 
 ## Install and run
 
@@ -48,7 +54,9 @@ not runtime requirements.
 Local configuration, SQLite preferences and operational logs live in
 `~/.kubePeep/` on Unix or `%LOCALAPPDATA%\kubePeep\` on Windows. Kubeconfig
 contents, Secret values, container logs and terminal traffic are not persisted
-there. Updates and data removal require explicit actions.
+there. Explicit kubeconfig import can merge supplied content into the platform's
+standard Kubernetes config file; SQLite stores only the source path. Updates
+and data removal require explicit actions.
 
 The local API enforces Host/Origin checks, CSRF and bounded requests. Kubernetes
 authorizes each operation; mutable actions are checked again immediately before

@@ -1,3 +1,4 @@
+import { useAutoRefreshQueryOptions } from './resource/AutoRefreshProvider'
 import { useQuery } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 
@@ -6,7 +7,9 @@ import { getBatchedPermissions } from '../permissions/batchedPermissions'
 import { StatePanel } from './StatePanel'
 import { Badge, Card, CardContent, DataTable, PageHeader } from './ui'
 import { ResourceListControls } from './ResourceListControls'
+import { usePreferenceColumnVisibility, type ColumnVisibilityState } from './resource/columns'
 import { WarningBanner } from './ui/Banner'
+import { errorMessage } from './resource/errors'
 
 const decisionCopy: Record<CapabilityDecision, string> = {
   allowed: 'allowed',
@@ -25,7 +28,7 @@ function decisionBadgeVariant(decision: CapabilityDecision) {
   }
 }
 
-export function PermissionsMatrixView({ matrix }: { matrix: CapabilityMatrix }) {
+export function PermissionsMatrixView({ matrix, columnVisibility }: { matrix: CapabilityMatrix; columnVisibility?: ColumnVisibilityState }) {
   const [search, setSearch] = useState('')
   const columns = useMemo(() => [
     {
@@ -37,7 +40,7 @@ export function PermissionsMatrixView({ matrix }: { matrix: CapabilityMatrix }) 
       key: 'namespace', header: 'Namespace', cell: (capability: Capability) => capability.namespace || 'cluster',
     },
     {
-      key: 'resourceName', header: 'Target', cell: (capability: Capability) => capability.resourceName || '—',
+      key: 'resource-name', sortKey: 'resourceName', header: 'Target', cell: (capability: Capability) => capability.resourceName || '—',
     },
     {
       key: 'operation',
@@ -66,7 +69,7 @@ export function PermissionsMatrixView({ matrix }: { matrix: CapabilityMatrix }) 
       {matrix.errors.map((error) => <p className="text-content text-kp-red" role="status" key={`${error.namespace ?? 'global'}-${error.code}-${error.message}`}>{error.namespace ? `${error.namespace}: ` : ''}{error.message}</p>)}
       <DataTable
         caption={`Capabilities for generation ${matrix.generation}`}
-        columns={columns}
+        columns={columns} columnVisibility={columnVisibility}
         rows={matrix.decisions.filter((item) => [item.capabilityId, item.namespace, item.resourceName, item.verb, item.resource, item.apiGroup, item.subresource, decisionCopy[item.decision]].join(' ').toLocaleLowerCase().includes(search.toLocaleLowerCase()))}
         getRowKey={(capability, index) => `${capability.capabilityId}-${capability.namespace}-${capability.resourceName}-${index}`}
       />
@@ -75,13 +78,15 @@ export function PermissionsMatrixView({ matrix }: { matrix: CapabilityMatrix }) 
 }
 
 export function PermissionsMatrixPage() {
+  const autoRefresh = useAutoRefreshQueryOptions()
+  const columnVisibility = usePreferenceColumnVisibility('permissions')
   const status = useQuery({ queryKey: ['local-status'], queryFn: ({ signal }) => getStatus(signal), staleTime: 15_000, retry: false })
   const permissions = useQuery({
     queryKey: ['permissions', status.data?.selection?.generation],
     queryFn: ({ signal }) => getBatchedPermissions(status.data!.selection!, false, signal),
     enabled: Boolean(status.data?.selection?.scopeMode && status.data.selection.namespaceCount > 0),
     staleTime: 45_000,
-    refetchInterval: 45_000,
+    ...autoRefresh,
     refetchIntervalInBackground: false,
     retry: false,
   })
@@ -100,17 +105,17 @@ export function PermissionsMatrixPage() {
   }
 
   return (
-    <div className="flex w-full min-w-0 flex-col gap-4">
+    <div className="resource-page flex w-full min-w-0 flex-col gap-4">
       <PageHeader
         title="Permission matrix"
         description="Effective capabilities evaluated by SelfSubjectAccessReview for the active scope."
       />
-      <Card className="p-4">
-        <CardContent className="grid gap-3 p-0">
+      <Card className="resource-page-content p-4">
+        <CardContent className="resource-page-content flex-1 min-h-0 p-0">
           <p className="m-0 text-content text-kp-overlay-text">The backend revalidates every protected action. This display never grants authority by itself.</p>
           {permissions.isPending ? <StatePanel kind="loading" title="Evaluating capabilities">SelfSubjectAccessReview decisions are loading.</StatePanel> : null}
-          {permissions.isError ? <StatePanel kind="unavailable" title="Authorization is unavailable">Permission review could not produce a matrix. No mutation is assumed to be allowed.</StatePanel> : null}
-          {permissions.data ? <PermissionsMatrixView matrix={permissions.data} /> : null}
+          {permissions.isError ? <StatePanel kind="unavailable" title="Permission review could not complete">{errorMessage(permissions.error)} No mutation is assumed to be allowed.</StatePanel> : null}
+          {permissions.data ? <PermissionsMatrixView matrix={permissions.data} columnVisibility={columnVisibility} /> : null}
         </CardContent>
       </Card>
     </div>

@@ -24,6 +24,7 @@ func (ConfigMapListDTO) resourceListItem() {}
 
 type ConfigMapEntryDTO struct {
 	Key       string `json:"key"`
+	Field     string `json:"field"`
 	Encoding  string `json:"encoding"`
 	Value     string `json:"value"`
 	Truncated bool   `json:"truncated"`
@@ -83,19 +84,20 @@ func ConvertConfigMapDetail(value *corev1.ConfigMap) ConfigMapDetailDTO {
 		key    string
 		raw    []byte
 		binary bool
+		field  string
 	}
 	candidates := make([]candidate, 0, len(value.Data)+len(value.BinaryData))
 	for key, content := range value.Data {
-		candidates = append(candidates, candidate{key: key, raw: []byte(content), binary: !utf8.ValidString(content)})
+		candidates = append(candidates, candidate{key: key, raw: []byte(content), binary: !utf8.ValidString(content), field: "data"})
 		detail.TotalBytes += int64(len(content))
 	}
 	for key, content := range value.BinaryData {
-		candidates = append(candidates, candidate{key: key, raw: append([]byte(nil), content...), binary: true})
+		candidates = append(candidates, candidate{key: key, raw: append([]byte(nil), content...), binary: true, field: "binaryData"})
 		detail.TotalBytes += int64(len(content))
 	}
 	sort.Slice(candidates, func(i, j int) bool { return candidates[i].key < candidates[j].key })
 	for _, item := range candidates {
-		entry := configEntry(item.key, item.raw, item.binary, false)
+		entry := configEntry(item.key, item.raw, item.binary, false, item.field)
 		trial := detail
 		trial.Entries = append(append([]ConfigMapEntryDTO(nil), detail.Entries...), entry)
 		encoded, _ := json.Marshal(trial)
@@ -107,7 +109,7 @@ func ConvertConfigMapDetail(value *corev1.ConfigMap) ConfigMapDetailDTO {
 		low, high, best := 0, len(item.raw), -1
 		for low <= high {
 			middle := (low + high) / 2
-			candidateEntry := configEntry(item.key, item.raw[:middle], item.binary, true)
+			candidateEntry := configEntry(item.key, item.raw[:middle], item.binary, true, item.field)
 			candidateDetail := detail
 			candidateDetail.Truncated = true
 			candidateDetail.Entries = append(append([]ConfigMapEntryDTO(nil), detail.Entries...), candidateEntry)
@@ -120,20 +122,20 @@ func ConvertConfigMapDetail(value *corev1.ConfigMap) ConfigMapDetailDTO {
 			}
 		}
 		if best >= 0 {
-			detail.Entries = append(detail.Entries, configEntry(item.key, item.raw[:best], item.binary, true))
+			detail.Entries = append(detail.Entries, configEntry(item.key, item.raw[:best], item.binary, true, item.field))
 		}
 		break
 	}
 	return detail
 }
 
-func configEntry(key string, raw []byte, binary, truncated bool) ConfigMapEntryDTO {
+func configEntry(key string, raw []byte, binary, truncated bool, field string) ConfigMapEntryDTO {
 	if !binary {
 		end := len(raw)
 		for end > 0 && !utf8.Valid(raw[:end]) {
 			end--
 		}
-		return ConfigMapEntryDTO{Key: key, Encoding: "utf-8", Value: string(raw[:end]), Truncated: truncated || end < len(raw)}
+		return ConfigMapEntryDTO{Key: key, Field: field, Encoding: "utf-8", Value: string(raw[:end]), Truncated: truncated || end < len(raw)}
 	}
-	return ConfigMapEntryDTO{Key: key, Encoding: "base64", Value: base64.StdEncoding.EncodeToString(raw), Truncated: truncated}
+	return ConfigMapEntryDTO{Key: key, Field: field, Encoding: "base64", Value: base64.StdEncoding.EncodeToString(raw), Truncated: truncated}
 }

@@ -8,6 +8,8 @@ interface GlobalNamespaceContextValue {
   value: string
   options: string[]
   loading: boolean
+  /** Resource views wait until a concrete initial namespace is resolved. */
+  ready: boolean
   /** True when the option list could not be fully verified (RBAC denial). */
   degraded: boolean
   setValue: (value: string) => void
@@ -20,21 +22,26 @@ const GlobalNamespaceContext = createContext<GlobalNamespaceContextValue | null>
  * in the app. The option universe is the active Scope — `All` means every
  * namespace the Scope (and RBAC) allows, never more.
  */
-export function GlobalNamespaceProvider({ generation, scopeId, scopeMode, children }: {
+export function GlobalNamespaceProvider({ generation, scopeId, scopeMode, defaultNamespace, requestedNamespace, children }: {
   generation: string | undefined
   scopeId: number | null
   scopeMode: string | null
+  requestedNamespace?: string | null
+  defaultNamespace?: string | null
   children: ReactNode
 }) {
-  const [rawValue, setRawValue] = useState('')
-  const [prevGeneration, setPrevGeneration] = useState(generation)
+  const [rawValue, setRawValue] = useState<string | undefined>(requestedNamespace ?? undefined)
+  const binding = `${generation ?? ''}/${scopeId ?? ''}/${scopeMode ?? ''}/${defaultNamespace ?? ''}`
+  const [previousRequested, setPreviousRequested] = useState(requestedNamespace)
+  if (requestedNamespace !== previousRequested) { setPreviousRequested(requestedNamespace); if (requestedNamespace) setRawValue(requestedNamespace) }
+  const [previousBinding, setPreviousBinding] = useState(binding)
 
   // Render-time adjustment (React "you might not need an effect"): a context
-  // switch resets the filter to All so a stale namespace can never leak into
-  // the new selection.
-  if (generation !== prevGeneration) {
-    setPrevGeneration(generation)
-    setRawValue('')
+  // switch restores the new scope's default before resource views render.
+  // Only an explicit user selection can set the filter to All ('').
+  if (binding !== previousBinding) {
+    setPreviousBinding(binding)
+    setRawValue(undefined)
   }
 
   const scopeDetail = useQuery({
@@ -50,7 +57,7 @@ export function GlobalNamespaceProvider({ generation, scopeId, scopeMode, childr
     staleTime: 60_000,
   })
 
-  const { options, degraded, loading } = useMemo(() => {
+  const { options: available, degraded, loading } = useMemo(() => {
     if (scopeMode === 'all') {
       if (clusterNamespaces.isPending) return { options: [] as string[], degraded: false, loading: true }
       if (clusterNamespaces.isError) return { options: [] as string[], degraded: true, loading: false }
@@ -63,11 +70,17 @@ export function GlobalNamespaceProvider({ generation, scopeId, scopeMode, childr
     return { options: names, degraded: false, loading: false }
   }, [clusterNamespaces.isError, clusterNamespaces.isPending, clusterNamespaces.data, scopeDetail.isError, scopeDetail.isPending, scopeDetail.data, scopeId, scopeMode])
 
-  // A namespace picked for a previous scope must never surface as selected
-  // when the option universe no longer contains it.
-  const value = rawValue !== '' && !loading && options.length > 0 && !options.includes(rawValue) ? '' : rawValue
+  const initialNamespace = defaultNamespace ?? scopeDetail.data?.defaultNamespace
+    ?? (available.includes('default') ? 'default' : available[0]) ?? ''
+  const options = useMemo(() => initialNamespace
+    ? [initialNamespace, ...available.filter((name) => name !== initialNamespace)]
+    : available, [available, initialNamespace])
+  // An unavailable explicit choice falls back to the default, never to All.
+  const value = rawValue === undefined || rawValue !== '' && !loading && !degraded && !options.includes(rawValue)
+    ? initialNamespace : rawValue
+  const ready = value !== '' || rawValue === ''
 
-  const contextValue = useMemo<GlobalNamespaceContextValue>(() => ({ value, options, loading, degraded, setValue: setRawValue }), [degraded, loading, options, value])
+  const contextValue = useMemo<GlobalNamespaceContextValue>(() => ({ value, options, loading, ready, degraded, setValue: setRawValue }), [degraded, loading, ready, options, value])
   return <GlobalNamespaceContext.Provider value={contextValue}>{children}</GlobalNamespaceContext.Provider>
 }
 

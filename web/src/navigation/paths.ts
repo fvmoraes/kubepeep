@@ -2,7 +2,10 @@
 // truth shared by tables, the command palette, favorites, recents and the
 // Resource Workspace so no navigation target can 404 again.
 
+import { gatewayCollections } from './gateway'
+
 export const clusterScopedCollections = new Set([
+  'gateway-classes',
   'nodes',
   'persistent-volumes',
   'storage-classes',
@@ -21,6 +24,8 @@ export const clusterScopedCollections = new Set([
 ])
 
 export function isClusterScopedCollection(collection: string): boolean {
+  const dynamic = parseDynamicCollection(collection)
+  if (dynamic) return !dynamic.namespaced
   return clusterScopedCollections.has(collection)
 }
 
@@ -38,6 +43,9 @@ export function workloadKindPath(kind: string): string | null {
 }
 
 const collectionDetailRoots: Record<string, string> = {
+ 'helm-releases': '/helm/releases/secrets',
+ 'helm-configmap-releases': '/helm/releases/configmaps',
+ ...Object.fromEntries(Object.keys(gatewayCollections).map((key) => [key, `/network/gateway-api/${key}`])),
   pods: '/pods',
   services: '/network/services',
   ingresses: '/network/ingresses',
@@ -81,6 +89,8 @@ export interface ResourceRefInput {
 
 /** Full detail path for a resource, or null when the collection is unknown. */
 export function resourceDetailPath(reference: ResourceRefInput): string | null {
+  const dynamic = parseDynamicCollection(reference.collection)
+  if (dynamic) return `${dynamicListPath(dynamic)}/${encodeURIComponent(reference.namespace || '_')}/${encodeURIComponent(reference.name)}`
   const name = encodeURIComponent(reference.name)
   const namespace = reference.namespace ? encodeURIComponent(reference.namespace) : null
   if (reference.collection === 'workloads') {
@@ -97,6 +107,8 @@ export function resourceDetailPath(reference: ResourceRefInput): string | null {
 
 /** List path that hosts the collection (used when closing the workspace). */
 export function collectionListPath(reference: ResourceRefInput): string | null {
+  const dynamic = parseDynamicCollection(reference.collection)
+  if (dynamic) return dynamicListPath(dynamic)
   if (reference.collection === 'workloads') {
     // Prefer the kind tab when known; the general workloads page otherwise.
     const kindPath = reference.kind ? workloadKindPath(reference.kind) : null
@@ -115,6 +127,9 @@ export function resourceKey(reference: ResourceRefInput): string {
 export function resourceKindLabel(reference: ResourceRefInput): string {
   if (reference.kind) return reference.kind
   const labels: Record<string, string> = {
+    'helm-releases': 'HelmRelease',
+    'helm-configmap-releases': 'HelmRelease',
+    ...gatewayCollections,
     pods: 'Pod',
     services: 'Service',
     ingresses: 'Ingress',
@@ -150,3 +165,29 @@ export function resourceKindLabel(reference: ResourceRefInput): string {
   }
   return labels[reference.collection] ?? reference.collection
 }
+
+/** Resolve references with the same catalog used by resource routes. */
+export function resourceRefForKind(ref: { kind: string; name: string; namespace?: string | null; apiGroup?: string | null }): ResourceRefInput | null {
+  const workload = workloadKindPath(ref.kind)
+  const collection = workload ? 'workloads' : Object.keys(collectionDetailRoots).find((collection) => resourceKindLabel({ collection, name: ref.name }) === ref.kind)
+  if (!collection || !ref.name) return null
+  // Custom resources can reuse built-in kind names. Never send a reference
+  // from another group to an unrelated built-in object's detail or editor.
+  if (ref.apiGroup != null) {
+    const groups: Record<string, string> = {
+      ...Object.fromEntries(Object.keys(gatewayCollections).map((key) => [key, 'gateway.networking.k8s.io'])),
+      workloads: ref.kind === 'Job' || ref.kind === 'CronJob' ? 'batch' : 'apps',
+      ingresses: 'networking.k8s.io', 'ingress-classes': 'networking.k8s.io', 'network-policies': 'networking.k8s.io',
+      'endpoint-slices': 'discovery.k8s.io', leases: 'coordination.k8s.io',
+      'storage-classes': 'storage.k8s.io', 'csi-drivers': 'storage.k8s.io', 'csi-nodes': 'storage.k8s.io', 'volume-attachments': 'storage.k8s.io',
+      roles: 'rbac.authorization.k8s.io', 'role-bindings': 'rbac.authorization.k8s.io', 'cluster-roles': 'rbac.authorization.k8s.io', 'cluster-role-bindings': 'rbac.authorization.k8s.io',
+      hpas: 'autoscaling', pdbs: 'policy', customresourcedefinitions: 'apiextensions.k8s.io',
+      'priority-classes': 'scheduling.k8s.io', 'runtime-classes': 'node.k8s.io',
+      'mutating-webhook-configurations': 'admissionregistration.k8s.io', 'validating-webhook-configurations': 'admissionregistration.k8s.io',
+    }
+    if (ref.apiGroup !== (groups[collection] ?? '')) return null
+  }
+  const target = { collection, kind: workload ? ref.kind : null, namespace: isClusterScopedCollection(collection) ? null : ref.namespace ?? null, name: ref.name }
+  return resourceDetailPath(target) ? target : null
+}
+import { dynamicListPath, parseDynamicCollection } from './dynamic'

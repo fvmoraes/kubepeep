@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import { readFile } from 'node:fs/promises'
+import { gatewayCollections } from '../src/navigation/gateway'
 
 const generation = 'gen_workspace'
 const budget = { cpuRequestMillicores: 500, cpuLimitMillicores: 1000, memoryRequestBytes: 134217728, memoryLimitBytes: 268435456 }
@@ -12,8 +13,9 @@ const collection = { limit: 100, next: '', complete: true, truncated: false, fil
 async function expectFixedSplit(page: Page) {
   const list = await page.locator('.resource-list-pane').boundingBox()
   const detail = await page.locator('.resource-detail-slot').boundingBox()
-  expect(detail!.height / (list!.height + detail!.height)).toBeCloseTo(page.viewportSize()!.height <= 600 ? 0.7 : 0.6, 2)
-  expect(detail!.y).toBeGreaterThanOrEqual(list!.y + list!.height)
+  expect(detail!.height / page.viewportSize()!.height).toBeCloseTo(0.7, 2)
+  expect(list!.height).toBeCloseTo((await page.locator('.resource-split').boundingBox())!.height, 0)
+  expect(detail!.y + detail!.height).toBeCloseTo(list!.y + list!.height, 0)
   expect(detail!.y + detail!.height).toBeLessThanOrEqual(page.viewportSize()!.height)
   expect(await page.evaluate(() => ({
     width: document.documentElement.scrollWidth <= innerWidth,
@@ -49,11 +51,73 @@ test.beforeEach(async ({ context }) => {
     else if (path === '/api/v1/session') data = { csrfToken: 'csrf_workspace', generation }
     else if (path === '/api/v1/hpas') data = [{ namespace: 'payments', name: 'api-hpa', targetKind: 'Deployment', targetName: 'api', resourceTargets: [{ resource: 'cpu', utilization: 60, averageValue: null }] }]
     else if (path === '/api/v1/metrics') data = { complete: true, truncated: false, errors: [], coverage: null, value: { collectedAt: '2026-10-06T12:00:00Z', windowSeconds: 30, pods: [{ namespace: 'payments', pod: pod.name, cpuMillicores: 350, memoryBytes: 249561088, containers: [{ name: 'api', cpuMillicores: 350, memoryBytes: 249561088 }] }], topCPU: [], topMemory: [] } }
+    else if (path === '/api/v1/secrets') data = [{ metadata: { ...metadata, name: 'credentials' } }]
+    else if (path === '/api/v1/configmaps') data = [{ ...metadata, name: 'settings' }]
     else if (path === '/api/v1/secrets/payments/credentials') data = { apiVersion: 'v1', kind: 'Secret', metadata: { ...metadata, name: 'credentials' } }
-    else if (path === '/api/v1/secrets/payments/credentials/data') data = { metadata: { ...metadata, name: 'credentials' }, entries: [{ key: 'token', value: 'sensitive-fixture', encoding: 'utf-8', truncated: false }], truncated: false }
+    else if (path === '/api/v1/secrets/payments/credentials/data') data = { metadata: { ...metadata, name: 'credentials' }, entries: [{ key: 'token', value: 'c2Vuc2l0aXZlLWZpeHR1cmU=', field: 'data', encoding: 'base64', truncated: false }], truncated: false }
     else if (path === '/api/v1/configmaps/payments/settings') data = { metadata: { ...metadata, name: 'settings' }, entries: [{ key: 'MODE', value: 'production', encoding: 'utf-8', truncated: false }], truncated: false }
     await route.fulfill({ status: 200, json: { data, meta } })
   })
+})
+
+for (const entry of [
+  { route: '/pods', endpoint: '/api/v1/pods' },
+  { route: '/workloads/kind/deployments', endpoint: '/api/v1/workloads' },
+  { route: '/configuration/hpas', endpoint: '/api/v1/hpas' },
+  { route: '/config/configmaps', endpoint: '/api/v1/configmaps' },
+]) {
+  test(`default namespace precedes explicit All and is restored on reload in ${entry.route}`, async ({ page }) => {
+    const queries: URL[] = []
+    page.on('request', (request) => {
+      const url = new URL(request.url())
+      if (url.pathname === entry.endpoint) queries.push(url)
+    })
+    await page.goto(entry.route)
+    const namespace = page.getByRole('combobox', { name: 'Global namespace' })
+    await expect(namespace).toHaveValue('payments')
+    await expect.poll(() => queries.length).toBeGreaterThan(0)
+    expect(queries.every((url) => url.searchParams.get('namespace') === 'payments')).toBe(true)
+    await namespace.selectOption('')
+    await expect.poll(() => queries.some((url) => !url.searchParams.has('namespace'))).toBe(true)
+    await expect(namespace).toHaveValue('')
+    queries.length = 0
+    await page.reload()
+    await expect(namespace).toHaveValue('payments')
+    await expect.poll(() => queries.length).toBeGreaterThan(0)
+    expect(queries.every((url) => url.searchParams.get('namespace') === 'payments')).toBe(true)
+  })
+}
+
+test('changing context restores its own default before the first resource query', async ({ page }) => {
+  let context = 'development'
+  let selectedGeneration = generation
+  const selection = () => ({ clusterProfileId: 1, context, cluster: context, scopeId: context === 'development' ? 1 : 2, scopeMode: 'list', scopeName: context, scopeSource: 'saved', defaultNamespace: context === 'development' ? 'payments' : 'stage-apps', namespaceCount: 2, generation: selectedGeneration })
+  await page.route('**/api/v1/status', (route) => route.fulfill({ json: { data: { version: 'test', selection: selection(), components: Object.fromEntries(['application', 'sqlite', 'kubeconfig', 'context', 'cluster', 'metrics'].map((key) => [key, { status: key === 'metrics' ? 'unknown' : 'healthy' }])) } } }))
+  await page.route('**/api/v1/cluster/profiles', (route) => route.fulfill({ json: { data: [{ id: 1, name: 'Local', context, isDefault: true, kubeconfigFiles: [{ position: 0, displayPath: '~/.kube/config' }] }] } }))
+  await page.route('**/api/v1/contexts?*', (route) => route.fulfill({ json: { data: ['development', 'staging'].map((name) => ({ clusterProfileId: 1, name, cluster: name, selected: name === context })) } }))
+  await page.route('**/api/v1/session', (route) => route.fulfill({ json: { data: { csrfToken: 'csrf', generation: selectedGeneration } } }))
+  await page.route('**/api/v1/contexts/select', async (route) => {
+    context = route.request().postDataJSON().context
+    selectedGeneration = 'gen_staging'
+    await route.fulfill({ json: { data: selection(), meta: { generation: selectedGeneration } } })
+  })
+  await page.route('**/api/v1/namespace-scopes/2', (route) => route.fulfill({ json: { data: { namespaces: ['alpha', 'stage-apps'], defaultNamespace: 'stage-apps' } } }))
+  const namespaces: string[] = []
+  await page.route('**/api/v1/pods?*', (route) => {
+    namespaces.push(new URL(route.request().url()).searchParams.get('namespace') ?? 'All')
+    return route.fulfill({ json: { data: [{ ...pod, namespace: selection().defaultNamespace }], meta: { generation: selectedGeneration, page: collection } } })
+  })
+  await page.goto('/pods')
+  const namespace = page.getByRole('combobox', { name: 'Global namespace' })
+  await expect(namespace).toHaveValue('payments')
+  await namespace.selectOption('')
+  await expect.poll(() => namespaces.includes('All')).toBe(true)
+  namespaces.length = 0
+  await page.getByRole('combobox', { name: 'Kubernetes context', exact: true }).selectOption('staging')
+  await expect(namespace).toHaveValue('stage-apps')
+  await expect.poll(() => namespaces.includes('stage-apps')).toBe(true)
+  expect(namespaces).not.toContain('All')
+  expect(namespaces).not.toContain('payments')
 })
 
 test('menus, common filters, HPA bars and resizing stay consistent', async ({ page }) => {
@@ -74,7 +138,8 @@ test('menus, common filters, HPA bars and resizing stay consistent', async ({ pa
     const font = await page.getByLabel('Search resources').evaluate((element) => parseFloat(getComputedStyle(element).fontSize))
     expect(font).toBe(14)
     const name = await page.getByRole('button', { name: `Open Pod ${pod.name} in payments` }).boundingBox()
-    expect(name!.width).toBeGreaterThanOrEqual(160)
+    expect(name!.width).toBeGreaterThanOrEqual(width < 600 ? 110 : 120)
+    expect(await page.locator('.data-table').evaluate(element => element.scrollWidth <= element.clientWidth + 1)).toBe(true)
     expect(name!.height).toBeLessThanOrEqual(30)
   }
   await page.screenshot({ path: '/tmp/kubepeep-mobile.png', fullPage: true })
@@ -178,7 +243,7 @@ test('contains list, logs, environment and YAML scrolling inside the fixed split
   const panel = page.locator('.workspace-panel')
   const header = panel.locator('.workspace-header')
   const headerTop = (await header.boundingBox())!.y
-  const list = page.getByRole('region', { name: 'Page content', exact: true })
+  const list = page.locator('.resource-collection > .data-table')
   await list.evaluate((element) => { element.scrollTop = element.scrollHeight })
   expect(await list.evaluate((element) => element.scrollTop)).toBeGreaterThan(0)
   expect((await header.boundingBox())!.y).toBe(headerTop)
@@ -275,7 +340,8 @@ for (const emptyTerminal of [false, true]) {
     await expect(table.getByRole('button', { name: `Open Pod ${pod.name} in payments` })).toBeVisible()
     const warning = page.getByRole('note').filter({ hasText: 'Partial result' })
     await expect(warning).toContainText('1 failed')
-    await expect(warning).toHaveAttribute('title', 'restricted: AUTHORIZATION_UNAVAILABLE')
+    await warning.click()
+    await expect(page.getByText(/restricted · AUTHORIZATION_UNAVAILABLE/)).toBeVisible()
     await expect(page.getByText('Resource request failed', { exact: true })).toHaveCount(0)
     await page.clock.fastForward(16_000)
     await expect.poll(() => requests).toBe(4)
@@ -284,7 +350,7 @@ for (const emptyTerminal of [false, true]) {
   })
 }
 
-for (const [status, code] of [[401, 'AUTHENTICATION_UNAVAILABLE'], [403, 'FORBIDDEN'], [409, 'GENERATION_CHANGED']] as const) {
+for (const [status, code] of [[403, 'FORBIDDEN'], [409, 'GENERATION_CHANGED']] as const) {
   test(`stops Pod polling after ${status}/${code}`, async ({ page }) => {
     await page.clock.install()
     let requests = 0
@@ -301,8 +367,9 @@ for (const [status, code] of [[401, 'AUTHENTICATION_UNAVAILABLE'], [403, 'FORBID
   })
 }
 
-for (const initiallyUnavailable of [true, false]) {
-  test(`recovers from unavailable Pod authorization ${initiallyUnavailable ? 'on initial load' : 'after loading rows'} without navigation`, async ({ page }) => {
+for (const [status, code] of [[503, 'AUTHORIZATION_UNAVAILABLE'], [401, 'AUTHENTICATION_UNAVAILABLE']] as const) {
+ for (const initiallyUnavailable of [true, false]) {
+  test(`recovers from Pod ${code} ${initiallyUnavailable ? 'on initial load' : 'after loading rows'} without navigation`, async ({ page }) => {
     await page.clock.install()
     let unavailable = initiallyUnavailable
     let requests = 0
@@ -312,7 +379,7 @@ for (const initiallyUnavailable of [true, false]) {
     await page.route('**/api/v1/pods?*', async (route) => {
       requests++
       if (unavailable) {
-        await route.fulfill({ status: 503, json: { code: 'AUTHORIZATION_UNAVAILABLE', message: 'Authorization could not be confirmed.' } })
+        await route.fulfill({ status, json: { code, message: status === 401 ? 'Cluster credentials expired; retrying authentication.' : 'Authorization could not be confirmed.' } })
         return
       }
       if (recovering) await recovery
@@ -325,16 +392,16 @@ for (const initiallyUnavailable of [true, false]) {
       unavailable = true
       await page.clock.fastForward(16_000)
     }
-    await expect(page.getByText('AUTHORIZATION_UNAVAILABLE', { exact: true })).toBeVisible()
+    await expect(page.getByText(code, { exact: true })).toBeVisible()
     await expect(table).toHaveCount(0)
-    await expect(page.getByLabel('Resource live updates')).toHaveText('Auto · 15s')
+    await expect(page.getByLabel('Resource live updates')).toHaveText('Auto · 10s')
     // A cached unknown decision can outlive the first interval. Keep retrying
     // without displaying cached rows or issuing an immediate retry burst.
     for (let attempt = 0; attempt < 2; attempt++) {
       const previousRequests = requests
       await page.clock.fastForward(16_000)
       await expect.poll(() => requests).toBe(previousRequests + 1)
-      await expect(page.getByText('AUTHORIZATION_UNAVAILABLE', { exact: true })).toBeVisible()
+      await expect(page.getByText(code, { exact: true })).toBeVisible()
       await expect(table).toHaveCount(0)
     }
     unavailable = false
@@ -345,9 +412,10 @@ for (const initiallyUnavailable of [true, false]) {
     await expect(table).toHaveCount(0)
     releaseRecovery()
     await expect(table).toBeVisible()
-    await expect(page.getByText('AUTHORIZATION_UNAVAILABLE', { exact: true })).toHaveCount(0)
+    await expect(page.getByText(code, { exact: true })).toHaveCount(0)
     await expect(page).toHaveURL(/\/pods$/)
   })
+ }
 }
 
 test('Pod env references, ConfigMap entries and explicit Secret reveal work', async ({ page }) => {
@@ -361,7 +429,7 @@ test('Pod env references, ConfigMap entries and explicit Secret reveal work', as
   await expect(page.getByText('production', { exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'ConfigMap: settings' }).click()
   await page.getByRole('tab', { name: 'Data', exact: true }).click()
-  await page.getByText('MODE · utf-8', { exact: true }).click()
+  await page.getByText('MODE · UTF-8 · text', { exact: true }).click()
   await expect(page.getByText('production', { exact: true })).toBeVisible()
   await page.goto('/pods')
   await page.getByRole('button', { name: `Open Pod ${pod.name} in payments` }).click()
@@ -370,11 +438,11 @@ test('Pod env references, ConfigMap entries and explicit Secret reveal work', as
   await page.getByRole('tab', { name: 'Data', exact: true }).click()
   expect(secretReads).toBe(0)
   await page.getByRole('button', { name: 'Reveal data' }).click()
-  await page.getByText('token · utf-8', { exact: true }).click()
-  await expect(page.getByText('sensitive-fixture', { exact: true })).toBeVisible()
+  await page.getByText('token · data · Base64 · encoded value', { exact: true }).click()
+  await expect(page.getByText('c2Vuc2l0aXZlLWZpeHR1cmU=', { exact: true })).toBeVisible()
   await page.getByRole('tab', { name: 'Overview', exact: true }).click()
   await page.getByRole('tab', { name: 'Data', exact: true }).click()
-  await expect(page.getByText('sensitive-fixture', { exact: true })).toHaveCount(0)
+  await expect(page.getByText('c2Vuc2l0aXZlLWZpeHR1cmU=', { exact: true })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Reveal data' })).toBeVisible()
   expect(secretReads).toBe(1)
 })
@@ -562,66 +630,106 @@ test('marks partial log exports and never saves denied or canceled downloads', a
   await expect(panel.getByLabel('Log output', { exact: true })).toContainText('workload log fixture')
 })
 
-test('keeps the source list, search and column selection while inspecting related objects', async ({ page }) => {
+test('associated resources open their exact filtered inventory and preserve workspace back/forward', async ({ page }) => {
+  const queries: URL[] = []
+  page.on('request', (request) => { const url = new URL(request.url()); if (url.pathname === '/api/v1/configmaps') queries.push(url) })
   await page.goto('/workloads/kind/deployments?search=api#inventory')
   const table = page.getByRole('table', { name: 'Authorized workload pages' })
-  await expect(table).toBeVisible()
-  await page.getByRole('button', { name: 'Choose visible columns', exact: true }).click()
-  await page.getByRole('checkbox', { name: 'Available', exact: true }).uncheck()
-  await page.keyboard.press('Escape')
   await table.getByRole('button', { name: 'Open Deployment api in payments' }).click()
   const panel = page.locator('.workspace-panel')
-  await expect(panel).toHaveAttribute('role', 'region')
   await panel.getByRole('button', { name: 'Open ConfigMap settings' }).click()
   await expect(panel).toHaveAttribute('aria-label', 'ConfigMap settings')
-  await expect(table).toBeVisible()
-  await expect(table.getByRole('columnheader', { name: /Available/ })).toHaveCount(0)
-  await expect(page.getByLabel('Search resources')).toHaveValue('api')
+  await expect(table).toHaveCount(0)
+  await expect(page.getByText('Exact name:')).toContainText('settings')
+  await expect(page.getByRole('combobox', { name: 'Global namespace' })).toHaveValue('payments')
+  await expect.poll(() => queries.some((url) => url.searchParams.get('fieldSelector') === 'metadata.name=settings' && url.searchParams.get('namespace') === 'payments')).toBe(true)
   await panel.getByRole('button', { name: 'Go to previous resource' }).click()
   await expect(panel).toHaveAttribute('aria-label', 'Deployment api')
+  await expect(table).toBeVisible()
+  await expect(page.getByLabel('Search resources')).toHaveValue('api')
   await panel.getByRole('button', { name: 'Go to next resource' }).click()
   await expect(panel).toHaveAttribute('aria-label', 'ConfigMap settings')
   await panel.getByRole('button', { name: 'Close resource workspace' }).click()
-  await expect(page).toHaveURL(/\/workloads\/kind\/deployments\?search=api#inventory$/)
-  await expect(table).toBeVisible()
-  await table.getByRole('button', { name: 'Open Deployment api in payments' }).click()
-  await page.locator('aside').getByRole('link', { name: 'Pods', exact: true }).click()
+  await expect(page).toHaveURL(/\/config\/configmaps\?focus=settings&namespace=payments$/)
   await expect(panel).toHaveCount(0)
-  await expect(page.getByRole('table', { name: 'Authorized Pod pages' })).toBeVisible()
+  await page.getByRole('button', { name: 'Clear object filter' }).click()
+  await expect(page.getByText('Exact name:')).toHaveCount(0)
+  await expect.poll(() => queries.some((url) => !url.searchParams.has('fieldSelector'))).toBe(true)
 })
 
-for (const example of [
-  { path: '/configuration/resource-quotas', api: 'resource-quotas', row: { hard: {}, used: {} }, open: 'Open quota api in payments' },
-  { path: '/service-accounts', api: 'service-accounts', row: {}, open: 'Open ServiceAccount api in payments' },
-  { path: '/access/roles', api: 'roles', row: { ruleCount: 2 }, open: 'Open Role api' },
-  { path: '/administration/runtime-classes', api: 'runtime-classes', row: { handler: 'runc' }, open: 'Open RuntimeClass api' },
-  { path: '/storage/persistent-volume-claims', api: 'persistent-volume-claims', row: { status: 'Bound', volumeName: 'volume', capacity: '1Gi' }, open: 'Open claim api in payments' },
-  { path: '/leases', api: 'leases', row: { holderName: 'worker', durationSeconds: 30, renewTime: null }, open: 'Open Lease api in payments' },
-  { path: '/network/services', api: 'services', row: { type: 'ClusterIP', clusterIPs: ['10.0.0.1'] }, open: 'Open services api in payments' },
-  { path: '/config/configmaps', api: 'configmaps', row: {}, open: 'Open ConfigMap api in payments' },
-]) {
-  test(`${example.path} shares the compact table and inline inspection behavior`, async ({ page }) => {
-    await page.route(`**/api/v1/${example.api}?*`, (route) => route.fulfill({ json: { data: [{ ...metadata, ageSeconds: 60, ...example.row }], meta: { generation, page: collection } } }))
-    await page.route(`**/api/v1/${example.api}/**`, (route) => route.fulfill({ json: { data: { metadata }, meta: { generation } } }))
+const inventoryExamples: Array<{ path: string; api: string; row: Record<string, unknown>; open: string; expected: string; cluster?: boolean; nested?: boolean; detail?: Record<string, unknown> }> = [
+  ...Object.entries(gatewayCollections).map(([api, kind]) => ({ path: `/network/gateway-api/${api}`, api, row: { kind, apiVersion: 'gateway.networking.k8s.io/v1', status: 'Ready', className: 'edge-class', hosts: ['api.example.test'], addresses: ['10.0.0.1'], listeners: 1, rules: 1, conditions: [], related: [] }, open: `Open ${kind} api`, expected: 'api.example.test', cluster: api === 'gateway-classes' })),
+  { path: '/configuration/resource-quotas', api: 'resource-quotas', row: { hard: { pods: '20' }, used: { pods: '3' } }, open: 'Open quota api in payments', expected: 'pods: 20' },
+  { path: '/configuration/limit-ranges', api: 'limit-ranges', row: { items: [{ type: 'Container', max: { cpu: '4' } }] }, open: 'Open limit range api in payments', expected: 'cpu: 4' },
+  { path: '/configuration/hpas', api: 'hpas', row: { targetKind: 'Deployment', targetName: 'scaled-api', minReplicas: 1, maxReplicas: 10, currentReplicas: 2, desiredReplicas: 3, metricNames: ['cpu'], resourceTargets: [], conditions: [] }, open: 'Open autoscaler api in payments', expected: 'scaled-api' },
+  { path: '/configuration/pdbs', api: 'pdbs', row: { minAvailable: { isInt: false, string: '50%' }, currentHealthy: 2, desiredHealthy: 1, disruptionsAllowed: 1 }, open: 'Open budget api in payments', expected: '50%' },
+  { path: '/service-accounts', api: 'service-accounts', row: {}, open: 'Open ServiceAccount api in payments', expected: 'uid-api' },
+  ...['roles', 'cluster-roles'].map((api) => ({ path: `/access/${api}`, api, row: { ruleCount: 1, rules: [{ apiGroups: [''], resources: ['pods'], verbs: ['get', 'list'] }] }, open: 'Open Role api', expected: 'verbs: get; list', cluster: api.startsWith('cluster-') })),
+  ...['role-bindings', 'cluster-role-bindings'].map((api) => ({ path: `/access/${api}`, api, row: { roleRefKind: 'Role', roleRefName: 'read-pods', subjects: [{ kind: 'ServiceAccount', name: 'reader', namespace: 'payments' }] }, open: 'Open Binding api', expected: 'read-pods', cluster: api.startsWith('cluster-') })),
+  { path: '/administration/runtime-classes', api: 'runtime-classes', row: { handler: 'runc' }, open: 'Open RuntimeClass api', expected: 'runc', cluster: true },
+  { path: '/administration/priority-classes', api: 'priority-classes', row: { value: 1000, globalDefault: false, preemptionPolicy: 'Never' }, open: 'Open PriorityClass api', expected: 'Never', cluster: true },
+  { path: '/administration/customresourcedefinitions', api: 'customresourcedefinitions', row: { kind: 'Widget', group: 'widgets.example', scope: 'Namespaced', versions: [{ name: 'v1', storage: true, served: true }] }, open: 'Open CRD api', expected: 'widgets.example', cluster: true },
+  ...['mutating-webhook-configurations', 'validating-webhook-configurations'].map((api) => ({ path: `/administration/${api}`, api, row: { webhookCount: 1, webhooks: [{ name: 'admission.example', failurePolicy: 'Fail' }] }, open: 'Open webhook configuration api', expected: 'admission.example', cluster: true })),
+  { path: '/storage/persistent-volume-claims', api: 'persistent-volume-claims', row: { status: 'Bound', volumeName: 'volume', capacity: '1Gi' }, open: 'Open claim api in payments', expected: 'volume' },
+  { path: '/storage/persistent-volumes', api: 'persistent-volumes', row: { status: 'Bound', capacity: '1Gi', storageClass: 'fast-disk' }, open: 'Open api', expected: 'fast-disk', cluster: true },
+  { path: '/storage/storage-classes', api: 'storage-classes', row: { provisioner: 'csi.example', default: false, volumeBindingMode: 'WaitForFirstConsumer' }, open: 'Open api', expected: 'WaitForFirstConsumer', cluster: true },
+  { path: '/storage/volume-attachments', api: 'volume-attachments', row: { nodeName: 'worker-2', attacher: 'csi.example', attached: true }, open: 'Open api', expected: 'worker-2', cluster: true },
+  { path: '/storage/csi-nodes', api: 'csi-nodes', row: { driverCount: 1, drivers: [{ name: 'csi.example', nodeID: 'worker-2' }] }, open: 'Open api', expected: 'csi.example', cluster: true },
+  { path: '/storage/csi-drivers', api: 'csi-drivers', row: { attachRequired: true, fsGroupPolicy: 'ReadWriteOnceWithFSType' }, open: 'Open api', expected: 'ReadWriteOnceWithFSType', cluster: true },
+  { path: '/nodes', api: 'nodes', row: { roles: ['worker'], status: 'Ready', ready: true, kubeletVersion: 'v1.35.2', internalIP: '10.0.0.5', conditions: [], capacity: { cpu: '8' }, allocatable: { cpu: '7' } }, open: 'Open Node api', expected: 'v1.35.2', cluster: true },
+  { path: '/leases', api: 'leases', row: { holderName: 'worker', durationSeconds: 30, renewTime: null }, open: 'Open Lease api in payments', expected: 'worker' },
+  { path: '/network/services', api: 'services', row: { type: 'ClusterIP', clusterIPs: ['10.0.0.1'], ports: [] }, open: 'Open services api in payments', expected: '10.0.0.1', nested: true },
+  { path: '/network/ingresses', api: 'ingresses', row: { className: 'nginx', hosts: ['api.example'], paths: [], tlsHosts: [] }, open: 'Open ingresses api in payments', expected: 'api.example', nested: true },
+  { path: '/network/endpoint-slices', api: 'endpoint-slices', row: { addressType: 'IPv4', endpoints: [{ addresses: ['10.0.0.9'], conditions: { ready: true } }], ports: [] }, open: 'Open endpoint-slices api in payments', expected: '10.0.0.9', nested: true },
+  { path: '/network/endpoints', api: 'endpoints', row: { readyCount: 1, notReadyCount: 0, subsets: [] }, open: 'Open endpoints api in payments', expected: 'Ready addresses' },
+  { path: '/network/ingress-classes', api: 'ingress-classes', row: { controller: 'ingress.example', default: false }, open: 'Open ingress-classes api', expected: 'ingress.example', cluster: true },
+  { path: '/network/network-policies', api: 'network-policies', row: { podSelector: 'app=api', ruleSummary: [], policyTypes: ['Ingress'] }, open: 'Open network-policies api in payments', expected: 'app=api' },
+  { path: '/config/configmaps', api: 'configmaps', row: {}, detail: { entries: [{ key: 'MODE', value: 'production', encoding: 'utf-8' }] }, open: 'Open ConfigMap api in payments', expected: 'MODE' },
+  { path: '/config/secrets', api: 'secrets', row: {}, detail: { type: 'Opaque' }, open: 'Open Secret api in payments', expected: 'Opaque' },
+]
+
+for (const example of inventoryExamples) {
+  test(`${example.path} loads selected data and shares full list / 70% overlay behavior`, async ({ page }) => {
+    const identity = { ...metadata, ...(example.cluster ? { namespace: undefined } : {}) }
+    const row = { ...identity, ageSeconds: 60, ...example.row }
+    let detailReads = 0
+    await page.route(`**/api/v1/${example.api}?*`, (route) => route.fulfill({ json: { data: [row], meta: { generation, page: collection } } }))
+    await page.route(`**/api/v1/${example.api}/**`, (route) => {
+      detailReads++
+      expect(new URL(route.request().url()).pathname).toBe(`/api/v1/${example.api}/${example.cluster ? '' : 'payments/'}api`)
+      return route.fulfill({ json: { data: { metadata: identity, ...(example.nested ? { summary: row } : row), ...example.detail }, meta: { generation } } })
+    })
     await page.goto(example.path)
     const table = page.getByRole('table').first()
+    await expect(table).toBeVisible()
+    await table.getByRole('checkbox', { name: 'Select all loaded rows' }).check()
+    await expect(page.getByRole('toolbar', { name: 'Bulk actions' })).toContainText('1 selected')
+    await expect(page.getByRole('button', { name: 'Delete selected' })).toHaveCount(0)
+    await page.getByRole('button', { name: 'Clear selection' }).click()
+    const inventory = page.locator('.resource-collection')
+    const initial = (await inventory.boundingBox())!
+    const pane = (await page.locator('.resource-list-pane').boundingBox())!
+    expect(initial.y + initial.height).toBeCloseTo(pane.y + pane.height, 0)
     await expect(page.getByRole('searchbox', { name: 'Search resources' })).toBeVisible()
-    await expect(page.getByRole('button', { name: /Apply filters|Refresh/ })).toHaveCount(0)
     await expect(table.getByRole('button', { name: 'Choose visible columns', exact: true })).toBeVisible()
-    await table.getByRole('button', { name: example.open, exact: true }).click()
-    const panel = page.locator('.workspace-panel')
-    await expect(panel).toBeVisible()
-    await expect(panel).toHaveAttribute('role', 'region')
-    await expectFixedSplit(page)
-    await expect(table).toBeVisible()
-    expect((await panel.boundingBox())!.y).toBeGreaterThan((await table.boundingBox())!.y)
-    await panel.getByRole('button', { name: 'Close resource workspace' }).click()
-    await expect(page).toHaveURL(new RegExp(`${example.path}$`))
-    await expect(table).toBeVisible()
+    for (let iteration = 0; iteration < 2; iteration++) {
+      await table.getByRole('button', { name: example.open, exact: true }).click()
+      const panel = page.locator('.workspace-panel')
+      await expect(panel.getByRole('tabpanel')).toContainText(example.expected)
+      await expectFixedSplit(page)
+      expect((await inventory.boundingBox())!.height).toBeCloseTo(initial.height, 0)
+      await panel.getByRole('button', { name: 'Close resource workspace' }).click()
+      await expect(panel).toHaveCount(0)
+      await expect(page.locator('.resource-detail-slot')).toBeHidden()
+      await expect(page).toHaveURL(new RegExp(`${example.path}$`))
+      expect((await inventory.boundingBox())!.height).toBeCloseTo(initial.height, 0)
+    }
+    expect(detailReads).toBeGreaterThan(0)
   })
 }
 
 for (const target of [
+  ...Object.entries(gatewayCollections).map(([collection, kind]) => ({ collection, kind, name: 'edge', namespace: collection === 'gateway-classes' ? null : 'payments', path: `/network/gateway-api/${collection}/${collection === 'gateway-classes' ? '' : 'payments/'}edge`, apiVersion: 'gateway.networking.k8s.io/v1beta1' })),
   { collection: 'pods', kind: 'Pod', name: pod.name, namespace: 'payments', path: `/pods/payments/${pod.name}`, apiVersion: 'v1' },
   { collection: 'configmaps', kind: 'ConfigMap', name: 'settings', namespace: 'payments', path: '/config/configmaps/payments/settings', apiVersion: 'v1' },
   { collection: 'secrets', kind: 'Secret', name: 'credentials', namespace: 'payments', path: '/config/secrets/payments/credentials', apiVersion: 'v1' },
@@ -676,3 +784,260 @@ for (const target of [
     expect(writes).toBe(2)
   })
 }
+
+for (const [kind, plural] of [['Deployment', 'deployments'], ['ReplicaSet', 'replicasets'], ['DaemonSet', 'daemonsets'], ['StatefulSet', 'statefulsets'], ['Job', 'jobs'], ['CronJob', 'cronjobs']]) {
+  test(`${kind} loads its own detail including nullable workload arrays`, async ({ page }) => {
+    const row = { ...metadata, kind, ready: 1, desired: 1, available: 1, updated: 1, status: 'Healthy', ageSeconds: 60 }
+    await page.route('**/api/v1/workloads?*', (route) => route.fulfill({ json: { data: [row], meta: { generation, page: collection } } }))
+    await page.route(`**/api/v1/workloads/${plural}/payments/api`, (route) => route.fulfill({ json: { data: { ...row, metadata, containers: [spec], conditions: null, related: null }, meta: { generation } } }))
+    await page.goto(`/workloads/kind/${plural}`)
+    await page.getByRole('button', { name: `Open ${kind} api in payments`, exact: true }).click()
+    const panel = page.locator('.workspace-panel')
+    await expect(panel.getByRole('tabpanel')).toContainText('example/api:1')
+    await expect(panel).toHaveAttribute('aria-label', `${kind} api`)
+    await expectFixedSplit(page)
+    await panel.getByRole('button', { name: 'Close resource workspace' }).click()
+    await expect(panel).toHaveCount(0)
+    await page.reload()
+    await expect(page.locator('.resource-detail-slot')).toBeHidden()
+    const inventory = (await page.locator('.resource-collection').boundingBox())!
+    const pane = (await page.locator('.resource-list-pane').boundingBox())!
+    expect(inventory.y + inventory.height).toBeCloseTo(pane.y + pane.height, 0)
+  })
+}
+
+test('Gateway relationships switch namespace, exact inventory and cluster scope', async ({ page }) => {
+  await page.route('**/api/v1/namespace-scopes/1', (route) => route.fulfill({ json: { data: { namespaces: ['payments', 'infra'], defaultNamespace: 'payments' } } }))
+  const reads: URL[] = []
+  const routeRow = { ...metadata, kind: 'HTTPRoute', apiVersion: 'gateway.networking.k8s.io/v1', status: 'Ready', hosts: [], addresses: [], conditions: [], related: [{ apiGroup: 'gateway.networking.k8s.io', kind: 'Gateway', namespace: 'infra', name: 'edge' }] }
+  const gateway = { ...routeRow, namespace: 'infra', name: 'edge', kind: 'Gateway', className: 'public', related: [{ apiGroup: 'gateway.networking.k8s.io', kind: 'GatewayClass', namespace: '', name: 'public' }] }
+  await page.route('**/api/v1/http-routes**', (route) => route.fulfill({ json: { data: new URL(route.request().url()).pathname.endsWith('/api') ? routeRow : [routeRow], meta: { generation, page: collection } } }))
+  await page.route('**/api/v1/gateways**', (route) => {
+    const url = new URL(route.request().url()); reads.push(url)
+    return route.fulfill({ json: { data: url.pathname.endsWith('/edge') ? gateway : [gateway], meta: { generation, page: collection } } })
+  })
+  await page.route('**/api/v1/gateway-classes**', (route) => {
+    const url = new URL(route.request().url()); reads.push(url)
+    const item = { ...gateway, namespace: '', kind: 'GatewayClass', name: 'public', related: [] }
+    return route.fulfill({ json: { data: url.pathname.endsWith('/public') ? item : [item], meta: { generation, page: collection } } })
+  })
+  await page.goto('/network/gateway-api/http-routes')
+  await page.getByRole('button', { name: 'Open HTTPRoute api', exact: true }).click()
+  const panel = page.locator('.workspace-panel')
+  await panel.getByRole('button', { name: 'Open Gateway edge', exact: true }).click()
+  await expect(panel).toHaveAttribute('aria-label', 'Gateway edge')
+  await expect(page.getByLabel('Global namespace', { exact: true })).toHaveValue('infra')
+  await expect.poll(() => reads.some((url) => url.pathname === '/api/v1/gateways' && url.searchParams.get('namespace') === 'infra' && url.searchParams.get('fieldSelector') === 'metadata.name=edge')).toBe(true)
+  await panel.getByRole('button', { name: 'Open GatewayClass public', exact: true }).click()
+  await expect(panel).toHaveAttribute('aria-label', 'GatewayClass public')
+  await expect.poll(() => reads.some((url) => url.pathname === '/api/v1/gateway-classes' && !url.searchParams.has('namespace') && url.searchParams.get('fieldSelector') === 'metadata.name=public')).toBe(true)
+  await expectFixedSplit(page)
+})
+
+test('100 loaded Pods authorize and delete all exact targets in bounded batches', async ({ page }) => {
+  const rows = Array.from({ length: 100 }, (_, index) => ({ ...pod, name: `pod-${index.toString().padStart(3, '0')}` }))
+  const permissionBatches: string[][] = []
+  const deleted: string[] = []
+  await page.route('**/api/v1/pods?*', (route) => route.fulfill({ json: { data: rows.filter((row) => !deleted.includes(row.name)), meta: { generation, page: collection } } }))
+  await page.route('**/api/v1/permissions?*', (route) => {
+    const url = new URL(route.request().url()), names = url.searchParams.getAll('resourceName')
+    permissionBatches.push(names)
+    expect(names.length).toBeLessThanOrEqual(20)
+    return route.fulfill({ json: { data: { generation, complete: true, truncated: false, errors: [], decisions: names.flatMap((resourceName) => url.searchParams.getAll('capability').map((capabilityId) => ({ capabilityId, namespace: 'payments', resourceName, decision: 'allowed' }))) } } })
+  })
+  await page.route('**/api/v1/pods/payments/**', (route) => {
+    const path = new URL(route.request().url()).pathname, name = path.split('/')[5]
+    if (route.request().method() !== 'GET') {
+      expect(route.request().headers()['x-kubepeep-csrf']).toBe('csrf_workspace')
+      expect(route.request().postDataJSON()).toMatchObject({ confirmed: true, expectedUid: `uid-${name}`, expectedResourceVersion: '17', expectedGeneration: generation, target: { name, namespace: 'payments', kind: 'Pod' } })
+      deleted.push(name)
+      return route.fulfill({ json: { data: { accepted: true, generation } } })
+    }
+    return route.fulfill({ json: { data: { metadata: { ...metadata, name, uid: `uid-${name}` }, summary: { ...pod, name }, conditions: [], containers: [], initContainers: [], ephemeralContainers: [], relatedEvents: [] }, meta: { generation } } })
+  })
+  await page.goto('/pods')
+  await page.getByRole('checkbox', { name: 'Select all loaded rows' }).check()
+  await expect(page.getByRole('toolbar', { name: 'Bulk actions' })).toContainText('100 selected')
+  await expect(page.getByRole('button', { name: 'Restart selected' })).toBeEnabled()
+  const remove = page.getByRole('button', { name: 'Delete selected', exact: true })
+  await expect(remove).toBeEnabled()
+  expect(new Set(permissionBatches.flat()).size).toBe(100)
+  await remove.click()
+  const dialog = page.getByRole('alertdialog', { name: 'Delete 100 Pods' })
+  await dialog.getByRole('checkbox', { name: 'I understand this action cannot be undone.' }).check()
+  await dialog.getByRole('button', { name: 'Delete selected' }).click()
+  await expect(page.getByText('Deleted 100 Pods', { exact: true })).toBeVisible({ timeout: 20_000 })
+  expect(new Set(deleted).size).toBe(100)
+})
+
+test('HPA replica capacity uses green, yellow and red percentage bars', async ({ page }) => {
+  await page.route('**/api/v1/hpas?*', (route) => route.fulfill({ json: { data: [20, 80, 95].map((currentReplicas) => ({ ...metadata, name: `scale-${currentReplicas}`, minReplicas: 1, maxReplicas: 100, currentReplicas, desiredReplicas: currentReplicas, targetKind: 'Deployment', targetName: 'api', resourceTargets: [], conditions: [], metricNames: [] })), meta: { generation, page: collection } } }))
+  await page.goto('/configuration/hpas')
+  for (const [value, tone] of [[20, 'healthy'], [80, 'warning'], [95, 'danger']] as const) {
+    const row = page.getByRole('row').filter({ has: page.getByRole('button', { name: `Open autoscaler scale-${value} in payments` }) })
+    const meter = row.getByRole('meter', { name: 'HPA replica capacity' })
+    await expect(meter).toHaveAttribute('aria-valuenow', `${value}`)
+    await expect(meter.locator('..')).toHaveAttribute('data-tone', tone)
+  }
+})
+
+test('visited Pods stay warm behind Deployments and return without a loading gap', async ({ page }) => {
+  await page.clock.install()
+  let reads = 0
+  await page.route('**/api/v1/pods?*', (route) => {
+    reads++
+    return route.fulfill({ json: { data: [{ ...pod, name: `warm-${reads}` }], meta: { generation, page: collection } } })
+  })
+  await page.goto('/pods')
+  await expect(page.getByRole('button', { name: 'Open Pod warm-1 in payments' })).toBeVisible()
+  const menu = page.getByRole('navigation', { name: 'Workloads resources', exact: true })
+  await menu.getByRole('link', { name: 'Deployments', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Open Deployment api in payments' })).toBeVisible()
+  await page.clock.fastForward(10_001)
+  await expect.poll(() => reads).toBe(2)
+  await menu.getByRole('link', { name: 'Pods', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Open Pod warm-2 in payments' })).toBeVisible()
+  expect(reads).toBe(2)
+})
+
+test('Pods show starting separately and container state dots; column order survives reload', async ({ page }) => {
+  const containers = [
+    { name: 'app', type: 'regular', state: 'running', status: 'running' },
+    { name: 'sidecar', type: 'regular', state: 'waiting', status: 'starting', reason: 'ContainerCreating' },
+    { name: 'setup', type: 'init', state: 'terminated', status: 'inactive', reason: 'Completed' },
+  ]
+  let prefs = { version: 1, ui: { language: 'en' }, columns: { hidden: {}, order: {} } }
+  await page.route('**/api/v1/preferences', async (route) => {
+    if (route.request().method() === 'PUT') prefs = route.request().postDataJSON()
+    await route.fulfill({ json: { data: prefs } })
+  })
+  await page.route('**/api/v1/pods?*', (route) => route.fulfill({ json: { data: [{ ...pod, starting: true, problematic: false, containers, containerCount: 3 }], meta: { generation, page: collection } } }))
+  await page.goto('/pods')
+  const table = page.getByRole('table', { name: 'Authorized Pod pages' })
+  await expect(table.getByText('Starting', { exact: true })).toBeVisible()
+  await expect(table.getByText('problem', { exact: true })).toHaveCount(0)
+  await page.getByRole('button', { name: 'Choose visible columns', exact: true }).click()
+  await expect(page.getByRole('dialog', { name: 'Choose visible columns', exact: true })).toBeVisible()
+  expect(await table.locator('.table-column-chooser').evaluate(element => element.scrollLeft)).toBe(0)
+  await page.getByRole('checkbox', { name: 'Containers', exact: true }).check()
+  await page.keyboard.press('Escape')
+  const cell = table.getByRole('cell').filter({ has: page.locator('[title^="app (regular)"]') })
+  await expect(cell).toContainText('3')
+  await expect(cell.locator('[title^="app (regular)"]')).toHaveClass(/bg-kp-green/)
+  await expect(cell.locator('[title^="sidecar (regular)"]')).toHaveClass(/bg-kp-yellow/)
+  await expect(cell.locator('[title^="setup (init)"]')).toHaveClass(/bg-kp-overlay/)
+  await page.getByRole('button', { name: 'Choose visible columns', exact: true }).click()
+  for (let index = 0; index < 5; index++) {
+    await page.getByRole('button', { name: 'Move Containers left', exact: true }).click()
+    await expect.poll(() => (prefs.columns.order as Record<string, string[]>).pods?.indexOf('containers')).toBe(7 - index)
+  }
+  await expect.poll(() => Object.keys(prefs.columns.order)).toContain('pods')
+  await page.keyboard.press('Escape')
+  const before = await table.getByRole('columnheader').allTextContents()
+  expect(before.findIndex((value) => value.includes('Containers'))).toBeLessThan(before.findIndex((value) => value.includes('Ready')))
+  await page.reload()
+  await expect(table).toBeVisible()
+  await expect.poll(() => table.getByRole('columnheader').allTextContents()).toEqual(before)
+})
+
+test('automatic refresh defaults to ten seconds, stops globally, and resumes on enable', async ({ page }) => {
+  await page.clock.install()
+  let reads = 0
+  await page.route('**/api/v1/pods?*', (route) => {
+    reads++
+    return route.fulfill({ json: { data: [pod], meta: { generation, page: collection } } })
+  })
+  await page.goto('/pods')
+  await expect(page.getByRole('table', { name: 'Authorized Pod pages' })).toBeVisible()
+  const toggle = page.getByRole('button', { name: 'Automatic refresh every 10 seconds' })
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true')
+  expect(reads).toBe(1)
+  await page.clock.fastForward(9_000)
+  expect(reads).toBe(1)
+  await page.clock.fastForward(1_000)
+  await expect.poll(() => reads).toBe(2)
+  await toggle.click()
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false')
+  await page.clock.fastForward(30_000)
+  expect(reads).toBe(2)
+  await toggle.click()
+  await page.clock.fastForward(10_000)
+  await expect.poll(() => reads).toBe(3)
+  await page.reload()
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true')
+})
+
+test('kubeconfig import browses files, retains conflict drafts and makes a new source selectable', async ({ page }, testInfo) => {
+  const profiles = [{ id: 1, name: 'Current', context: 'development', isDefault: true, kubeconfigFiles: [{ position: 0, displayPath: '~/.kube/current' }] }]
+  await page.route('**/api/v1/cluster/profiles', (route) => route.fulfill({ json: { data: profiles } }))
+  await page.route('**/api/v1/contexts?*', (route) => route.fulfill({ json: { data: [{ clusterProfileId: Number(new URL(route.request().url()).searchParams.get('clusterProfileId')), name: 'development', cluster: 'dev', selected: true }] } }))
+  let saved = false
+  await page.route('**/api/v1/cluster/profiles/import', async (route) => {
+    expect(route.request().headers()['x-kubepeep-csrf']).toBe('csrf_workspace')
+    const body = route.request().postDataJSON()
+    if (!saved) {
+      saved = true
+      expect(body.content).toContain('example.invalid')
+      await route.fulfill({ status: 409, json: { code: 'KUBECONFIG_CONFLICT', message: 'Existing entries were preserved.' } })
+      return
+    }
+    expect(body).toEqual({ path: '~/clusters/dev.yaml' })
+    const profile = { id: 2, name: 'Imported', context: 'development', isDefault: false, kubeconfigFiles: [{ position: 0, displayPath: '~/clusters/dev.yaml' }] }
+    profiles.push(profile)
+    await route.fulfill({ json: { data: profile } })
+  })
+  await page.goto('/pods')
+  await page.getByRole('button', { name: 'Add kubeconfig' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Add kubeconfig' })
+  await expect(dialog).toBeVisible()
+  const content = 'apiVersion: v1\nkind: Config\nclusters: [{name: dev, cluster: {server: https://example.invalid}}]'
+  await dialog.getByLabel('Kubeconfig file', { exact: true }).setInputFiles({ name: 'config.yaml', mimeType: 'application/yaml', buffer: Buffer.from(content) })
+  await expect(dialog.getByLabel('Kubeconfig YAML')).toHaveValue(content)
+  await page.screenshot({ path: testInfo.outputPath('kubeconfig-import-desktop.png') })
+  await dialog.getByRole('button', { name: 'Save kubeconfig' }).click()
+  await expect(dialog.getByRole('alert')).toContainText('Existing entries were preserved')
+  await expect(dialog.getByLabel('Kubeconfig YAML')).toHaveValue(content)
+  await dialog.getByRole('button', { name: 'Use local path' }).click()
+  await dialog.getByLabel('Local kubeconfig path').fill('~/clusters/dev.yaml')
+  await dialog.getByRole('button', { name: 'Add source', exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+  await expect(page.getByLabel('Kubeconfig source', { exact: true })).toHaveValue('2')
+  await expect(page.getByLabel('Kubernetes context', { exact: true })).toHaveValue('')
+  await expect(page.getByLabel('Kubernetes context', { exact: true }).getByRole('option', { name: 'development · dev' })).toHaveCount(1)
+})
+
+test('context colors persist and isolate identical names in different sources', async ({ page }, testInfo) => {
+  let profileId = 1
+  let prefs = { version: 1, ui: { language: 'en', contextColors: [] as Array<{ clusterProfileId: number; context: string; color: string }> } }
+  await page.route('**/api/v1/preferences', async (route) => {
+    if (route.request().method() === 'PUT') prefs = route.request().postDataJSON()
+    await route.fulfill({ json: { data: prefs } })
+  })
+  await page.route('**/api/v1/status', (route) => route.fulfill({ json: { data: { version: 'test', components: Object.fromEntries(['application', 'sqlite', 'kubeconfig', 'context', 'cluster', 'metrics'].map((key) => [key, { status: 'healthy' }])), selection: { clusterProfileId: profileId, context: 'development', cluster: 'dev', scopeId: 1, scopeMode: 'list', defaultNamespace: 'payments', namespaceCount: 1, generation } } } }))
+  await page.route('**/api/v1/cluster/profiles', (route) => route.fulfill({ json: { data: [1, 2].map((id) => ({ id, name: `Source ${id}`, context: 'development', isDefault: id === 1, kubeconfigFiles: [{ position: 0, displayPath: `~/.kube/source-${id}` }] })) } }))
+  await page.route('**/api/v1/contexts?*', (route) => route.fulfill({ json: { data: [{ clusterProfileId: Number(new URL(route.request().url()).searchParams.get('clusterProfileId')), name: 'development', cluster: 'dev', selected: true }] } }))
+  await page.route('**/api/v1/contexts/select', (route) => {
+    profileId = route.request().postDataJSON().clusterProfileId
+    return route.fulfill({ json: { data: { clusterProfileId: profileId, context: 'development', cluster: 'dev', generation } } })
+  })
+  await page.goto('/pods')
+  const shell = page.locator('.app-shell')
+  await page.getByRole('button', { name: 'Context color', exact: true }).click()
+  await page.getByRole('button', { name: 'Development — blue' }).click()
+  await expect(shell).toHaveAttribute('data-context-color', '#38bdf8')
+  await page.keyboard.press('Escape')
+  await page.reload()
+  await expect(shell).toHaveAttribute('data-context-color', '#38bdf8')
+  await page.getByLabel('Kubeconfig source', { exact: true }).selectOption('2')
+  await page.getByLabel('Kubernetes context', { exact: true }).selectOption('development')
+  await expect(shell).not.toHaveAttribute('data-context-color')
+  await page.getByRole('button', { name: 'Context color', exact: true }).click()
+  await page.getByRole('button', { name: 'Production — red' }).click()
+  await expect(shell).toHaveAttribute('data-context-color', '#f87171')
+  await page.keyboard.press('Escape')
+  await page.screenshot({ path: testInfo.outputPath('context-red-desktop.png') })
+  expect(prefs.ui.contextColors).toHaveLength(2)
+  await page.getByLabel('Kubeconfig source', { exact: true }).selectOption('1')
+  await page.getByLabel('Kubernetes context', { exact: true }).selectOption('development')
+  await expect(shell).toHaveAttribute('data-context-color', '#38bdf8')
+})

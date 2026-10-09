@@ -94,7 +94,7 @@ func authorizationHTTPError(err error, matrix authorization.CapabilityMatrix) er
 	var public *authorization.PublicError
 	if errors.As(err, &public) {
 		details := any(nil)
-		if public.Code == authorization.CodeAuthorizationUnavailable && len(matrix.Decisions) != 0 {
+		if len(matrix.Decisions) != 0 {
 			details = matrix
 		}
 		return api.NewHTTPError(public.HTTPStatus, string(public.Code), public.Message, details, err)

@@ -10,10 +10,11 @@ import (
 
 func TestKubernetesModulesArePinnedToValidatedVersion(t *testing.T) {
 	want := map[string]string{
-		"k8s.io/api":          "v0.35.7",
-		"k8s.io/apimachinery": "v0.35.7",
-		"k8s.io/client-go":    "v0.35.7",
-		"k8s.io/metrics":      "v0.35.7",
+		"k8s.io/api":                     "v0.36.5",
+		"k8s.io/apiextensions-apiserver": "v0.36.5",
+		"k8s.io/apimachinery":            "v0.36.5",
+		"k8s.io/client-go":               "v0.36.5",
+		"k8s.io/metrics":                 "v0.36.5",
 	}
 	for module, version := range want {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

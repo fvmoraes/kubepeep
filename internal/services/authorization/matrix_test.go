@@ -313,7 +313,7 @@ func TestMatrixReturnsUnavailableWhenEveryDecisionIsUnknown(t *testing.T) {
 		ActiveNamespaces: []string{"payments"},
 		CapabilityIDs:    []string{"pods.list", "pods.watch"},
 	})
-	if ErrorCodeOf(err) != CodeAuthorizationUnavailable || len(matrix.Decisions) != 2 || len(matrix.Errors) != 2 {
+	if ErrorCodeOf(err) != CodeUpstreamTimeout || len(matrix.Decisions) != 2 || len(matrix.Errors) != 2 {
 		t.Fatalf("matrix=%+v code=%q", matrix, ErrorCodeOf(err))
 	}
 	for _, capability := range matrix.Decisions {

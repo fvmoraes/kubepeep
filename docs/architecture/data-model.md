@@ -58,8 +58,11 @@ O nome do profile é único localmente. Contextos iguais podem existir em profil
 
 Trocar o profile default ocorre em uma transação: zerar o anterior, marcar o novo e verificar que existe exatamente um default quando há profiles.
 
-Profiles não são criados nem recebem paths por uma rota web no MVP. No
-bootstrap, o adapter resolve o conjunto ordenado pela precedência
+Profiles também podem ser cadastrados pela importação explícita em
+`POST /api/v1/cluster/profiles/import`. Um caminho registra a fonte existente;
+conteúdo validado é mesclado no arquivo Kubernetes padrão, fora do SQLite.
+O banco recebe apenas o path, nunca o kubeconfig ou suas credenciais.
+No bootstrap, o adapter resolve o conjunto ordenado pela precedência
 `--kubeconfig` > `KUBECONFIG` > profile `is_default` persistido > path
 recomendado da plataforma, normaliza-o e o reconcilia em uma transação:
 
@@ -106,7 +109,7 @@ Regras:
 - não expandir conteúdo, token ou certificado;
 - `~` pode ser expandido antes de persistir para evitar ambiguidade;
 - o comportamento de separadores, deduplicação e merge reproduz o loader
-  oficial do `client-go v0.35.7`: flag explícita seleciona um único arquivo e
+  oficial do `client-go` fixado em `go.mod`: flag explícita seleciona um único arquivo e
   `KUBECONFIG` usa a lista de paths nativa preservando precedência; somente na
   ausência dessas fontes o produto consulta profile default e path recomendado
   conforme a regra de bootstrap acima.
@@ -219,6 +222,7 @@ Uma migration já aplicada com checksum diferente é erro fatal e não é reapli
 | Chave | Schema v1 | Default | Limite |
 | --- | --- | --- | --- |
 | `ui.language` | `"en"` ou `"pt-BR"` | `"en"` | enum |
+| `ui.context_colors` | array de `{clusterProfileId, context, color}` | `[]` | 200 pares únicos; cor `#RRGGBB` |
 | `logs.wrap` | boolean | `false` | — |
 | `logs.timestamps` | boolean | `true` | — |
 | `logs.tail_lines` | integer | `200` | 1–2000 |
@@ -229,6 +233,24 @@ Uma migration já aplicada com checksum diferente é erro fatal e não é reapli
 | `filters.pods` | objeto `SavedFilterSet` | vazio | até 50 filtros |
 | `filters.events` | objeto `SavedFilterSet` | vazio | até 50 filtros |
 | `filters.logs` | objeto `SavedFilterSet` | vazio | até 50 filtros |
+| `favorites` | conjunto versionado de identidades | vazio | 50 recursos, sem conteúdo |
+| `shell.sidebar_compact` | boolean | `false` | — |
+| `shell.collapsed_groups` | array de IDs de navegação | padrão do shell | grupos conhecidos, sem duplicatas |
+| `columns.hidden` | mapa coleção → IDs ocultos | sem personalização | até 32 IDs por coleção; 64 KiB por chave |
+| `columns.order` | mapa coleção → IDs ordenados | ordem inicial comum | até 32 IDs únicos por coleção; 64 KiB por chave |
+| `recent` | conjunto versionado de identidades | vazio | 20 entradas; retenção de 30 dias |
+| `custom_views` | array de `{clusterProfileId, context, cluster, items}` | `[]` | 100 contextos, 32 GVRs por contexto; 64 KiB total |
+
+`ui.context_colors` e `custom_views` aparecem no DTO como `ui.contextColors` e
+`customViews`. As colunas aceitam coleções nativas, Helm, Gateway API e
+`dynamic:{group|_}:{version}:{resource}:{n|c}`. As visões armazenam somente
+identidade, kind e short names, sem objetos Kubernetes ou YAML.
+
+Ausência de preferência de colunas significa usar o conjunto inicial; uma
+lista vazia de IDs ocultos significa mostrar todas. Ordem, visibilidade, cores
+e visões customizadas não expiram e sobrevivem à reabertura. A retenção de
+recentes não se aplica a essas preferências. Os cinco inventários mantidos
+quentes são cache em memória, não registros nesta tabela.
 
 IDs de seção conhecidos:
 
@@ -403,6 +425,13 @@ O runner SQLite vive em `internal/adapters/sqlite/`; os arquivos SQL ficam em
 `internal/migrations/sql/`, embutidos por `internal/migrations/migrations.go`.
 O spike F1 permanece como reprodução histórica do embed.
 
+A migration `0004_context_view_preferences.sql` amplia a constraint de chaves
+permitidas de `preferences`, preservando valores, versões e timestamps
+anteriores. A substituição da tabela é transacional e marcada como destrutiva
+para exigir o backup verificável do runner. As migrations já lançadas mantêm
+seus checksums. Testes verificam dados legados e reabertura do banco após gravar
+cores, colunas e visões por contexto.
+
 ## 9. Backup, update e rollback
 
 Antes de migration destrutiva ou incompatível:
@@ -437,7 +466,7 @@ Repositórios locais retornam modelos de domínio, não `sql.Row` nem JSON bruto
 
 | Repositório | Operações |
 | --- | --- |
-| `ClusterProfileRepository` | list, get, find by exact ordered paths, create from bootstrap, update selected context, select default |
+| `ClusterProfileRepository` | list, get, find by exact ordered paths, create from bootstrap/import, update selected context, select default |
 | `NamespaceScopeRepository` | list/get, save aggregate transactionally, delete |
 | `PreferenceRepository` | get allowlisted snapshot, replace validated keys |
 | `MigrationRepository` | current version/checksum, record apply |
@@ -470,7 +499,7 @@ Nenhum teste usa credencial real.
 
 ## 13. Retenção e exclusão
 
-- Profiles reconciliados pelo bootstrap persistem até a remoção explícita de
+- Profiles reconciliados pelo bootstrap ou importação persistem até a remoção explícita de
   todos os dados locais; não existe exclusão individual de profile pela API web
   no MVP.
 - A remoção integral dos dados locais elimina profiles, paths e scopes; qualquer

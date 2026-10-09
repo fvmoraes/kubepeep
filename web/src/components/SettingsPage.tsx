@@ -7,6 +7,7 @@ import type { Preferences } from '../api/types'
 import { StatePanel } from './StatePanel'
 import { Button, Card, CardContent, Checkbox, Input, PageHeader, Select } from './ui'
 import { ErrorBanner, SuccessBanner, WarningBanner } from './ui/Banner'
+import { ClientLoadDiagnostics } from './ClientLoadDiagnostics'
 
 function errorMessage(error: unknown): string {
   return error instanceof APIError ? error.message : 'Preferences could not be saved.'
@@ -21,6 +22,7 @@ export function SettingsPage() {
       {preferences.isPending ? <StatePanel kind="loading" title="Loading preferences">Defaults are materialized by the local service.</StatePanel>
         : preferences.isError ? <StatePanel kind="error" title="Preferences unavailable" details={errorMessage(preferences.error)}>{errorMessage(preferences.error)}</StatePanel>
 		  : <SettingsForm initial={preferences.data} />}
+		<ClientLoadDiagnostics />
 		<PerformanceDiagnostics />
     </div>
   )

@@ -11,6 +11,7 @@ próprios. Comece pelo [escopo do produto](reference/product-spec.md).
 | [Download e instalação](download.md) | Pacotes, versão explícita, checksum, atualização e remoção |
 | [Desenvolvimento](guides/development.md) | Ambiente, comandos, layout e validação |
 | [Build desktop](guides/desktop-build.md) | Wails e dependências nativas por plataforma |
+| [Inventários e workspaces](guides/resource-workspaces.md) | Colunas, detalhes, atualização, kubeconfig, YAML, Helm, Gateway API e visões customizadas |
 | [Investigação e diagnóstico](guides/investigation-diagnostics.md) | Problemas, relações, logs e diagnósticos |
 | [Observabilidade](guides/observability.md) | Logs operacionais, métricas e instrumentação |
 

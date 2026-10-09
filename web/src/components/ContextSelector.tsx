@@ -13,6 +13,8 @@ import {
   type SelectionSummary,
 } from '../api/client'
 import { Select } from './ui'
+import { KubeconfigImport } from './KubeconfigImport'
+import { ContextColorPicker } from './ContextColorPicker'
 
 interface ContextSelectorProps {
   selection: SelectionSummary | null
@@ -80,12 +82,12 @@ export function ContextSelector({ selection, onSelected }: ContextSelectorProps)
     ?? contextList.find((context) => context.selected)
     ?? contextList.find((context) => context.name === selection?.context)
     ?? contextList[0]
-  const effectiveContextName = preferredContext?.name ?? contextName
+  const effectiveContextName = contextName === '' && effectiveProfileId !== selection?.clusterProfileId ? '' : preferredContext?.name ?? contextName
 
   const session = useQuery({
     queryKey: ['session'],
     queryFn: ({ signal }) => getSession(signal),
-    enabled: effectiveProfileId !== null && effectiveContextName !== '',
+    enabled: effectiveProfileId !== null,
     staleTime: 5 * 60_000,
     retry: false,
   })
@@ -136,18 +138,26 @@ export function ContextSelector({ selection, onSelected }: ContextSelectorProps)
     contextSelection.mutate({ intent: selectionIntent.current, controller, context })
   }
 
+  const importControl = <KubeconfigImport onImported={(profile) => {
+    selectionController.current?.abort()
+    setProfileId(profile.id)
+    setContextName('')
+    setSelectionError(null)
+  }} />
+
   if (profiles.isPending) {
-    return <LoadingState label="Loading kubeconfigs…" layout="inline" />
+    return <>{importControl}<LoadingState label="Loading kubeconfigs…" layout="inline" /></>
   }
   if (profiles.isError) {
-    return <div className="control flex items-center text-content text-kp-red" role="status">{queryError(profiles.error)}</div>
+    return <>{importControl}<div className="control flex items-center text-content text-kp-red" role="status">{queryError(profiles.error)}</div></>
   }
   if (profileList.length === 0) {
-    return <div className="control flex items-center text-content text-kp-overlay-text" role="status">No kubeconfig source found</div>
+    return <>{importControl}<div className="control flex items-center text-content text-kp-overlay-text" role="status">No kubeconfig source found</div></>
   }
 
   return (
     <div className="flex items-center gap-1.5 min-w-0" aria-label="Kubernetes context selector">
+      {importControl}
       <div className="relative min-w-0">
         <Select
           aria-label="Kubeconfig source"
@@ -199,6 +209,7 @@ export function ContextSelector({ selection, onSelected }: ContextSelectorProps)
               : 'Choose a context'}</option>
         {contextList.map((context) => <option key={context.name} value={context.name}>{context.name} · {context.cluster}</option>)}
       </Select>
+      <ContextColorPicker selection={selection} />
       {contextSelection.isPending ? <span className="text-content text-kp-overlay-text" role="status">Switching…</span> : null}
       {contexts.isError ? <span className="text-content text-kp-red" role="status">{queryError(contexts.error)}</span> : null}
       {contexts.data && contextList.length === 0 ? <span className="text-content text-kp-red" role="status">No contexts exist in this kubeconfig.</span> : null}

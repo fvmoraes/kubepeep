@@ -21,6 +21,7 @@ interface ConfirmDialogProps {
   pending?: boolean
   /** Require typing the single resource name for especially dangerous operations. */
   requireTypingName?: string
+  acknowledgementLabel?: string
   onConfirm: () => void
   onCancel: () => void
 }
@@ -46,6 +47,7 @@ function ConfirmDialogBody({
   pendingLabel = 'Working…',
   pending = false,
   requireTypingName,
+  acknowledgementLabel = 'I understand this action cannot be undone.',
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
@@ -109,7 +111,7 @@ function ConfirmDialogBody({
           </label>
         ) : null}
         <Checkbox checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)}>
-          I understand this action cannot be undone.
+          {acknowledgementLabel}
         </Checkbox>
         <div className="mt-3 flex flex-wrap justify-end gap-2">
           <Button variant="secondary" onClick={onCancel} disabled={pending}>{cancelLabel}</Button>

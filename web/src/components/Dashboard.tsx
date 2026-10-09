@@ -1,3 +1,4 @@
+import { useAutoRefreshQueryOptions } from './resource/AutoRefreshProvider'
 import { LoadingState } from './ui/LoadingState'
 import { useQuery } from '@tanstack/react-query'
 import {
@@ -626,13 +627,14 @@ function BlockAge({ response }: { response?: DashboardResponse<unknown> }) {
 }
 
 function DashboardContent({ selection, cluster }: { selection: SelectionSummary; cluster: ComponentState }) {
-	const summary = useQuery({ queryKey: ['dashboard', 'summary', selection.generation], queryFn: ({ signal }) => getDashboardSummary(signal, selection.generation), ...dashboardQueryDefaults })
-	const problems = useQuery({ queryKey: ['dashboard', 'problems', selection.generation], queryFn: ({ signal }) => getDashboardProblems(signal, selection.generation), ...dashboardQueryDefaults })
-	const restarts = useQuery({ queryKey: ['dashboard', 'restarts', selection.generation, 10], queryFn: ({ signal }) => getDashboardRestarts(10, signal, selection.generation), ...dashboardQueryDefaults })
-	const events = useQuery({ queryKey: ['dashboard', 'events', selection.generation], queryFn: ({ signal }) => getDashboardEvents(signal, selection.generation), ...dashboardQueryDefaults })
+  const autoRefresh = useAutoRefreshQueryOptions()
+	const summary = useQuery({ queryKey: ['dashboard', 'summary', selection.generation], queryFn: ({ signal }) => getDashboardSummary(signal, selection.generation), ...dashboardQueryDefaults, ...autoRefresh })
+	const problems = useQuery({ queryKey: ['dashboard', 'problems', selection.generation], queryFn: ({ signal }) => getDashboardProblems(signal, selection.generation), ...dashboardQueryDefaults, ...autoRefresh })
+	const restarts = useQuery({ queryKey: ['dashboard', 'restarts', selection.generation, 10], queryFn: ({ signal }) => getDashboardRestarts(10, signal, selection.generation), ...dashboardQueryDefaults, ...autoRefresh })
+	const events = useQuery({ queryKey: ['dashboard', 'events', selection.generation], queryFn: ({ signal }) => getDashboardEvents(signal, selection.generation), ...dashboardQueryDefaults, ...autoRefresh })
 	// Tier 2 cannot occupy network capacity before the core overview settles.
-	const metrics = useQuery({ queryKey: ['dashboard', 'metrics', selection.generation], queryFn: ({ signal }) => getDashboardMetrics(signal, selection.generation), ...dashboardQueryDefaults, enabled: summary.isSuccess, staleTime: 8_000, refetchInterval: 8_000, refetchIntervalInBackground: false })
-	const namespaceHealth = useQuery({ queryKey: ['dashboard', 'namespace-health', selection.generation], queryFn: ({ signal }) => getDashboardNamespaceHealth(signal, selection.generation), ...dashboardQueryDefaults, enabled: summary.isSuccess })
+	const metrics = useQuery({ queryKey: ['dashboard', 'metrics', selection.generation], queryFn: ({ signal }) => getDashboardMetrics(signal, selection.generation), ...dashboardQueryDefaults, ...autoRefresh, enabled: summary.isSuccess, staleTime: 10_000 })
+	const namespaceHealth = useQuery({ queryKey: ['dashboard', 'namespace-health', selection.generation], queryFn: ({ signal }) => getDashboardNamespaceHealth(signal, selection.generation), ...dashboardQueryDefaults, ...autoRefresh, enabled: summary.isSuccess })
 	const infrastructure = useQuery({
 		queryKey: ['dashboard', 'infrastructure', selection.generation],
 		queryFn: async ({ signal }) => {
@@ -642,7 +644,7 @@ function DashboardContent({ selection, cluster }: { selection: SelectionSummary;
 			const claims = await getPersistentVolumeClaims({ limit: 100, priority: 'unrelated', skipUXTiming: true }, signal, selection.generation)
 			return { nodes, claims }
 		},
-		...dashboardQueryDefaults,
+		...dashboardQueryDefaults, ...autoRefresh,
 		enabled: summary.isSuccess,
 	})
   const session = useQuery({ queryKey: ['session', selection.generation], queryFn: ({ signal }) => getSession(signal), staleTime: 5 * 60_000, retry: false })

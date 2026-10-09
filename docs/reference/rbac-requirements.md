@@ -1,12 +1,13 @@
 # Requisitos RBAC do KubePeep
 
-> **Fonte única de verdade:** `internal/services/authorization/allowlist.go`. Este documento reflete a allowlist imutável e os requisitos mínimos por perfil de uso.
+> **Fontes de contrato:** `internal/services/authorization/allowlist.go` e `internal/services/resourcecatalog/` para operações nativas; descoberta validada para as leituras dinâmicas. A decisão final é sempre do Kubernetes.
 
 ## 1. Modelo
 
 - O KubePeep **nunca** usa credenciais próprias: toda chamada usa a identidade do kubeconfig selecionado (com `SelfSubjectRulesReview`/`SelfSubjectAccessReview` para descobrir capacidades).
 - Toda capacidade é revalidada no servidor em cada operação mutável (guard), nunca apenas cacheada no frontend.
-- A allowlist é fechada: capacidades fora da lista não são consultadas nem exibidas.
+- Mutações nativas usam capabilities do catálogo fechado. Visões dinâmicas
+  aceitam somente GVRs descobertos com list/get e não oferecem mutação genérica.
 
 ## 2. Perfis de uso
 
@@ -41,7 +42,7 @@ a captura local.
 
 | Capacidade | Verbo Kubernetes | Uso na UI |
 | --- | --- | --- |
-| `yaml.{collection}.update` | `update` no grupo/plural real do catálogo | editar e salvar YAML de qualquer objeto disponível, nome exato, com ou sem namespace |
+| `yaml.{collection}.update` | `update` no grupo/plural real do catálogo | editar YAML de objeto do catálogo nativo, incluindo Gateway API, com nome e escopo exatos; exclui visões dinâmicas |
 | `deployments.update` | `update` deployments | compatibilidade com a rota anterior de edição |
 | `deployments.restart` | `patch` deployments | botão Restart |
 | `deployments.scale` | `update` deployments/scale | campo Scale |
@@ -105,11 +106,31 @@ uma página adicional que retornaria 403/503 e ocultaria a tabela inteira.
 As falhas permanecem visíveis no rodapé; cada nova coleta reavalia o escopo.
 
 O cache de revisão dura 45 s por padrão (configurável entre 30 e 60 s), exceto
-para requisições canceladas. Listas visíveis e blocos do dashboard voltam a
-consultar a cada 15 s após uma revisão indisponível, inclusive se a primeira
-tentativa ainda encontrar a decisão `unknown` em cache. Cada consulta continua
-sujeita à autorização no backend; a lista oculta os dados enquanto ela não
-for confirmada. Respostas 401/403 e mudança de geração suspendem esse polling.
+para requisições canceladas. Uma revisão `unknown` pode ser resolvida por uma
+leitura real limitada do mesmo recurso e escopo; isso não autoriza mutações.
+Uma decisão negada explicitamente não recebe esse fallback. Falhas transitórias
+têm tentativas limitadas com backoff, e listas/dashboard voltam a consultar a
+cada 10 s enquanto Auto estiver ligado. Autenticação expirada pode recuperar
+a identidade e tentar novamente; negação 403 e mudança de geração interrompem
+a consulta antiga. Dados sem leitura autorizada confirmada permanecem ocultos.
+Mensagens distinguem autenticação/plugin, DNS, TLS, conexão, timeout e
+throttling sem expor erro bruto ou credenciais.
+
+### Helm, Gateway API e recursos dinâmicos
+
+- Gateway API exige list/get por plural do grupo `gateway.networking.k8s.io`;
+  GatewayClass é cluster-scoped. O editor exige update no objeto exato.
+- Helm lê metadata de Secrets ou ConfigMaps com `owner=helm` para o inventário;
+  detalhe, values e manifest exigem get do registro correspondente. Upgrade e
+  rollback precisam das permissões sobre o armazenamento e sobre os recursos e
+  hooks realmente executados pelo SDK Helm. Permissão de leitura não concede
+  essas operações, e não há retry automático de escrita.
+- A descoberta de APIs não concede list/get dos objetos. Visões dinâmicas
+  revalidam GVR, namespace/escopo e nome e reutilizam a recuperação de leitura.
+  O YAML é somente leitura; não são aceitos URLs arbitrários ou subresources.
+- Seleção em massa é uma interação local. Cada alvo de ação exige permissão
+  própria; somente Pods oferecem delete em massa. Reinício de Pods usa delete
+  e exige controlador que possa recriá-los.
 
 ### Timeouts e cancelamentos no dashboard
 

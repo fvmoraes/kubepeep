@@ -47,10 +47,12 @@ Missing relationships remain explicitly tied to local cache coverage.
 
 ## Inline resource inspection
 
-Every resource family keeps its source inventory visible and places details
-underneath it, including related objects opened from that detail. Search, column
-controls and scroll position are preserved. Closing restores the source route;
-sidebar navigation starts a different inventory. Direct links remain supported.
+Every resource family keeps its inventory at full height and overlays details
+on its bottom 70% of the window height. Related objects open their destination
+inventory, select its namespace and apply an exact-name filter. Closing removes
+the overlay and retains that inventory/filter; Clear object filter removes it.
+Workspace back/forward restores the corresponding inspected target. Sidebar
+navigation starts a different inventory; direct links remain supported.
 
 For Pods, the
 Logs tab automatically follows that exact Pod's main container; select another
@@ -62,9 +64,13 @@ Inline logs use explicit Pod targets, without discovering the entire Pod or
 workload catalog. They share the bounded SSE reader with workload logs: five
 streams, 75 ms rendering batches, 1,000 lines and 1 MiB in memory. The initial
 tail is 200 lines. If streaming is unavailable, authorized HTTP reads update
-every 5 s; previous-container logs are read once. Pause, closing the panel,
-changing targets/tabs or changing generation cancels all active requests.
+every 5 s; previous-container logs are read once. Pause freezes the visible
+output while capture continues; Resume shows the latest captured lines.
+Closing the panel, changing targets/tabs or changing generation cancels all
+active requests.
 Container access and log reads still pass through exact backend authorization.
+Inventory refresh is a separate global Auto toggle fixed at 10 seconds. It
+does not replace the log reader's own follow/pause controls.
 
 ## Workload logs
 
@@ -118,6 +124,14 @@ canonical namespaces with four workers. If the scope is larger, or RBAC/cache
 coverage is partial, the response is marked incomplete and explains the bounded
 limit. Namespace identity is returned only in the requested response and is
 never retained in telemetry labels.
+
+The inventory footer also links to client load diagnostics in Settings,
+including pending requests, response/first-render timings and loaded/rendered
+row counts. Up to five recent inventory queries remain warm in memory; inactive
+queries refresh sequentially while Auto is enabled and the application is
+visible. YAML and Secret/Helm documents are excluded. These counters help
+separate client rendering from upstream collection latency; synthetic browser
+tests are not measurements of a production cluster's latency.
 
 ## Local API
 

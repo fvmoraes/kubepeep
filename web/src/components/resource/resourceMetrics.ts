@@ -1,3 +1,4 @@
+import { useAutoRefreshQueryOptions } from './AutoRefreshProvider'
 import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { getDashboardMetrics, getHPAs, getWorkloads } from '../../api/client'
@@ -5,7 +6,8 @@ import type { CollectionResult, HorizontalPodAutoscaler, HPAResourceTarget, Pod,
 
 // One shared observation per generation; a stale health badge cannot block it.
 export function useResourceMetrics(generation?: string) {
-  return useQuery({ queryKey: ['resource-metrics', generation], queryFn: ({ signal }) => getDashboardMetrics(signal, generation), enabled: Boolean(generation), staleTime: 8_000, refetchInterval: 8_000, refetchIntervalInBackground: false })
+  const autoRefresh = useAutoRefreshQueryOptions()
+  return useQuery({ queryKey: ['resource-metrics', generation], queryFn: ({ signal }) => getDashboardMetrics(signal, generation), enabled: Boolean(generation), staleTime: 10_000, ...autoRefresh })
 }
 
 async function boundedCatalog<T>(fetchPage: (cursor?: string) => Promise<CollectionResult<T>>) {

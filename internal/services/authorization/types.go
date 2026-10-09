@@ -13,6 +13,9 @@ const (
 	DefaultTTL = 45 * time.Second
 	MinTTL     = 30 * time.Second
 	MaxTTL     = 60 * time.Second
+	// Failed reviews must recover on the next ten-second refresh, rather than
+	// pinning an inconclusive result for a full authorization cache lifetime.
+	UnknownTTL = 3 * time.Second
 )
 
 // Decision is a tri-state result. Unknown is deliberately distinct from a
@@ -35,6 +38,7 @@ const (
 	ReasonSARIncomplete                ReasonCode = "SAR_INCOMPLETE"
 	ReasonSARUnavailable               ReasonCode = "SAR_UNAVAILABLE"
 	ReasonSARTimeout                   ReasonCode = "SAR_TIMEOUT"
+	ReasonSARForbidden                 ReasonCode = "SAR_FORBIDDEN"
 	ReasonSARAuthenticationUnavailable ReasonCode = "SAR_AUTHENTICATION_UNAVAILABLE"
 	ReasonRequestCanceled              ReasonCode = "REQUEST_CANCELED"
 	ReasonOperationAllowed             ReasonCode = "OPERATION_ALLOWED"

@@ -179,14 +179,20 @@ obtidos em `/api/v1/session`. Ele
 seleciona o contexto real; cria e seleciona scopes `single`, `list` e `all`;
 prova `all` permitido somente com `list namespaces` e negado sem essa
 capacidade; verifica dashboard completo, parcial e offline; e exige falha
-fechada das leituras e ações do produto no namespace negado. Um no-match de
-SSAR permanece `503/AUTHORIZATION_UNAVAILABLE`; somente uma negação
-autoritativa observada diretamente é publicada como `403/FORBIDDEN`.
+fechada das leituras e ações do produto no namespace negado. Quando SSAR não
+tem opinião, inventários, detalhes e YAML fazem uma leitura limitada na API
+Kubernetes: sua negação autoritativa deve aparecer como `403/FORBIDDEN`.
+Logs, streams e ações que exigem uma revisão positiva continuam bloqueados
+com `503/AUTHORIZATION_UNAVAILABLE` quando SSAR não tem opinião. O driver
+verifica o status e o código exatos de cada contrato, sem aceitar um no lugar
+do outro.
 
 No fluxo permitido, o próprio produto abre SSE de recursos e logs, observa
 snapshot/live, reconecta com `Last-Event-ID` para replay e permanece conectado
 enquanto o harness revoga a RoleBinding F6. Ambos os streams precisam terminar
-por reautorização periódica. Exec usa ticket efêmero e WebSocket RFC 6455 real:
+por reautorização periódica. A leitura HTTP de Pods após a revogação deve
+convergir para `403/FORBIDDEN`, conforme a resposta real do apiserver.
+Exec usa ticket efêmero e WebSocket RFC 6455 real:
 valida `ready`, heartbeat com eco, canais stdout/stderr, terminal, fechamento e
 ticket one-shot. Outro ticket é criado antes da revogação de RBAC. Como um
 RBAC no-match do Kind produz SSAR sem opinião, tanto o upgrade quanto uma nova
@@ -201,6 +207,12 @@ harness compara o estado/output contra o token do kubeconfig e contra o payload
 aleatório real do Secret; o driver também procura CSRF, protocolos efêmeros e
 linhas cruas de log. A instância offline usa somente um token sintético e um
 endpoint loopback fechado, sem derrubar nem alterar o cluster Kind.
+
+Se uma espera de HTTP não convergir, o diagnóstico inclui o último status
+e um código público conhecido; códigos arbitrários aparecem como `UNKNOWN`.
+Os testes offline desse diagnóstico rodam antes do cluster na CI e podem ser
+executados localmente com
+`python3 -m unittest discover -s test/kind -p 'test_*.py'`.
 
 Em cluster reutilizado, verificações de ownership distinguem `NotFound` de
 falha do apiserver. O Pod de previous-log e o Event inicial são substituídos um

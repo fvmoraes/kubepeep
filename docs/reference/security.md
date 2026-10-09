@@ -9,9 +9,10 @@
 ## 1. Objetivos de segurança
 
 1. Não ampliar as capacidades da identidade do kubeconfig.
-2. Não copiar nem persistir credenciais Kubernetes; transmiti-las ao API
-   server somente pelo `client-go` e pelo transporte TLS configurado, nunca
-   devolvê-las à UI ou registrá-las.
+2. Não persistir credenciais Kubernetes no banco, caches ou logs do produto;
+   transmiti-las ao API server somente pelo `client-go` e pelo transporte TLS
+   configurado. A importação explícita pode gravar o kubeconfig fornecido pelo
+   usuário no arquivo Kubernetes padrão, conforme §20.7; nunca o devolve na resposta.
 3. Impedir que páginas externas usem a API local como ponte para o cluster.
 4. Falhar fechado quando uma permissão não puder ser determinada.
 5. Expor valores de Secret somente por leitura explícita autorizada, sem cache, índice, persistência ou log de conteúdo.
@@ -115,7 +116,7 @@ Cada seta exige validação e sanitização nos dois sentidos pertinentes.
 | Cluster não sensível | nomes/status de recursos autorizados | sim, com limite | não | somente identificadores allowlisted | sim, `no-store` |
 | Sensível transitória | logs, YAML autorizado (inclusive Secret), Data explícito de Secret, saída de `exec` | sim, pelo menor tempo | nunca | nunca como payload | sim, `no-store` |
 | Credencial Kubernetes | token, certificado, chave, senha, Authorization header | apenas dentro de `client-go`/plugin que precisa | nunca | nunca | nunca para o browser |
-| Proibida no MVP | kubeconfig completo, Secret ou comando/saída de `exec` persistido | não deve entrar no modelo de produto | nunca | nunca | nunca |
+| Proibida na persistência do produto | kubeconfig completo, Secret ou comando/saída de `exec` persistido | somente nos fluxos explícitos autorizados | nunca | nunca | nunca como resposta de configuração |
 
 Paths de kubeconfig são sensíveis de baixa criticidade: podem ser persistidos por requisito, mas são omitidos de respostas desnecessárias e sanitizados em logs.
 
@@ -267,6 +268,11 @@ Consultas de coleção não inventam `resourceName`. Ações sobre objeto inclue
 | `unknown` | timeout, erro ou review incompleto | fail-closed; não afirmar negação |
 
 `SelfSubjectRulesReview` serve apenas como resumo/otimização e pode ser incompleto.
+Para leituras, `unknown` pode disparar uma operação real limitada no mesmo alvo;
+somente sucesso autorizado do API server comprova acesso. Negação explícita
+bloqueia o fallback. Escritas continuam exigindo decisão permitida e não são
+repetidas automaticamente. Erros de autenticação, rede e timeout são distintos
+de `FORBIDDEN` e recebem diagnóstico sanitizado.
 
 ### 9.3 Revalidação
 
@@ -763,8 +769,10 @@ implementação e a identidade continuam sendo próprias do KubePeep.
   outro.
 - Toda mutação exige um único alvo/origem explícito e reautorização imediata;
   não há restart/scale/delete/exec/port-forward em massa implícito.
-- Kubeconfigs continuam somente leitura e clusters não precisam se conectar
-  entre si nem receber componente do KubePeep.
+- Seleção e leituras não modificam kubeconfigs; importação exige ação explícita
+  (§20.7). Clusters não precisam se conectar entre si nem receber componente do
+  KubePeep. Agregação multi-contexto permanece um contrato futuro, não uma tela
+  implementada.
 
 ### 20.5 Port-forward e conexão
 
@@ -791,3 +799,30 @@ A inspeção nunca publica o valor da sentinela. Ela registra somente
 pass/fail, categoria e caminho relativo allowlisted. Qualquer achado reabre o
 gate, remove o dado do estado versionado/alcançável e exige rotação/revogação
 quando o valor puder ser uma credencial real.
+
+### 20.7 Importação, preferências e extensões de recursos
+
+Importação de kubeconfig exige Origin/CSRF, corpo limitado e escolha explícita
+entre caminho e conteúdo. Conteúdo de até 1 MiB é validado e mesclado em
+`<home>/.kube/config` por escrita atômica com permissões privadas. Conflitos e
+destinos simbólicos são recusados; referências relativas de credenciais exigem
+o caminho original. A importação não executa plugins nem ativa o contexto.
+SQLite armazena somente o path. Erros e respostas não incluem o conteúdo.
+
+Cores, colunas e visões personalizadas são preferências limitadas e validadas;
+não concedem permissões. A migration 0004 preserva dados antigos sob transação
+e backup verificável. O cache dos cinco inventários recentes fica em memória,
+é isolado por geração e exclui documentos YAML, dados de Secret e documentos
+Helm. Desligar Auto ou ocultar a aplicação suspende sua atualização.
+
+Visões dinâmicas são exclusivamente de leitura: a API valida o GVR descoberto,
+o escopo, o nome e os verbos permitidos. Discovery, respostas Table e documentos
+possuem limites antes da decodificação. Secrets core usam metadata no inventário
+e detalhe; YAML completo exige leitura explícita. Preferências guardam apenas
+identidades de tipos de recursos. Remover uma visão nunca remove objetos.
+
+Helm permite values upgrade e rollback confirmados usando as credenciais
+selecionadas. O Kubernetes autoriza individualmente os recursos/hooks do SDK;
+uma operação que falha pode ter efeitos parciais e nunca é repetida
+automaticamente. Values/manifest são documentos explícitos e efêmeros, com
+limite de 2 MiB. Os detalhes dos contratos estão na [referência da API](api.md).

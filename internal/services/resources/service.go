@@ -17,6 +17,11 @@ var collectionGVR = map[Collection]Origin{
 	CollectionRoleBindings:           {APIGroup: "rbac.authorization.k8s.io", Version: "v1", Resource: "rolebindings"},
 	CollectionNetworkPolicies:        {APIGroup: "networking.k8s.io", Version: "v1", Resource: "networkpolicies"},
 	CollectionEndpoints:              {Version: "v1", Resource: "endpoints"},
+	CollectionServiceAccounts:        {Version: "v1", Resource: "serviceaccounts"},
+	CollectionResourceQuotas:         {Version: "v1", Resource: "resourcequotas"},
+	CollectionLimitRanges:            {Version: "v1", Resource: "limitranges"},
+	CollectionHPAs:                   {APIGroup: "autoscaling", Version: "v2", Resource: "horizontalpodautoscalers"},
+	CollectionPDBs:                   {APIGroup: "policy", Version: "v1", Resource: "poddisruptionbudgets"},
 }
 var workloadGVR = map[WorkloadKind]Origin{WorkloadDeployments: {APIGroup: "apps", Version: "v1", Resource: "deployments"}, WorkloadStatefulSets: {APIGroup: "apps", Version: "v1", Resource: "statefulsets"}, WorkloadDaemonSets: {APIGroup: "apps", Version: "v1", Resource: "daemonsets"}, WorkloadJobs: {APIGroup: "batch", Version: "v1", Resource: "jobs"}, WorkloadCronJobs: {APIGroup: "batch", Version: "v1", Resource: "cronjobs"}, WorkloadReplicaSets: {APIGroup: "apps", Version: "v1", Resource: "replicasets"}}
 
@@ -57,6 +62,9 @@ func originsFor(collection Collection, namespaces []string, kinds []WorkloadKind
 		return canonicalOrigins(result), nil
 	}
 	base, ok := collectionGVR[collection]
+	if resource, dynamic := ParseDynamicCollection(collection); dynamic && resource.Namespaced {
+		base, ok = Origin{APIGroup: resource.Group, Version: resource.Version, Resource: resource.Resource}, true
+	}
 	if !ok {
 		return nil, validationError("collection is not supported")
 	}
@@ -70,12 +78,13 @@ func originsFor(collection Collection, namespaces []string, kinds []WorkloadKind
 }
 
 type GetRequest[T DetailItem] struct {
-	Selection  Selection
-	Origin     Origin
-	Name       string
-	Getter     ResourceGetter[T]
-	Authorizer AuthorizationChecker
-	Timeout    time.Duration
+	Selection          Selection
+	Origin             Origin
+	Name               string
+	Getter             ResourceGetter[T]
+	Authorizer         AuthorizationChecker
+	Timeout            time.Duration
+	ReadThroughUnknown bool
 }
 
 func GetAuthorized[T DetailItem](ctx context.Context, request GetRequest[T]) (T, error) {
@@ -97,9 +106,12 @@ func GetAuthorized[T DetailItem](ctx context.Context, request GetRequest[T]) (T,
 	case authorization.DecisionDenied:
 		return zero, domainError(CodeForbidden, "Access to this resource was denied.", nil)
 	case authorization.DecisionUnknown:
-		return zero, domainError(CodeAuthorizationUnavailable, "Authorization could not be confirmed.", nil)
+		if !request.ReadThroughUnknown {
+			failure := authorization.ReviewFailure(capability)
+			return zero, domainError(ErrorCode(failure.Code), failure.Message, nil)
+		}
 	}
-	value, err := request.Getter.Get(requestContext, request.Origin, request.Name)
+	value, err := RetryRead(requestContext, func(ctx context.Context) (T, error) { return request.Getter.Get(ctx, request.Origin, request.Name) })
 	if err != nil {
 		return zero, sanitizePortError(err)
 	}

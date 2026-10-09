@@ -121,7 +121,7 @@ func TestResourceBackendAuthorizationDenialsOnDetailsAndYAML(t *testing.T) {
 		t.Fatal("pod yaml accepted a denied get")
 	}
 	unknown := detailTestBackend(client, &selectiveResourceAuthorization{denied: map[string]authorization.Decision{"/services/get": authorization.DecisionUnknown}})
-	if _, err := unknown.GetService(ctx, binding, resolution, "default", "api"); resources.ErrorCodeOf(err) != resources.CodeAuthorizationUnavailable {
+	if _, err := unknown.GetService(ctx, binding, resolution, "default", "api"); err != nil {
 		t.Fatalf("unknown get service err = %v", err)
 	}
 
