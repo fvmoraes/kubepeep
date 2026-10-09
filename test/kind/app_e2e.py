@@ -20,6 +20,20 @@ import uuid
 from typing import Any, Callable
 
 
+PUBLIC_ERROR_CODES = frozenset({
+    "AUTHENTICATION_UNAVAILABLE",
+    "AUTHORIZATION_UNAVAILABLE",
+    "CLUSTER_UNAVAILABLE",
+    "FEATURE_UNAVAILABLE",
+    "FORBIDDEN",
+    "GENERATION_CHANGED",
+    "LIMIT_EXCEEDED",
+    "NOT_FOUND",
+    "UPSTREAM_TIMEOUT",
+    "VALIDATION_FAILED",
+})
+
+
 class E2EFailure(RuntimeError):
     pass
 
@@ -825,13 +839,19 @@ def wait_http_status(
     expected_code: str | None = None,
 ) -> None:
     deadline = time.monotonic() + timeout
+    last_response = "no response observed"
     while time.monotonic() < deadline:
         status, _, payload = client.exchange(method, path, timeout=10)
-        if status == expected and (expected_code is None or api_error_code(payload) == expected_code):
+        code = api_error_code(payload)
+        if status == expected and (expected_code is None or code == expected_code):
             return
+        # Only expose the numeric status and known public codes, never bodies
+        # or arbitrary upstream error text in the CI diagnostic.
+        safe_code = code if code in PUBLIC_ERROR_CODES else "UNKNOWN"
+        last_response = f"last response HTTP {status}/{safe_code}"
         time.sleep(0.5)
     code_expectation = "" if expected_code is None else f" with code {expected_code}"
-    raise E2EFailure(f"{method} {path} did not converge to HTTP {expected}{code_expectation}")
+    raise E2EFailure(f"{method} {path} did not converge to HTTP {expected}{code_expectation}; {last_response}")
 
 
 def assert_values_absent(root: pathlib.Path, values: list[str]) -> None:
@@ -864,18 +884,6 @@ def check_periodic_revocation(
         wait_marker(control_dir, "f6-revoked", 30)
         resource_error = resource_stream.wait_for(lambda event: event.get("event") == "error", 85)
         log_error = log_stream.wait_for(lambda event: event.get("event") == "error", 20)
-        public_error_codes = {
-            "AUTHENTICATION_UNAVAILABLE",
-            "AUTHORIZATION_UNAVAILABLE",
-            "CLUSTER_UNAVAILABLE",
-            "FEATURE_UNAVAILABLE",
-            "FORBIDDEN",
-            "GENERATION_CHANGED",
-            "LIMIT_EXCEEDED",
-            "NOT_FOUND",
-            "UPSTREAM_TIMEOUT",
-            "VALIDATION_FAILED",
-        }
         for stream_name, event in (("resource", resource_error), ("log", log_error)):
             payload = event.get("data")
             code = str(payload.get("code", "")).upper() if isinstance(payload, dict) else ""
@@ -883,21 +891,21 @@ def check_periodic_revocation(
             # remains unknown by policy. The streams must still fail closed;
             # the harness separately proves the authoritative apiserver denial.
             if code != "AUTHORIZATION_UNAVAILABLE":
-                safe_code = code if code in public_error_codes else "UNKNOWN"
+                safe_code = code if code in PUBLIC_ERROR_CODES else "UNKNOWN"
                 raise E2EFailure(
                     f"{stream_name} periodic reauthorization returned {safe_code} instead of AUTHORIZATION_UNAVAILABLE"
                 )
-        # Kind reports an RBAC no-match as a successful SSAR with no opinion.
-        # The ordinary product read must therefore fail closed as unknown, not
-        # invent a denial. The harness separately proves that an apiserver read
-        # under this identity is authoritatively forbidden.
+        # A no-opinion SSAR does not prevent a bounded inventory read. The
+        # actual apiserver denial must win over both unknown reviews and any
+        # previously allowed/cached state. Streams above still require an
+        # affirmative review and must stop before exposing more events.
         wait_http_status(
             client,
             "GET",
             "/api/v1/pods?limit=1",
-            503,
+            403,
             10,
-            expected_code="AUTHORIZATION_UNAVAILABLE",
+            expected_code="FORBIDDEN",
         )
     finally:
         resource_stream.close()
@@ -1113,16 +1121,17 @@ def check_denied(client: Client, status: dict[str, Any], args: argparse.Namespac
     if selection.get("defaultNamespace") != namespace:
         raise E2EFailure("denied run selected an unexpected namespace")
     denied_reads = (
-        "/api/v1/workloads?limit=1",
-        "/api/v1/pods?limit=1",
-        f"/api/v1/pods/{namespace}/kp-interactive",
-        f"/api/v1/pods/{namespace}/kp-interactive/yaml",
-        f"/api/v1/pods/{namespace}/kp-interactive/logs?container=utility&tailLines=1",
-        "/api/v1/secrets?limit=1",
+        ("/api/v1/workloads?limit=1", 403, "FORBIDDEN"),
+        ("/api/v1/pods?limit=1", 403, "FORBIDDEN"),
+        (f"/api/v1/pods/{namespace}/kp-interactive", 403, "FORBIDDEN"),
+        (f"/api/v1/pods/{namespace}/kp-interactive/yaml", 403, "FORBIDDEN"),
+        # Logs still require an affirmative authorization review.
+        (f"/api/v1/pods/{namespace}/kp-interactive/logs?container=utility&tailLines=1", 503, "AUTHORIZATION_UNAVAILABLE"),
+        ("/api/v1/secrets?limit=1", 403, "FORBIDDEN"),
     )
-    for path in denied_reads:
-        _, payload = client.request("GET", path, expected=503)
-        if api_error_code(payload) != "AUTHORIZATION_UNAVAILABLE":
+    for path, expected_status, expected_code in denied_reads:
+        _, payload = client.request("GET", path, expected=expected_status)
+        if api_error_code(payload) != expected_code:
             raise E2EFailure(f"denied product read did not fail closed: {path}")
     dashboard = client.data("GET", "/api/v1/dashboard/summary")
     dashboard_errors = dashboard.get("errors") if isinstance(dashboard, dict) else None

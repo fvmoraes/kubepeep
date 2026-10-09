@@ -294,6 +294,9 @@ jobs:
           chmod 0755 "$RUNNER_TEMP/kubepeep-bin/kubectl"
           echo "$RUNNER_TEMP/kubepeep-bin" >> "$GITHUB_PATH"
 
+      - name: Verify Kind driver diagnostics
+        run: python3 -m unittest discover -s test/kind -p 'test_*.py'
+
       - name: Create and validate restricted cluster
         run: |
           restricted_stage() {
