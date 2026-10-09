@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { APIError, getSession } from '../api/client'
 import { streamURL } from '../api/desktop'
 import type { APIErrorPayload } from '../api/types'
+import { useAutoRefresh } from './resource/AutoRefreshProvider'
+import { autoRefreshInterval } from './resource/autoRefresh'
 
 export type ResourceTopic = 'pods' | 'events' | 'workloads' | 'services' | 'ingresses' | 'endpoint-slices' | 'configmaps' | 'persistent-volume-claims'
 
@@ -48,6 +50,7 @@ function streamURLPath(topics: ResourceTopic[]): string {
 }
 
 export function ResourceLiveUpdates({ generation, topics, queryKeys, autoStart = true, onProgress, onPreviewReset }: { generation: string; topics: ResourceTopic[]; queryKeys: ReadonlyArray<readonly unknown[]>; autoStart?: boolean; onProgress?: (progress: ResourceStreamProgress) => void; onPreviewReset?: () => void }) {
+  const { enabled } = useAutoRefresh()
   const queryClient = useQueryClient()
   const [state, setState] = useState<LiveState>({ mode: 'idle', message: 'Connecting…' })
   const controllerRef = useRef<AbortController | null>(null)
@@ -140,7 +143,7 @@ export function ResourceLiveUpdates({ generation, topics, queryKeys, autoStart =
         const contentType = response.headers.get('content-type')?.toLowerCase() ?? ''
         const payload = contentType.startsWith('application/json') ? await response.json() as APIErrorPayload : { code: 'INVALID_RESPONSE', message: 'The stream guard returned an invalid response.' }
         if (response.status === 403 || response.status === 503) {
-          fallbackToPolling(`${payload.code ?? response.status}: live watch is unavailable. Refreshing automatically every 15 seconds.`)
+          fallbackToPolling(`${payload.code ?? response.status}: live watch is unavailable. Refreshing automatically every 10 seconds.`)
           return
         }
         throw new APIError(response.status, payload)
@@ -192,18 +195,18 @@ export function ResourceLiveUpdates({ generation, topics, queryKeys, autoStart =
             scheduleProgressStatus()
             // A sustained watch burst must not turn into a LIST every 250 ms.
             // Coalesce all deltas in one bounded screen-refresh window.
-            scheduleInvalidate(2_000)
+            scheduleInvalidate(autoRefreshInterval)
           } else if (event.event === 'reset') {
             onPreviewResetRef.current?.()
             await invalidate()
             if (payload.reason === 'generation_changed') throw new APIError(409, { code: 'GENERATION_CHANGED', message: 'The active selection changed.' })
-            fallbackToPolling(`Stream reset (${String(payload.reason ?? 'state_lost')}). Refreshing automatically every 15 seconds.`)
+            fallbackToPolling(`Stream reset (${String(payload.reason ?? 'state_lost')}). Refreshing automatically every 10 seconds.`)
             return
           } else if (event.event === 'error') {
             onPreviewResetRef.current?.()
             const code = String(payload.code ?? 'STREAM_ERROR')
             if (code === 'FORBIDDEN' || code === 'AUTHORIZATION_UNAVAILABLE') {
-              fallbackToPolling(`${code}: live watch is unavailable. Refreshing automatically every 15 seconds.`)
+              fallbackToPolling(`${code}: live watch is unavailable. Refreshing automatically every 10 seconds.`)
               return
             }
             throw new APIError(502, { code, message: String(payload.message ?? 'The resource stream ended.') })
@@ -211,13 +214,13 @@ export function ResourceLiveUpdates({ generation, topics, queryKeys, autoStart =
         }
       }
       if (controller.signal.aborted || !mountedRef.current) return
-      fallbackToPolling('The live stream closed. Refreshing automatically every 15 seconds.')
+      fallbackToPolling('The live stream closed. Refreshing automatically every 10 seconds.')
     } catch (error) {
       if (controller.signal.aborted || !mountedRef.current) return
       if (error instanceof APIError && error.code === 'GENERATION_CHANGED') {
         setState({ mode: 'error', message: `${error.code}: ${error.message}` })
       } else {
-        fallbackToPolling(`${error instanceof APIError ? error.code : 'STREAM_UNAVAILABLE'}: live updates failed. Refreshing automatically every 15 seconds.`)
+        fallbackToPolling(`${error instanceof APIError ? error.code : 'STREAM_UNAVAILABLE'}: live updates failed. Refreshing automatically every 10 seconds.`)
       }
     } finally {
       controller.signal.removeEventListener('abort', cancelReader)
@@ -230,14 +233,23 @@ export function ResourceLiveUpdates({ generation, topics, queryKeys, autoStart =
   const startRef = useRef(start)
   useEffect(() => { startRef.current = start })
   useEffect(() => {
-    if (autoStart && document.visibilityState !== 'hidden' && navigator.onLine !== false) void startRef.current()
-  }, [autoStart, generation])
+    if (enabled && autoStart && document.visibilityState !== 'hidden' && navigator.onLine !== false) void startRef.current()
+    return () => {
+      controllerRef.current?.abort()
+      controllerRef.current = null
+      if (invalidateTimerRef.current) clearTimeout(invalidateTimerRef.current)
+      if (statusTimerRef.current) clearTimeout(statusTimerRef.current)
+      invalidateTimerRef.current = null
+      statusTimerRef.current = null
+      onPreviewResetRef.current?.()
+    }
+  }, [autoStart, enabled, generation])
 
   useEffect(() => {
-    if (state.mode !== 'error' || state.message.includes('GENERATION_CHANGED')) return
+    if (!enabled || state.mode !== 'error' || state.message.includes('GENERATION_CHANGED')) return
     const timer = setTimeout(() => { if (document.visibilityState !== 'hidden' && navigator.onLine !== false) void startRef.current() }, 60_000)
     return () => clearTimeout(timer)
-  }, [state])
+  }, [enabled, state])
   useEffect(() => {
     const visibility = () => {
       if (document.visibilityState === 'hidden' || navigator.onLine === false) {
@@ -247,7 +259,7 @@ export function ResourceLiveUpdates({ generation, topics, queryKeys, autoStart =
         if (statusTimerRef.current) clearTimeout(statusTimerRef.current)
         invalidateTimerRef.current = null
         statusTimerRef.current = null
-      } else if (!controllerRef.current) void startRef.current()
+      } else if (enabled && !controllerRef.current) void startRef.current()
     }
     document.addEventListener('visibilitychange', visibility)
     window.addEventListener('online', visibility)
@@ -257,10 +269,10 @@ export function ResourceLiveUpdates({ generation, topics, queryKeys, autoStart =
       window.removeEventListener('online', visibility)
       window.removeEventListener('offline', visibility)
     }
-  }, [generation])
+  }, [enabled, generation])
 
-  return <span aria-label="Resource live updates" title={state.message} className={`resource-live-status text-content ${state.mode === 'live' ? 'text-kp-green' : 'text-kp-overlay-text'}`}>
+  return <span aria-label="Resource live updates" title={state.message} className={`resource-live-status text-content ${enabled && state.mode === 'live' ? 'text-kp-green' : 'text-kp-overlay-text'}`}>
     <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-current" />
-    {state.mode === 'live' ? 'Live' : state.mode === 'error' ? state.message.includes('GENERATION_CHANGED') ? 'Selection changed' : 'Auto · 15s' : 'Connecting…'}
+    {!enabled ? 'Paused' : state.mode === 'live' ? 'Live' : state.mode === 'error' ? state.message.includes('GENERATION_CHANGED') ? 'Selection changed' : 'Auto · 10s' : 'Connecting…'}
   </span>
 }

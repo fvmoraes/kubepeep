@@ -121,7 +121,7 @@ observability:
 
 | Fonte | Revalidação | Limite/condição |
 | --- | --- | --- |
-| recursos core com stream ativo | WATCH após snapshot inicial | compartilhamento por identidade completa; idle de 45 s; revalidação HTTP a cada 15 s para inventários visíveis, inclusive sem WATCH |
+| recursos core com stream ativo | WATCH após snapshot inicial | compartilhamento por identidade completa; idle de 45 s; revalidação HTTP a cada 10 s para inventários visíveis quando Auto está ligado, inclusive sem WATCH |
 | páginas de coleção cobertas por WATCH | cache em memória por até 30 s | reautorização por origem em cada hit; delta, 403 e troca de geração invalidam |
 | CPU/memória do overview | 8 s | somente após Tier 1; suspenso em background |
 | capabilities/RBAC | TTL de 30–60 s (45 s padrão) | 403/revogação e generation exigem revalidação/invalidação |

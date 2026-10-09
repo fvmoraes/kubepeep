@@ -33,7 +33,7 @@ it('sorts numbers in either direction while keeping Job Pods last, and filters v
   fireEvent.click(screen.getByRole('checkbox', { name: 'Job' }))
   expect(names()).toEqual(['api', 'web'])
   fireEvent.keyDown(document, { key: 'Escape' })
-  fireEvent.click(screen.getByRole('checkbox', { name: 'Select all rows on this page' }))
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Select all loaded rows' }))
   expect(toggle).toHaveBeenLastCalledWith(true, [rows[1], rows[2]])
   fireEvent.click(screen.getByRole('button', { name: 'Choose visible columns' }))
   fireEvent.click(screen.getByRole('checkbox', { name: 'Restarts' }))

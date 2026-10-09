@@ -32,7 +32,13 @@ func TestResourceYAMLRoundTripEveryRegisteredKind(t *testing.T) {
 	for _, resource := range resourcecatalog.All() {
 		t.Run(resource.Collection, func(t *testing.T) {
 			object, target := yamlFixture(resource)
-			dynamic := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme(), object)
+			dynamic := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme())
+			// The fake's English plural guessing produces "gatewaies". Register
+			// objects under the API catalog's actual resource, just like a server.
+			gvr := schema.GroupVersionResource{Group: resource.Group, Version: resource.Version, Resource: resource.Resource}
+			if err := dynamic.Tracker().Create(gvr, object, target.Namespace); err != nil {
+				t.Fatal(err)
+			}
 			client := &ActionClient{dynamic: dynamic}
 			document, err := client.ReadResourceYAML(t.Context(), target, resource.Collection)
 			if err != nil || strings.Contains(document, "managedFields") || !strings.Contains(document, "preserveUnknownField") {
@@ -93,6 +99,35 @@ func TestResourceYAMLRejectsMalformedOrRetargetedDocuments(t *testing.T) {
 		_, err := client.UpdateResourceYAML(t.Context(), actions.ResourceYAMLCommand{Collection: "secrets", DeploymentYAMLCommand: actions.DeploymentYAMLCommand{Target: target, ExpectedUID: "uid-sample", ExpectedResourceVersion: "17", YAML: baseline}})
 		if err == nil || apierrors.IsConflict(err) != apierrors.IsConflict(upstream) || apierrors.IsForbidden(err) != apierrors.IsForbidden(upstream) || strings.Contains(err.Error(), "PRIVATE_VALUE") {
 			t.Fatalf("lost error classification or leaked value: %v", err)
+		}
+	}
+}
+
+func TestGatewayYAMLRetainsServedVersionForUpdate(t *testing.T) {
+	t.Parallel()
+	for _, registered := range resourcecatalog.GatewayResources() {
+		for _, version := range resourcecatalog.Versions(registered)[1:] {
+			t.Run(registered.Kind+"/"+version, func(t *testing.T) {
+				t.Parallel()
+				resource := registered
+				resource.Version = version
+				object, target := yamlFixture(resource)
+				dynamic := dynamicfake.NewSimpleDynamicClient(runtime.NewScheme())
+				gvr := schema.GroupVersionResource{Group: resource.Group, Version: version, Resource: resource.Resource}
+				if err := dynamic.Tracker().Create(gvr, object, target.Namespace); err != nil {
+					t.Fatal(err)
+				}
+				client := &ActionClient{dynamic: dynamic}
+				document, err := client.ReadResourceYAML(t.Context(), target, resource.Collection)
+				if err != nil || !strings.Contains(document, resource.APIVersion()) {
+					t.Fatalf("read served version: %q / %v", document, err)
+				}
+				dynamic.ClearActions()
+				_, err = client.UpdateResourceYAML(t.Context(), actions.ResourceYAMLCommand{Collection: resource.Collection, DeploymentYAMLCommand: actions.DeploymentYAMLCommand{Target: target, ExpectedUID: "uid-sample", ExpectedResourceVersion: "17", YAML: document}})
+				if err != nil || len(dynamic.Actions()) != 1 || dynamic.Actions()[0].GetResource() != gvr || dynamic.Actions()[0].GetVerb() != "update" {
+					t.Fatalf("update switched API version: %v / %#v", err, dynamic.Actions())
+				}
+			})
 		}
 	}
 }

@@ -7,11 +7,11 @@ import { useGlobalNamespace } from '../context/GlobalNamespace'
  * list itself is the scope universe (never beyond RBAC).
  */
 export function GlobalNamespaceSelect({ disabled }: { disabled?: boolean }) {
-  const { value, options, loading, degraded, setValue } = useGlobalNamespace()
+  const { value, options, loading, ready, degraded, setValue } = useGlobalNamespace()
   if (degraded && options.length === 0) {
     return (
       <Select aria-label="Global namespace" className="!w-auto max-w-[12rem] pr-6 text-menu" value="" disabled title="The namespace list is unavailable for this scope (RBAC or cluster error)">
-        <option value="">Namespace: All</option>
+          <option value="">Namespaces unavailable</option>
       </Select>
     )
   }
@@ -24,8 +24,10 @@ export function GlobalNamespaceSelect({ disabled }: { disabled?: boolean }) {
       disabled={disabled || loading}
       onChange={(event) => setValue(event.target.value)}
     >
-      <option value="">Namespace: All</option>
-      {options.map((namespace) => <option key={namespace} value={namespace}>{namespace}</option>)}
+        {!ready ? <option value="">{loading ? 'Loading namespaces…' : 'Choose a namespace scope'}</option> : null}
+        {options.slice(0, 1).map((namespace) => <option key={namespace} value={namespace}>{namespace}</option>)}
+        {ready ? <option value="">Namespace: All</option> : null}
+        {options.slice(1).map((namespace) => <option key={namespace} value={namespace}>{namespace}</option>)}
     </Select>
   )
 }

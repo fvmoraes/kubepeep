@@ -2,7 +2,7 @@
 
 ## Preparar o ambiente
 
-A CI fixa Go 1.26.7, Node.js 24.18.0, npm 11.16.0, Ginger v1.4.4 e Wails
+A CI fixa Go 1.26.9, Node.js 24.18.0, npm 11.16.0, Ginger v1.4.4 e Wails
 v2.15.0. Consulte `go.mod`, `web/package.json` e os workflows antes de atualizar
 ferramentas. Python 3.9+ é usado pelo verificador de documentação e pelos harnesses
 Kind; não é dependência do aplicativo distribuído.
@@ -104,10 +104,30 @@ scanner antes dos uploads e novamente antes da tag. Em `dry_run`, os jobs
 recebem o SHA exato de origem e aplicam a versão calculada ao `wails.json`,
 sem criar commit remoto. Notas já revisadas no `CHANGELOG.md` são preservadas.
 
-Para reproduzir uma versão escolhida: `make build build-desktop VERSION=0.7.0`.
+Para reproduzir uma versão escolhida: `make build build-desktop VERSION=0.11.0-dev`.
 CLI e desktop recebem os mesmos ldflags de versão, commit e data. Builds de
-desenvolvimento usam `0.7.0-dev`. Evidências de versões anteriores estão no
+desenvolvimento devem informar `VERSION` explicitamente; o exemplo não publica
+uma release. Evidências de versões anteriores estão no
 [arquivo](../archive/README.md) e não substituem os gates da árvore atual.
+
+### Validação da experiência 0.11
+
+A base de build atual usa Go 1.26.9, módulos Kubernetes alinhados em 0.36.5
+e Helm 3.21.4. A matriz da Fase 1 em `docs/research` é histórica e não valida
+essas versões em um cluster real; os gates abaixo continuam obrigatórios.
+
+Os testes Go cobrem descoberta/Table/fallback dinâmicos, autorização e retries,
+Gateway API, Helm, importação de kubeconfig, codificação e persistência após
+reabrir SQLite. `go test -race ./...` acrescenta verificação de concorrência.
+Vitest cobre estado, preferências, namespace, cache recente e editor.
+
+Playwright executa o bundle de produção com fixtures sintéticas. Os arquivos
+`resource-workspace.spec.ts`, `dynamic-resources.spec.ts`, `helm.spec.ts` e
+`phase07.spec.ts` cobrem menus, detalhes, relações, YAML, colunas, contexto,
+refresh e tamanhos de janela. Os cenários `phase02-real`/`phase03-real` são
+opt-in e dependem de origem/cluster preparados; skips devem ser informados,
+nunca apresentados como validação em cluster real. Testes Windows/macOS e
+restricted Kind permanecem gates separados na CI.
 
 ## O que versionar
 

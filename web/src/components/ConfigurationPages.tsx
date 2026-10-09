@@ -1,5 +1,6 @@
 import { useInfiniteCollection } from './resource/useInfiniteCollection'
 import { ResourceCollectionTable } from './resource/ResourceCollectionTable'
+import { QuantityUsage, QuotaUsage } from './resource/QuantityUsage'
 import { useQuery } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
 import { useParams } from 'react-router'
@@ -81,7 +82,7 @@ export function ConfigurationPage() {
     identity: ['resources', tab, generation, globalNamespace.value],
     filters: applied,
     enabled: Boolean(selection),
-    fetchPage: (cursor, signal, prefetch) => fetchList({ ...options, continueToken: cursor || undefined, prefetch }, signal, generation),
+    fetchPage: (cursor, signal, prefetch, focus) => fetchList({ ...options, ...focus, continueToken: cursor || undefined, prefetch }, signal, generation),
   })
 
   const columnVisibility = usePreferenceColumnVisibility(tab)
@@ -93,6 +94,7 @@ export function ConfigurationPage() {
           { key: 'name', header: 'Name', cell: (item) => { const value = item as ResourceQuota; return <TableLink aria-label={`Open quota ${value.name} in ${value.namespace}`} onClick={() => workspace.openResource({ collection: tab, namespace: value.namespace, name: value.name })} primary={value.name} /> } },
           { key: 'hard', header: 'Hard', cell: (item) => quantitySummary((item as ResourceQuota).hard) },
           { key: 'used', header: 'Used', cell: (item) => quantitySummary((item as ResourceQuota).used) },
+          { key: 'usage', header: 'Usage', cell: (item) => <QuotaUsage quota={item as ResourceQuota} /> },
         ]
       case 'limit-ranges':
         return [
@@ -108,6 +110,7 @@ export function ConfigurationPage() {
           { key: 'target', header: 'Target', cell: (item) => `${(item as HorizontalPodAutoscaler).targetKind}/${(item as HorizontalPodAutoscaler).targetName}` },
           { key: 'minmax', header: 'Min / Max', cell: (item) => `${(item as HorizontalPodAutoscaler).minReplicas ?? '—'} / ${(item as HorizontalPodAutoscaler).maxReplicas}` },
           { key: 'replicas', header: 'Current / Desired', cell: (item) => `${(item as HorizontalPodAutoscaler).currentReplicas} / ${(item as HorizontalPodAutoscaler).desiredReplicas}` },
+          { key: 'capacity', header: 'Replica capacity', value: (item) => (item as HorizontalPodAutoscaler).currentReplicas / (item as HorizontalPodAutoscaler).maxReplicas, cell: (item) => <QuantityUsage label="HPA replica capacity" current={(item as HorizontalPodAutoscaler).currentReplicas} total={(item as HorizontalPodAutoscaler).maxReplicas} /> },
           { key: 'age', sortKey: 'ageSeconds', header: 'Age', cell: (item) => age((item as HorizontalPodAutoscaler).ageSeconds) },
         ]
       case 'pdbs':
@@ -115,7 +118,7 @@ export function ConfigurationPage() {
           { key: 'namespace', header: 'Namespace', cell: (item) => (item as PodDisruptionBudget).namespace },
           { key: 'name', header: 'Name', cell: (item) => { const value = item as PodDisruptionBudget; return <TableLink aria-label={`Open budget ${value.name} in ${value.namespace}`} onClick={() => workspace.openResource({ collection: tab, namespace: value.namespace, name: value.name })} primary={value.name} /> } },
           { key: 'allowed', header: 'Disruptions allowed', cell: (item) => { const allowed = (item as PodDisruptionBudget).disruptionsAllowed; return allowed > 0 ? <Badge variant="healthy">{allowed}</Badge> : <Badge variant={allowed === 0 ? 'warning' : 'unknown'}>{allowed}</Badge> } },
-          { key: 'healthy', header: 'Healthy / Desired', cell: (item) => `${(item as PodDisruptionBudget).currentHealthy} / ${(item as PodDisruptionBudget).desiredHealthy}` },
+          { key: 'healthy', header: 'Healthy / Desired', value: (item) => (item as PodDisruptionBudget).currentHealthy, cell: (item) => <QuantityUsage label="PDB healthy pods" current={(item as PodDisruptionBudget).currentHealthy} total={(item as PodDisruptionBudget).desiredHealthy} completion failed={(item as PodDisruptionBudget).currentHealthy < (item as PodDisruptionBudget).desiredHealthy} /> },
           { key: 'age', sortKey: 'ageSeconds', header: 'Age', cell: (item) => age((item as PodDisruptionBudget).ageSeconds) },
         ]
     }
@@ -152,7 +155,7 @@ export function ServiceAccountsPage() {
     identity: ['resources', 'service-accounts', generation, globalNamespace.value],
     filters: applied,
     enabled: Boolean(selection),
-    fetchPage: (cursor, signal, prefetch) => getServiceAccounts({ limit: 100, prefetch, uxInteractionId: listInteractionFor(applied), search: applied.search || undefined, continueToken: cursor || undefined, namespaces: effectiveNamespaces(globalNamespace.value, []) }, signal, generation),
+    fetchPage: (cursor, signal, prefetch, focus) => getServiceAccounts({ ...focus, limit: 100, prefetch, uxInteractionId: listInteractionFor(applied), search: applied.search || undefined, continueToken: cursor || undefined, namespaces: effectiveNamespaces(globalNamespace.value, []) }, signal, generation),
   })
 
   return (

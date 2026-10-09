@@ -14,6 +14,15 @@ function identity(value: string) {
   const document = parseDocument(value, { uniqueKeys: true })
   if (document.errors.length) throw new Error('Invalid YAML. Check indentation, duplicate keys and document structure.')
   const data = document.toJS({ maxAliasCount: 50 })
+  for (const field of data?.kind === 'Secret' ? ['data'] : data?.kind === 'ConfigMap' ? ['binaryData'] : []) {
+    for (const value of Object.values(data[field] ?? {})) {
+      if (typeof value !== 'string') throw new Error(`${field} values must be Base64 strings. No automatic conversion is performed.`)
+      try {
+        const encoded = value.replace(/[\r\n]/g, '')
+        if (btoa(atob(encoded)) !== encoded) throw new Error('Invalid Base64')
+      } catch { throw new Error(`${field} values must be valid Base64. Use ${data.kind === 'Secret' ? 'stringData' : 'data'} for UTF-8 text.`) }
+    }
+  }
   if (typeof data?.apiVersion !== 'string' || typeof data?.kind !== 'string' || typeof data?.metadata?.name !== 'string' || typeof data?.metadata?.uid !== 'string' || typeof data?.metadata?.resourceVersion !== 'string') throw new Error('Keep the API version, kind, name, UID and resourceVersion from the loaded document.')
   return { apiVersion: data.apiVersion as string, kind: data.kind as string, name: data.metadata.name as string, namespace: (data.metadata.namespace ?? '') as string, uid: data.metadata.uid as string, resourceVersion: data.metadata.resourceVersion as string }
 }
@@ -41,10 +50,10 @@ export function ResourceYamlEditor({ collection, namespace, name, selection }: {
   const capability = `yaml.${collection}.update`
   const permissions = useQuery({
     queryKey: ['yaml-permissions', selection.generation, collection, namespace, name],
-    queryFn: ({ signal }) => getPermissions({ namespaces: namespace ? [namespace] : undefined, resourceNames: [name], capabilityIds: [capability] }, signal, selection.generation),
+    queryFn: ({ signal }) => getPermissions({ namespaces: namespace ? [namespace] : undefined, resourceNames: [name], capabilityIds: [capability], refresh: true }, signal, selection.generation),
     staleTime: 15_000,
   })
-  const canEdit = permissions.data?.decisions.some((item) => item.capabilityId === capability && (item.namespace ?? '') === (namespace ?? '') && item.resourceName === name && item.decision === 'allowed') ?? false
+  const canEdit = !permissions.isError && permissions.data?.generation === selection.generation && (permissions.data?.decisions.some((item) => item.capabilityId === capability && (item.namespace ?? '') === (namespace ?? '') && item.resourceName === name && item.decision === 'allowed') ?? false)
 
   async function load() {
     controller.current?.abort()
@@ -80,20 +89,22 @@ export function ResourceYamlEditor({ collection, namespace, name, selection }: {
   }
 
   return <section className="resource-yaml-editor grid gap-2" aria-label="Resource YAML editor">
+    {collection === 'secrets' || collection === 'configmaps' ? <p className="m-0 text-content text-kp-subtext">{collection === 'secrets' ? 'Original Kubernetes format: data = Base64; stringData = UTF-8 text (converted by Kubernetes when saved).' : 'Original Kubernetes format: data = UTF-8 text; binaryData = Base64.'} Values are never decoded or converted by this editor.</p> : null}
     {saved ? <p role="status" className="text-content text-kp-green">{saved} saved. Load YAML to inspect the new version.</p> : null}
     {!editing ? <>
       {collection === 'secrets' && !original ? <p className="m-0 text-content text-kp-overlay-text">Load YAML to reveal this Secret’s full document. It is kept only while this tab is open.</p> : null}
-      <YamlViewer value={original?.yaml} pending={pending} error={error ? new Error(saveError(error)) : null} onLoad={() => void load()} diffTarget={namespace && diffCollections.has(collection) ? { collection, namespace, name, generation: selection.generation } : undefined} />
-      {original ? <div className="flex items-center gap-2">
+      <YamlViewer value={original?.yaml} pending={pending} error={error ? new Error(saveError(error)) : null} onLoad={() => void load()} diffTarget={namespace && diffCollections.has(collection) ? { collection, namespace, name, generation: selection.generation } : undefined} actions={original ? <>
         <Button disabled={!canEdit || pending} onClick={() => { setDraft(original.yaml); setEditing(true); setError(null) }}>Edit YAML</Button>
         {!canEdit ? <span className="text-content text-kp-overlay-text">{permissions.isPending ? 'Checking update permission…' : permissions.isError ? 'Update permission could not be confirmed.' : 'Read only · update permission required.'}</span> : null}
-      </div> : null}
+        {!canEdit && !permissions.isPending ? <Button variant="secondary" disabled={permissions.isFetching} onClick={() => void permissions.refetch()}>Check permission again</Button> : null}
+      </> : undefined} />
     </> : <>
+      <div className="flex flex-wrap gap-2"><Button disabled={pending || !canEdit || draft === original?.yaml} onClick={() => void save()}>{pending ? 'Saving…' : `Save ${original?.kind}`}</Button><Button variant="secondary" disabled={pending} onClick={() => { setEditing(false); setDraft(''); setError(null) }}>Cancel editing</Button></div>
       <label htmlFor={editorId} className="text-content font-bold">{original?.kind} YAML</label>
       <textarea id={editorId} className="yaml-editor" spellCheck={false} autoCapitalize="off" autoComplete="off" value={draft} disabled={pending} onChange={(event) => setDraft(event.target.value)} />
       <p className="m-0 text-content text-kp-overlay-text" hidden={Boolean(error)}>Save updates this {original?.kind}.</p>
       {error ? <p role="alert" className="m-0 text-content text-kp-red">{saveError(error)}</p> : null}
-      <div className="flex flex-wrap gap-2"><Button disabled={pending || !canEdit || draft === original?.yaml} onClick={() => void save()}>{pending ? 'Saving…' : `Save ${original?.kind}`}</Button><Button variant="secondary" disabled={pending} onClick={() => { setEditing(false); setDraft(''); setError(null) }}>Cancel editing</Button></div>
+
     </>}
   </section>
 }

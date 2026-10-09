@@ -62,7 +62,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  GO_VERSION: "1.26.7"
+  GO_VERSION: "1.26.9"
   NODE_VERSION: "24.18.0"
   NPM_VERSION: "11.16.0"
   WAILS_VERSION: "v2.15.0"

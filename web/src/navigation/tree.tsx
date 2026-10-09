@@ -79,13 +79,14 @@ export const navGroups: NavGroup[] = [
       { id: 'statefulsets', label: 'StatefulSets', path: '/workloads/kind/statefulsets', icon: Database, tip: 'StatefulSets' },
       { id: 'jobs', label: 'Jobs', path: '/workloads/kind/jobs', icon: Package, tip: 'Jobs' },
       { id: 'cronjobs', label: 'CronJobs', path: '/workloads/kind/cronjobs', icon: CalendarClock, tip: 'CronJobs' },
+      { id: 'custom-resources', label: 'Custom resources', path: '/workloads/custom', icon: Layers, tip: 'Pinned resource views for this context', keywords: ['CRD', 'dynamic', 'custom', 'resources'] },
     ],
   },
   {
     id: 'helm',
     label: 'Helm',
     items: [
-      { id: 'helm-releases', label: 'Releases', icon: Ship, tip: 'Helm Releases' },
+      { id: 'helm-releases', label: 'Releases', path: '/helm/releases/secrets', icon: Ship, tip: 'Helm Releases' },
     ],
   },
   {
@@ -98,7 +99,7 @@ export const navGroups: NavGroup[] = [
       { id: 'ingresses', label: 'Ingresses', path: '/network/ingresses', icon: Globe, tip: 'Ingresses' },
       { id: 'ingress-classes', label: 'IngressClasses', path: '/network/ingress-classes', icon: Waypoints, tip: 'IngressClasses' },
       { id: 'network-policies', label: 'NetworkPolicies', path: '/network/network-policies', icon: Braces, tip: 'NetworkPolicies' },
-      { id: 'gateway-api', label: 'Gateway API', icon: Anchor, tip: 'Gateway API' },
+      { id: 'gateway-api', label: 'Gateway API', path: '/network/gateway-api/gateways', icon: Anchor, tip: 'Gateway API' },
       { id: 'port-forwarding', label: 'Port Forwarding', path: '/network/port-forwards', icon: ArrowLeftRight, tip: 'Port Forwarding' },
     ],
   },

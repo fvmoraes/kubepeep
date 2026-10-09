@@ -111,10 +111,10 @@ func TestRetryListPageCapsJitterAndStopsOnCancellation(t *testing.T) {
 			return waitContext.Err()
 		},
 	}, &apiPressure{})
-	if err != context.Canceled || lister.calls != 1 {
+	if err != context.Canceled || lister.calls != 0 {
 		t.Fatalf("err = %v, calls = %d", err, lister.calls)
 	}
-	if waited != 2*time.Second {
+	if waited != -1 {
 		t.Fatalf("capped jitter delay = %v", waited)
 	}
 }

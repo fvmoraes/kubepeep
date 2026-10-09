@@ -9,16 +9,27 @@ import (
 // ClusterCollections are read without any namespace scope: the origin carries
 // an empty namespace and authorization keys use cluster-scoped capabilities.
 var clusterGVR = map[Collection]Origin{
-	CollectionNodes:             {Version: "v1", Resource: "nodes"},
-	CollectionPersistentVolumes: {Version: "v1", Resource: "persistentvolumes"},
-	CollectionVolumeAttachments: {APIGroup: "storage.k8s.io", Version: "v1", Resource: "volumeattachments"},
-	CollectionStorageClasses:    {APIGroup: "storage.k8s.io", Version: "v1", Resource: "storageclasses"},
-	CollectionCSINodes:          {APIGroup: "storage.k8s.io", Version: "v1", Resource: "csinodes"},
-	CollectionCSIDrivers:        {APIGroup: "storage.k8s.io", Version: "v1", Resource: "csidrivers"},
+	CollectionNodes:               {Version: "v1", Resource: "nodes"},
+	CollectionPersistentVolumes:   {Version: "v1", Resource: "persistentvolumes"},
+	CollectionVolumeAttachments:   {APIGroup: "storage.k8s.io", Version: "v1", Resource: "volumeattachments"},
+	CollectionStorageClasses:      {APIGroup: "storage.k8s.io", Version: "v1", Resource: "storageclasses"},
+	CollectionCSINodes:            {APIGroup: "storage.k8s.io", Version: "v1", Resource: "csinodes"},
+	CollectionCSIDrivers:          {APIGroup: "storage.k8s.io", Version: "v1", Resource: "csidrivers"},
+	CollectionClusterRoles:        {APIGroup: "rbac.authorization.k8s.io", Version: "v1", Resource: "clusterroles"},
+	CollectionClusterRoleBindings: {APIGroup: "rbac.authorization.k8s.io", Version: "v1", Resource: "clusterrolebindings"},
+	CollectionCRDs:                {APIGroup: "apiextensions.k8s.io", Version: "v1", Resource: "customresourcedefinitions"},
+	CollectionPriorityClasses:     {APIGroup: "scheduling.k8s.io", Version: "v1", Resource: "priorityclasses"},
+	CollectionRuntimeClasses:      {APIGroup: "node.k8s.io", Version: "v1", Resource: "runtimeclasses"},
+	CollectionMutatingWebhooks:    {APIGroup: "admissionregistration.k8s.io", Version: "v1", Resource: "mutatingwebhookconfigurations"},
+	CollectionValidatingWebhooks:  {APIGroup: "admissionregistration.k8s.io", Version: "v1", Resource: "validatingwebhookconfigurations"},
+	CollectionIngressClasses:      {APIGroup: "networking.k8s.io", Version: "v1", Resource: "ingressclasses"},
 }
 
 // ClusterOriginFor returns the single cluster-scoped origin of a collection.
 func ClusterOriginFor(collection Collection) (Origin, error) {
+	if resource, ok := ParseDynamicCollection(collection); ok && !resource.Namespaced {
+		return Origin{APIGroup: resource.Group, Version: resource.Version, Resource: resource.Resource}, nil
+	}
 	origin, ok := clusterGVR[collection]
 	if !ok {
 		return Origin{}, validationError("collection is not cluster-scoped")
@@ -28,6 +39,9 @@ func ClusterOriginFor(collection Collection) (Origin, error) {
 
 // isClusterScoped reports whether a collection is read without namespaces.
 func isClusterScoped(collection Collection) bool {
+	if resource, ok := ParseDynamicCollection(collection); ok {
+		return !resource.Namespaced
+	}
 	_, ok := clusterGVR[collection]
 	return ok
 }

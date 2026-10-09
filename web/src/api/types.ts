@@ -568,6 +568,8 @@ export interface ResourceOwner {
 }
 
 export interface Pod {
+  containerCount?: number
+  containers?: PodContainerSummary[]
   containerResources?: Record<string, ResourceBudget>
   resources?: ResourceBudget
   configMaps?: string[]
@@ -582,6 +584,15 @@ export interface Pod {
   owner: ResourceOwner | null
   ageSeconds: number
   problematic: boolean
+  starting?: boolean
+}
+
+export interface PodContainerSummary {
+  name: string
+  type: ContainerType
+  state: 'waiting' | 'running' | 'terminated' | 'unknown'
+  status: 'running' | 'problem' | 'starting' | 'inactive'
+  reason: string | null
 }
 
 export interface PodContainer {
@@ -706,7 +717,7 @@ export interface ConfigMapResource {
 
 export interface ConfigMapDetail {
   metadata: ResourceMetadata
-  entries: Array<{ key: string; encoding: 'utf-8' | 'base64'; value: string; truncated: boolean }>
+  entries: Array<{ key: string; field?: 'data' | 'binaryData'; encoding: 'utf-8' | 'base64'; value: string; truncated: boolean }>
   totalBytes: number
   truncated: boolean
 }
@@ -1116,8 +1127,9 @@ export interface SavedFilterSet {
 }
 
 export interface Preferences {
+  customViews?: CustomViewContext[]
   version: 1
-  ui: { language: 'en' | 'pt-BR' }
+  ui: { language: 'en' | 'pt-BR'; contextColors?: Array<{ clusterProfileId: number; context: string; color: string }> }
   logs: { wrap: boolean; timestamps: boolean; tailLines: number }
   dashboard: { logScanWindow: '15m' | '30m' | '1h' | '4h'; sectionOrder: string[]; hiddenSections: string[] }
   filters: Record<SavedFilterCollection, SavedFilterSet>
@@ -1127,6 +1139,22 @@ export interface Preferences {
   recent?: RecentSet
 }
 
+export interface DynamicResource {
+  group: string
+  version: string
+  resource: string
+  kind: string
+  namespaced: boolean
+  shortNames?: string[]
+}
+export interface CustomViewContext { clusterProfileId: number; context: string; cluster: string; items: DynamicResource[] }
+export interface ResourceDiscovery { resources: DynamicResource[]; failures: Array<{ groupVersion: string; code: string; message: string }>; truncated: boolean }
+export interface DynamicColumn { name: string; type: string; format?: string; priority?: number }
+export interface DynamicRow {
+  name: string; namespace?: string; kind: string; uid?: string; resourceVersion?: string; createdAt?: string; ageSeconds: number
+  columns: DynamicColumn[]; cells: string[]; truncated?: boolean
+}
+
 export interface ShellPreferences {
   sidebarCompact: boolean
   collapsedGroups: string[]
@@ -1134,6 +1162,7 @@ export interface ShellPreferences {
 
 export interface ColumnPreferences {
   hidden: Record<string, string[]>
+  order?: Record<string, string[]>
 }
 
 export interface RecentSet {
@@ -1286,4 +1315,55 @@ export interface ExecTicket {
   websocketUrl: string
   protocols: string[]
   expiresAt: string
+}
+export interface GatewayResource {
+ name: string
+ namespace: string
+ uid: string
+ resourceVersion: string
+ apiVersion: string
+ kind: string
+ status: string
+ className: string
+ controllerName?: string
+ hosts: string[]
+ addresses: string[]
+ listeners: number
+ rules: number
+ ageSeconds: number
+ conditions: Array<{type: string; status: string; reason: string | null; message: string | null; lastTransitionTime: string | null}>
+ related: ResourceRef[]
+}
+export interface HelmRelease {
+ name: string
+ namespace: string
+ driver: 'secrets' | 'configmaps'
+ status: string
+ revision: number
+ storageName: string
+ uid: string
+ resourceVersion: string
+ ageSeconds: number
+ chart?: string
+ appVersion?: string
+ updatedAt?: string
+ related: ResourceRef[]
+ history?: Array<{revision: number; status: string; updatedAt: string}>
+}
+export interface HelmDocument {
+ document: string
+ format: 'values' | 'manifest'
+ revision: number
+ uid: string
+ resourceVersion: string
+}
+export interface HelmMutation {
+ expectedGeneration: string
+ expectedRevision: number
+ expectedUid: string
+ expectedResourceVersion: string
+ confirmed: boolean
+ action: 'values' | 'rollback'
+ values?: string
+ revision?: number
 }

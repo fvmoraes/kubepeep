@@ -46,10 +46,11 @@ type Repository struct {
 	reconcileMu sync.Mutex
 }
 
-// Service is the sanitized read surface consumed by HTTP handlers. Write and
-// path-bearing operations remain available only through Repository to keep
-// normalized machine paths away from JSON boundaries.
+// Service exposes sanitized profile DTOs to HTTP handlers. Imports delegate
+// file validation/storage to ConfigImporter; the repository stores references
+// only and normalized machine paths are never returned by the JSON API.
 type Service struct {
+	Importer   ConfigImporter
 	repository *Repository
 	home       string
 	active     ActiveProfileSource

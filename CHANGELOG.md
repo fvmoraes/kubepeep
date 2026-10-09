@@ -7,6 +7,60 @@ versions follow [Semantic Versioning](https://semver.org/) **without the `v`
 prefix** (official tags: `1.4.2`, `1.4.3`, …), and entries are generated
 automatically from Conventional Commits by `.github/workflows/release.yml`.
 
+## [Unreleased]
+
+### Added
+
+- Dynamic Resource Views under Workloads: discover native APIs and CRDs, search
+  by name/kind/short name/group, and pin, reorder or remove views per context.
+  Lists use Kubernetes printer columns and provide explicit read-only YAML.
+- Helm releases backed by Secrets or ConfigMaps, with history, resource links,
+  explicit values/manifest reads, values upgrades and revision rollback.
+- Gateway API inventories, relationships, details and authorized YAML editing.
+- Kubeconfig file/text import or local path registration, and saved context
+  colors on subtle shell dividers.
+- Optional Pod container count/state dots and quantitative usage bars including
+  HPA replica capacity; client load diagnostics in Settings.
+
+### Changed
+
+- All inventories fill the available content area; details overlay the bottom
+  70% of the window without shrinking the list. Closing restores full access.
+- Automatic inventory refresh defaults to enabled at a fixed 10 seconds, with
+  one global toggle. Five recent inventory queries remain warm in memory.
+- Initial columns follow a compact common order and adapt to narrow viewports.
+  User visibility and drag/button ordering preferences persist without expiry.
+- Namespace selection starts at the scope default. Explicit All loads the
+  default namespace before other authorized origins.
+- Only Pods expose bulk deletion; other resource tables retain compatible
+  selection/actions without bulk delete.
+
+### Fixed
+
+- Related-resource navigation selects the destination namespace, filters the
+  exact inventory item and opens its own details.
+- Native YAML editing, including Secrets/ConfigMaps and cluster resources,
+  preserves identity, resource version and drafts after conflicts. Data views
+  distinguish UTF-8 from Base64 without silently decoding editable values.
+- Pod startup/readiness transitions are distinguished from actual failures.
+- Read recovery distinguishes RBAC denial from authentication, discovery,
+  network and timeout failures, with bounded retries and partial coverage.
+- SQLite migration 0004 preserves existing preferences and enables context
+  colors, column ordering and custom views across application restarts.
+
+### Security
+
+- Update the Go build toolchain to 1.26.9 and refresh networking and OCI
+  dependencies with available security fixes.
+- Use Helm 3.21.4, which removes the legacy containerd dependency, and align
+  Kubernetes client modules on 0.36.5.
+
+### Validation scope
+
+- Automated backend, browser and persistence tests use isolated/synthetic
+  fixtures. Real-cluster opt-in tests and native macOS/Windows checks remain
+  separate validation gates; a local Linux build does not replace them.
+
 ## [0.10.0] - 2026-10-07
 
 ## Added

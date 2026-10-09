@@ -111,7 +111,7 @@ export function LeasesPage() {
   const collection = useInfiniteCollection({
     identity: ['resources', 'leases', generation, globalNamespace.value],
     filters: applied,
-    fetchPage: (cursor, signal, prefetch) => getLeases({ limit: 100, prefetch, uxInteractionId: listInteractionFor(applied), namespaces: effectiveNamespaces(globalNamespace.value, []), search: applied.search || undefined, ...sortParams(applied), continueToken: cursor || undefined }, signal, generation),
+    fetchPage: (cursor, signal, prefetch, focus) => getLeases({ ...focus, limit: 100, prefetch, uxInteractionId: listInteractionFor(applied), namespaces: effectiveNamespaces(globalNamespace.value, []), search: applied.search || undefined, ...sortParams(applied), continueToken: cursor || undefined }, signal, generation),
     enabled: Boolean(selection),
   })
 
@@ -192,7 +192,7 @@ export function StoragePage() {
     identity: ['resources', tab, generation, tab === 'persistent-volume-claims' ? globalNamespace.value : ''],
     filters: applied,
     enabled: Boolean(selection),
-    fetchPage: (cursor, signal, prefetch) => fetchList({ limit: 100, prefetch, uxInteractionId: listInteractionFor(applied), search: applied.search || undefined, statuses: applied.status ? [applied.status] : undefined, namespaces: tab === 'persistent-volume-claims' ? effectiveNamespaces(globalNamespace.value, []) : undefined, continueToken: cursor || undefined, ...sortParams(applied) }, signal, generation),
+    fetchPage: (cursor, signal, prefetch, focus) => fetchList({ ...focus, limit: 100, prefetch, uxInteractionId: listInteractionFor(applied), search: applied.search || undefined, statuses: applied.status ? [applied.status] : undefined, namespaces: tab === 'persistent-volume-claims' ? effectiveNamespaces(globalNamespace.value, []) : undefined, continueToken: cursor || undefined, ...sortParams(applied) }, signal, generation),
   })
 
   function setDraft(next: SimpleListState) {

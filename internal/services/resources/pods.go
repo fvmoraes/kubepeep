@@ -11,6 +11,8 @@ import (
 )
 
 type PodDTO struct {
+	ContainerCount     int                          `json:"containerCount"`
+	Containers         []PodContainerSummaryDTO     `json:"containers"`
 	ContainerResources map[string]ResourceBudgetDTO `json:"containerResources,omitempty"`
 	Resources          ResourceBudgetDTO            `json:"resources"`
 	Secrets            []string                     `json:"secrets,omitempty"`
@@ -25,8 +27,18 @@ type PodDTO struct {
 	Owner              *OwnerDTO                    `json:"owner"`
 	AgeSeconds         int64                        `json:"ageSeconds"`
 	Problematic        bool                         `json:"problematic"`
+	Starting           bool                         `json:"starting"`
 	ConfigMaps         []string                     `json:"configMaps,omitempty"`
 	PVCs               []string                     `json:"pvcs,omitempty"`
+}
+
+// Inventory status only: never include container environment or Secret values.
+type PodContainerSummaryDTO struct {
+	Name   string  `json:"name"`
+	Type   string  `json:"type"`
+	State  string  `json:"state"`
+	Status string  `json:"status"`
+	Reason *string `json:"reason"`
 }
 
 func (PodDTO) resourceListItem() {}
@@ -60,6 +72,8 @@ func ConvertPod(value *corev1.Pod, now time.Time) PodDTO {
 	owner := directOwner(value.OwnerReferences)
 	status := normalizePodPhase(value.Status.Phase)
 	summary := PodDTO{
+		ContainerCount:     len(value.Spec.Containers) + len(value.Spec.InitContainers) + len(value.Spec.EphemeralContainers),
+		Containers:         podContainerSummaries(value, now),
 		Namespace:          value.Namespace,
 		Resources:          podBudget(value.Spec),
 		ContainerResources: podContainerBudgets(value.Spec),
@@ -76,8 +90,103 @@ func ConvertPod(value *corev1.Pod, now time.Time) PodDTO {
 		ConfigMaps:         podConfigMapRefs(value.Spec),
 		PVCs:               podPVCRefs(value.Spec),
 	}
-	summary.Problematic = podProblematic(value, summary)
+	summary.Starting = podStarting(value, summary, now)
+	summary.Problematic = !summary.Starting && podProblematic(value, summary)
 	return summary
+}
+
+func podStarting(value *corev1.Pod, summary PodDTO, now time.Time) bool {
+	if value.Status.Phase != corev1.PodPending && value.Status.Phase != corev1.PodRunning {
+		return false
+	}
+	if summary.Restarts > 0 {
+		return false
+	}
+	for _, condition := range value.Status.Conditions {
+		if condition.Type == corev1.PodScheduled && condition.Status == corev1.ConditionFalse && condition.Reason == "Unschedulable" {
+			return false
+		}
+	}
+	for _, container := range summary.Containers {
+		if container.Status == "problem" {
+			return false
+		}
+	}
+	for _, container := range summary.Containers {
+		if container.Status == "starting" {
+			return true
+		}
+	}
+	for _, container := range value.Status.InitContainerStatuses {
+		if container.State.Terminated == nil && !container.Ready {
+			return true
+		}
+	}
+	for _, container := range value.Status.ContainerStatuses {
+		// Kubernetes keeps Started false until the startup probe succeeds.
+		if container.Started != nil && !*container.Started && container.State.Running != nil {
+			return true
+		}
+	}
+	// Match the dashboard's readiness grace period for a newly created Pod.
+	return summary.Ready.Current < summary.Ready.Desired && !value.CreationTimestamp.IsZero() && now.Sub(value.CreationTimestamp.Time) < 2*time.Minute
+}
+
+func podContainerSummaries(value *corev1.Pod, now time.Time) []PodContainerSummaryDTO {
+	result := make([]PodContainerSummaryDTO, 0)
+	appendGroup := func(names []string, statuses []corev1.ContainerStatus, kind string) {
+		byName := make(map[string]corev1.ContainerStatus, len(statuses))
+		for _, status := range statuses {
+			byName[status.Name] = status
+		}
+		for _, name := range names {
+			if len(result) >= maximumContainers {
+				return
+			}
+			status := byName[name]
+			detail := podContainer(ContainerSpecDTO{Name: name}, status, kind)
+			tone := "inactive"
+			switch {
+			case status.State.Running != nil:
+				tone = "running"
+				if !status.Ready && kind != "ephemeral" {
+					if kind == "init" || status.Started != nil && !*status.Started || !value.CreationTimestamp.IsZero() && now.Sub(value.CreationTimestamp.Time) < 2*time.Minute {
+						tone = "starting"
+					} else {
+						tone = "problem"
+					}
+				}
+			case status.State.Terminated != nil && status.State.Terminated.ExitCode != 0:
+				tone = "problem"
+			case status.State.Waiting != nil:
+				switch status.State.Waiting.Reason {
+				case "", "ContainerCreating", "PodInitializing":
+					tone = "starting"
+				default:
+					tone = "problem"
+				}
+			case status.Name == "" && value.Status.Phase == corev1.PodPending:
+				tone = "starting"
+			}
+			result = append(result, PodContainerSummaryDTO{Name: name, Type: kind, State: detail.State, Status: tone, Reason: detail.Reason})
+		}
+	}
+	regular := make([]string, 0, len(value.Spec.Containers))
+	for _, container := range value.Spec.Containers {
+		regular = append(regular, container.Name)
+	}
+	init := make([]string, 0, len(value.Spec.InitContainers))
+	for _, container := range value.Spec.InitContainers {
+		init = append(init, container.Name)
+	}
+	ephemeral := make([]string, 0, len(value.Spec.EphemeralContainers))
+	for _, container := range value.Spec.EphemeralContainers {
+		ephemeral = append(ephemeral, container.Name)
+	}
+	appendGroup(regular, value.Status.ContainerStatuses, "regular")
+	appendGroup(init, value.Status.InitContainerStatuses, "init")
+	appendGroup(ephemeral, value.Status.EphemeralContainerStatuses, "ephemeral")
+	return result
 }
 
 func podConfigMapRefs(spec corev1.PodSpec) []string {

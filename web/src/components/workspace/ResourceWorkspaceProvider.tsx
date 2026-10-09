@@ -9,6 +9,7 @@ export interface WorkspaceEntry {
   namespace: string | null
   name: string
   tab: string
+  listLocation?: Location
 }
 
 export interface WorkspaceRefInput {
@@ -26,6 +27,8 @@ interface WorkspaceContextValue {
   canBack: boolean
   canForward: boolean
   historySize: number
+  openRelatedResource: (ref: WorkspaceRefInput, tab?: string) => void
+  clearListFocus: () => void
   openResource: (ref: WorkspaceRefInput, tab?: string) => void
   /** Deep-link path: opens without duplicating history when already active. */
   openFromRoute: (ref: WorkspaceRefInput, tab?: string) => void
@@ -65,7 +68,7 @@ export function ResourceWorkspaceProvider({ children }: { children: ReactNode })
     const path = resourceDetailPath(entry)
     if (path) {
       setNavigationFrom(location.key)
-      navigate(path, { replace: true })
+      navigate(`${path}${entry.listLocation?.search ?? ''}`, { replace: true })
     }
   }, [location.key, navigate])
 
@@ -85,29 +88,44 @@ export function ResourceWorkspaceProvider({ children }: { children: ReactNode })
     })
   }, [index])
 
-  const inspect = useCallback((ref: WorkspaceRefInput, tab?: string, fromRoute = false) => {
+  const inspect = useCallback((ref: WorkspaceRefInput, tab?: string, fromRoute = false, related = false) => {
     if (!resourceDetailPath(ref)) return
+    const listPath = collectionListPath(ref) ?? '/'
+    const focusParams = new URLSearchParams({ focus: ref.name })
+    if (ref.namespace) focusParams.set('namespace', ref.namespace)
+    const listLocation = related ? { ...location, pathname: listPath, search: `?${focusParams}`, hash: '', key: resourceKey(ref) }
+      : fromRoute ? { ...location, pathname: listPath } : undefined
+    const nextEntry = { ...toEntry(ref, tab ?? defaultWorkspaceTab), listLocation: listLocation ?? (visible ? active?.listLocation : undefined) }
     if (!visible) {
       setOrigin({
-        location,
+        location: listLocation ?? location,
         returnTo: fromRoute ? `${collectionListPath(ref) ?? '/'}${location.search}${location.hash}` : `${location.pathname}${location.search}${location.hash}`,
       })
-      commit([toEntry(ref, tab ?? defaultWorkspaceTab)], 0)
+      commit([nextEntry], 0)
       return
     }
     const key = resourceKey(ref)
     const existing = entries.findIndex((entry) => resourceKey(entry) === key)
     if (existing >= 0) {
-      const entry: WorkspaceEntry = { ...entries[existing], tab: tab ?? entries[existing].tab }
+      const entry: WorkspaceEntry = { ...entries[existing], tab: tab ?? entries[existing].tab, listLocation: related ? listLocation : entries[existing].listLocation }
       const nextEntries = [...entries.slice(0, existing), entry]
       commit(nextEntries, existing)
       return
     }
-    const nextEntries = [...entries.slice(0, index + 1), toEntry(ref, tab ?? defaultWorkspaceTab)]
+    const nextEntries = [...entries.slice(0, index + 1), nextEntry]
     commit(nextEntries, nextEntries.length - 1)
-  }, [commit, entries, index, location, visible])
+  }, [active, commit, entries, index, location, visible])
 
   const openResource = useCallback((ref: WorkspaceRefInput, tab?: string) => inspect(ref, tab), [inspect])
+
+  const openRelatedResource = useCallback((ref: WorkspaceRefInput, tab?: string) => inspect(ref, tab, false, true), [inspect])
+  const clearListFocus = useCallback(() => {
+    if (!active?.listLocation) return
+    const params = new URLSearchParams(active.listLocation.search)
+    params.delete('focus')
+    const next = { ...active, listLocation: { ...active.listLocation, search: params.size ? `?${params}` : '' } }
+    commit(entries.map((entry, at) => at === index ? next : entry), index)
+  }, [active, commit, entries, index])
 
   const openFromRoute = useCallback((ref: WorkspaceRefInput, tab?: string) => {
     if (visible && active && resourceKey(active) === resourceKey(ref)) {
@@ -121,7 +139,7 @@ export function ResourceWorkspaceProvider({ children }: { children: ReactNode })
   const close = useCallback(() => {
     setNavigationFrom(location.key)
     setOpen(false)
-    navigate(origin?.returnTo ?? (active ? collectionListPath(active) : null) ?? '/', { replace: true })
+    navigate(active?.listLocation ? `${active.listLocation.pathname}${active.listLocation.search}` : origin?.returnTo ?? (active ? collectionListPath(active) : null) ?? '/', { replace: true })
   }, [active, location.key, navigate, origin])
 
   const back = useCallback(() => {
@@ -178,19 +196,21 @@ export function ResourceWorkspaceProvider({ children }: { children: ReactNode })
 
   const value = useMemo<WorkspaceContextValue>(() => ({
     open: visible,
-    backgroundLocation: visible || navigationFrom === location.key ? origin?.location ?? null : null,
+    backgroundLocation: visible || navigationFrom === location.key ? active?.listLocation ?? origin?.location ?? null : null,
     active: visible ? active : null,
     canBack: visible && index > 0,
     canForward: visible && index < entries.length - 1,
     historySize: entries.length,
     openResource,
+    openRelatedResource,
+    clearListFocus,
     openFromRoute,
     close,
     back,
     forward,
     setTab,
     reset,
-  }), [active, back, close, entries.length, forward, index, visible, origin, navigationFrom, location.key, openFromRoute, openResource, reset, setTab])
+  }), [active, back, close, entries.length, forward, index, visible, origin, navigationFrom, location.key, openFromRoute, openResource, openRelatedResource, clearListFocus, reset, setTab])
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>
 }

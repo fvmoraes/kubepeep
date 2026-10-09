@@ -15,9 +15,11 @@ const navigationInventory = [
   '/', '/nodes', '/events', '/namespaces', '/leases', '/workloads',
   '/workloads/kind/deployments', '/pods', '/workloads/kind/replicasets',
   '/workloads/kind/daemonsets', '/workloads/kind/statefulsets',
-  '/workloads/kind/jobs', '/workloads/kind/cronjobs', '/network/services',
+  '/workloads/kind/jobs', '/workloads/kind/cronjobs', '/workloads/custom', '/network/services',
   '/network/endpoints', '/network/endpoint-slices', '/network/ingresses',
   '/network/ingress-classes', '/network/network-policies', '/network/port-forwards',
+  '/network/gateway-api/gateways',
+  '/helm/releases/secrets',
   '/config/configmaps', '/config/secrets', '/configuration/resource-quotas',
   '/configuration/limit-ranges', '/configuration/hpas', '/configuration/pdbs',
   '/storage/persistent-volumes', '/storage/persistent-volume-claims',
@@ -26,7 +28,7 @@ const navigationInventory = [
   '/access/role-bindings', '/access/cluster-roles', '/access/cluster-role-bindings',
   '/permissions', '/logs', '/administration/customresourcedefinitions',
   '/administration/priority-classes', '/administration/runtime-classes',
-  '/administration/mutating-webhook-configurations', '/settings',
+  '/administration/mutating-webhook-configurations', '/administration/validating-webhook-configurations', '/settings',
 ] as const
 
 const preferences = {

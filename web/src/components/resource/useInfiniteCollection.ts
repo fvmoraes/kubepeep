@@ -3,6 +3,9 @@ import { useCallback, useEffect, useMemo, useRef } from 'react'
 
 import { APIError } from '../../api/client'
 import type { CollectionResult } from '../../api/types'
+import { useAutoRefreshQueryOptions } from './AutoRefreshProvider'
+import { useResourceListFocus } from './ResourceListFocus'
+import { useWarmInventoryCache } from './WarmInventoryCache'
 
 export const collectionStaleTime = 30_000
 export const collectionGcTime = 120_000
@@ -11,27 +14,36 @@ export function useInfiniteCollection<T>(options: {
   identity: readonly unknown[]
   filters: unknown
   enabled: boolean
-  fetchPage: (cursor: string, signal: AbortSignal, prefetch: boolean) => Promise<CollectionResult<T>>
+  fetchPage: (cursor: string, signal: AbortSignal, prefetch: boolean, focus: { fieldSelector?: string }) => Promise<CollectionResult<T>>
 }) {
-  const queryKey = [...options.identity, options.filters]
+  const autoRefresh = useAutoRefreshQueryOptions()
+  const focus = useResourceListFocus()
+  const keepWarm = useWarmInventoryCache()
+  const queryKey = [...options.identity, options.filters, ...(focus ? [focus.name] : [])]
   const prefetchCursorRef = useRef<string | null>(null)
   const prefetchAfterRef = useRef(0)
   const query = useInfiniteQuery({
     queryKey,
     initialPageParam: '',
-    queryFn: ({ pageParam, signal }) => options.fetchPage(pageParam, signal, pageParam !== '' && prefetchCursorRef.current === pageParam),
+    queryFn: ({ pageParam, signal }) => options.fetchPage(pageParam, signal, pageParam !== '' && prefetchCursorRef.current === pageParam, focus ? { fieldSelector: `metadata.name=${focus.name}` } : {}),
     getNextPageParam: (lastPage) => lastPage.page.next || undefined,
     maxPages: 5,
     staleTime: collectionStaleTime,
-    gcTime: collectionGcTime,
+    gcTime: keepWarm ? Infinity : collectionGcTime,
     placeholderData: (previousData, previousQuery) => {
       const previousKey = previousQuery?.queryKey
       return previousKey?.length === queryKey.length
         && options.identity.every((value, index) => previousKey[index] === value)
+        && (!focus || previousKey.at(-1) === focus.name)
         ? previousData : undefined
     },
     enabled: options.enabled,
+    ...autoRefresh,
   })
+  const queryFingerprint = JSON.stringify(queryKey)
+  useEffect(() => {
+    if (options.enabled) keepWarm?.(JSON.parse(queryFingerprint))
+  }, [keepWarm, options.enabled, queryFingerprint])
   const pages = query.data?.pages
   const items = useMemo(() => {
     if (!pages) return [] as T[]
@@ -45,7 +57,7 @@ export function useInfiniteCollection<T>(options: {
     return currentPages.length === 1 ? currentPages[0].items : currentPages.flatMap((page) => page.items)
   }, [pages])
   const authorizationFailed = query.error instanceof APIError
-    && (query.error.status === 403 || query.error.code === 'GENERATION_CHANGED' || query.error.code === 'AUTHORIZATION_UNAVAILABLE')
+    && (query.error.status === 401 || query.error.status === 403 || query.error.code === 'GENERATION_CHANGED' || query.error.code === 'AUTHORIZATION_UNAVAILABLE')
   const identityFingerprint = JSON.stringify(options.identity)
   const idleHandle = useRef<ReturnType<typeof setTimeout> | number | null>(null)
   const deferredNearEnd = useRef(false)
@@ -113,6 +125,7 @@ export function useInfiniteCollection<T>(options: {
   }, [isFetching, hasNextPage, isPlaceholderData, onScrollProgress])
 
   return {
+    focused: Boolean(focus),
     query,
     queryKey,
     items: authorizationFailed ? [] as T[] : items,

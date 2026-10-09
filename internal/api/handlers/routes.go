@@ -9,6 +9,7 @@ import (
 
 	"github.com/fvmoraes/kubepeep/internal/api"
 	actionservice "github.com/fvmoraes/kubepeep/internal/services/actions"
+	"github.com/fvmoraes/kubepeep/internal/services/resourcecatalog"
 )
 
 type Dependencies struct {
@@ -54,6 +55,7 @@ func Register(applicationRouter *router.Router, dependencies Dependencies) {
 	if dependencies.Profiles != nil {
 		profiles := NewClusterProfiles(dependencies.Profiles)
 		apiRouter.GET("/cluster/profiles", profiles.List)
+		apiRouter.POST("/cluster/profiles/import", profiles.Import)
 		apiRouter.GET("/cluster/profile", profiles.Active)
 	}
 	if dependencies.Contexts != nil {
@@ -91,6 +93,22 @@ func Register(applicationRouter *router.Router, dependencies Dependencies) {
 	}
 	if dependencies.Resources != nil && dependencies.Selection != nil {
 		resourceHandler := NewResources(dependencies.Resources, dependencies.Preferences, dependencies.Selection, dependencies.Cursors).WithCursorStore(dependencies.CursorStore)
+		apiRouter.GET("/resource-discovery", resourceHandler.ResourceDiscovery)
+		apiRouter.GET("/dynamic-resources/{group}/{version}/{resource}/{scope}", resourceHandler.DynamicList)
+		apiRouter.GET("/dynamic-resources/{group}/{version}/{resource}/{scope}/{namespace}/{name}", resourceHandler.DynamicDetail)
+		apiRouter.GET("/dynamic-resources/{group}/{version}/{resource}/{scope}/{namespace}/{name}/yaml", resourceHandler.DynamicYAML)
+		apiRouter.GET("/helm/releases/{driver}", resourceHandler.HelmList)
+		apiRouter.GET("/helm/releases/{driver}/{namespace}/{name}", resourceHandler.HelmDetail)
+		apiRouter.GET("/helm/releases/{driver}/{namespace}/{name}/{format}", resourceHandler.HelmDocument)
+		apiRouter.POST("/helm/releases/{driver}/{namespace}/{name}", resourceHandler.HelmApply)
+		for _, resource := range resourcecatalog.GatewayResources() {
+			apiRouter.GET("/"+resource.Collection, resourceHandler.GatewayList(resource.Collection))
+			path := "/" + resource.Collection + "/{name}"
+			if resource.Namespaced {
+				path = "/" + resource.Collection + "/{namespace}/{name}"
+			}
+			apiRouter.GET(path, resourceHandler.GatewayDetail(resource.Collection))
+		}
 		apiRouter.GET("/workloads", resourceHandler.Workloads)
 		apiRouter.GET("/workloads/{kind}/{namespace}/{name}", resourceHandler.WorkloadDetail)
 		apiRouter.GET("/workloads/{kind}/{namespace}/{name}/yaml", resourceHandler.WorkloadYAML)
@@ -236,6 +254,30 @@ func NewAPIFallback() http.Handler {
 }
 
 func allowedMethods(path string) (string, bool) {
+	if path == apiPrefix+"/resource-discovery" {
+		return "GET, HEAD", true
+	}
+	if strings.HasPrefix(path, apiPrefix+"/dynamic-resources/") {
+		parts := strings.Split(strings.TrimPrefix(path, apiPrefix+"/dynamic-resources/"), "/")
+		return "GET, HEAD", len(parts) == 4 || len(parts) == 6 || len(parts) == 7 && parts[6] == "yaml"
+	}
+	if strings.HasPrefix(path, apiPrefix+"/helm/releases/") {
+		parts := strings.Split(strings.TrimPrefix(path, apiPrefix+"/"), "/")
+		if len(parts) == 3 {
+			return "GET, HEAD", true
+		}
+		if len(parts) == 5 {
+			return "GET, HEAD, POST", true
+		}
+		if len(parts) == 6 {
+			return "GET, HEAD", true
+		}
+	}
+	for _, resource := range resourcecatalog.GatewayResources() {
+		if path == apiPrefix+"/"+resource.Collection {
+			return "GET, HEAD", true
+		}
+	}
 	switch path {
 	case statusPath, sessionPath, profilesPath, profilePath,
 		apiPrefix + "/contexts", apiPrefix + "/namespaces", apiPrefix + "/permissions",
@@ -261,7 +303,7 @@ func allowedMethods(path string) (string, bool) {
 		return "GET, HEAD, PUT", true
 	case apiPrefix + "/stream":
 		return "GET", true
-	case apiPrefix + "/contexts/select", apiPrefix + "/namespace-scopes/validate", apiPrefix + "/dashboard/log-scan":
+	case apiPrefix + "/cluster/profiles/import", apiPrefix + "/contexts/select", apiPrefix + "/namespace-scopes/validate", apiPrefix + "/dashboard/log-scan":
 		return "POST", true
 	case apiPrefix + "/namespace-scopes":
 		return "GET, HEAD, POST", true
@@ -296,6 +338,16 @@ func allowedMethods(path string) (string, bool) {
 }
 
 func resourceAllowedMethods(path string) (string, bool) {
+	for _, resource := range resourcecatalog.GatewayResources() {
+		parts := strings.Split(strings.TrimPrefix(path, apiPrefix+"/"), "/")
+		count := 2
+		if resource.Namespaced {
+			count = 3
+		}
+		if len(parts) == count && parts[0] == resource.Collection {
+			return "GET, HEAD", true
+		}
+	}
 	if !strings.HasPrefix(path, apiPrefix+"/") {
 		return "", false
 	}

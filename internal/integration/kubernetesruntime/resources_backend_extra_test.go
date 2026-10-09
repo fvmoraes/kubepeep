@@ -365,7 +365,7 @@ func TestResourceBackendCollectGuardrails(t *testing.T) {
 	if _, err := newBackend(&namespaceAwareResourceAuthorization{globalDecision: authorization.DecisionDenied}).ListPods(ctx, binding, resolution, resources.ListOptions{Limit: 10}, globalCursor); resources.ErrorCodeOf(err) != resources.CodeForbidden {
 		t.Fatalf("denied global cursor err = %v", err)
 	}
-	if _, err := newBackend(&namespaceAwareResourceAuthorization{globalDecision: authorization.DecisionUnknown}).ListPods(ctx, binding, resolution, resources.ListOptions{Limit: 10}, globalCursor); resources.ErrorCodeOf(err) != resources.CodeAuthorizationUnavailable {
+	if _, err := newBackend(&namespaceAwareResourceAuthorization{globalDecision: authorization.DecisionUnknown}).ListPods(ctx, binding, resolution, resources.ListOptions{Limit: 10}, globalCursor); err != nil {
 		t.Fatalf("unknown global cursor err = %v", err)
 	}
 

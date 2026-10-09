@@ -33,6 +33,30 @@ func TestPreferenceGetMaterializesDefaultsAndIsolatesFutureRecords(t *testing.T)
 	}
 }
 
+func TestColumnOrderRoundTripAndValidation(t *testing.T) {
+	t.Parallel()
+	value := DefaultPreferences()
+	value.Columns.Order = map[string][]string{"pods": {"name", "containers", "namespace"}}
+	repository := &fakePreferenceRepository{}
+	service := &PreferenceService{Repository: repository, Detector: DefaultSensitiveDetector{}}
+	if _, err := service.Put(t.Context(), value); err != nil {
+		t.Fatal(err)
+	}
+	repository.records = repository.replaced
+	loaded, err := service.Get(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	order := loaded.Columns.Order["pods"]
+	if len(order) != 3 || order[0] != "name" || order[1] != "containers" {
+		t.Fatalf("order = %v", order)
+	}
+	value.Columns.Order["pods"] = []string{"name", "name"}
+	if _, err := service.Put(t.Context(), value); ErrorCodeOf(err) != CodeValidationFailed {
+		t.Fatalf("duplicate order: %v", err)
+	}
+}
+
 func TestPreferencePutValidatesAndReplacesAllKeysTransactionally(t *testing.T) {
 	repository := &fakePreferenceRepository{}
 	service := &PreferenceService{Repository: repository, Detector: DefaultSensitiveDetector{}}
@@ -45,7 +69,7 @@ func TestPreferencePutValidatesAndReplacesAllKeysTransactionally(t *testing.T) {
 	}
 	// 11 legacy keys + favorites, shell, columns and recent sections with the
 	// same schema v1.
-	if saved.UI.Language != "pt-BR" || len(repository.replaced) != 16 {
+	if saved.UI.Language != "pt-BR" || len(repository.replaced) != 19 {
 		t.Fatalf("saved=%#v records=%d", saved, len(repository.replaced))
 	}
 	for index := 1; index < len(repository.replaced); index++ {
@@ -79,5 +103,33 @@ func TestPreferenceReplaceFailureIsSanitized(t *testing.T) {
 	_, err := service.Put(context.Background(), DefaultPreferences())
 	if ErrorCodeOf(err) != CodeClusterUnavailable || PublicMessage(err) == repository.replaceErr.Error() {
 		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestContextColorsAreIsolatedByProfileAndRoundTrip(t *testing.T) {
+	t.Parallel()
+	value := DefaultPreferences()
+	value.UI.ContextColors = []ContextColor{{ClusterProfileID: 1, Context: "shared-name", Color: "#38bdf8"}, {ClusterProfileID: 2, Context: "shared-name", Color: "#f87171"}}
+	repository := &fakePreferenceRepository{}
+	service := &PreferenceService{Repository: repository, Detector: DefaultSensitiveDetector{}}
+	if _, err := service.Put(t.Context(), value); err != nil {
+		t.Fatal(err)
+	}
+	repository.records = repository.replaced
+	loaded, err := service.Get(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.UI.ContextColors) != 2 || loaded.UI.ContextColors[1].Color != "#f87171" {
+		t.Fatal("context colors lost")
+	}
+	value.UI.ContextColors[1].ClusterProfileID = 1
+	if err := ValidatePreferences(value); ErrorCodeOf(err) != CodeValidationFailed {
+		t.Fatalf("duplicate color: %v", err)
+	}
+	value.UI.ContextColors[1].ClusterProfileID = 2
+	value.UI.ContextColors[1].Color = "red; background:url(x)"
+	if err := ValidatePreferences(value); ErrorCodeOf(err) != CodeValidationFailed {
+		t.Fatalf("invalid color: %v", err)
 	}
 }

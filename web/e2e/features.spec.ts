@@ -241,7 +241,7 @@ test('bulk namespace paste previews counts and saves one scope without cluster d
 test('nodes lists and details without namespace scope and honors authorization (R02/V1)', async ({ page }) => {
   await page.goto('/nodes')
   await expect(page.getByRole('heading', { name: 'Nodes' })).toBeVisible()
-  await expect(page.getByRole('cell', { name: /worker-1/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Open Node worker-1' })).toBeVisible()
   await expect(page.getByText('Cluster-scoped result')).toBeVisible()
 
   await page.getByRole('button', { name: /Open Node worker-1/i }).click()
@@ -272,7 +272,7 @@ test('storage tabs render honest states and navigate (R23-R27/V2)', async ({ pag
 
   await page.goto('/storage/persistent-volumes')
   await expect(page.getByRole('heading', { name: 'Storage' })).toBeVisible()
-  await expect(page.getByRole('cell', { name: /pv-data/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Open pv-data' })).toBeVisible()
   // No fictitious namespace fan-out for cluster-scoped lists.
   await expect(page.getByText('Cluster-scoped result')).toBeVisible()
 
@@ -292,7 +292,7 @@ test('leases page lists authorized leases in the scoped namespaces (R05/V2)', as
 
   await page.goto('/leases')
   await expect(page.getByRole('heading', { name: 'Leases' })).toBeVisible()
-  await expect(page.getByRole('cell', { name: /leader-election/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Open Lease leader-election in payments' })).toBeVisible()
   await expect(page.getByText('api-abc').first()).toBeVisible()
 })
 

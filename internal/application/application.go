@@ -24,6 +24,7 @@ import (
 	httpapp "github.com/fvmoraes/kubepeep/internal/app"
 	"github.com/fvmoraes/kubepeep/internal/buildinfo"
 	productconfig "github.com/fvmoraes/kubepeep/internal/config"
+	"github.com/fvmoraes/kubepeep/internal/integration/kubeconfigimport"
 	kuberuntime "github.com/fvmoraes/kubepeep/internal/integration/kubernetesruntime"
 	"github.com/fvmoraes/kubepeep/internal/logging"
 	"github.com/fvmoraes/kubepeep/internal/observability"
@@ -274,6 +275,7 @@ func Compose(ctx context.Context, options Options) (*Platform, error) {
 	if err != nil {
 		return nil, fmt.Errorf("startup: create health provider: %w", err)
 	}
+	profileService.Importer = &kubeconfigimport.Importer{Home: home}
 	contexts, err := contextservice.NewService(profileRepository, kubernetesRuntime, selectionState, snapshots)
 	if err != nil {
 		return nil, err

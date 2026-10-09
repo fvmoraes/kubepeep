@@ -226,10 +226,11 @@ func (s *Service) Matrix(ctx context.Context, request PermissionsRequest) (Capab
 		capability.CapabilityID = item.CapabilityID
 		matrix.Decisions = append(matrix.Decisions, capability)
 		if capability.Decision == DecisionUnknown {
+			failure := ReviewFailure(capability)
 			matrix.Errors = append(matrix.Errors, PartialError{
 				Namespace: capability.Namespace,
-				Code:      CodeAuthorizationUnavailable,
-				Message:   publicMessages[CodeAuthorizationUnavailable],
+				Code:      failure.Code,
+				Message:   failure.Message,
 			})
 			continue
 		}
@@ -237,6 +238,9 @@ func (s *Service) Matrix(ctx context.Context, request PermissionsRequest) (Capab
 	}
 	matrix.Complete = len(matrix.Errors) == 0
 	if known == 0 {
+		if len(matrix.Decisions) > 0 {
+			return matrix, ReviewFailure(matrix.Decisions[0])
+		}
 		return matrix, authorizationUnavailableError(nil)
 	}
 	return matrix, nil

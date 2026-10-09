@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -62,11 +63,12 @@ type CursorMemoryStore interface {
 // credentials: every operation obtains a generation-bound lease from Runtime
 // and exposes only resource DTOs or a bounded YAML document.
 type ResourceBackend struct {
-	runtime    *Runtime
-	clients    resourceClientProvider
-	authorizer resources.AuthorizationChecker
-	redactor   resources.TextRedactor
-	now        func() time.Time
+	runtime       *Runtime
+	clients       resourceClientProvider
+	authorizer    resources.AuthorizationChecker
+	redactor      resources.TextRedactor
+	now           func() time.Time
+	viewDiscovery resourceDiscoveryCache
 
 	listWindowTimeout      time.Duration
 	metrics                *observability.Registry
@@ -541,22 +543,24 @@ func collectResource[T resources.ListItem](
 	if err != nil {
 		return resources.ListResult[T]{}, err
 	}
-	globalCandidate := resolution.PreferGlobal && len(options.Namespaces) == 0 && !cursorNamespaced
+	preferredNamespace := preferredListNamespace(resolution, options)
+	globalCandidate := preferredNamespace == "" && resolution.PreferGlobal && len(options.Namespaces) == 0 && !cursorNamespaced
 	if globalCandidate {
 		origins, originsErr := resources.GlobalOriginsFor(collection, options.Kinds)
 		if originsErr != nil {
 			return resources.ListResult[T]{}, originsErr
 		}
 		decision := globalListDecision(ctx, backend.authorizer, binding.Generation, origins)
-		if decision == authorization.DecisionAllowed {
+		if decision == authorization.DecisionAllowed || decision == authorization.DecisionUnknown && cursorGlobal {
 			backend.metrics.IncCounter(observability.ResourceListsTotalName, map[string]string{"resource": string(collection), "strategy": "global"})
 			selection := resourceSelection(binding, resolution)
 			selection.Namespaces = []string{""}
 			var received atomic.Int64
 			started := time.Now()
 			result, collectErr := resources.Collect(ctx, resources.CollectionRequest[T]{
-				Selection: selection, Options: options, Origins: origins, Cursor: cursor,
-				Lister: countingLister(list, &received), Authorizer: backend.authorizer, Less: less,
+				ReadThroughUnknown: true,
+				Selection:          selection, Options: options, Origins: origins, Cursor: cursor,
+				Lister: countingLister(list, &received, backend, binding), Authorizer: backend.authorizer, Less: less,
 				Timeout:             backend.listWindowTimeout,
 				RequestedNamespaces: len(resolution.Namespaces),
 				Fanout:              backend.listFanout,
@@ -576,7 +580,7 @@ func collectResource[T resources.ListItem](
 			return resources.ListResult[T]{}, resourceDomain(resources.CodeAuthorizationUnavailable, "Authorization could not be confirmed.", nil)
 		}
 	}
-	if collection == resources.CollectionPods && !resolution.PreferGlobal && !cursorNamespaced && len(resolution.Namespaces) > 1 && (len(options.Namespaces) != 1 || cursorGlobal) {
+	if preferredNamespace == "" && collection == resources.CollectionPods && !resolution.PreferGlobal && !cursorNamespaced && len(resolution.Namespaces) > 1 && (len(options.Namespaces) != 1 || cursorGlobal) {
 		names, namesErr := resources.ResolveNamespaces(resolution.Namespaces, options.Namespaces)
 		if namesErr != nil {
 			return resources.ListResult[T]{}, namesErr
@@ -586,7 +590,7 @@ func collectResource[T resources.ListItem](
 			return resources.ListResult[T]{}, originsErr
 		}
 		decision := globalListDecision(ctx, backend.authorizer, binding.Generation, origins)
-		if decision == authorization.DecisionAllowed {
+		if decision == authorization.DecisionAllowed || decision == authorization.DecisionUnknown && cursorGlobal {
 			allowed := make(map[string]struct{}, len(names))
 			for _, name := range names {
 				allowed[name] = struct{}{}
@@ -594,10 +598,11 @@ func collectResource[T resources.ListItem](
 			selection := resourceSelection(binding, resolution)
 			selection.Namespaces = []string{""}
 			var received atomic.Int64
-			counted := countingLister(list, &received)
+			counted := countingLister(list, &received, backend, binding)
 			started := time.Now()
 			result, collectErr := resources.Collect(ctx, resources.CollectionRequest[T]{
-				Selection: selection, Options: options, Origins: origins, Cursor: cursor,
+				ReadThroughUnknown: true,
+				Selection:          selection, Options: options, Origins: origins, Cursor: cursor,
 				Lister: originListerFunc[T](func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[T], error) {
 					return listGlobalPodPageInScope(ctx, page, counted, allowed)
 				}),
@@ -635,13 +640,15 @@ func collectResource[T resources.ListItem](
 	backend.metrics.IncCounter(observability.ResourceListsTotalName, map[string]string{"resource": string(collection), "strategy": "fanout"})
 	started := time.Now()
 	result, collectErr := resources.Collect(ctx, resources.CollectionRequest[T]{
-		Selection: selection, Options: options, Origins: origins, Cursor: cursor,
-		Lister: countingLister(list, &received), Authorizer: backend.authorizer, Less: less,
+		ReadThroughUnknown: true,
+		Selection:          selection, Options: options, Origins: origins, Cursor: cursor,
+		Lister: countingLister(list, &received, backend, binding), Authorizer: backend.authorizer, Less: less,
 		Timeout:             backend.listWindowTimeout,
 		RequestedNamespaces: len(names),
 		Fanout:              backend.listFanout,
 		NativeIdentityOrder: true,
 		GlobalGrantFastPath: true,
+		PreferredNamespace:  preferredNamespace,
 		Retry:               backend.listRetryPolicy(),
 	})
 	observeListDuration(backend.metrics, collection, "fanout", started)
@@ -649,6 +656,16 @@ func collectResource[T resources.ListItem](
 		backend.observeList(collection, int(received.Load()), len(result.Items))
 	}
 	return result, collectErr
+}
+
+func preferredListNamespace(resolution namespaces.ScopeResolution, options resources.ListOptions) string {
+	if resolution.DefaultNamespace == nil || !slices.Contains(resolution.Namespaces, *resolution.DefaultNamespace) {
+		return ""
+	}
+	if len(options.Namespaces) > 0 && !slices.Contains(options.Namespaces, *resolution.DefaultNamespace) {
+		return ""
+	}
+	return *resolution.DefaultNamespace
 }
 
 // A global LIST is safe for an explicit scope only after a global LIST grant.
@@ -849,8 +866,9 @@ func clusterCollectUncoalesced[T resources.ListItem](ctx context.Context, backen
 	backend.metrics.IncCounter(observability.ResourceListsTotalName, map[string]string{"resource": string(collection), "strategy": "global"})
 	started := time.Now()
 	result, collectErr := resources.Collect(ctx, resources.CollectionRequest[T]{
-		Selection: selection, Options: normalized, Origins: []resources.Origin{origin}, Cursor: cursor,
-		Lister: countingLister(list, &received), Authorizer: backend.authorizer, Less: less,
+		ReadThroughUnknown: true,
+		Selection:          selection, Options: normalized, Origins: []resources.Origin{origin}, Cursor: cursor,
+		Lister: countingLister(list, &received, backend, binding), Authorizer: backend.authorizer, Less: less,
 		Timeout:             backend.listWindowTimeout,
 		Fanout:              backend.listFanout,
 		NativeIdentityOrder: true,
@@ -858,8 +876,9 @@ func clusterCollectUncoalesced[T resources.ListItem](ctx context.Context, backen
 	})
 	if cursor == nil && resources.ErrorCodeOf(collectErr) == resources.CodeCursorExpired && ctx.Err() == nil {
 		result, collectErr = resources.Collect(ctx, resources.CollectionRequest[T]{
-			Selection: selection, Options: normalized, Origins: []resources.Origin{origin},
-			Lister: countingLister(list, &received), Authorizer: backend.authorizer, Less: less,
+			ReadThroughUnknown: true,
+			Selection:          selection, Options: normalized, Origins: []resources.Origin{origin},
+			Lister: countingLister(list, &received, backend, binding), Authorizer: backend.authorizer, Less: less,
 			Timeout: backend.listWindowTimeout, Fanout: backend.listFanout, NativeIdentityOrder: true,
 			Retry: backend.listRetryPolicy(),
 		})
@@ -896,10 +915,11 @@ func sanitizeClusterFailures(failures []resources.PartialErrorDTO) []resources.P
 // countingLister records how many items Kubernetes returned for one window so
 // the over-fetch ratio (received versus returned) can be measured. Concurrency
 // is bounded by the collection fan-out, so an atomic counter is sufficient.
-func countingLister[T resources.ListItem](list originListerFunc[T], received *atomic.Int64) originListerFunc[T] {
+func countingLister[T resources.ListItem](list originListerFunc[T], received *atomic.Int64, backend *ResourceBackend, binding namespaces.SelectionBinding) originListerFunc[T] {
 	return func(ctx context.Context, request resources.PageRequest) (resources.OriginPage[T], error) {
 		ctx, end := observability.StartSpanWithAttributes(ctx, "resources.list.origin", observability.SafeSpanAttributes{PageSize: int(request.Limit), Fanout: 1})
 		page, err := list(ctx, request)
+		backend.recoverReadAuthentication(binding, err)
 		end(err)
 		if err == nil {
 			received.Add(int64(len(page.Items)))

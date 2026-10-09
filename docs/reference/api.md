@@ -289,6 +289,13 @@ server-side e é consumido pelas páginas seguintes, o que reduz o over-fetch
 `kubepeep_resource_list_items_received_total` ÷
 `kubepeep_resource_list_items_returned_total` em `/metrics`).
 
+Quando o scope tem `defaultNamespace`, consultas sem filtro de namespace
+carregam primeiro esse namespace e depois os demais. `NamespacePriority`
+preserva a paginação e a autorização de cada origem, incluindo todos os GVRs
+de Workloads. O caminho global otimizado de Pods não antecipa os outros
+namespaces nesse caso. Filtros explícitos continuam apenas estreitando o
+scope; um default negado ou indisponível não bloqueia os demais autorizados.
+
 Consultas simultâneas idênticas são coalescidas pela identidade completa
 (generation, contexto, scope resolvido, coleção/GVR, filtros, sort e cursor).
 O resultado concluído não vira cache. Cada consumidor mantém seu próprio
@@ -560,8 +567,17 @@ encerra outro PID.
 | `POST /api/v1/contexts/select` | MVP | `SelectContextRequest` | `SelectionDTO`, 200 | CSRF; profile/contexto devem existir | `CONTEXT_NOT_FOUND`, `KUBECONFIG_NOT_FOUND`, `KUBECONFIG_INVALID`, `GENERATION_CHANGED` |
 | `GET /api/v1/cluster/profile` | MVP | vazio | `ClusterProfileDTO` ativo | Host/origin local; sem RBAC | `NOT_FOUND` |
 
-Não existe rota web para criar profile ou enviar path/conteúdo de kubeconfig no
-MVP. Antes de servir a API, o bootstrap resolve o conjunto ordenado pela
+`POST /api/v1/cluster/profiles/import` registra uma fonte local ou importa
+conteúdo com o mesmo controle de origem e CSRF das demais mutações. O JSON contém
+exatamente uma opção: `{ "path": "~/clusters/dev.yaml" }` ou
+`{ "content": "apiVersion: v1\n..." }`. Retorna um `ClusterProfileDTO` sanitizado.
+O arquivo deve ter até 1 MiB e contextos válidos. Caminhos locais preservam a origem;
+conteúdo é mesclado em `<home do sistema>/.kube/config`, com escrita atômica e
+permissões privadas (0600). Não executa plugins nem ativa um contexto na importação.
+Entradas com o mesmo nome e conteúdo diferente retornam 409 `KUBECONFIG_CONFLICT`;
+o arquivo existente é preservado. Referências relativas de credenciais no conteúdo
+retornam 400, orientando usar o caminho original. Destinos simbólicos são recusados.
+Conteúdo e credenciais nunca entram no banco de preferências nem na resposta. Antes de servir a API, o bootstrap resolve o conjunto ordenado pela
 precedência canônica, normaliza os paths e, sob transação, reutiliza o profile
 com conjunto exatamente igual ou cria um novo. O primeiro recebe `isDefault`;
 profiles posteriores só se tornam default por seleção explícita. Fingerprints
@@ -942,6 +958,8 @@ Seções da fase F6 (mesmo schema v1, chaves versionadas por seção):
   grupos de navegação (`cluster`, `workloads`, `helm`, `network`,
   `configuration`, `storage`, `access-control`, `observability`,
   `administration`); nenhuma chave arbitrária.
+- `ui.context_colors`: até 200 pares únicos `clusterProfileId`/`context` com `color` hexadecimal `#RRGGBB`; o DTO expõe `ui.contextColors`.
+- `columns.order`: mapa de ID de coleção → ordem dos IDs de coluna, sem duplicatas; colunas novas não citadas são acrescentadas ao fim.
 - `columns.hidden`: mapa de ID de coleção → lista de IDs de coluna ocultas
   (máx. 32 por coleção, IDs `^[a-z0-9-]{1,32}$`); coleção fora do catálogo é
   rejeitada.
@@ -2289,3 +2307,83 @@ Critérios cobertos pelo contrato: **MVP-01**, **MVP-05–20**, **MVP-22**.
 ### Edição YAML de Deployment
 
 O corpo do PUT inclui `confirmed: true`, `action: "updateDeployment"`, `consequenceCode: "UPDATE_DEPLOYMENT"`, `target` com perfil/contexto/namespace/kind/nome, `expectedGeneration`, `expectedUid`, `expectedResourceVersion` e `yaml`. Limite: 2 MiB de YAML em um documento, validação estrita e identidade imutável. Exige `deployments.update` (apps/deployments, verbo update, resourceName target). Conflitos de versão exigem carregar novamente; o rascunho da UI é preservado em falhas.
+
+### Resumo de containers na lista de Pods
+
+`PodDTO` inclui `containerCount`, `containers[]` e `starting`. Cada container expõe
+somente `name`, `type` (`regular`, `init`, `ephemeral`), `state`, `status`
+(`running`, `starting`, `problem`, `inactive`) e `reason`. O resumo é projetado do
+objeto já listado, limitado pelo teto de containers do serviço, sem consultas
+adicionais e sem valores de ambiente. `starting` distingue a inicialização normal
+da classificação `problematic`; a sondagem startup ainda pendente e readiness
+inicial recebem tolerância, sem ocultar falhas reais de containers.
+
+### Gateway API
+
+O catálogo inclui `gateway-classes`, `gateways`, `http-routes`, `grpc-routes`,
+`tcp-routes`, `tls-routes`, `udp-routes`, `reference-grants`,
+`backend-tls-policies` e `listener-sets`. Cada coleção usa `GET /api/v1/{collection}`
+e detalhe `GET /api/v1/{collection}/{namespace}/{name}`; `gateway-classes` é
+cluster-scoped e omite o namespace. Listas compartilham paginação, filtros,
+prioridade do namespace padrão e autorização das outras famílias.
+
+Leituras tentam as versões permitidas `v1`, `v1beta1`, `v1alpha3`, `v1alpha2`
+do grupo `gateway.networking.k8s.io` apenas quando a versão anterior responde
+404. Um 403 nunca provoca fallback de versão. CRD ausente é distinguida de
+negação de permissão. DTOs incluem condições atuais e referências tipadas por
+API group. O editor YAML genérico preserva a versão efetivamente lida e exige
+`update`, UID, resourceVersion e geração correspondentes.
+
+### Helm Releases
+
+`driver` é `secrets` ou `configmaps`; o armazenamento SQL não é suportado.
+
+| Método e rota | Comportamento |
+| --- | --- |
+| `GET /api/v1/helm/releases/{driver}` | Última revisão de cada release, com paginação e namespace padrão primeiro |
+| `GET /api/v1/helm/releases/{driver}/{namespace}/{name}` | Chart, versão, estado, histórico e referências aos recursos do manifesto |
+| `GET /api/v1/helm/releases/{driver}/{namespace}/{name}/{format}` | Documento explícito: `values` ou `manifest` |
+| `POST /api/v1/helm/releases/{driver}/{namespace}/{name}` | Upgrade dos valores usando o chart atual, ou rollback para revisão anterior |
+
+A lista consulta somente metadata dos Secrets/ConfigMaps marcados `owner=helm`,
+sem carregar valores ou manifestos. O limite de varredura é 10.000 registros de
+metadata. Detalhe e documentos exigem leitura autorizada do armazenamento;
+documentos têm limite de 2 MiB e permanecem somente na aba aberta, fora do cache
+de inventários. Strings Base64 são preservadas nos valores, sem decodificação
+automática. O manifesto é a versão armazenada pelo Helm; editar um objeto vivo
+ocorre pelo link para seu recurso e pelo editor YAML genérico.
+
+O POST exige CSRF e JSON estrito com `confirmed`, `action` (`values` ou
+`rollback`), `expectedGeneration`, `expectedRevision`, `expectedUid` e
+`expectedResourceVersion`, mais `values` (YAML mapping) ou `revision` (destino
+do rollback). O SDK Helm executa recursos e hooks sob as credenciais atuais;
+o Kubernetes autoriza cada operação. Não há retry automático de mutação nem
+remoção automática do histórico. Conflitos preservam o rascunho no cliente;
+uma operação que já iniciou pode ter aplicado parte dos recursos, então a UI
+orienta revisar o estado antes de repetir.
+
+### Recuperação de leituras e diagnóstico de autorização
+
+Falha na SelfSubjectAccessReview não equivale a 403. Quando a decisão é
+indeterminada, uma leitura real e limitada do mesmo recurso pode comprovar
+acesso; negação explícita permanece bloqueada. Mutações continuam exigindo
+decisão autorizada. Falhas transitórias de leitura têm tentativas limitadas
+com backoff; o Auto da interface retoma a cada 10 s enquanto estiver ligado.
+As mensagens diferenciam permissão, autenticação/plugin, DNS, TLS, conexão,
+timeout, throttling e indisponibilidade, sem expor credenciais nem payloads.
+Resultados parciais identificam namespace, código e causa de cada falha.
+
+### Dynamic Resource Views
+
+| Método e rota | Comportamento |
+| --- | --- |
+| `GET /api/v1/resource-discovery` | APIs com verbos list/get, short names, kind, GVR e escopo; `refresh=true` renova o catálogo |
+| `GET /api/v1/dynamic-resources/{group}/{version}/{resource}/{scope}` | Lista paginada com os filtros e envelope comuns |
+| `GET /api/v1/dynamic-resources/{group}/{version}/{resource}/{scope}/{namespace}/{name}` | Metadata e células do printer do objeto exato |
+| `GET /api/v1/dynamic-resources/{group}/{version}/{resource}/{scope}/{namespace}/{name}/yaml` | YAML explícito, original em codificação, somente leitura |
+
+O grupo core usa `_`; scope é `n` (namespaced) ou `c` (cluster), e o namespace de objetos cluster usa `_`. A identidade é verificada na descoberta do cluster ativo; subresources e URLs arbitrárias não são aceitos. Estas rotas não expõem mutações. O Kubernetes decide permissões de descoberta; LIST e GET passam pela autorização e recuperação de leitura comuns. Catálogo incompleto não é tratado como prova de recurso ausente.
+
+A descoberta usa até quatro requisições simultâneas, 512 versões, 4.096 recursos projetados e respostas de até 2 MiB; o cache é isolado por seleção/geração, com 5 minutos para resultados completos e 10 segundos para parciais. Table requests incluem somente metadata junto das células escalares, com fallback para PartialObjectMetadata quando o servidor não oferece Table. Secrets core usam metadata na lista/detalhe. Cada linha limita 24 colunas e 2.048 bytes por célula. O documento YAML limita a resposta antes da decodificação e o resultado a 2 MiB; não entra no cache de inventário.
+
+`preferences.customViews` guarda até 100 entradas `{clusterProfileId, context, cluster, items}`, cada uma com até 32 identidades `{group, version, resource, kind, namespaced, shortNames?}`, e limite total de 64 KiB. `columns.hidden` e `columns.order` aceitam a identidade `dynamic:{group|_}:{version}:{resource}:{n|c}` além dos recursos nativos. Remover uma visão não remove recursos Kubernetes.

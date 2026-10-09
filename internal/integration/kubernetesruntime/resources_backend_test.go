@@ -133,8 +133,16 @@ func TestResourceErrorMappingKeepsPublicClassification(t *testing.T) {
 		t.Fatalf("resource expiry mapping: %v", err)
 	}
 	forbidden := apierrors.NewForbidden(schema.GroupResource{Resource: "pods"}, "p", errors.New("sensitive upstream detail"))
-	if err := mapResourceError(forbidden); !errors.As(err, &domain) || domain.Code != resources.CodeForbidden || domain.Message != "Access to this resource was denied." {
+	if err := mapResourceError(forbidden); !errors.As(err, &domain) || domain.Code != resources.CodeForbidden || domain.Message != authorization.TranslateOperationError(forbidden).Message {
 		t.Fatalf("forbidden mapping: %#v", err)
+	}
+	unauthorized := apierrors.NewUnauthorized("sensitive bearer credential")
+	if err := mapResourceError(unauthorized); !errors.As(err, &domain) || domain.Code != resources.CodeAuthenticationUnavailable || domain.Message != authorization.TranslateOperationError(unauthorized).Message {
+		t.Fatalf("unauthorized mapping: %#v", err)
+	}
+	pluginFailure := errors.New("exec: executable private-credential-path not found: sensitive credential")
+	if err := mapResourceError(pluginFailure); !errors.As(err, &domain) || domain.Code != resources.CodeAuthenticationUnavailable || domain.Message == pluginFailure.Error() {
+		t.Fatalf("credential provider mapping: %#v", err)
 	}
 	rateLimited := apierrors.NewTooManyRequests("sensitive upstream detail", 3)
 	if err := mapResourceError(rateLimited); !errors.As(err, &domain) || domain.Code != resources.CodeRateLimited || domain.RetryAfter() != 3*time.Second {
@@ -366,6 +374,42 @@ func TestExplicitPodScopeSingleNamespaceFilterUsesNamespacedList(t *testing.T) {
 		if key.Namespace != "alpha" {
 			t.Fatalf("unexpected authorization namespace: %#v", key)
 		}
+	}
+}
+
+func TestDefaultNamespaceIsListedBeforeAllOtherScopeNamespaces(t *testing.T) {
+	client := kubefake.NewSimpleClientset(
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "alpha", Name: "other"}},
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "zulu", Name: "preferred"}},
+	)
+	calls := []string{}
+	client.PrependReactor("list", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		calls = append(calls, action.GetNamespace())
+		return false, nil, nil
+	})
+	preferred := "zulu"
+	resolution := namespaces.ScopeResolution{ScopeName: "scope", Namespaces: []string{"alpha", "zulu"}, DefaultNamespace: &preferred}
+	binding := namespaces.SelectionBinding{ClusterProfileID: 1, Context: "ctx", Generation: "gen"}
+	backend := &ResourceBackend{clients: fixedResourceClientProvider{set: resourceClientSet{kubernetes: client}}, authorizer: &allowResourceAuthorization{}, now: time.Now}
+	first, err := backend.ListPods(t.Context(), binding, resolution, resources.ListOptions{Limit: 1}, nil)
+	if err != nil || len(first.Items) != 1 || first.Items[0].Namespace != "zulu" || len(calls) != 1 || calls[0] != "zulu" {
+		t.Fatalf("first=%v calls=%v err=%v", first.Items, calls, err)
+	}
+	if first.Cursor == nil {
+		t.Fatal("missing continuation for other namespaces")
+	}
+	second, err := backend.ListPods(t.Context(), binding, resolution, resources.ListOptions{Limit: 1}, first.Cursor)
+	if err != nil || len(second.Items) != 1 || second.Items[0].Namespace != "alpha" || !second.Page.Complete {
+		t.Fatalf("second=%v page=%+v err=%v", second.Items, second.Page, err)
+	}
+	if len(calls) != 2 || calls[1] != "alpha" {
+		t.Fatalf("LIST order=%v", calls)
+	}
+	// An explicit user filter never expands back to the default namespace.
+	calls = nil
+	_, err = backend.ListPods(t.Context(), binding, resolution, resources.ListOptions{Limit: 10, Namespaces: []string{"alpha"}}, nil)
+	if err != nil || len(calls) != 1 || calls[0] != "alpha" {
+		t.Fatalf("filtered calls=%v err=%v", calls, err)
 	}
 }
 
@@ -813,7 +857,7 @@ func TestListNodesDeniedIsAuthoritativeNotEmpty(t *testing.T) {
 	unknown := &selectiveResourceAuthorization{denied: map[string]authorization.Decision{"/nodes/list": authorization.DecisionUnknown}}
 	backend = &ResourceBackend{clients: fixedResourceClientProvider{set: resourceClientSet{kubernetes: client}}, authorizer: unknown, now: time.Now}
 	_, err = backend.ListNodes(context.Background(), binding, namespaces.ScopeResolution{}, resources.ListOptions{Limit: 10}, nil)
-	if !errors.As(err, &domain) || domain.Code != resources.CodeAuthorizationUnavailable {
-		t.Fatalf("unknown list error=%v", err)
+	if err != nil || len(client.Actions()) == 0 {
+		t.Fatalf("unknown review did not use real list: %v", err)
 	}
 }

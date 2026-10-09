@@ -1,5 +1,11 @@
+import { QuantityUsage, QuotaUsage, WorkloadProgress } from '../resource/QuantityUsage'
+import { helmDriver, isHelmCollection } from '../../navigation/helm'
+import { getHelmRelease } from '../../api/client'
+import type { HelmRelease } from '../../api/types'
+import { useAutoRefreshQueryOptions } from '../resource/AutoRefreshProvider'
 import { LoadingState } from '../ui/LoadingState'
 import { DataEntries, SecretData, WorkloadEnvironment } from './WorkloadData'
+import { relatedResources } from './relatedResources'
 import { PodMetrics, WorkloadMetrics } from './WorkloadMetrics'
 import { lazy, Suspense, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -57,6 +63,7 @@ import type {
   ServiceDetail,
   SelectionSummary,
   Investigation,
+  ResourceQuota, HorizontalPodAutoscaler, PodDisruptionBudget,
 } from '../../api/types'
 import { Badge, Button, Input, Select, StatusBadge } from '../ui'
 import { csrfForGeneration } from '../../actions/csrf'
@@ -68,7 +75,7 @@ import { errorMessage } from '../resource/errors'
 import { dateTime } from '../resource/format'
 import { eventBadgeVariant, statusBadgeVariant } from '../resource/status'
 import { ResourceTabStrip, type ResourceTab } from '../resource/ResourceTabStrip'
-import { resourceDetailPath, resourceKindLabel, workloadKindPath } from '../../navigation/paths'
+import { resourceRefForKind, resourceKindLabel, workloadKindPath } from '../../navigation/paths'
 import { useResourceWorkspace, type WorkspaceEntry } from './ResourceWorkspaceProvider'
 
 const PodLogsPanel = lazy(() => import('./PodLogsPanel').then((module) => ({ default: module.PodLogsPanel })))
@@ -76,43 +83,14 @@ const WorkloadLogsPanel = lazy(() => import('./WorkloadLogsPanel').then((module)
 const ResourceYamlEditor = lazy(() => import('./ResourceYamlEditor').then((module) => ({ default: module.ResourceYamlEditor })))
 const PodActions = lazy(() => import('../ResourceActions').then((module) => ({ default: module.PodActions })))
 const WorkloadActions = lazy(() => import('../ResourceActions').then((module) => ({ default: module.WorkloadActions })))
+const HelmDocumentEditor = lazy(() => import('./HelmDetails').then((module) => ({ default: module.HelmDocumentEditor })))
+const HelmHistory = lazy(() => import('./HelmDetails').then((module) => ({ default: module.HelmHistory })))
 
-const kindToTarget: Record<string, { collection: string; kind?: string }> = {
-  Pod: { collection: 'pods' },
-  Deployment: { collection: 'workloads', kind: 'Deployment' },
-  StatefulSet: { collection: 'workloads', kind: 'StatefulSet' },
-  DaemonSet: { collection: 'workloads', kind: 'DaemonSet' },
-  Job: { collection: 'workloads', kind: 'Job' },
-  CronJob: { collection: 'workloads', kind: 'CronJob' },
-  ReplicaSet: { collection: 'workloads', kind: 'ReplicaSet' },
-  Service: { collection: 'services' },
-  Ingress: { collection: 'ingresses' },
-  EndpointSlice: { collection: 'endpoint-slices' },
-  Endpoints: { collection: 'endpoints' },
-  ConfigMap: { collection: 'configmaps' },
-  Secret: { collection: 'secrets' },
-  PersistentVolumeClaim: { collection: 'persistent-volume-claims' },
-  PersistentVolume: { collection: 'persistent-volumes' },
-  StorageClass: { collection: 'storage-classes' },
-  Node: { collection: 'nodes' },
-  ServiceAccount: { collection: 'service-accounts' },
-  Role: { collection: 'roles' },
-  RoleBinding: { collection: 'role-bindings' },
-  ClusterRole: { collection: 'cluster-roles' },
-  ClusterRoleBinding: { collection: 'cluster-role-bindings' },
-}
-
-function refToWorkspaceRef(ref: ResourceRef): { collection: string; kind: string | null; namespace: string | null; name: string } | null {
-  if (!ref.name) return null
-  const mapped = kindToTarget[ref.kind]
-  if (mapped) {
-    const target = { collection: mapped.collection, kind: mapped.kind ?? null, namespace: ref.namespace ?? null, name: ref.name }
-    return resourceDetailPath(target) ? target : null
-  }
-  return null
-}
+const refToWorkspaceRef = resourceRefForKind
 
 export function tabsFor(entry: WorkspaceEntry): ResourceTab[] {
+  if (parseDynamicCollection(entry.collection)) return [{ id: 'overview', label: 'Overview' }, { id: 'yaml', label: 'YAML' }]
+  if (isHelmCollection(entry.collection)) return [{id:'overview',label:'Overview'},{id:'values',label:'Values'},{id:'manifest',label:'Manifest'},{id:'history',label:'History'}]
   const tabs: ResourceTab[] = [{ id: 'overview', label: 'Overview' }]
   if (entry.collection === 'pods') {
 		tabs.push({ id: 'investigation', label: 'Investigation' }, { id: 'logs', label: 'Logs' }, { id: 'yaml', label: 'YAML' }, { id: 'events', label: 'Events' }, { id: 'metrics', label: 'Metrics' }, { id: 'containers', label: 'Containers' }, { id: 'data', label: 'Data / Env' }, { id: 'actions', label: 'Actions' })
@@ -170,7 +148,7 @@ function InvestigationView({ value, onOpen }: { value: Investigation; onOpen: (r
 	]
 	const incomplete = value.coverage.filter((item) => !item.complete)
 	return <div className="grid gap-3">
-		{incomplete.length > 0 ? <p className="rounded-r-md border-l-2 border-kp-yellow-border bg-kp-yellow-bg px-3 py-2 text-content text-kp-yellow" role="status">Partial local coverage: {incomplete.map((item) => item.topic).join(', ')}. Absence below does not prove absence in the cluster.</p> : null}
+		{incomplete.length > 0 ? <p className="rounded-md border border-kp-yellow-border bg-kp-yellow-bg px-3 py-2 text-content text-kp-yellow" role="status">Partial local coverage: {incomplete.map((item) => item.topic).join(', ')}. Absence below does not prove absence in the cluster.</p> : null}
 		<div className="grid gap-3 sm:grid-cols-2">
 			{groups.map(([label, resources]) => <section key={label} className="rounded-lg border border-kp-overlay-0 bg-kp-surface-1 p-3"><h3 className="text-heading text-kp-text">{label}</h3>{resources.length === 0 ? <p className="mt-1 text-content text-kp-overlay-text">No item in the loaded local index.</p> : <ul className="mt-2 grid list-none gap-1 p-0">{resources.map((resource) => {
 				const navigable = resource.kind !== 'Event'
@@ -187,6 +165,10 @@ type WorkspaceDetail =
   | { type: 'other'; data: unknown; label: string }
 
 async function fetchDetail(entry: WorkspaceEntry, signal: AbortSignal, generation: string | undefined): Promise<WorkspaceDetail> {
+ const dynamic = parseDynamicCollection(entry.collection)
+ if (dynamic) return { type: 'other', data: await getDynamicResource(dynamic, entry.namespace, entry.name, signal, generation), label: entry.kind || dynamic.resource }
+ if (isHelmCollection(entry.collection)) return {type:'other',data:await getHelmRelease(helmDriver(entry.collection),entry.namespace!,entry.name,signal,generation),label:'HelmRelease'}
+ if (isGatewayCollection(entry.collection)) return { type: 'other', data: await getGatewayResource(entry.collection,entry.namespace,entry.name,signal,generation),label:resourceKindLabel(entry) }
   const ns = entry.namespace
   const name = entry.name
   switch (entry.collection) {
@@ -362,7 +344,7 @@ function ServiceEndpoints({ entry, generation }: { entry: WorkspaceEntry; genera
     enabled: Boolean(generation && entry.namespace),
   })
   if (detail.isPending) return <LoadingState label="Loading endpoints…" />
-  if (detail.isError) return <p className="text-content text-kp-red" role="alert">{errorMessage(detail.error)}</p>
+  if (detail.isError) return <div><p className="text-content text-kp-red" role="alert">{errorMessage(detail.error)}</p><Button variant="secondary" disabled={detail.isFetching} onClick={() => void detail.refetch()}>Retry loading detail</Button></div>
   const data = detail.data
   return (
     <Facts facts={[
@@ -535,16 +517,19 @@ function overviewFacts(entry: WorkspaceEntry, detail: WorkspaceDetail): Array<{ 
       { label: 'UID', value: data.metadata.uid },
     ]
   }
-  const data = detail.data as Record<string, unknown>
+  const raw = detail.data as Record<string, unknown>
+  // Network DTOs put inventory fields in summary; configuration/RBAC DTOs
+  // are flat. Both contracts must expose the selected object's actual data.
+  const data = { ...(raw.summary as Record<string, unknown> | undefined), ...raw }
   const facts: Array<{ label: string; value: string }> = []
-  const metadata = data.metadata as { resourceVersion?: string; creationTimestamp?: string; uid?: string } | undefined
+  const metadata = (data.metadata ?? data) as { resourceVersion?: string; creationTimestamp?: string; uid?: string }
   if (metadata?.creationTimestamp) facts.push({ label: 'Created', value: dateTime(metadata.creationTimestamp) })
   if (metadata?.uid) facts.push({ label: 'UID', value: metadata.uid })
   if (metadata?.resourceVersion) facts.push({ label: 'Resource version', value: metadata.resourceVersion })
   const simple = (key: string, label: string) => {
     const value = data[key]
-    if (value === undefined || value === null || value === '' || typeof value === 'object') return
-    facts.push({ label, value: String(value) })
+    if (value === undefined || value === null || value === '') return
+    facts.push({ label, value: overviewValue(value) })
   }
   simple('status', 'Status')
   simple('type', 'Type')
@@ -583,7 +568,38 @@ function overviewFacts(entry: WorkspaceEntry, detail: WorkspaceDetail): Array<{ 
   simple('group', 'Group')
   simple('scope', 'Scope')
   simple('webhookCount', 'Webhooks')
+  for (const [key, label] of [
+    ['name', 'Name'], ['namespace', 'Namespace'], ['clusterIPs', 'Cluster IPs'], ['ports', 'Ports'],
+    ['hosts', 'Hosts'], ['tlsHosts', 'TLS hosts'], ['loadBalancerAddresses', 'Load balancer addresses'],
+    ['endpoints', 'Endpoints'], ['policyTypes', 'Policy types'], ['ruleSummary', 'Rules'],
+    ['selector', 'Selector'], ['durationSeconds', 'Lease duration (seconds)'], ['renewTime', 'Last renewal'],
+    ['capacity', 'Capacity'], ['allocatable', 'Allocatable'], ['accessModes', 'Access modes'], ['claim', 'Claim'],
+    ['default', 'Default'], ['volumeBindingMode', 'Volume binding mode'], ['allowVolumeExpansion', 'Volume expansion'],
+    ['attached', 'Attached'], ['persistentVolumeName', 'Persistent volume'], ['podInfoOnMount', 'Pod info on mount'],
+    ['storageCapacity', 'Storage capacity'], ['fsGroupPolicy', 'FS group policy'], ['driverCount', 'Drivers'],
+    ['drivers', 'Driver details'], ['hard', 'Hard limits'], ['used', 'Used'], ['items', 'Limits'],
+    ['metricNames', 'Metrics'], ['resourceTargets', 'Resource targets'], ['minAvailable', 'Min available'],
+    ['maxUnavailable', 'Max unavailable'], ['currentHealthy', 'Current healthy'], ['desiredHealthy', 'Desired healthy'],
+    ['disruptionsAllowed', 'Disruptions allowed'], ['expectedPods', 'Expected Pods'], ['rules', 'Policy rules'],
+    ['subjects', 'Subjects'], ['versions', 'Versions'], ['globalDefault', 'Global default'],
+    ['preemptionPolicy', 'Preemption policy'], ['overhead', 'Overhead'], ['webhooks', 'Webhook details'],
+    ['parameters', 'Parameters'], ['roles', 'Roles'], ['totalBytes', 'Data size (bytes)'],
+    ['apiVersion', 'API version'], ['addresses', 'Addresses'], ['listeners', 'Listeners'],
+    ['chart', 'Chart'], ['appVersion', 'App version'], ['revision', 'Revision'], ['driver', 'Storage'], ['updatedAt', 'Updated'],
+  ]) simple(key, label)
+  if (entry.collection === 'configmaps' && Array.isArray(data.entries)) facts.push({ label: 'Data keys', value: data.entries.map((item: { key: string }) => item.key).join(', ') || 'none' })
   return facts
+}
+
+function overviewValue(value: unknown): string {
+  if (value === null || value === undefined) return '—'
+  if (Array.isArray(value)) return value.map(overviewValue).join('; ') || 'none'
+  if (typeof value === 'object') {
+    const record = value as Record<string, unknown>
+    if ('isInt' in record) return String(record.isInt ? record.int : record.string)
+    return Object.entries(record).map(([key, item]) => `${key}: ${overviewValue(item)}`).join(', ') || 'none'
+  }
+  return String(value)
 }
 
 function secretNotice(label: string): string | null {
@@ -596,6 +612,7 @@ function secretNotice(label: string): string | null {
 export function ResourceWorkspacePanel() {
   const workspace = useResourceWorkspace()
   const entry = workspace.active
+  const autoRefresh = useAutoRefreshQueryOptions()
   const status = useQuery({ queryKey: ['local-status'], queryFn: ({ signal }) => getStatus(signal), staleTime: 15_000 })
   const selection = status.data?.selection ?? null
   const generation = selection?.generation
@@ -604,11 +621,12 @@ export function ResourceWorkspacePanel() {
     queryKey: ['workspace-detail', generation, entry?.collection, entry?.kind, entry?.namespace, entry?.name],
     queryFn: ({ signal }) => fetchDetail(entry as WorkspaceEntry, signal, generation),
     enabled: Boolean(workspace.open && entry && generation),
+    ...autoRefresh,
   })
   const investigation = useQuery({
     queryKey: ['investigation', generation, entry?.kind, entry?.namespace, entry?.name],
     queryFn: ({ signal }) => getInvestigation(entry?.kind ?? (entry?.collection === 'pods' ? 'Pod' : ''), entry!.namespace!, entry!.name, signal),
-    enabled: Boolean(workspace.open && entry?.namespace && generation && (entry.collection === 'pods' || entry.collection === 'workloads')),
+    enabled: Boolean(workspace.open && entry?.tab === 'investigation' && entry.namespace && generation && (entry.collection === 'pods' || entry.collection === 'workloads')),
     staleTime: 5_000,
   })
   const entryKey = entry ? `${generation ?? ''}|${entry.collection}|${entry.kind ?? ''}|${entry.namespace ?? ''}|${entry.name}` : ''
@@ -625,17 +643,25 @@ export function ResourceWorkspacePanel() {
 
   function openRef(ref: ResourceRef) {
     const target = refToWorkspaceRef(ref)
-    if (target) workspace.openResource(target)
+    if (target) workspace.openRelatedResource(target)
   }
 
   function detailFallback() {
     if (!selection) return <p className="text-content text-kp-overlay-text" role="note">Select a Kubernetes context to inspect resources.</p>
     if (detail.isPending) return <LoadingState label="Loading authorized detail…" />
-    if (detail.isError) return <p className="text-content text-kp-red" role="alert">{errorMessage(detail.error)}</p>
+    if (detail.isError) return <div><p className="text-content text-kp-red" role="alert">{errorMessage(detail.error)}</p><Button variant="secondary" disabled={detail.isFetching} onClick={() => void detail.refetch()}>Retry loading detail</Button></div>
     return null
   }
 
   function renderTab(tab: string) {
+    if (parseDynamicCollection(activeEntry.collection)) {
+      if (tab === 'yaml' && generation) return <Suspense fallback={<LoadingState label="Opening resource YAML…" />}><DynamicYAML key={entryKey} entry={activeEntry} generation={generation} /></Suspense>
+      return detail.data?.type === 'other' ? <Suspense fallback={<LoadingState label="Opening resource detail…" />}><DynamicOverview value={detail.data.data as DynamicRow} /></Suspense> : detailFallback()
+    }
+    if (isHelmCollection(activeEntry.collection) && selection && activeEntry.namespace) {
+      if (tab === 'values' || tab === 'manifest') return <Suspense fallback={<LoadingState label="Opening Helm document…" />}><HelmDocumentEditor key={`${entryKey}|${tab}`} driver={helmDriver(activeEntry.collection)} namespace={activeEntry.namespace} name={activeEntry.name} format={tab} selection={selection} /></Suspense>
+      if (tab === 'history') return detail.data?.type === 'other' ? <Suspense fallback={<LoadingState label="Opening Helm history…" />}><HelmHistory key={entryKey} release={detail.data.data as HelmRelease} selection={selection} /></Suspense> : detailFallback()
+    }
     if (tab === 'investigation') {
       if (investigation.isPending) return <p className="text-content text-kp-overlay-text" role="status">Reading the generation-scoped local relationship index…</p>
       if (investigation.isError) return <p className="text-content text-kp-red" role="alert">{errorMessage(investigation.error)}</p>
@@ -655,8 +681,13 @@ export function ResourceWorkspacePanel() {
         <div className="grid content-start gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(260px,0.7fr)]">
           <div className="grid content-start gap-3 min-w-0">
             <Facts facts={overviewFacts(activeEntry, data)} />
+            {data.type === 'workload' ? <WorkloadProgress workload={data.data} /> : null}
+            {data.type === 'other' && activeEntry.collection === 'hpas' ? <QuantityUsage label="HPA replica capacity" current={(data.data as HorizontalPodAutoscaler).currentReplicas} total={(data.data as HorizontalPodAutoscaler).maxReplicas} /> : null}
+            {data.type === 'other' && activeEntry.collection === 'resource-quotas' ? <QuotaUsage quota={data.data as ResourceQuota} /> : null}
+            {data.type === 'other' && activeEntry.collection === 'pdbs' ? <QuantityUsage label="PDB healthy pods" current={(data.data as PodDisruptionBudget).currentHealthy} total={(data.data as PodDisruptionBudget).desiredHealthy} completion failed={(data.data as PodDisruptionBudget).currentHealthy < (data.data as PodDisruptionBudget).desiredHealthy} /> : null}
             {data.type === 'workload' && data.data.conditions.length > 0 ? <ConditionsTable conditions={data.data.conditions} /> : null}
-            {data.type === 'pod' ? <ConditionsTable conditions={data.data.conditions} /> : null}
+              {data.type === 'pod' ? <ConditionsTable conditions={data.data.conditions} /> : null}
+              {data.type === 'other' && Array.isArray((data.data as { conditions?: unknown }).conditions) ? <ConditionsTable conditions={(data.data as { conditions: PodDetail['conditions'] }).conditions} /> : null}
             {data.type === 'other' ? <p className="m-0 text-content text-kp-overlay-text" role="note">{secretNotice(data.label) ?? ''}</p> : null}
           </div>
           <div className="grid content-start gap-2 min-w-0">
@@ -675,7 +706,7 @@ export function ResourceWorkspacePanel() {
                 <RelatedRefList refs={podRefs} onOpen={openRef} emptyNote="" />
               </>
             ) : null}
-            {data.type === 'other' ? <p className="m-0 text-content text-kp-overlay-text" role="note">Relationship navigation is available for workloads, Pods and Services.</p> : null}
+            {data.type === 'other' ? <RelatedRefList refs={relatedResources(activeEntry.collection, data.data, activeEntry.namespace)} onOpen={openRef} emptyNote="No explicit resource references are available in this detail." /> : null}
           </div>
         </div>
       )
@@ -798,3 +829,10 @@ export function ResourceWorkspacePanel() {
     </>
   )
 }
+import { isGatewayCollection } from '../../navigation/gateway'
+import { getGatewayResource } from '../../api/client'
+import { parseDynamicCollection } from '../../navigation/dynamic'
+import { getDynamicResource } from '../../api/client'
+import type { DynamicRow } from '../../api/types'
+const DynamicOverview = lazy(() => import('./DynamicDetails').then(module => ({ default: module.DynamicOverview })))
+const DynamicYAML = lazy(() => import('./DynamicDetails').then(module => ({ default: module.DynamicYAML })))

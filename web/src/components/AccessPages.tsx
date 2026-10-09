@@ -114,7 +114,7 @@ export function AccessControlPage() {
     identity: ['resources', tab, generation, namespacedTab ? globalNamespace.value : ''],
     filters: applied,
     enabled: Boolean(selection),
-    fetchPage: (cursor, signal, prefetch) => fetchList({ ...options, continueToken: cursor || undefined, prefetch }, signal, generation),
+    fetchPage: (cursor, signal, prefetch, focus) => fetchList({ ...options, ...focus, continueToken: cursor || undefined, prefetch }, signal, generation),
   })
 
   const columns: DataTableColumn<unknown>[] = tab === 'roles' || tab === 'cluster-roles' ? [
@@ -123,7 +123,7 @@ export function AccessControlPage() {
     { key: 'age', sortKey: 'ageSeconds', header: 'Age', cell: (item) => age((item as Role).ageSeconds) },
   ] : [
     { key: 'name', header: 'Binding', cell: (item) => { const value = item as Binding; return <TableLink aria-label={`Open Binding ${value.name}`} onClick={() => workspace.openResource({ collection: tab, namespace: namespacedTab ? value.namespace : null, name: value.name })} primary={value.name} /> } },
-    { key: 'roleRef', header: 'Role ref', cell: (item) => { const value = item as Binding; return `${value.roleRefKind}/${value.roleRefName}` } },
+    { key: 'role-ref', header: 'Role ref', cell: (item) => { const value = item as Binding; return `${value.roleRefKind}/${value.roleRefName}` } },
     { key: 'subjects', header: 'Subjects', cell: (item) => (item as Binding).subjects.length },
     { key: 'age', sortKey: 'ageSeconds', header: 'Age', cell: (item) => age((item as Binding).ageSeconds) },
   ]
@@ -169,7 +169,7 @@ export function AdministrationPage() {
     identity: ['resources', tab, generation],
     filters: applied,
     enabled: Boolean(selection),
-    fetchPage: (cursor, signal, prefetch) => fetchList({ ...options, continueToken: cursor || undefined, prefetch }, signal, generation),
+    fetchPage: (cursor, signal, prefetch, focus) => fetchList({ ...options, ...focus, continueToken: cursor || undefined, prefetch }, signal, generation),
   })
 
   const columns: DataTableColumn<unknown>[] = (() => {

@@ -2,13 +2,16 @@ import { useEffect, useMemo, useRef, useState, isValidElement, type ReactNode } 
 import { useVirtualizer } from '@tanstack/react-virtual'
 
 import { recordFirstRowRendered, recordRenderedRowCount, recordVisibleRowRendered } from '../../observability/uxMetrics'
-import { ArrowDown, ArrowUp, ChevronDown, Columns3 } from 'lucide-react'
+import { ArrowDown, ArrowUp, ArrowLeft, ArrowRight, ChevronDown, Columns3 } from 'lucide-react'
 import { TableMenu } from './TableMenu'
 import type { ColumnVisibilityState } from '../resource/columns'
 
 import { Checkbox } from './Checkbox'
+import { initialColumns } from '../resource/initialColumns'
 
 export interface DataTableColumn<T> {
+  initialRole?: string
+  defaultHidden?: boolean
   key: string
   header: ReactNode
   width?: string
@@ -63,9 +66,40 @@ export function DataTable<T>({
   const [sort, setSort] = useState<{ key: string; descending: boolean } | null>(null)
   const [excluded, setExcluded] = useState<Record<string, string[]>>({})
   const [hidden, setHidden] = useState<string[]>([])
+  const [localOrder, setLocalOrder] = useState<string[]>([])
+  const draggedColumn = useRef<string | null>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const [initialColumnCount, setInitialColumnCount] = useState(9)
+  useEffect(() => {
+    const element = scrollRef.current
+    if (!element || typeof ResizeObserver === 'undefined') return
+    const measure = () => { const width = element.clientWidth; if (width > 0) setInitialColumnCount(width < 600 ? 3 : width < 920 ? 5 : 9) }
+    const observer = new ResizeObserver(measure); observer.observe(element); measure()
+    return () => observer.disconnect()
+  }, [])
   const identifier = allColumns.find((column) => column.key === 'name')?.key ?? allColumns[0]?.key
-  const visibility = columnVisibility ?? { hidden, toggle: (key: string) => setHidden((current) => current.includes(key) ? current.filter((item) => item !== key) : [...current, key]), reset: () => setHidden([]) }
-  const columns = allColumns.filter((column) => column.key === identifier || !visibility.hidden.includes(column.key))
+  const initial = Boolean(columnVisibility?.useInitialVisibility)
+  const defaults = initialColumns(allColumns, initial ? initialColumnCount : 9)
+  const baseVisibility = columnVisibility ?? { hidden, toggle: (key: string) => setHidden((current) => current.includes(key) ? current.filter((item) => item !== key) : [...current, key]), reset: () => setHidden([]) }
+  const effectiveHidden = initial ? defaults.hidden : baseVisibility.hidden
+  const visibility = { ...baseVisibility, hidden: effectiveHidden, toggle: (key: string) => columnVisibility?.setHidden ? columnVisibility.setHidden(effectiveHidden.includes(key) ? effectiveHidden.filter(item => item !== key) : [...effectiveHidden, key]) : baseVisibility.toggle(key) }
+  const order = columnVisibility ? columnVisibility.order?.length ? columnVisibility.order : defaults.order : localOrder
+  const orderedColumns = [...allColumns].sort((left, right) => {
+    const position = (key: string) => { const index = order.indexOf(key); return index < 0 ? order.length : index }
+    return position(left.key) - position(right.key)
+  })
+  const columns = orderedColumns.filter((column) => column.key === identifier || !visibility.hidden.includes(column.key))
+  const fitsInitialSet = Boolean(columnVisibility) && (initial || initialColumnCount === 9) && columns.every(column => !defaults.hidden.includes(column.key))
+  const hasUsageColumns = columns.some(column => column.key === 'cpu' || column.key === 'memory')
+  const initialWidth = (key: string): string | undefined => hasUsageColumns
+    ? ({ namespace: '12%', name: '22%', status: '9%', ready: '5%', restarts: '6%', cpu: '14%', memory: '16%', type: '6%', age: '5%' } as Record<string, string>)[key]
+    : key === identifier ? initialColumnCount === 3 ? '42%' : '25%' : key === 'namespace' ? initialColumnCount === 3 ? '20%' : '14%' : undefined
+  function moveColumn(index: number, offset: number) {
+    const next = orderedColumns.map((column) => column.key)
+    ;[next[index], next[index + offset]] = [next[index + offset], next[index]]
+    if (columnVisibility?.reorder) columnVisibility.reorder(next)
+    else setLocalOrder(next)
+  }
   const values = useMemo(() => sourceRows.map((row, index) => new Map(allColumns.map((column) => [column.key, columnValue(column, row, index)]))), [sourceRows, allColumns])
   const rows = useMemo(() => sourceRows.map((row, index) => ({ row, index })).filter(({ index }) =>
     allColumns.every((column) => !excluded[column.key]?.includes(String(values[index].get(column.key) ?? '—'))))
@@ -79,7 +113,6 @@ export function DataTable<T>({
       const order = typeof left === 'number' && typeof right === 'number' ? left - right : collator.compare(String(left), String(right))
       return (sort.descending ? -order : order) || a.index - b.index
     }).map(({ row }) => row), [sourceRows, allColumns, excluded, values, rowGroup, sort])
-  const scrollRef = useRef<HTMLDivElement>(null)
   // A normal resource page contains 100 rows. Give that page its own scroll
   // viewport so reaching 75% can request the next bounded page.
   const virtualized = virtualize ?? true
@@ -158,14 +191,16 @@ export function DataTable<T>({
         onScrollProgress(distance <= 0 ? 0 : element.scrollTop / distance)
       } : undefined}
     >
-      <table className="w-full border-collapse text-content" aria-rowcount={virtualized ? rows.length + 1 : undefined}>
+      <table className={`w-full border-collapse text-content${fitsInitialSet ? ' data-table-initial' : ''}`} aria-rowcount={virtualized ? rows.length + 1 : undefined}>
+        {fitsInitialSet ? <colgroup>{selectable ? <col style={{ width: 28 }} /> : null}{columns.map(column => <col key={column.key} style={{ width: initialWidth(column.key) }} />)}<col style={{ width: 30 }} /></colgroup> : null}
         {caption ? <caption className="sr-only">{caption}</caption> : null}
         <thead>
           <tr>
             {selectable ? (
               <th scope="col" className={`${headerBase} w-8 pr-0`}>
                 <Checkbox
-                  aria-label={allSelected ? 'Clear selection' : 'Select all rows on this page'}
+                  aria-label={allSelected ? 'Clear selection' : 'Select all loaded rows'}
+                  title="Select loaded rows matching the column filters"
                   checked={allSelected}
                   onChange={(event) => onToggleAll?.(event.target.checked, rows)}
                 />
@@ -174,10 +209,22 @@ export function DataTable<T>({
             {columns.map((column) => (
               <th
                 key={column.key}
+                draggable={Boolean(columnVisibility?.reorder)}
+                onDragStart={event => { draggedColumn.current = column.key; event.dataTransfer.effectAllowed = 'move'; event.dataTransfer.setData('text/plain', column.key) }}
+                onDragEnd={() => { draggedColumn.current = null }}
+                onDragOver={event => { if (draggedColumn.current) event.preventDefault() }}
+                onDrop={event => {
+                  event.preventDefault()
+                  const from = orderedColumns.findIndex(item => item.key === draggedColumn.current)
+                  const to = orderedColumns.findIndex(item => item.key === column.key)
+                  if (from >= 0 && to >= 0 && from !== to) { const next = orderedColumns.map(item => item.key); next.splice(to, 0, next.splice(from, 1)[0]); columnVisibility?.reorder?.(next) }
+                  draggedColumn.current = null
+                }}
+                title={columnVisibility?.reorder ? `${textContent(column.header)} — drag to reorder, or use Choose visible columns` : undefined}
                 scope="col"
                 aria-label={textContent(column.header)}
                 className={`${headerBase} ${column.align === 'right' ? 'text-right' : column.align === 'center' ? 'text-center' : ''}`}
-                style={{ width: column.width }}
+                style={{ width: fitsInitialSet ? undefined : column.width }}
                 aria-sort={sort?.key === column.key ? sort.descending ? 'descending' : 'ascending' : 'none'}
               >
                 <div className="flex items-center gap-1">
@@ -193,10 +240,15 @@ export function DataTable<T>({
                 </div>
               </th>
             ))}
-            <th scope="col" className={headerBase}>
+            <th scope="col" className={`${headerBase} table-column-chooser`}>
               <TableMenu label="Choose visible columns" icon={<Columns3 size={14} />}>
-                {allColumns.map((column) => <label key={column.key}><input type="checkbox" checked={column.key === identifier || !visibility.hidden.includes(column.key)} disabled={column.key === identifier} onChange={() => visibility.toggle(column.key)} />{column.header}</label>)}
-                <button type="button" onClick={visibility.reset}>Reset columns</button>
+                  {orderedColumns.map((column, index) => <div key={column.key} className="table-column-option">
+                    <label><input type="checkbox" checked={column.key === identifier || !visibility.hidden.includes(column.key)} disabled={column.key === identifier} onChange={() => visibility.toggle(column.key)} />{column.header}</label>
+                    <button type="button" disabled={index === 0} aria-label={`Move ${textContent(column.header)} left`} title="Move column left" onClick={() => moveColumn(index, -1)}><ArrowLeft size={14} aria-hidden="true" /></button>
+                    <button type="button" disabled={index === orderedColumns.length - 1} aria-label={`Move ${textContent(column.header)} right`} title="Move column right" onClick={() => moveColumn(index, 1)}><ArrowRight size={14} aria-hidden="true" /></button>
+                  </div>)}
+                  <button type="button" onClick={() => columnVisibility?.setHidden ? columnVisibility.setHidden(defaults.hidden) : visibility.reset()}>Reset columns</button>
+                  <button type="button" onClick={() => columnVisibility?.resetOrder ? columnVisibility.resetOrder() : setLocalOrder([])}>Reset column order</button>
                 <button type="button" onClick={() => { setExcluded({}); setSort(null) }}>Reset column filters</button>
                 {visibility.error ? <p role="alert">{visibility.error}</p> : null}
               </TableMenu>

@@ -1,8 +1,10 @@
+import { WorkloadProgress } from './resource/QuantityUsage'
+import { useAutoRefreshQueryOptions } from './resource/AutoRefreshProvider'
 import { ResourceUsage } from './resource/ResourceUsage'
 import { useResourceMetrics, useResourceHPAs, podHPA, podResourceUsage } from './resource/resourceMetrics'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useParams, useSearchParams } from 'react-router'
+import { Link, useParams, useSearchParams } from 'react-router'
 import { RotateCcw, ScrollText, Trash2 } from 'lucide-react'
 
 import {
@@ -13,7 +15,6 @@ import {
   getEvents,
   getIngressClasses,
   getIngresses,
-  getPermissions,
   getNetworkPolicies,
   getNodes,
   getPod,
@@ -25,7 +26,6 @@ import {
   getWorkload,
   getWorkloads,
   deletePod,
-  deleteWorkload,
   restartWorkload,
   APIError,
 } from '../api/client'
@@ -46,6 +46,9 @@ import { Badge, Button, DataTable, StatusBadge, type DataTableColumn } from './u
 import { ConfirmDialog } from './ui/ConfirmDialog'
 import { useToast } from './ui/Toast'
 import { csrfForGeneration } from '../actions/csrf'
+import { getBulkPermissions } from '../permissions/bulkPermissions'
+import { BulkSelectionToolbar } from './resource/BulkSelectionToolbar'
+import { SelectableResourceTable } from './resource/SelectableResourceTable'
 import { effectiveNamespaces, useGlobalNamespace } from '../context/GlobalNamespace'
 import { bindListInteraction, listInteractionFor } from '../observability/uxMetrics'
 import { ResourceListControls } from './ResourceListControls'
@@ -56,8 +59,10 @@ import { CollectionCoverage, InfiniteCollectionFooter, QueryState, SelectionGate
 import { collectionGcTime, collectionStaleTime, useInfiniteCollection } from './resource/useInfiniteCollection'
 import { podPreviewKey } from './resource/podPreview'
 import { useSelectionBoundKeys } from './resource/useSelectionBoundKeys'
+import { useSelectionBoundState } from './resource/useSelectionBoundState'
 import { useResourceStreamPreview } from './resource/useResourceStreamPreview'
 import { ResourcePage } from './resource/ResourcePage'
+import { PodContainerStatus } from './resource/PodContainerStatus'
 import { TableLink } from './resource/TableLink'
 import { usePreferenceColumnVisibility } from './resource/columns'
 import { age, dateTime } from './resource/format'
@@ -239,7 +244,7 @@ function sameListState<T extends object>(left: T, right: T): boolean {
   return (Object.keys(left) as Array<keyof T>).every((key) => left[key] === right[key])
 }
 
-/** Bulk destructive operations: per-resource detail fetch → authorized delete. */
+/** Bulk operations re-read and authorize each concrete target before mutation. */
 interface BulkOutcome {
   succeeded: number
   failed: Array<{ name: string; reason: string }>
@@ -251,15 +256,6 @@ const bulkRestartCapabilities: Partial<Record<Workload['kind'], string>> = {
   DaemonSet: 'daemonsets.restart',
 }
 
-const bulkDeleteCapabilities: Record<Workload['kind'], string> = {
-  Deployment: 'deployments.delete',
-  StatefulSet: 'statefulsets.delete',
-  DaemonSet: 'daemonsets.delete',
-  Job: 'jobs.delete',
-  CronJob: 'cronjobs.delete',
-  ReplicaSet: 'replicasets.delete',
-}
-
 function allows(matrix: CapabilityMatrix | undefined, capabilityId: string, namespace: string, resourceName: string): boolean {
   return matrix?.decisions.some((item) => item.capabilityId === capabilityId && item.namespace === namespace && item.resourceName === resourceName && item.decision === 'allowed') === true
 }
@@ -267,15 +263,6 @@ function allows(matrix: CapabilityMatrix | undefined, capabilityId: string, name
 function mutationError(error: unknown): string {
   if (error instanceof APIError) return `${error.code}: ${error.message}`
   return error instanceof Error ? error.message : 'The action could not be completed.'
-}
-
-function BulkToolbar({ count, children }: { count: number; children: React.ReactNode }) {
-  return (
-    <div className="mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-kp-accent-border bg-kp-accent-bg/50 px-3 py-2" role="toolbar" aria-label="Bulk actions">
-      <strong className="text-content text-kp-text">{count} selected</strong>
-      {children}
-    </div>
-  )
 }
 
 export function WorkloadsPage() {
@@ -286,6 +273,7 @@ export function WorkloadsPage() {
   const { kind: kindParam, namespace: paramNamespace, name: paramName } = useParams<{ kind: string; namespace: string; name: string }>()
   const [params] = useSearchParams()
   const generation = selection?.generation
+  const bulkRequests = useGenerationRequests(generation)
   // Sidebar deep links use /workloads/kind/:kind; the path param presets the filter.
   const kindPreset = useMemo(() => (kindParam && (workloadKinds as readonly string[]).includes(kindParam) ? kindParam : ''), [kindParam])
   const [draft, setDraft] = useState<WorkloadListState>(() => ({ ...workloadsStateFromParams(params), kind: kindPreset }))
@@ -297,8 +285,8 @@ export function WorkloadsPage() {
     setApplied((current) => ({ ...current, kind: kindPreset }))
   }
   const queryClient = useQueryClient()
-  const [selectedKeys, setSelectedKeys] = useSelectionBoundKeys([selection?.clusterProfileId, selection?.context, selection?.scopeId, generation, globalNamespace.value])
-  const [bulkAction, setBulkAction] = useState<'delete' | 'restart' | null>(null)
+  const [selectedKeys, setSelectedKeys] = useSelectionBoundKeys([selection?.clusterProfileId, selection?.context, selection?.scopeId, generation, globalNamespace.value, applied])
+  const [bulkAction, setBulkAction] = useSelectionBoundState<'restart' | null>([generation, globalNamespace.value, applied], null)
 
   // Deep links (/workloads/:kind/:ns/:name) open in the Resource Workspace.
   useEffect(() => {
@@ -309,12 +297,12 @@ export function WorkloadsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only react to route param changes
   }, [kindParam, paramNamespace, paramName, generation])
 
-  const workloadColumnState = usePreferenceColumnVisibility('workloads')
+  const workloadColumnState = usePreferenceColumnVisibility(kindPreset || 'workloads', kindPreset ? 'workloads' : undefined)
   const workloadColumns: DataTableColumn<Workload>[] = [
     { key: 'namespace', header: 'Namespace', cell: (item) => item.namespace },
     { key: 'name', header: 'Name', cell: (item) => <TableLink aria-label={`Open ${item.kind} ${item.name} in ${item.namespace}`} onClick={() => workspace.openResource({ collection: 'workloads', kind: item.kind, namespace: item.namespace, name: item.name })} primary={item.name} /> },
     { key: 'kind', header: 'Type', cell: (item) => item.kind },
-    { key: 'ready', header: 'Ready', cell: (item) => `${item.ready ?? '—'} / ${item.desired ?? '—'}` },
+    { key: 'ready', header: 'Ready / Progress', value: (item) => item.kind === 'Job' ? item.available : item.ready, cell: (item) => <WorkloadProgress workload={item} /> },
     { key: 'available', header: 'Available', cell: (item) => item.available ?? '—' },
     { key: 'updated', header: 'Updated', cell: (item) => item.updated ?? '—' },
     { key: 'status', header: 'Status', cell: (item) => <StatusBadge variant={statusBadgeVariant(item.status)}>{item.status}</StatusBadge> },
@@ -325,75 +313,41 @@ export function WorkloadsPage() {
   const collection = useInfiniteCollection<Workload>({
     identity: ['resources', 'workloads', selection?.clusterProfileId, selection?.context, selection?.scopeId, generation, globalNamespace.value, applied.namespace],
     filters: applied,
-    fetchPage: (cursor, signal, prefetch) => getWorkloads({ limit: 100, prefetch, uxInteractionId: listInteractionFor(applied), search: applied.search || undefined, namespaces: effectiveNamespaces(globalNamespace.value, namespaceValues(applied.namespace)), kinds: applied.kind ? [applied.kind] : undefined, statuses: applied.workloadStatus ? [applied.workloadStatus] : undefined, ...optionalSort(applied.sort, applied.order, 'identity', 'asc'), continueToken: cursor || undefined }, signal, generation),
+    fetchPage: (cursor, signal, prefetch, focus) => getWorkloads({ ...focus, limit: 100, prefetch, uxInteractionId: listInteractionFor(applied), search: applied.search || undefined, namespaces: effectiveNamespaces(globalNamespace.value, namespaceValues(applied.namespace)), kinds: applied.kind ? [applied.kind] : undefined, statuses: applied.workloadStatus ? [applied.workloadStatus] : undefined, ...optionalSort(applied.sort, applied.order, 'identity', 'asc'), continueToken: cursor || undefined }, signal, generation),
     enabled: Boolean(selection),
   })
   const list = collection.query
   const preview = useResourceStreamPreview<Workload>({ identity: [selection?.clusterProfileId, selection?.context, selection?.scopeId, generation, globalNamespace.value], topic: 'workloads', namespace: globalNamespace.value, isItem: isWorkloadPreview, itemKey: workloadPreviewKey })
-  const previewActive = list.isPending && !collection.authorizationFailed && sameListState(applied, defaultWorkloadList) && Boolean(preview.preview?.items.length)
+  const previewActive = !collection.focused && list.isPending && !collection.authorizationFailed && sameListState(applied, defaultWorkloadList) && Boolean(preview.preview?.items.length)
   const visibleItems = previewActive ? preview.preview!.items : collection.items
   useEffect(() => { if (collection.authorizationFailed) setSelectedKeys(new Set()) }, [collection.authorizationFailed, setSelectedKeys])
   const selectedItems = useMemo(() => collection.items.filter((item) => selectedKeys.has(rowKey(item))), [collection.items, selectedKeys, rowKey])
-  const selectedCapabilityIDs = useMemo(() => Array.from(new Set(selectedItems.flatMap((item) => [bulkDeleteCapabilities[item.kind], bulkRestartCapabilities[item.kind]].filter((value): value is string => Boolean(value))))), [selectedItems])
+  const permissionTargets = selectedItems.flatMap((item) => { const capabilityId = bulkRestartCapabilities[item.kind]; return capabilityId ? [{ capabilityId, namespace: item.namespace, name: item.name }] : [] })
   const bulkPermissions = useQuery({
-    queryKey: ['bulk-action-permissions', generation, selectedItems.map(rowKey).join('|'), selectedCapabilityIDs.join('|')],
-    queryFn: ({ signal }) => getPermissions({ namespaces: Array.from(new Set(selectedItems.map((item) => item.namespace))), capabilityIds: selectedCapabilityIDs, resourceNames: selectedItems.map((item) => item.name) }, signal, generation),
-    enabled: Boolean(generation && selectedItems.length),
+    queryKey: ['bulk-action-permissions', generation, selectedItems.map(rowKey).join('|'), 'restart'],
+    queryFn: ({ signal }) => getBulkPermissions(permissionTargets, generation!, signal),
+    enabled: Boolean(generation && permissionTargets.length),
     staleTime: 15_000,
   })
-  const canBulkDelete = selectedItems.length > 0 && selectedItems.every((item) => allows(bulkPermissions.data, bulkDeleteCapabilities[item.kind], item.namespace, item.name))
   const canBulkRestart = selectedItems.length > 0 && selectedItems.every((item) => {
     const capability = bulkRestartCapabilities[item.kind]
     return Boolean(capability && allows(bulkPermissions.data, capability, item.namespace, item.name))
   })
 
-  const bulkDelete = useMutation({
-    mutationFn: async (): Promise<BulkOutcome> => {
-      const csrfToken = await csrfForGeneration(generation!)
-      const outcome: BulkOutcome = { succeeded: 0, failed: [] }
-      for (const item of selectedItems) {
-        try {
-          const detail = await getWorkload(workloadKindPath(item.kind)!, item.namespace, item.name, undefined, generation)
-          await deleteWorkload(workloadKindPath(item.kind)!, item.namespace, item.name, {
-            confirmed: true,
-            action: 'deleteWorkload',
-            consequenceCode: 'DELETE_RESOURCE',
-            target: { clusterProfileId: selection!.clusterProfileId, context: selection!.context, namespace: item.namespace, kind: item.kind, name: item.name },
-            expectedGeneration: generation!,
-            expectedUid: detail.metadata.uid,
-            expectedResourceVersion: detail.metadata.resourceVersion,
-          }, csrfToken)
-          outcome.succeeded += 1
-        } catch (error) {
-          outcome.failed.push({ name: `${item.kind}/${item.name}`, reason: mutationError(error) })
-        }
-      }
-      return outcome
-    },
-    onSuccess: (outcome) => {
-      toast.success(`Deleted ${outcome.succeeded} workload${outcome.succeeded === 1 ? '' : 's'}`, outcome.failed.length ? `${outcome.failed.length} failed: ${outcome.failed.map((item) => item.name).join(', ')}` : 'Every selected workload was removed.')
-      setBulkAction(null)
-      setSelectedKeys(new Set())
-      void queryClient.invalidateQueries({ queryKey: ['resources', 'workloads'] })
-    },
-    onError: (error) => {
-      toast.error('Bulk delete failed', mutationError(error))
-      setBulkAction(null)
-    },
-  })
-
   const bulkRestart = useMutation({
-    mutationFn: async (): Promise<BulkOutcome> => {
+    mutationFn: (): Promise<BulkOutcome> => bulkRequests.run(async (signal) => {
+      if (!canBulkRestart) throw new Error('Restart is unavailable for this selection.')
       const csrfToken = await csrfForGeneration(generation!)
       const outcome: BulkOutcome = { succeeded: 0, failed: [] }
       for (const item of selectedItems) {
+        signal.throwIfAborted()
         const kindPath = workloadKindPath(item.kind)
         if (!kindPath || !bulkRestartCapabilities[item.kind]) {
           outcome.failed.push({ name: `${item.kind}/${item.name}`, reason: 'This workload kind does not support rollout restart.' })
           continue
         }
         try {
-          const detail = await getWorkload(kindPath, item.namespace, item.name, undefined, generation)
+          const detail = await getWorkload(kindPath, item.namespace, item.name, signal, generation)
           await restartWorkload(kindPath, item.namespace, item.name, {
             confirmed: true,
             action: 'restart',
@@ -401,14 +355,15 @@ export function WorkloadsPage() {
             target: { clusterProfileId: selection!.clusterProfileId, context: selection!.context, namespace: item.namespace, kind: item.kind, name: item.name },
             expectedGeneration: generation!,
             expectedResourceVersion: detail.metadata.resourceVersion,
-          }, csrfToken, createIdempotencyKey())
+          }, csrfToken, createIdempotencyKey(), signal)
           outcome.succeeded += 1
         } catch (error) {
           outcome.failed.push({ name: `${item.kind}/${item.name}`, reason: mutationError(error) })
         }
       }
+      signal.throwIfAborted()
       return outcome
-    },
+    }),
     onSuccess: (outcome) => {
       toast.success(`Restarted ${outcome.succeeded} workload${outcome.succeeded === 1 ? '' : 's'}`, outcome.failed.length ? `${outcome.failed.length} failed: ${outcome.failed.map((item) => item.name).join(', ')}` : 'Every selected controller accepted a rollout restart.')
       setBulkAction(null)
@@ -432,13 +387,11 @@ export function WorkloadsPage() {
       <SelectionGate pending={status.isPending} error={status.error} selected={Boolean(selection)}>
         <QueryState pending={list.isPending && !previewActive} error={!list.data || collection.authorizationFailed ? list.error : null} empty={visibleItems.length === 0 && !list.hasNextPage}>
           {selectedItems.length > 0 ? (
-            <BulkToolbar count={selectedItems.length}>
+            <BulkSelectionToolbar names={selectedItems.map(rowKey)} onClear={() => setSelectedKeys(new Set())}>
               <Button variant="warning" disabled={!canBulkRestart || bulkPermissions.isPending} disabledReason="Every selected workload must support rollout restart and be authorized." onClick={() => setBulkAction('restart')}><RotateCcw size={12} aria-hidden="true" /> Restart selected</Button>
-              <Button variant="danger" disabled={!canBulkDelete || bulkPermissions.isPending} disabledReason="Delete must be authorized for every selected workload." onClick={() => setBulkAction('delete')}><Trash2 size={12} aria-hidden="true" /> Delete selected</Button>
-              <Button variant="ghost" onClick={() => setSelectedKeys(new Set())}>Clear selection</Button>
-            </BulkToolbar>
+            </BulkSelectionToolbar>
           ) : null}
-          <div className="min-w-0 overflow-x-auto rounded-xl border border-kp-overlay-0 bg-kp-surface-0">
+          <div className="resource-collection min-w-0 rounded-xl border border-kp-overlay-0 bg-kp-surface-0">
 
             {previewActive ? <p className="px-3 py-1.5 text-content text-kp-sky" role="status">Receiving workloads · ✓ {preview.preview!.completed}/{preview.preview!.requested} namespaces · partial preview</p> : null}
             {list.isPlaceholderData || list.isFetching && !list.isFetchingNextPage ? <p className="sr-only" role="status">Refreshing workloads…</p> : null}
@@ -458,8 +411,8 @@ export function WorkloadsPage() {
                   return next
                 })
               }}
-              onToggleAll={(checked) => {
-                setSelectedKeys(checked ? new Set(collection.items.map(rowKey)) : new Set())
+              onToggleAll={(checked, rows) => {
+                setSelectedKeys(checked ? new Set(rows.map(rowKey)) : new Set())
               }}
             />
             {collection.lastPage ? <InfiniteCollectionFooter result={collection.lastPage} itemCount={collection.items.length} pageCount={list.data?.pages.length ?? 0} firstPage={list.data?.pageParams[0] === '' && list.data.pages.length === 1} hasNextPage={Boolean(list.hasNextPage)} loading={list.isFetching} refreshing={list.isPlaceholderData} nextPageError={collection.nextPageError} onNext={() => void collection.loadNextPage()} onRestart={() => void queryClient.resetQueries({ queryKey: collection.queryKey })} /> : null}
@@ -467,16 +420,16 @@ export function WorkloadsPage() {
         </QueryState>
       </SelectionGate>
       <ConfirmDialog
-        open={bulkAction !== null}
-        severity={bulkAction === 'restart' ? 'warning' : 'danger'}
-        title={`${bulkAction === 'restart' ? 'Restart' : 'Delete'} ${selectedItems.length} workload${selectedItems.length === 1 ? '' : 's'}`}
-        description={`Each ${bulkAction === 'restart' ? 'restart' : 'delete'} is authorized and re-validated by Kubernetes individually before it executes.`}
+        open={bulkAction === 'restart' && selectedItems.length > 0}
+        severity="warning"
+        title={`Restart ${selectedItems.length} workload${selectedItems.length === 1 ? '' : 's'}`}
+        description="Each restart is authorized and re-validated by Kubernetes individually before it executes."
         resources={selectedItems.map((item) => ({ kind: item.kind, namespace: item.namespace, name: item.name }))}
-        consequenceNote={bulkAction === 'restart' ? 'Each controller updates its Pod template and Kubernetes replaces the managed Pods.' : 'Dependent ReplicaSets, Pods and Jobs are garbage-collected by Kubernetes after deletion. This action cannot be undone.'}
-        confirmLabel={bulkAction === 'restart' ? 'Restart selected' : 'Delete selected'}
-        pendingLabel={bulkAction === 'restart' ? 'Restarting…' : 'Deleting…'}
-        pending={bulkDelete.isPending || bulkRestart.isPending}
-        onConfirm={() => bulkAction === 'restart' ? bulkRestart.mutate() : bulkDelete.mutate()}
+        consequenceNote="Each controller updates its Pod template and Kubernetes replaces the managed Pods."
+        confirmLabel="Restart selected"
+        pendingLabel="Restarting…"
+        pending={bulkRestart.isPending}
+        onConfirm={() => { if (canBulkRestart && !bulkRestart.isPending) bulkRestart.mutate() }}
         onCancel={() => setBulkAction(null)}
       />
     </ResourcePage>
@@ -492,11 +445,12 @@ export function PodsPage() {
   const [params] = useSearchParams()
   const [aggregateTargets, setAggregateTargets] = useState<{ generation: string; pods: Pod[] } | null>(null)
   const generation = selection?.generation
+  const bulkRequests = useGenerationRequests(generation)
   const [draft, setDraft] = useState<PodListState>(() => podsStateFromParams(params))
   const [applied, setApplied] = useState<PodListState>(() => podsStateFromParams(params))
   const queryClient = useQueryClient()
-  const [selectedKeys, setSelectedKeys] = useSelectionBoundKeys([selection?.clusterProfileId, selection?.context, selection?.scopeId, generation, globalNamespace.value])
-  const [bulkAction, setBulkAction] = useState<'delete' | 'restart' | null>(null)
+  const [selectedKeys, setSelectedKeys] = useSelectionBoundKeys([selection?.clusterProfileId, selection?.context, selection?.scopeId, generation, globalNamespace.value, applied])
+  const [bulkAction, setBulkAction] = useSelectionBoundState<'delete' | 'restart' | null>([generation, globalNamespace.value, applied], null)
   const preview = useResourceStreamPreview<Pod>({ identity: [selection?.clusterProfileId, selection?.context, selection?.scopeId, generation, globalNamespace.value], topic: 'pods', namespace: globalNamespace.value, isItem: isPodPreview, itemKey: namedPreviewKey })
   const previewNamespace = globalNamespace.value || globalNamespace.options[0] || ''
   const seedPreview = useQuery({
@@ -517,7 +471,7 @@ export function PodsPage() {
   const collection = useInfiniteCollection<Pod>({
     identity: ['resources', 'pods', selection?.clusterProfileId, selection?.context, selection?.scopeId, generation, globalNamespace.value, applied.namespace],
     filters: applied,
-    fetchPage: (cursor, signal, prefetch) => getPods({ limit: 100, prefetch, uxInteractionId: listInteractionFor(applied), search: applied.search || undefined, namespaces: effectiveNamespaces(globalNamespace.value, namespaceValues(applied.namespace)), statuses: applied.podStatus ? [applied.podStatus] : undefined, workload: applied.workload || undefined, node: applied.node || undefined, restarts: applied.restarts as 'any' | 'gt0' | 'gte3' | 'gte10', problematic: applied.problematic === '' ? undefined : applied.problematic === 'true', ...optionalSort(applied.sort, applied.order, 'identity', 'asc'), continueToken: cursor || undefined }, signal, generation),
+    fetchPage: (cursor, signal, prefetch, focus) => getPods({ ...focus, limit: 100, prefetch, uxInteractionId: listInteractionFor(applied), search: applied.search || undefined, namespaces: effectiveNamespaces(globalNamespace.value, namespaceValues(applied.namespace)), statuses: applied.podStatus ? [applied.podStatus] : undefined, workload: applied.workload || undefined, node: applied.node || undefined, restarts: applied.restarts as 'any' | 'gt0' | 'gte3' | 'gte10', problematic: applied.problematic === '' ? undefined : applied.problematic === 'true', ...optionalSort(applied.sort, applied.order, 'identity', 'asc'), continueToken: cursor || undefined }, signal, generation),
     enabled: Boolean(selection),
   })
   const list = collection.query
@@ -528,17 +482,17 @@ export function PodsPage() {
   const authorizationFailed = collection.authorizationFailed
   useEffect(() => { if (authorizationFailed) setSelectedKeys(new Set()) }, [authorizationFailed, setSelectedKeys])
   const seedItems = seedPreview.data?.items.filter((item) => item.namespace === previewNamespace) ?? []
-  const previewActive = list.isPending && !authorizationFailed && sameListState(applied, defaultPodList) && Boolean(preview.preview?.items.length || seedItems.length)
+  const previewActive = !collection.focused && list.isPending && !authorizationFailed && sameListState(applied, defaultPodList) && Boolean(preview.preview?.items.length || seedItems.length)
   const visibleItems = previewActive ? preview.preview?.items.length ? preview.preview.items : seedItems : listItems
   const selectedItems = useMemo(() => listItems.filter((item) => selectedKeys.has(rowKey(item))), [listItems, selectedKeys, rowKey])
   const bulkPermissions = useQuery({
     queryKey: ['bulk-action-permissions', generation, 'pods.delete', selectedItems.map(rowKey).join('|')],
-    queryFn: ({ signal }) => getPermissions({ namespaces: Array.from(new Set(selectedItems.map((item) => item.namespace))), capabilityIds: ['pods.delete'], resourceNames: selectedItems.map((item) => item.name) }, signal, generation),
+    queryFn: ({ signal }) => getBulkPermissions(selectedItems.map((item) => ({ capabilityId: 'pods.delete', namespace: item.namespace, name: item.name })), generation!, signal),
     enabled: Boolean(generation && selectedItems.length),
     staleTime: 15_000,
   })
   const canBulkDelete = selectedItems.length > 0 && selectedItems.every((item) => allows(bulkPermissions.data, 'pods.delete', item.namespace, item.name))
-  const canBulkRestart = canBulkDelete && selectedItems.every((item) => item.owner !== null)
+  const canBulkRestart = canBulkDelete && selectedItems.every((item) => item.owner && ['ReplicaSet', 'Deployment', 'StatefulSet', 'DaemonSet', 'ReplicationController'].includes(item.owner.kind))
 
   // Metrics are requested independently of the cached health badge.
   const metrics = useResourceMetrics(generation)
@@ -554,10 +508,11 @@ export function PodsPage() {
   const podColumnState = usePreferenceColumnVisibility('pods')
   const podColumns: DataTableColumn<Pod>[] = [
     { key: 'namespace', header: 'Namespace', cell: (item) => item.namespace },
-    { key: 'name', header: 'Pod', cell: (item) => <TableLink aria-label={`Open Pod ${item.name} in ${item.namespace}`} onClick={() => workspace.openResource({ collection: 'pods', namespace: item.namespace, name: item.name })} primary={<>{item.name}{item.problematic ? <Badge variant="danger" className="ml-2">problem</Badge> : null}</>} /> },
+    { key: 'name', header: 'Pod', cell: (item) => <TableLink aria-label={`Open Pod ${item.name} in ${item.namespace}`} onClick={() => workspace.openResource({ collection: 'pods', namespace: item.namespace, name: item.name })} primary={<>{item.name}{item.starting ? <Badge variant="warning" className="ml-2">Starting</Badge> : item.problematic ? <Badge variant="danger" className="ml-2">problem</Badge> : null}</>} /> },
     { key: 'type', header: 'Type', value: (item) => podGroup(item) ? 'Job' : 'Pod', cell: (item) => podGroup(item) ? 'Job' : 'Pod' },
     { key: 'status', header: 'Status', cell: (item) => <StatusBadge variant={statusBadgeVariant(item.status)}>{item.status}</StatusBadge> },
     { key: 'ready', header: 'Ready', cell: (item) => `${item.ready.current}/${item.ready.desired}` },
+    { key: 'containers', header: 'Containers', value: (item) => item.containerCount, cell: (item) => <PodContainerStatus pod={item} /> },
     { key: 'restarts', header: 'Restarts', cell: (item) => item.restarts },
     { key: 'cpu', header: 'CPU', value: (item) => metricsByPod.get(rowKey(item))?.cpuMillicores, cell: (item) => { const value = metricsByPod.get(rowKey(item)); return <ResourceUsage {...podResourceUsage(item, value, 'cpu', podHPA(item, hpaCatalog))} /> } },
     { key: 'memory', header: 'Memory', value: (item) => metricsByPod.get(rowKey(item))?.memoryBytes, cell: (item) => { const value = metricsByPod.get(rowKey(item)); return <ResourceUsage {...podResourceUsage(item, value, 'memory', podHPA(item, hpaCatalog))} /> } },
@@ -568,17 +523,19 @@ export function PodsPage() {
   ]
 
   const bulkPodAction = useMutation({
-    mutationFn: async (): Promise<BulkOutcome> => {
+    mutationFn: (): Promise<BulkOutcome> => bulkRequests.run(async (signal) => {
+      if (!canBulkDelete || bulkAction === 'restart' && !canBulkRestart) throw new Error('The action is unavailable for this selection.')
       const csrfToken = await csrfForGeneration(generation!)
       const outcome: BulkOutcome = { succeeded: 0, failed: [] }
       const restarting = bulkAction === 'restart'
       for (const item of selectedItems) {
+        signal.throwIfAborted()
         if (restarting && !item.owner) {
           outcome.failed.push({ name: `${item.namespace}/${item.name}`, reason: 'Standalone Pods cannot be restarted because no controller will recreate them.' })
           continue
         }
         try {
-          const detail = await getPod(item.namespace, item.name, undefined, generation)
+          const detail = await getPod(item.namespace, item.name, signal, generation)
           await deletePod(item.namespace, item.name, {
             confirmed: true,
             action: 'deletePod',
@@ -587,14 +544,15 @@ export function PodsPage() {
             expectedGeneration: generation!,
             expectedUid: detail.metadata.uid,
             expectedResourceVersion: detail.metadata.resourceVersion,
-          }, csrfToken)
+          }, csrfToken, signal)
           outcome.succeeded += 1
         } catch (error) {
           outcome.failed.push({ name: `${item.namespace}/${item.name}`, reason: mutationError(error) })
         }
       }
+      signal.throwIfAborted()
       return outcome
-    },
+    }),
     onSuccess: (outcome) => {
       const restarted = bulkAction === 'restart'
       toast.success(`${restarted ? 'Restarted' : 'Deleted'} ${outcome.succeeded} Pod${outcome.succeeded === 1 ? '' : 's'}`, outcome.failed.length ? `${outcome.failed.length} failed: ${outcome.failed.map((item) => item.name).join(', ')}` : restarted ? 'Every selected Pod will be recreated by its controller.' : 'The selected Pods were removed.')
@@ -619,17 +577,16 @@ export function PodsPage() {
       <SelectionGate pending={status.isPending} error={status.error} selected={Boolean(selection)}>
         <QueryState pending={list.isPending && visibleItems.length === 0} error={!list.data || authorizationFailed ? list.error : null} empty={visibleItems.length === 0 && !list.hasNextPage}>
           {selectedItems.length > 0 ? (
-            <BulkToolbar count={selectedItems.length}>
+            <BulkSelectionToolbar names={selectedItems.map(rowKey)} onClear={() => setSelectedKeys(new Set())}>
               <Button variant="secondary" onClick={() => {
                 if (selectedItems.length === 1) { setAggregateTargets(null); workspace.openResource({ collection: 'pods', namespace: selectedItems[0].namespace, name: selectedItems[0].name }, 'logs') }
                 else { workspace.reset(); setAggregateTargets({ generation: generation!, pods: selectedItems }) }
               }}><ScrollText size={12} aria-hidden="true" />{selectedItems.length === 1 ? 'View logs' : 'Aggregate logs'}</Button>
-              <Button variant="warning" disabled={!canBulkRestart || bulkPermissions.isPending} disabledReason="Every selected Pod must have a controller owner and delete permission." onClick={() => setBulkAction('restart')}><RotateCcw size={12} aria-hidden="true" /> Restart selected</Button>
+              <Button variant="warning" disabled={!canBulkRestart || bulkPermissions.isPending} disabledReason="Every selected Pod must have a running workload controller and delete permission." onClick={() => setBulkAction('restart')}><RotateCcw size={12} aria-hidden="true" /> Restart selected</Button>
               <Button variant="danger" disabled={!canBulkDelete || bulkPermissions.isPending} disabledReason="Delete must be authorized for every selected Pod." onClick={() => setBulkAction('delete')}><Trash2 size={12} aria-hidden="true" /> Delete selected</Button>
-              <Button variant="ghost" onClick={() => setSelectedKeys(new Set())}>Clear selection</Button>
-            </BulkToolbar>
+            </BulkSelectionToolbar>
           ) : null}
-          <div className="min-w-0 overflow-x-auto rounded-xl border border-kp-overlay-0 bg-kp-surface-0">
+          <div className="resource-collection min-w-0 rounded-xl border border-kp-overlay-0 bg-kp-surface-0">
 
             {previewActive ? <p className="px-3 py-1.5 text-content text-kp-sky" role="status">Receiving Pods · ✓ {preview.preview?.items.length ? preview.preview.completed : 1}/{preview.preview?.items.length ? preview.preview.requested : selection?.namespaceCount ?? 1} namespaces · partial preview</p> : null}
             {list.isPlaceholderData || list.isFetching && !list.isFetchingNextPage ? <p className="sr-only" role="status">Refreshing Pods…</p> : null}
@@ -664,6 +621,8 @@ export function PodsPage() {
                   <CollectionCoverage coverage={listData.coverage} />
                 </div>
                 <div className="flex gap-2">
+                  <Link className="self-center text-content text-kp-sky" to="/settings#performance">Performance</Link>
+                  {listData.coverage?.failed.length ? <Button variant="secondary" disabled={list.isFetching} onClick={() => void queryClient.resetQueries({ queryKey: listKey })}>Retry collection</Button> : null}
                   <Button variant="secondary" disabled={list.data?.pageParams[0] === '' && list.data?.pages.length === 1} disabledReason="Already on the first page." onClick={() => void queryClient.resetQueries({ queryKey: listKey })}>First page</Button>
                   <Button disabled={!list.hasNextPage || list.isFetching || list.isPlaceholderData} disabledReason="The current result has no next page or is refreshing." onClick={() => void collection.loadNextPage()}>{list.isFetchingNextPage ? 'Loading…' : 'Load next page'}</Button>
                 </div>
@@ -681,7 +640,7 @@ export function PodsPage() {
         </div></div>
       </section></ResourceDetailPortal> : null}
       <ConfirmDialog
-        open={bulkAction !== null}
+        open={bulkAction !== null && selectedItems.length > 0}
         severity={bulkAction === 'restart' ? 'warning' : 'danger'}
         title={`${bulkAction === 'restart' ? 'Restart' : 'Delete'} ${selectedItems.length} Pod${selectedItems.length === 1 ? '' : 's'}`}
         description={`Each Pod deletion is authorized and re-validated by Kubernetes individually before it executes.`}
@@ -690,7 +649,7 @@ export function PodsPage() {
         confirmLabel={bulkAction === 'restart' ? 'Restart selected' : 'Delete selected'}
         pendingLabel={bulkAction === 'restart' ? 'Restarting…' : 'Deleting…'}
         pending={bulkPodAction.isPending}
-        onConfirm={() => bulkPodAction.mutate()}
+        onConfirm={() => { if (canBulkDelete && !bulkPodAction.isPending && (bulkAction !== 'restart' || canBulkRestart)) bulkPodAction.mutate() }}
         onCancel={() => setBulkAction(null)}
       />
     </ResourcePage>
@@ -717,12 +676,12 @@ export function EventsPage() {
   const collection = useInfiniteCollection<EventResource>({
     identity: ['resources', 'events', selection?.clusterProfileId, selection?.context, selection?.scopeId, generation, globalNamespace.value, applied.namespace],
     filters: applied,
-    fetchPage: (cursor, signal, prefetch) => getEvents({ limit: 100, prefetch, uxInteractionId: listInteractionFor(applied), search: applied.search || undefined, namespaces: effectiveNamespaces(globalNamespace.value, namespaceValues(applied.namespace)), statuses: applied.eventType ? [applied.eventType] : undefined, objectKind: applied.objectKind || undefined, reason: applied.reason || undefined, continueToken: cursor || undefined, ...optionalSort(applied.sort, applied.order, 'timestamp', 'desc') }, signal, generation),
+    fetchPage: (cursor, signal, prefetch, focus) => getEvents({ ...focus, limit: 100, prefetch, uxInteractionId: listInteractionFor(applied), search: applied.search || undefined, namespaces: effectiveNamespaces(globalNamespace.value, namespaceValues(applied.namespace)), statuses: applied.eventType ? [applied.eventType] : undefined, objectKind: applied.objectKind || undefined, reason: applied.reason || undefined, continueToken: cursor || undefined, ...optionalSort(applied.sort, applied.order, 'timestamp', 'desc') }, signal, generation),
     enabled: Boolean(selection),
   })
   const list = collection.query
   const preview = useResourceStreamPreview<EventResource>({ identity: [selection?.clusterProfileId, selection?.context, selection?.scopeId, generation, globalNamespace.value], topic: 'events', namespace: globalNamespace.value, isItem: isEventPreview, itemKey: eventPreviewKey, compare: compareEventPreview })
-  const previewActive = list.isPending && !collection.authorizationFailed && sameListState(applied, defaultEventList) && Boolean(preview.preview?.items.length)
+  const previewActive = !collection.focused && list.isPending && !collection.authorizationFailed && sameListState(applied, defaultEventList) && Boolean(preview.preview?.items.length)
   const visibleItems = previewActive ? preview.preview!.items : collection.items
   return (
     <ResourcePage
@@ -734,11 +693,11 @@ export function EventsPage() {
 
       <SelectionGate pending={status.isPending} error={status.error} selected={Boolean(selection)}>
         <QueryState pending={list.isPending && !previewActive} error={!list.data || collection.authorizationFailed ? list.error : null} empty={visibleItems.length === 0 && !list.hasNextPage}>
-          <div className="min-w-0 overflow-x-auto rounded-xl border border-kp-overlay-0 bg-kp-surface-0">
+          <div className="resource-collection min-w-0 rounded-xl border border-kp-overlay-0 bg-kp-surface-0">
 
             {previewActive ? <p className="px-3 py-1.5 text-content text-kp-sky" role="status">Receiving events · ✓ {preview.preview!.completed}/{preview.preview!.requested} namespaces · partial preview</p> : null}
             {list.isPlaceholderData || list.isFetching && !list.isFetchingNextPage ? <p className="sr-only" role="status">Refreshing events…</p> : null}
-            <DataTable
+            <SelectableResourceTable selectionIdentity={collection.queryKey} selectable={!previewActive}
               caption="Authorized event pages"
               rows={visibleItems}
               onScrollProgress={collection.onScrollProgress}
@@ -789,6 +748,7 @@ function networkTabFromParams(tab: string): NetworkResourceTab | null {
 }
 
 export function NetworkPage() {
+  const autoRefresh = useAutoRefreshQueryOptions()
   const { status, selection } = useActiveSelection()
   const globalNamespace = useGlobalNamespace()
   const workspace = useResourceWorkspace()
@@ -817,8 +777,8 @@ export function NetworkPage() {
     identity: ['resources', resourceTab, selection?.clusterProfileId, selection?.context, selection?.scopeId, generation, globalNamespace.value],
     filters: applied,
     enabled: Boolean(selection && tab !== 'port-forwards'),
-    fetchPage: (cursor, signal, prefetch) => {
-      const options = { ...networkOptions(cursor), prefetch }
+    fetchPage: (cursor, signal, prefetch, focus) => {
+      const options = { ...networkOptions(cursor), ...focus, prefetch }
       const namespacedOptions = { ...options, namespaces: effectiveNamespaces(globalNamespace.value, []) }
       switch (resourceTab) {
         case 'services': return getServices(namespacedOptions, signal, generation)
@@ -833,10 +793,10 @@ export function NetworkPage() {
   const activeQuery = collection.query
   const streamTopic = resourceTab === 'ingresses' || resourceTab === 'endpoint-slices' ? resourceTab : 'services'
   const preview = useResourceStreamPreview<NetworkPreviewItem>({ identity: [resourceTab, selection?.clusterProfileId, selection?.context, selection?.scopeId, generation, globalNamespace.value], topic: streamTopic, namespace: globalNamespace.value, isItem: isNetworkPreview, itemKey: namedPreviewKey })
-  const previewActive = (resourceTab === 'services' || resourceTab === 'ingresses' || resourceTab === 'endpoint-slices') && activeQuery.isPending && !collection.authorizationFailed && sameListState(applied, defaultSimpleList) && Boolean(preview.preview?.items.length)
+  const previewActive = !collection.focused && (resourceTab === 'services' || resourceTab === 'ingresses' || resourceTab === 'endpoint-slices') && activeQuery.isPending && !collection.authorizationFailed && sameListState(applied, defaultSimpleList) && Boolean(preview.preview?.items.length)
   const visibleItems: NetworkItem[] = previewActive ? preview.preview!.items : collection.items
   const [forwardSearch, setForwardSearch] = useState('')
-  const forwards = useQuery({ queryKey: ['port-forwards', generation], queryFn: ({ signal }) => getPortForwards(signal, generation!), enabled: Boolean(selection && tab === 'port-forwards'), refetchInterval: 10_000 })
+  const forwards = useQuery({ queryKey: ['port-forwards', generation], queryFn: ({ signal }) => getPortForwards(signal, generation!), enabled: Boolean(selection && tab === 'port-forwards'), ...autoRefresh })
   const close = useMutation({ mutationFn: (id: string) => requests.run(async (signal) => { const session = await getSession(signal); if (session.generation !== generation) throw new APIError(409, { code: 'GENERATION_CHANGED', message: 'The active selection changed.' }); return closePortForward(id, generation!, session.csrfToken, signal) }), onSuccess: () => { toast.info('Loopback session closed'); queryClient.invalidateQueries({ queryKey: ['port-forwards'] }) }, onError: (error) => toast.error('Failed to close session', mutationError(error)) })
   const [stopAllState, setStopAllState] = useState<'idle' | 'confirm'>('idle')
   const [stopAllResult, setStopAllResult] = useState<{ closed: number; failed: number } | null>(null)
@@ -860,6 +820,7 @@ export function NetworkPage() {
   }, onSuccess: (result) => { setStopAllResult(result); setStopAllState('idle'); toast.info(`Closed ${result.closed} session${result.closed === 1 ? '' : 's'}`, result.failed ? `${result.failed} failed` : undefined); queryClient.invalidateQueries({ queryKey: ['port-forwards'] }) } })
 
   const networkColumnState = usePreferenceColumnVisibility(resourceTab)
+  const forwardColumnState = usePreferenceColumnVisibility('port-forwards')
   const networkColumns: DataTableColumn<NetworkItem>[] = [
     ...(resourceTab === 'ingress-classes' ? [] : [{ key: 'namespace', header: 'Namespace', cell: (item: NetworkItem) => 'namespace' in item ? item.namespace : '—' }]),
     { key: 'name', header: 'Name', cell: (item) => <TableLink aria-label={`Open ${tab} ${item.name}${'namespace' in item ? ` in ${item.namespace}` : ''}`} onClick={() => workspace.openResource({ collection: networkCollections[resourceTab], namespace: 'namespace' in item ? item.namespace : null, name: item.name })} primary={item.name} /> },
@@ -870,7 +831,7 @@ export function NetworkPage() {
   return (
     <ResourcePage title="Network" description="Services, Ingresses, EndpointSlices and loopback-only port-forward sessions." actions={selection && (tab === 'services' || tab === 'ingresses' || tab === 'endpoint-slices') ? <ResourceLiveUpdates key={`${tab}/${generation}`} generation={generation!} topics={[tab]} queryKeys={[["resources", tab]]} autoStart onProgress={preview.onProgress} onPreviewReset={preview.onReset} /> : null}>
       {tab !== 'port-forwards' ? <ResourceListControls search={draft.search} appliedSearch={applied.search} onSearchChange={(value) => setDrafts((current) => ({ ...current, [resourceTab]: { ...current[resourceTab], search: value } }))} onApply={(interactionId) => { setAppliedLists((current) => ({ ...current, [resourceTab]: bindListInteraction({ ...draft }, interactionId) })) }} /> : <ResourceListControls search={forwardSearch} appliedSearch={forwardSearch} onSearchChange={setForwardSearch} onApply={() => {}} />}
-      <div id="network-panel">
+      <div id="network-panel" className="resource-page-content">
         <SelectionGate pending={status.isPending} error={status.error} selected={Boolean(selection)}>
           {tab === 'port-forwards' ? <QueryState pending={forwards.isPending} error={forwards.error ?? close.error} empty={forwards.data?.length === 0}>
             {stopAllState !== 'idle' ? (
@@ -887,25 +848,25 @@ export function NetworkPage() {
             {forwards.data?.some((item) => item.status === 'active') && stopAllState === 'idle' ? (
               <Button variant="danger" className="justify-self-start" onClick={() => setStopAllState('confirm')}>Stop all active sessions</Button>
             ) : null}
-            <DataTable caption="Loopback sessions" rows={(forwards.data ?? []).filter((item) => [item.namespace, item.pod, item.context, item.localAddress, item.localPort, item.remotePort, item.status].join(' ').toLocaleLowerCase().includes(forwardSearch.toLocaleLowerCase()))} getRowKey={(item) => item.id} columns={[
+            <SelectableResourceTable selectionIdentity={[generation, tab, forwardSearch]} columnVisibility={forwardColumnState} caption="Loopback sessions" rows={(forwards.data ?? []).filter((item) => [item.namespace, item.pod, item.context, item.localAddress, item.localPort, item.remotePort, item.status].join(' ').toLocaleLowerCase().includes(forwardSearch.toLocaleLowerCase()))} getRowKey={(item) => item.id} columns={[
               { key: 'namespace', header: 'Namespace', cell: (item) => item.namespace },
               { key: 'name', sortKey: 'pod', header: 'Pod', cell: (item) => <TableLink aria-label={`Open Pod ${item.pod} in ${item.namespace}`} onClick={() => workspace.openResource({ collection: 'pods', kind: 'Pod', namespace: item.namespace, name: item.pod })} primary={item.pod} /> },
               { key: 'context', header: 'Context', cell: (item) => item.context },
               { key: 'local', header: 'Local address', cell: (item) => `${item.localAddress}:${item.localPort}` },
-              { key: 'remotePort', header: 'Remote port', cell: (item) => item.remotePort },
+              { key: 'remote-port', sortKey: 'remotePort', header: 'Remote port', cell: (item) => item.remotePort },
               { key: 'status', header: 'Status', cell: (item) => <StatusBadge variant={statusBadgeVariant(item.status)}>{item.status}</StatusBadge> },
-              { key: 'createdAt', header: 'Created', cell: (item) => dateTime(item.createdAt) },
-              { key: 'expiresAt', header: 'Expires', cell: (item) => dateTime(item.expiresAt) },
-              { key: 'endedAt', header: 'Ended', cell: (item) => item.endedAt ? dateTime(item.endedAt) : '—' },
-              { key: 'endReason', header: 'End reason', cell: (item) => item.endReason ?? '—' },
+              { key: 'created-at', sortKey: 'createdAt', header: 'Created', cell: (item) => dateTime(item.createdAt) },
+              { key: 'expires-at', sortKey: 'expiresAt', header: 'Expires', cell: (item) => dateTime(item.expiresAt) },
+              { key: 'ended-at', sortKey: 'endedAt', header: 'Ended', cell: (item) => item.endedAt ? dateTime(item.endedAt) : '—' },
+              { key: 'end-reason', sortKey: 'endReason', header: 'End reason', cell: (item) => item.endReason ?? '—' },
               { key: 'actions', header: 'Actions', cell: (item) => item.status === 'active' ? <Button variant="danger" onClick={() => close.mutate(item.id)}>Close loopback session</Button> : '—' },
             ]} stickyHeader />
           </QueryState> : <QueryState pending={activeQuery.isPending && !previewActive} error={!activeQuery.data || collection.authorizationFailed ? activeQuery.error : null} empty={visibleItems.length === 0 && !activeQuery.hasNextPage}>
-            <div className="min-w-0 overflow-x-auto rounded-xl border border-kp-overlay-0 bg-kp-surface-0">
+            <div className="resource-collection min-w-0 rounded-xl border border-kp-overlay-0 bg-kp-surface-0">
 
               {previewActive ? <p className="px-3 py-1.5 text-content text-kp-sky" role="status">Receiving {tab} · ✓ {preview.preview!.completed}/{preview.preview!.requested} namespaces · partial preview</p> : null}
               {activeQuery.isPlaceholderData || activeQuery.isFetching && !activeQuery.isFetchingNextPage ? <p className="sr-only" role="status">Refreshing {tab}…</p> : null}
-              <DataTable
+              <SelectableResourceTable selectionIdentity={collection.queryKey} selectable={!previewActive}
                 caption={`Authorized ${tab} pages`}
                 rows={visibleItems}
                 onScrollProgress={collection.onScrollProgress}
@@ -958,8 +919,8 @@ export function ConfigPage() {
     identity: ['resources', tab, selection?.clusterProfileId, selection?.context, selection?.scopeId, generation, globalNamespace.value],
     filters: applied,
     enabled: Boolean(selection),
-    fetchPage: (cursor, signal, prefetch) => {
-      const options = { limit: 100, prefetch, uxInteractionId: listInteractionFor(applied), search: applied.search || undefined, continueToken: cursor || undefined, ...optionalSort(applied.sort, applied.order, 'identity', 'asc'), namespaces: effectiveNamespaces(globalNamespace.value, []) }
+    fetchPage: (cursor, signal, prefetch, focus) => {
+      const options = { ...focus, limit: 100, prefetch, uxInteractionId: listInteractionFor(applied), search: applied.search || undefined, continueToken: cursor || undefined, ...optionalSort(applied.sort, applied.order, 'identity', 'asc'), namespaces: effectiveNamespaces(globalNamespace.value, []) }
       return tab === 'configmaps' ? getConfigMapsSafe(options, signal, generation) : getSecretsSafe(options, signal, generation)
     },
   })
@@ -973,20 +934,20 @@ export function ConfigPage() {
   ]
   const activeQuery = collection.query
   const preview = useResourceStreamPreview<ConfigMapResource>({ identity: [tab, selection?.clusterProfileId, selection?.context, selection?.scopeId, generation, globalNamespace.value], topic: 'configmaps', namespace: globalNamespace.value, isItem: isConfigMapPreview, itemKey: namedPreviewKey })
-  const previewActive = tab === 'configmaps' && activeQuery.isPending && !collection.authorizationFailed && sameListState(applied, defaultSimpleList) && Boolean(preview.preview?.items.length)
+  const previewActive = !collection.focused && tab === 'configmaps' && activeQuery.isPending && !collection.authorizationFailed && sameListState(applied, defaultSimpleList) && Boolean(preview.preview?.items.length)
   const visibleItems: ConfigItem[] = previewActive ? preview.preview!.items : collection.items
 
   return (
     <ResourcePage title="Configuration" description="ConfigMaps and Secrets in the active scope. Open a resource to inspect its data." actions={selection && tab === 'configmaps' ? <ResourceLiveUpdates key={`configmaps/${generation}`} generation={generation!} topics={['configmaps']} queryKeys={[["resources", "configmaps"]]} autoStart onProgress={preview.onProgress} onPreviewReset={preview.onReset} /> : null}>
       <ResourceListControls search={draft.search} appliedSearch={applied.search} onSearchChange={(value) => setDrafts((current) => ({ ...current, [tab]: { ...current[tab], search: value } }))} onApply={(interactionId) => { setAppliedLists((current) => ({ ...current, [tab]: bindListInteraction({ ...draft }, interactionId) })) }} />
-      <div id="config-panel">
+      <div id="config-panel" className="resource-page-content">
         <SelectionGate pending={status.isPending} error={status.error} selected={Boolean(selection)}>
           <QueryState pending={activeQuery.isPending && !previewActive} error={!activeQuery.data || collection.authorizationFailed ? activeQuery.error : null} empty={visibleItems.length === 0 && !activeQuery.hasNextPage}>
-            <div className="min-w-0 overflow-x-auto rounded-xl border border-kp-overlay-0 bg-kp-surface-0">
+            <div className="resource-collection min-w-0 rounded-xl border border-kp-overlay-0 bg-kp-surface-0">
 
               {previewActive ? <p className="px-3 py-1.5 text-content text-kp-sky" role="status">Receiving ConfigMaps · ✓ {preview.preview!.completed}/{preview.preview!.requested} namespaces · partial preview</p> : null}
               {activeQuery.isPlaceholderData || activeQuery.isFetching && !activeQuery.isFetchingNextPage ? <p className="sr-only" role="status">Refreshing {tab}…</p> : null}
-              <DataTable
+              <SelectableResourceTable selectionIdentity={collection.queryKey} selectable={!previewActive}
                 caption={`Authorized ${tab} metadata pages`}
                 rows={visibleItems}
                 onScrollProgress={collection.onScrollProgress}
@@ -1054,7 +1015,7 @@ export function NodesPage() {
   const collection = useInfiniteCollection({
     identity: ['resources', 'nodes', selection?.clusterProfileId, selection?.context, selection?.scopeId, generation, ''],
     filters: applied,
-    fetchPage: (cursor: string, signal: AbortSignal, prefetch: boolean) => getNodes({ limit: 100, prefetch, uxInteractionId: listInteractionFor(applied), search: applied.search || undefined, statuses: applied.nodeStatus ? [applied.nodeStatus] : undefined, ...optionalSort(applied.sort, applied.order, 'identity', 'asc'), continueToken: cursor || undefined }, signal, generation),
+    fetchPage: (cursor, signal, prefetch, focus) => getNodes({ ...focus, limit: 100, prefetch, uxInteractionId: listInteractionFor(applied), search: applied.search || undefined, statuses: applied.nodeStatus ? [applied.nodeStatus] : undefined, ...optionalSort(applied.sort, applied.order, 'identity', 'asc'), continueToken: cursor || undefined }, signal, generation),
     enabled: Boolean(selection),
   })
   const list = collection.query
@@ -1067,9 +1028,9 @@ export function NodesPage() {
       <ResourceListControls search={draft.search} appliedSearch={applied.search} onSearchChange={(value) => setDraft((current) => ({ ...current, search: value }))} onApply={(interactionId) => { setApplied(bindListInteraction({ ...draft }, interactionId)) }} />
       <SelectionGate pending={status.isPending} error={status.error} selected={Boolean(selection)}>
         <QueryState pending={list.isPending} error={!list.data || collection.authorizationFailed ? list.error : null} empty={collection.items.length === 0 && !list.hasNextPage}>
-          <div className="min-w-0 overflow-x-auto rounded-xl border border-kp-overlay-0 bg-kp-surface-0">
+          <div className="resource-collection min-w-0 rounded-xl border border-kp-overlay-0 bg-kp-surface-0">
             {list.isPlaceholderData || list.isFetching && !list.isFetchingNextPage ? <p className="sr-only" role="status">Refreshing nodes…</p> : null}
-            <DataTable
+            <SelectableResourceTable selectionIdentity={collection.queryKey}
               caption="Authorized node pages"
               columnVisibility={columnVisibility}
               rows={collection.items}

@@ -1,3 +1,6 @@
+import { ResourceListFocus } from './components/resource/ResourceListFocus'
+import { WarmInventoryCache } from './components/resource/WarmInventoryCache'
+import { AutoRefreshProvider, AutoRefreshToggle } from './components/resource/AutoRefreshProvider'
 import { ResourceFamilyNav } from './components/resource/ResourceFamilyNav'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
@@ -10,6 +13,8 @@ import { getPreferences, getStatus, type Preferences } from './api/client'
 import { mutatePreferences } from './api/preferences'
 import { Badge } from './components/ui/Badge'
 import { CommandCenter, type CommandRoute } from './components/CommandCenter'
+import { contextColor } from './components/ContextColorPicker'
+import type { CSSProperties } from 'react'
 import { ContextSelector } from './components/ContextSelector'
 import { DefaultScopeGate } from './components/DefaultScopeGate'
 import { GlobalNamespaceSelect } from './components/GlobalNamespaceSelect'
@@ -43,6 +48,9 @@ const LeasesPage = lazy(() => import('./components/FamilyPages').then((module) =
 const NamespaceObjectPage = lazy(() => import('./components/FamilyPages').then((module) => ({ default: module.NamespaceObjectPage })))
 const StoragePage = lazy(() => import('./components/FamilyPages').then((module) => ({ default: module.StoragePage })))
 const ConfigurationPage = lazy(() => import('./components/ConfigurationPages').then((module) => ({ default: module.ConfigurationPage })))
+const GatewayPage = lazy(() => import('./components/GatewayPage').then((module) => ({ default: module.GatewayPage })))
+const DynamicResourcePage = lazy(() => import('./components/DynamicResourcePage').then((module) => ({ default: module.DynamicResourcePage })))
+const HelmPage = lazy(() => import('./components/HelmPage').then((module) => ({ default: module.HelmPage })))
 const ServiceAccountsPage = lazy(() => import('./components/ConfigurationPages').then((module) => ({ default: module.ServiceAccountsPage })))
 const AccessControlPage = lazy(() => import('./components/AccessPages').then((module) => ({ default: module.AccessControlPage })))
 const AdministrationPage = lazy(() => import('./components/AccessPages').then((module) => ({ default: module.AdministrationPage })))
@@ -369,7 +377,7 @@ function Shell() {
   }, [queryClient, selection?.generation, workspace])
 
   return (
-    <div className={`app-shell ${compact ? 'app-shell--compact' : ''}`}>
+    <div className={`app-shell ${compact ? 'app-shell--compact' : ''}`} data-context-color={contextColor(preferencesData, selection)} style={{ '--context-color': contextColor(preferencesData, selection) } as CSSProperties}>
       <a className="skip-link" href="#main-content">Skip to main content</a>
       {!mobile ? <Sidebar version={version} compact={compact} onToggleCompact={toggleCompact} collapsedGroups={collapsedGroups} onToggleGroup={toggleGroup} /> : null}
       <div className="workspace">
@@ -388,7 +396,8 @@ function Shell() {
               <span className="truncate">{scopeLabel(selection)}</span>
             </button>
           </div>
-          <div className="topbar-controls topbar-actions">
+            <div className="topbar-controls topbar-actions">
+              <AutoRefreshToggle />
             <StatusBadge />
             <CommandCenter routes={commandRoutes} getFavorites={() => favoriteEntries(preferences.data)} getResources={() => commandResourceEntries(queryClient, selection?.generation)} onRefresh={refreshActiveReads} />
           </div>
@@ -397,9 +406,12 @@ function Shell() {
           <ResourceFamilyNav />
           <ResourceSplitView detail={workspace.open ? <Suspense fallback={<LoadingState label="Opening resource…" />}><ResourceWorkspacePanel /></Suspense> : null}>
             <DefaultScopeGate selection={selection} selectionPending={selectionPendingForRoute}>
-              <Suspense fallback={<LoadingState label="Opening section…" layout="table" />}>
-                <Outlet />
-              </Suspense>
+              {selection?.scopeMode && !globalNamespace.ready && location.pathname !== '/namespaces' && location.pathname !== '/settings'
+                ? <StatePanel kind={globalNamespace.loading ? 'loading' : 'error'} title={globalNamespace.loading ? 'Loading the default namespace' : 'Default namespace unavailable'}>Open Namespace Scopes to review the namespaces available for this context.</StatePanel>
+                : <Suspense fallback={<LoadingState label="Opening section…" layout="table" />}><ResourceListFocus.Provider value={new URLSearchParams(location.search).get('focus') ? { name: new URLSearchParams(location.search).get('focus')!, clear: () => {
+                  if (workspace.open) workspace.clearListFocus()
+                  else { const params = new URLSearchParams(location.search); params.delete('focus'); navigate({ pathname: location.pathname, search: params.toString() }, { replace: true }) }
+                } } : null}><Outlet key={`${location.pathname}|${new URLSearchParams(location.search).get('focus') ?? ''}`} /></ResourceListFocus.Provider></Suspense>}
             </DefaultScopeGate>
           </ResourceSplitView>
         </main>
@@ -409,6 +421,7 @@ function Shell() {
 }
 
 function ShellProviders() {
+  const location = useLocation()
   const status = useQuery({
     queryKey: ['local-status'],
     queryFn: ({ signal }) => getStatus(signal),
@@ -417,7 +430,7 @@ function ShellProviders() {
   })
   const selection = status.data?.selection ?? null
   return (
-    <GlobalNamespaceProvider generation={selection?.generation} scopeId={selection?.scopeId ?? null} scopeMode={selection?.scopeMode ?? null}>
+    <GlobalNamespaceProvider generation={selection?.generation} scopeId={selection?.scopeId ?? null} scopeMode={selection?.scopeMode ?? null} defaultNamespace={selection?.defaultNamespace} requestedNamespace={new URLSearchParams(location.search).get('namespace')}>
       <Shell />
     </GlobalNamespaceProvider>
   )
@@ -442,6 +455,13 @@ function WorkspaceRoutes() {
           <Route path="storage/:tab/:name" element={<StoragePage />} />
           <Route path="storage/:tab/:namespace/:name" element={<StoragePage />} />
           <Route path="configuration" element={<ConfigurationPage />} />
+          <Route path="network/gateway-api" element={<GatewayPage />} />
+          <Route path="helm/releases" element={<HelmPage />} />
+          <Route path="helm/releases/:driver" element={<HelmPage />} />
+          <Route path="helm/releases/:driver/:namespace/:name" element={<HelmPage />} />
+          <Route path="network/gateway-api/:tab" element={<GatewayPage />} />
+          <Route path="network/gateway-api/:tab/:name" element={<GatewayPage />} />
+          <Route path="network/gateway-api/:tab/:namespace/:name" element={<GatewayPage />} />
           <Route path="configuration/:tab" element={<ConfigurationPage />} />
           <Route path="configuration/:tab/:namespace/:name" element={<ConfigurationPage />} />
           <Route path="service-accounts" element={<ServiceAccountsPage />} />
@@ -458,6 +478,9 @@ function WorkspaceRoutes() {
           <Route path="pods/:namespace/:name" element={<PodsPage />} />
           <Route path="workloads" element={<WorkloadsPage />} />
           <Route path="workloads/kind/:kind" element={<WorkloadsPage />} />
+          <Route path="workloads/custom" element={<DynamicResourcePage />} />
+          <Route path="workloads/custom/:group/:version/:resource/:scope" element={<DynamicResourcePage />} />
+          <Route path="workloads/custom/:group/:version/:resource/:scope/:namespace/:name" element={<DynamicResourcePage />} />
           <Route path="workloads/:kind/:namespace/:name" element={<WorkloadsPage />} />
           <Route path="network" element={<NetworkPage />} />
           <Route path="network/:tab" element={<NetworkPage />} />
@@ -474,5 +497,5 @@ function WorkspaceRoutes() {
 }
 
 export function App() {
-  return <ToastProvider><ResourceWorkspaceProvider><WorkspaceRoutes /></ResourceWorkspaceProvider></ToastProvider>
+  return <ToastProvider><AutoRefreshProvider><WarmInventoryCache><ResourceWorkspaceProvider><WorkspaceRoutes /></ResourceWorkspaceProvider></WarmInventoryCache></AutoRefreshProvider></ToastProvider>
 }

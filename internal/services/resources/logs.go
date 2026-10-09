@@ -237,7 +237,8 @@ func (service *LogService) authorize(ctx context.Context, selection Selection, t
 	case authorization.DecisionDenied:
 		return domainError(CodeForbidden, "Access to pod logs was denied.", nil)
 	default:
-		return domainError(CodeAuthorizationUnavailable, "Authorization could not be confirmed.", nil)
+		failure := authorization.ReviewFailure(capability)
+		return domainError(ErrorCode(failure.Code), failure.Message, nil)
 	}
 }
 

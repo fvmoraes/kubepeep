@@ -3,6 +3,7 @@ package resources
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -40,6 +41,109 @@ func TestSelectPaginationStrategyPreservesOrderingContract(t *testing.T) {
 	}
 	if got := selectPaginationStrategy(CollectionRequest[testListItem]{}, global).Name(); got != "global-native" {
 		t.Fatalf("global strategy = %q", got)
+	}
+}
+
+func TestPreferredNamespacePaginatesBeforeOtherNamespaces(t *testing.T) {
+	for _, native := range []bool{true, false} {
+		t.Run(fmt.Sprintf("native-%t", native), func(t *testing.T) {
+			t.Parallel()
+			origins, _ := OriginsFor(CollectionPods, []string{"alpha", "zulu"}, nil)
+			lister := &pagingOriginLister{perOrigin: 7, served: map[string]int{}}
+			request := CollectionRequest[testListItem]{
+				Selection: Selection{Generation: "gen", Context: "ctx", Scope: "scope"},
+				Options:   ListOptions{Limit: 5, Sort: "identity", Order: OrderAscending},
+				Origins:   origins, Lister: lister, NativeIdentityOrder: native, PreferredNamespace: "zulu",
+				Authorizer: &fakeAuthorization{}, Less: func(a, b testListItem) bool { return a < b },
+			}
+			items := []testListItem{}
+			for page := 0; page < 4; page++ {
+				result, err := Collect(t.Context(), request)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if page == 0 && (lister.served["alpha"] != 0 || lister.served["zulu"] != 5) {
+					t.Fatalf("first page touched other namespaces: %v", lister.served)
+				}
+				items = append(items, result.Items...)
+				if result.Page.Complete {
+					break
+				}
+				if result.Cursor == nil {
+					t.Fatal("missing continuation")
+				}
+				if err := result.Cursor.Validate(origins); err != nil {
+					t.Fatal(err)
+				}
+				request.Cursor = result.Cursor
+			}
+			if len(items) != 14 {
+				t.Fatalf("items=%v", items)
+			}
+			seen := map[testListItem]bool{}
+			for index, item := range items {
+				prefix := "alpha"
+				if index < 7 {
+					prefix = "zulu"
+				}
+				if seen[item] || !strings.HasPrefix(string(item), prefix) {
+					t.Fatalf("priority or duplicate: %v", items)
+				}
+				seen[item] = true
+			}
+		})
+	}
+}
+
+func TestPreferredNamespaceFailureDoesNotBlockAuthorizedRemainder(t *testing.T) {
+	for _, testCase := range []struct {
+		name     string
+		decision authorization.Decision
+		err      error
+	}{
+		{name: "denied", decision: authorization.DecisionDenied},
+		{name: "unknown", decision: authorization.DecisionUnknown},
+		{name: "upstream failure", err: fmt.Errorf("unavailable")},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+			origins, _ := OriginsFor(CollectionPods, []string{"alpha", "zulu"}, nil)
+			lister := &fakeStringLister{pages: map[string]OriginPage[testListItem]{"alpha": {Items: []testListItem{"alpha/pod"}}}, errs: map[string]error{"zulu": testCase.err}}
+			result, err := Collect(t.Context(), CollectionRequest[testListItem]{
+				Selection: Selection{Generation: "gen", Context: "ctx", Scope: "scope"},
+				Options:   ListOptions{Limit: 5, Sort: "identity", Order: OrderAscending},
+				Origins:   origins, Lister: lister, NativeIdentityOrder: true, PreferredNamespace: "zulu",
+				Authorizer: &fakeAuthorization{decisions: map[string]authorization.Decision{"zulu": testCase.decision}},
+				Less:       func(a, b testListItem) bool { return a < b },
+			})
+			if err != nil || len(result.Items) != 1 || result.Items[0] != "alpha/pod" {
+				t.Fatalf("items=%v err=%v", result.Items, err)
+			}
+			for _, call := range lister.calls {
+				if call.Origin.Namespace == "zulu" && testCase.decision != "" {
+					t.Fatal("queried unauthorized default")
+				}
+			}
+		})
+	}
+}
+
+func TestPreferredNamespaceFinishesAllWorkloadKindsBeforeOtherNamespaces(t *testing.T) {
+	origins, _ := OriginsFor(CollectionWorkloads, []string{"alpha", "zulu"}, []WorkloadKind{WorkloadDeployments, WorkloadStatefulSets})
+	lister := &fakeStringLister{pages: map[string]OriginPage[testListItem]{"alpha": {Items: []testListItem{"alpha/item"}}, "zulu": {Items: []testListItem{"zulu/item"}}}}
+	result, err := Collect(t.Context(), CollectionRequest[testListItem]{
+		Selection: Selection{Generation: "gen", Context: "ctx", Scope: "scope"},
+		Options:   ListOptions{Limit: 10, Sort: "identity", Order: OrderAscending},
+		Origins:   origins, Lister: lister, NativeIdentityOrder: true, PreferredNamespace: "zulu",
+		Authorizer: &fakeAuthorization{}, Less: func(a, b testListItem) bool { return a < b },
+	})
+	if err != nil || len(result.Items) != 2 || result.Cursor == nil || result.Page.Complete {
+		t.Fatalf("items=%v err=%v", result.Items, err)
+	}
+	for _, call := range lister.calls {
+		if call.Origin.Namespace != "zulu" {
+			t.Fatalf("LIST order=%v", lister.calls)
+		}
 	}
 }
 

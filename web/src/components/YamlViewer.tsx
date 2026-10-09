@@ -3,7 +3,7 @@ import { Badge, Button, Input } from '../components/ui'
 import { PrismLight as SyntaxHighlighter } from 'react-syntax-highlighter'
 import yaml from 'react-syntax-highlighter/dist/esm/languages/prism/yaml'
 import vscDarkPlus from 'react-syntax-highlighter/dist/esm/styles/prism/vsc-dark-plus'
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState, type ReactNode } from 'react'
 
 SyntaxHighlighter.registerLanguage('yaml', yaml)
 
@@ -25,6 +25,7 @@ interface YamlViewerProps {
   error: unknown
   onLoad: () => void
   diffTarget?: YamlDiffTarget
+  actions?: ReactNode
 }
 
 type DiffState =
@@ -33,7 +34,7 @@ type DiffState =
   | { kind: 'ready'; diff: YAMLDiff }
   | { kind: 'error'; message: string }
 
-export function YamlViewer({ value, pending, error, onLoad, diffTarget }: YamlViewerProps) {
+export function YamlViewer({ value, pending, error, onLoad, diffTarget, actions }: YamlViewerProps) {
   const [diffState, setDiffState] = useState<DiffState>({ kind: 'idle' })
   const [search, setSearch] = useState('')
   const [matchIndex, setMatchIndex] = useState(0)
@@ -109,9 +110,9 @@ export function YamlViewer({ value, pending, error, onLoad, diffTarget }: YamlVi
 
   return (
     <section className="yaml-viewer mt-3 flex flex-col gap-2 border-t border-kp-overlay-0 pt-3" aria-label="Authorized YAML">
-      <Button variant="secondary" className="justify-self-start" disabled={pending} onClick={onLoad}>
+      <div className="flex flex-wrap items-center gap-2"><Button variant="secondary" className="justify-self-start" disabled={pending} onClick={onLoad}>
         {pending ? 'Loading YAML…' : 'Load authorized YAML'}
-      </Button>
+      </Button>{actions}</div>
       {error ? <p className="text-content text-kp-red">{formatError(error)}</p> : null}
       {value !== undefined ? (
         <>

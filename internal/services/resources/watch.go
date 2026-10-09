@@ -1482,7 +1482,8 @@ func authorizeTopics(ctx context.Context, checker AuthorizationChecker, selectio
 					case authorization.DecisionDenied:
 						return domainError(CodeForbidden, "Access to the requested resource stream was denied.", nil)
 					default:
-						return domainError(CodeAuthorizationUnavailable, "Authorization could not be confirmed.", nil)
+						failure := authorization.ReviewFailure(capability)
+						return domainError(ErrorCode(failure.Code), failure.Message, nil)
 					}
 				}
 			}
@@ -1519,7 +1520,8 @@ func authorizeTopicsConcurrently(ctx context.Context, checker AuthorizationCheck
 	}()
 	var workers sync.WaitGroup
 	var resultMu sync.Mutex
-	denied, unavailable := false, false
+	denied := false
+	var unavailable *authorization.PublicError
 	for range min(maximumConcurrentStreamAuthorizations, len(keys)) {
 		workers.Add(1)
 		go func() {
@@ -1538,8 +1540,8 @@ func authorizeTopicsConcurrently(ctx context.Context, checker AuthorizationCheck
 				resultMu.Lock()
 				if capability.Decision == authorization.DecisionDenied {
 					denied = true
-				} else {
-					unavailable = true
+				} else if unavailable == nil {
+					unavailable = authorization.ReviewFailure(capability)
 				}
 				resultMu.Unlock()
 				cancel()
@@ -1552,8 +1554,11 @@ func authorizeTopicsConcurrently(ctx context.Context, checker AuthorizationCheck
 	if denied {
 		return domainError(CodeForbidden, "Access to the requested resource stream was denied.", nil)
 	}
-	if unavailable || ctx.Err() != nil {
-		return domainError(CodeAuthorizationUnavailable, "Authorization could not be confirmed.", nil)
+	if unavailable != nil {
+		return domainError(ErrorCode(unavailable.Code), unavailable.Message, nil)
+	}
+	if ctx.Err() != nil {
+		return sanitizePortError(ctx.Err())
 	}
 	return nil
 }

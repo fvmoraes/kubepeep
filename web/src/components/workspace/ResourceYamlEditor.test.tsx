@@ -7,7 +7,7 @@ import { ResourceYamlEditor } from './ResourceYamlEditor'
 const selection = { clusterProfileId: 1, context: 'dev', generation: 'gen_yaml' } as SelectionSummary
 const json = (data: unknown, status = 200) => new Response(JSON.stringify(status === 200 ? { data } : data), { status, headers: { 'Content-Type': 'application/json' } })
 function setup(collection = 'pods', kind = 'Pod', namespace: string | null = 'payments', allowed = true, saveStatus = 200) {
-  const document = JSON.stringify({ apiVersion: 'v1', kind, metadata: { name: 'sample', ...(namespace ? { namespace } : {}), uid: 'uid-sample', resourceVersion: '17' }, data: { key: 'original-value' } }, null, 2)
+  const document = JSON.stringify({ apiVersion: 'v1', kind, metadata: { name: 'sample', ...(namespace ? { namespace } : {}), uid: 'uid-sample', resourceVersion: '17' }, data: { key: kind === 'Secret' ? 'b3JpZ2luYWwtdmFsdWU=' : 'original-value' } }, null, 2)
   const requests: { path: string; init?: RequestInit }[] = []
   const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const path = String(input); requests.push({ path, init })
@@ -32,13 +32,13 @@ it.each([['pods', 'Pod', 'payments'], ['configmaps', 'ConfigMap', 'payments'], [
   const edit = await screen.findByRole('button', { name: 'Edit YAML' })
   await waitFor(() => expect(edit).toBeEnabled())
   fireEvent.click(edit)
-  fireEvent.change(screen.getByLabelText(`${kind} YAML`, { exact: true }), { target: { value: document.replace('original-value', 'edited-value') } })
+  fireEvent.change(screen.getByLabelText(`${kind} YAML`, { exact: true }), { target: { value: document.replace(kind === 'Secret' ? 'b3JpZ2luYWwtdmFsdWU=' : 'original-value', kind === 'Secret' ? 'ZWRpdGVkLXZhbHVl' : 'edited-value') } })
   fireEvent.click(screen.getByRole('button', { name: `Save ${kind}` }))
   expect(await screen.findByText(`${kind} saved. Load YAML to inspect the new version.`)).toBeVisible()
   const saved = requests.find(({ init }) => init?.method === 'PUT')!
   expect(saved.path).toBe(`/api/v1/resources/${collection}/${namespace ? namespace + '/' : ''}sample/yaml`)
   expect(saved.init?.headers).toMatchObject({ 'X-KubePeep-CSRF': 'csrf-yaml' })
-  expect(JSON.parse(String(saved.init?.body))).toMatchObject({ confirmed: true, action: 'updateResource', consequenceCode: 'UPDATE_RESOURCE', expectedGeneration: 'gen_yaml', expectedUid: 'uid-sample', expectedResourceVersion: '17', target: { namespace: namespace ?? '', kind, name: 'sample' }, yaml: expect.stringContaining('edited-value') })
+  expect(JSON.parse(String(saved.init?.body))).toMatchObject({ confirmed: true, action: 'updateResource', consequenceCode: 'UPDATE_RESOURCE', expectedGeneration: 'gen_yaml', expectedUid: 'uid-sample', expectedResourceVersion: '17', target: { namespace: namespace ?? '', kind, name: 'sample' }, yaml: expect.stringContaining(kind === 'Secret' ? 'ZWRpdGVkLXZhbHVl' : 'edited-value') })
   expect(JSON.stringify(client.getQueryCache().getAll().map((query) => query.state.data))).not.toContain('original-value')
   expect(client.getMutationCache().getAll()).toHaveLength(0)
 })
@@ -90,4 +90,22 @@ it('aborts an in-flight YAML read on unmount and leaves no payload in query cach
   view.unmount()
   expect(signal?.aborted).toBe(true)
   expect(JSON.stringify(client.getQueryCache().getAll().map((query) => query.state.data))).not.toContain('original-value')
+})
+
+it('preserves Base64 exactly and refuses to silently save UTF-8 in Secret.data', async () => {
+  const { document, requests } = setup('secrets', 'Secret')
+  fireEvent.click(screen.getByRole('button', { name: 'Load authorized YAML' }))
+  const edit = await screen.findByRole('button', { name: 'Edit YAML' })
+  await waitFor(() => expect(edit).toBeEnabled()); fireEvent.click(edit)
+  expect(screen.getByLabelText('Secret YAML')).toHaveValue(document)
+  fireEvent.change(screen.getByLabelText('Secret YAML'), { target: { value: document.replace('b3JpZ2luYWwtdmFsdWU=', 'ação em UTF-8') } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save Secret' }))
+  expect(await screen.findByRole('alert')).toHaveTextContent('data values must be valid Base64')
+  expect(requests.some(({ init }) => init?.method === 'PUT')).toBe(false)
+  const encoded = btoa(String.fromCharCode(...new TextEncoder().encode('ação em UTF-8')))
+  fireEvent.change(screen.getByLabelText('Secret YAML'), { target: { value: document.replace('b3JpZ2luYWwtdmFsdWU=', encoded) } })
+  fireEvent.click(screen.getByRole('button', { name: 'Save Secret' }))
+  await screen.findByText('Secret saved. Load YAML to inspect the new version.')
+  const payload = JSON.parse(String(requests.find(({ init }) => init?.method === 'PUT')!.init!.body))
+  expect(JSON.parse(payload.yaml).data.key).toBe(encoded)
 })
