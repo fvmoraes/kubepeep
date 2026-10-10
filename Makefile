@@ -116,6 +116,7 @@ test-release-artifacts:
 test-release-gates: test-release-artifacts
 	./test/release/gates.sh
 	./test/release/version.sh
+	python3 -m unittest discover -s test/release -p 'test_*.py'
 
 cross-build: web-build
 	@set -eu; \

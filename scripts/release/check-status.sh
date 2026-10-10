@@ -5,10 +5,10 @@ set -eu
 
 awk -F '\t' '
 BEGIN {
-	required[1] = "build-and-test"
-	required[2] = "restricted-kind"
-	required[3] = "native-runtime (macos-latest)"
-	required[4] = "native-runtime (windows-latest)"
+	required[1] = "01 · Native runtime (Linux)"
+	required[2] = "02 · Kubernetes integration (Kind, restricted RBAC)"
+	required[3] = "01 · Native runtime (macOS)"
+	required[4] = "01 · Native runtime (Windows)"
 }
 $1 ~ /^[0-9]+$/ && $1 + 0 > latest_id[$2] {
 	latest_id[$2] = $1 + 0
