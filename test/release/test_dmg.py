@@ -62,6 +62,7 @@ if [ "${DMG_FAIL_STAGE:-}" = copy ]; then exit 1; fi
         capacity = int(create[create.index("-size") + 1].removesuffix("m"))
         self.assertGreaterEqual(capacity, 224)  # 80 MiB logical payload plus slack
         self.assertNotIn("-srcfolder", create)
+        self.assertNotIn("-format", create)  # Invalid for blank image creation
         self.assertEqual(create[create.index("-fs") + 1], "HFS+")
         self.assertEqual([line.split()[0] for line in commands],
                          ["create", "attach", "copy", "detach", "convert", "verify"])

@@ -61,7 +61,8 @@ PY
 )
 
 stage=create
-hdiutil create -size "${size_mib}m" -fs HFS+ -volname KubePeep -format UDRW "$work/writable.dmg"
+# A blank image is writable by default; -format requires a source image/folder.
+hdiutil create -size "${size_mib}m" -fs HFS+ -volname KubePeep "$work/writable.dmg"
 stage=attach
 mkdir "$mountpoint"
 hdiutil attach -nobrowse -noautoopen -mountpoint "$mountpoint" "$work/writable.dmg"
