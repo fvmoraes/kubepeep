@@ -13,9 +13,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Core validation. Keep this check name: release.yml polls it together with
-  # native-runtime and restricted-kind as the blocking set.
+  # Visible names are also required by scripts/release/check-status.sh.
   build-and-test:
+    name: 01 · Build and test (Linux)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -104,6 +104,7 @@ jobs:
           ./test/release/version.sh
           ./test/release/gates.sh
           ./test/release/artifacts.sh
+          python3 -m unittest discover -s test/release -p 'test_*.py'
           ./scripts/release/check-artifacts.sh dist
 
       - name: Run the race detector
@@ -124,11 +125,15 @@ jobs:
 
   # Native runtime validation runs in parallel with the core checks.
   native-runtime:
-    name: native-runtime (${{ matrix.os }})
+    name: 01 · Native runtime (${{ matrix.platform }})
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest]
+        include:
+          - os: macos-latest
+            platform: macOS
+          - os: windows-latest
+            platform: Windows
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
@@ -172,6 +177,10 @@ jobs:
       - name: Parse native installer
         if: runner.os != 'Windows'
         run: sh -n install.sh
+
+      - name: Verify DMG packaging with a sparse app bundle
+        if: runner.os == 'macOS'
+        run: ./test/release/dmg.sh
 
       - name: Test native paths, permissions, locks, control lifecycle, and doctor (Windows)
         if: runner.os == 'Windows'
@@ -242,6 +251,7 @@ jobs:
 
   # Restricted RBAC integration starts after the core checks succeed.
   restricted-kind:
+    name: 02 · Kubernetes integration (Kind, restricted RBAC)
     needs: build-and-test
     runs-on: ubuntu-24.04
     timeout-minutes: 45

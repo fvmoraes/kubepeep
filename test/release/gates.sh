@@ -20,31 +20,37 @@ run_gate() {
 		local runs=""
 		case "$scenario" in
 			success)
-				runs=$'101\tbuild-and-test\tsuccess\n102\tnative-runtime (macos-latest)\tsuccess\n103\tnative-runtime (windows-latest)\tsuccess\n104\trestricted-kind\tsuccess'
+				runs=$'101\t01 · Build and test (Linux)\tsuccess\n102\t01 · Native runtime (macOS)\tsuccess\n103\t01 · Native runtime (Windows)\tsuccess\n104\t02 · Kubernetes integration (Kind, restricted RBAC)\tsuccess'
 				;;
 			recover)
 				reading=$((reading + 1))
 				case "$reading" in
-					1) runs=$'101\tbuild-and-test\tsuccess\n102\tnative-runtime (macos-latest)\tpending\n103\tnative-runtime (windows-latest)\tpending' ;;
-					2) runs=$'101\tbuild-and-test\tsuccess\n102\tnative-runtime (macos-latest)\tfailure\n103\tnative-runtime (windows-latest)\tpending\n104\trestricted-kind\tpending' ;;
-					*) runs=$'101\tbuild-and-test\tsuccess\n102\tnative-runtime (macos-latest)\tfailure\n103\tnative-runtime (windows-latest)\tsuccess\n104\trestricted-kind\tsuccess\n204\tnative-runtime (macos-latest)\tsuccess' ;;
+					1) runs=$'101\t01 · Build and test (Linux)\tsuccess\n102\t01 · Native runtime (macOS)\tpending\n103\t01 · Native runtime (Windows)\tpending' ;;
+					2) runs=$'101\t01 · Build and test (Linux)\tsuccess\n102\t01 · Native runtime (macOS)\tfailure\n103\t01 · Native runtime (Windows)\tpending\n104\t02 · Kubernetes integration (Kind, restricted RBAC)\tpending' ;;
+					*) runs=$'101\t01 · Build and test (Linux)\tsuccess\n102\t01 · Native runtime (macOS)\tfailure\n103\t01 · Native runtime (Windows)\tsuccess\n104\t02 · Kubernetes integration (Kind, restricted RBAC)\tsuccess\n204\t01 · Native runtime (macOS)\tsuccess' ;;
 				esac
 				;;
 			hardfail)
-				runs=$'101\tbuild-and-test\tsuccess\n102\tnative-runtime (macos-latest)\tfailure\n103\tnative-runtime (windows-latest)\tsuccess\n104\trestricted-kind\tsuccess'
+				runs=$'101\t01 · Build and test (Linux)\tsuccess\n102\t01 · Native runtime (macOS)\tfailure\n103\t01 · Native runtime (Windows)\tsuccess\n104\t02 · Kubernetes integration (Kind, restricted RBAC)\tsuccess'
 				;;
 			cancel_recovered)
 				reading=$((reading + 1))
 				case "$reading" in
-					1|2) runs=$'101\tbuild-and-test\tsuccess\n102\tnative-runtime (macos-latest)\tcancelled\n103\tnative-runtime (windows-latest)\tsuccess\n104\trestricted-kind\tsuccess' ;;
-					*) runs=$'101\tbuild-and-test\tsuccess\n102\tnative-runtime (macos-latest)\tcancelled\n103\tnative-runtime (windows-latest)\tsuccess\n104\trestricted-kind\tsuccess\n205\tnative-runtime (macos-latest)\tsuccess' ;;
+					1|2) runs=$'101\t01 · Build and test (Linux)\tsuccess\n102\t01 · Native runtime (macOS)\tcancelled\n103\t01 · Native runtime (Windows)\tsuccess\n104\t02 · Kubernetes integration (Kind, restricted RBAC)\tsuccess' ;;
+					*) runs=$'101\t01 · Build and test (Linux)\tsuccess\n102\t01 · Native runtime (macOS)\tcancelled\n103\t01 · Native runtime (Windows)\tsuccess\n104\t02 · Kubernetes integration (Kind, restricted RBAC)\tsuccess\n205\t01 · Native runtime (macOS)\tsuccess' ;;
 				esac
 				;;
 			missing_windows)
-				runs=$'101\tbuild-and-test\tsuccess\n102\tnative-runtime (macos-latest)\tsuccess\n104\trestricted-kind\tsuccess'
+				runs=$'101\t01 · Build and test (Linux)\tsuccess\n102\t01 · Native runtime (macOS)\tsuccess\n104\t02 · Kubernetes integration (Kind, restricted RBAC)\tsuccess'
+				;;
+			legacy_names)
+				runs=$'101\tbuild-and-test\tsuccess\n102\tnative-runtime (macos-latest)\tsuccess\n103\tnative-runtime (windows-latest)\tsuccess\n104\trestricted-kind\tsuccess'
+				;;
+			newer_failure)
+				runs=$'101\t01 · Build and test (Linux)\tsuccess\n102\t01 · Native runtime (macOS)\tsuccess\n103\t01 · Native runtime (Windows)\tsuccess\n104\t02 · Kubernetes integration (Kind, restricted RBAC)\tsuccess\n205\t01 · Build and test (Linux)\tfailure'
 				;;
 			timeout)
-				runs=$'101\tbuild-and-test\tpending'
+				runs=$'101\t01 · Build and test (Linux)\tpending'
 				;;
 		esac
 		local state status
@@ -94,6 +100,8 @@ assert hardfail      "OUTCOME: aborted" 0
 assert timeout       "OUTCOME: timeout"  0
 
 assert missing_windows "OUTCOME: timeout" 0
+assert legacy_names "OUTCOME: timeout" 0
+assert newer_failure "OUTCOME: aborted" 0
 
 echo "gate-harness: $pass passed, $fail failed"
 [ "$fail" -eq 0 ]

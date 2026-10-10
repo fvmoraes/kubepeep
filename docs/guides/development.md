@@ -93,16 +93,41 @@ camadas vazias para reproduzi-los.
 
 [release.yml](../../.github/workflows/release.yml) organiza os jobs em
 `01 Prepare` → `02 Build` (Linux/Windows/macOS) → `03 Publish` → `04 Latest`.
-A publicação exige `build-and-test`, `restricted-kind` e as duas pernas
-`native-runtime (macos-latest)` / `native-runtime (windows-latest)` de
+A publicação exige quatro checks de
 [verify.yml](../../.github/workflows/verify.yml), considerando a execução mais
-recente de cada nome. Preservar nomes de checks, IDs e nomes dos artefatos.
+recente de cada nome:
+
+- `01 · Build and test (Linux)`: build, testes Go/frontend/E2E, lint e segurança
+  no Ubuntu.
+- `01 · Native runtime (macOS)` e `01 · Native runtime (Windows)`: caminhos,
+  permissões, locks, ciclo de vida e instaladores de cada sistema operacional.
+- `02 · Kubernetes integration (Kind, restricted RBAC)`: cluster Kubernetes
+  temporário com acesso limitado, operações permitidas/negadas, revogação,
+  logs, streams e exec. Começa depois do check Linux e remove o cluster ao fim.
+
+A numeração agrupa etapas; as três validações `01` executam em paralelo.
+Os IDs dos jobs permanecem `build-and-test`, `native-runtime` e
+`restricted-kind`. Ao renomear checks visíveis, atualizar também
+`scripts/release/check-status.sh`, seus testes e eventuais regras de proteção
+da branch no GitHub. Preservar os nomes dos artefatos.
 
 `make test-release-gates` cobre classificação, scanner, versionamento,
 preservação das notas e metadados nativos. Binários e pacotes passam pelo
 scanner antes dos uploads e novamente antes da tag. Em `dry_run`, os jobs
 recebem o SHA exato de origem e aplicam a versão calculada ao `wails.json`,
 sem criar commit remoto. Notas já revisadas no `CHANGELOG.md` são preservadas.
+
+O [empacotador DMG](../../scripts/release/create-dmg.sh) cria uma imagem HFS+
+gravável com capacidade explícita: duas vezes o tamanho contabilizado do bundle
+mais 64 MiB, com mínimo de 128 MiB. A contagem considera bytes lógicos e
+alocados, inclusive arquivos esparsos, e margem por entrada do filesystem.
+Depois de copiar o `.app`, desmonta, converte para UDZO e verifica a imagem.
+O log informa capacidade, espaço livre e etapa em caso de falha; uma falta de
+espaço no host interrompe o processo antes da criação. Temporários são removidos
+após desmontar o volume e um artefato existente só é substituído após validação.
+Os testes portáveis cobrem capacidade e falhas; o check nativo macOS executa
+[um teste real](../../test/release/dmg.sh) de criação/montagem com um bundle
+esparso de 80 MiB, comparando conteúdo, permissão de execução e links simbólicos.
 
 Para reproduzir uma versão escolhida: `make build build-desktop VERSION=0.11.0-dev`.
 CLI e desktop recebem os mesmos ldflags de versão, commit e data. Builds de

@@ -21,7 +21,7 @@
 #
 # Regras:
 #   - Tags oficiais: 1.0.0, 1.1.0, 1.1.1 — SEM prefixo "v" (imutáveis) e criadas
-#     APENAS quando os builds e build-and-test passam (falha não queima versão).
+#     APENAS quando os builds e todos os checks de verify passam.
 #   - Apenas a git tag móvel `latest` é atualizada (force push só nela).
 #   - Assets com nome CONSTANTE (kubepeep-linux-amd64.deb, …): cada Release tem
 #     seu próprio namespace, e /releases/latest/download/<asset> é permanente.
@@ -619,17 +619,7 @@ jobs:
         run: |
           mkdir -p dist
           ditto -c -k --sequesterRsrc --keepParent build/bin/kubePeep.app dist/kubepeep-darwin-${{ matrix.arch }}.zip
-          # hdiutil is flaky on hosted runners; retry a couple of times.
-          attempts=0
-          until [ "$attempts" -ge 3 ]; do
-            if hdiutil create -volname "KubePeep" -srcfolder build/bin/kubePeep.app -ov -format UDZO "dist/kubepeep-darwin-${{ matrix.arch }}.dmg"; then
-              break
-            fi
-            attempts=$((attempts + 1))
-            echo "hdiutil attempt $attempts failed; retrying..."
-            sleep 5
-          done
-          [ "$attempts" -lt 3 ] || exit 1
+          ./scripts/release/create-dmg.sh build/bin/kubePeep.app "dist/kubepeep-darwin-${{ matrix.arch }}.dmg"
           staging=$(mktemp -d)
           cp build/bin/kubePeep.app/Contents/MacOS/kubePeep "$staging/kubePeep"
           cp README.md LICENSE NOTICE THIRD_PARTY_NOTICES.md "$staging/"
@@ -695,9 +685,8 @@ jobs:
           # reexecução manual que recuperou o job não mantém a falha antiga.
           # Falha/cancelamento/timeout só abortam após 3 leituras seguidas
           # sem recuperação; ausência/pending aguardam até o deadline.
-          # native-runtime é um job de matriz: as pernas se chamam
-          # "native-runtime (macos-latest)" e "native-runtime (windows-latest)".
-          # O helper exige os dois nomes e usa o maior id de cada check.
+          # O helper exige os quatro nomes visíveis de verify.yml (01/02),
+          # incluindo Native runtime em macOS e Windows, usando o maior id.
           deadline=$(( $(date +%s) + 45 * 60 ))
           failure_streak=0
           while :; do
@@ -705,7 +694,7 @@ jobs:
               "repos/${GITHUB_REPOSITORY}/commits/${GITHUB_SHA}/check-runs?per_page=100" \
               --jq '.check_runs[] | [.id, .name, (.conclusion // "pending")] | @tsv' 2>/dev/null | sort -n -k1,1) || runs=""
             if check_state=$(printf '%s\n' "$runs" | ./scripts/release/check-status.sh); then
-              echo "verify.yml (build-and-test, restricted-kind, native-runtime matrix) concluded successfully for ${GITHUB_SHA}."
+              echo "verify.yml (Linux, native macOS/Windows, Kubernetes integration) concluded successfully for ${GITHUB_SHA}."
               break
             else
               check_status=$?
