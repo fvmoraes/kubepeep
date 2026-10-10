@@ -15,7 +15,7 @@ concurrency:
 jobs:
   # Visible names are also required by scripts/release/check-status.sh.
   build-and-test:
-    name: 01 · Build and test (Linux)
+    name: 01 · Native runtime (Linux)
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:

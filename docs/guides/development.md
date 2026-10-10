@@ -97,7 +97,7 @@ A publicação exige quatro checks de
 [verify.yml](../../.github/workflows/verify.yml), considerando a execução mais
 recente de cada nome:
 
-- `01 · Build and test (Linux)`: build, testes Go/frontend/E2E, lint e segurança
+- `01 · Native runtime (Linux)`: build, testes Go/frontend/E2E, lint e segurança
   no Ubuntu.
 - `01 · Native runtime (macOS)` e `01 · Native runtime (Windows)`: caminhos,
   permissões, locks, ciclo de vida e instaladores de cada sistema operacional.

@@ -20,37 +20,37 @@ run_gate() {
 		local runs=""
 		case "$scenario" in
 			success)
-				runs=$'101\t01 · Build and test (Linux)\tsuccess\n102\t01 · Native runtime (macOS)\tsuccess\n103\t01 · Native runtime (Windows)\tsuccess\n104\t02 · Kubernetes integration (Kind, restricted RBAC)\tsuccess'
+				runs=$'101\t01 · Native runtime (Linux)\tsuccess\n102\t01 · Native runtime (macOS)\tsuccess\n103\t01 · Native runtime (Windows)\tsuccess\n104\t02 · Kubernetes integration (Kind, restricted RBAC)\tsuccess'
 				;;
 			recover)
 				reading=$((reading + 1))
 				case "$reading" in
-					1) runs=$'101\t01 · Build and test (Linux)\tsuccess\n102\t01 · Native runtime (macOS)\tpending\n103\t01 · Native runtime (Windows)\tpending' ;;
-					2) runs=$'101\t01 · Build and test (Linux)\tsuccess\n102\t01 · Native runtime (macOS)\tfailure\n103\t01 · Native runtime (Windows)\tpending\n104\t02 · Kubernetes integration (Kind, restricted RBAC)\tpending' ;;
-					*) runs=$'101\t01 · Build and test (Linux)\tsuccess\n102\t01 · Native runtime (macOS)\tfailure\n103\t01 · Native runtime (Windows)\tsuccess\n104\t02 · Kubernetes integration (Kind, restricted RBAC)\tsuccess\n204\t01 · Native runtime (macOS)\tsuccess' ;;
+					1) runs=$'101\t01 · Native runtime (Linux)\tsuccess\n102\t01 · Native runtime (macOS)\tpending\n103\t01 · Native runtime (Windows)\tpending' ;;
+					2) runs=$'101\t01 · Native runtime (Linux)\tsuccess\n102\t01 · Native runtime (macOS)\tfailure\n103\t01 · Native runtime (Windows)\tpending\n104\t02 · Kubernetes integration (Kind, restricted RBAC)\tpending' ;;
+					*) runs=$'101\t01 · Native runtime (Linux)\tsuccess\n102\t01 · Native runtime (macOS)\tfailure\n103\t01 · Native runtime (Windows)\tsuccess\n104\t02 · Kubernetes integration (Kind, restricted RBAC)\tsuccess\n204\t01 · Native runtime (macOS)\tsuccess' ;;
 				esac
 				;;
 			hardfail)
-				runs=$'101\t01 · Build and test (Linux)\tsuccess\n102\t01 · Native runtime (macOS)\tfailure\n103\t01 · Native runtime (Windows)\tsuccess\n104\t02 · Kubernetes integration (Kind, restricted RBAC)\tsuccess'
+				runs=$'101\t01 · Native runtime (Linux)\tsuccess\n102\t01 · Native runtime (macOS)\tfailure\n103\t01 · Native runtime (Windows)\tsuccess\n104\t02 · Kubernetes integration (Kind, restricted RBAC)\tsuccess'
 				;;
 			cancel_recovered)
 				reading=$((reading + 1))
 				case "$reading" in
-					1|2) runs=$'101\t01 · Build and test (Linux)\tsuccess\n102\t01 · Native runtime (macOS)\tcancelled\n103\t01 · Native runtime (Windows)\tsuccess\n104\t02 · Kubernetes integration (Kind, restricted RBAC)\tsuccess' ;;
-					*) runs=$'101\t01 · Build and test (Linux)\tsuccess\n102\t01 · Native runtime (macOS)\tcancelled\n103\t01 · Native runtime (Windows)\tsuccess\n104\t02 · Kubernetes integration (Kind, restricted RBAC)\tsuccess\n205\t01 · Native runtime (macOS)\tsuccess' ;;
+					1|2) runs=$'101\t01 · Native runtime (Linux)\tsuccess\n102\t01 · Native runtime (macOS)\tcancelled\n103\t01 · Native runtime (Windows)\tsuccess\n104\t02 · Kubernetes integration (Kind, restricted RBAC)\tsuccess' ;;
+					*) runs=$'101\t01 · Native runtime (Linux)\tsuccess\n102\t01 · Native runtime (macOS)\tcancelled\n103\t01 · Native runtime (Windows)\tsuccess\n104\t02 · Kubernetes integration (Kind, restricted RBAC)\tsuccess\n205\t01 · Native runtime (macOS)\tsuccess' ;;
 				esac
 				;;
 			missing_windows)
-				runs=$'101\t01 · Build and test (Linux)\tsuccess\n102\t01 · Native runtime (macOS)\tsuccess\n104\t02 · Kubernetes integration (Kind, restricted RBAC)\tsuccess'
+				runs=$'101\t01 · Native runtime (Linux)\tsuccess\n102\t01 · Native runtime (macOS)\tsuccess\n104\t02 · Kubernetes integration (Kind, restricted RBAC)\tsuccess'
 				;;
 			legacy_names)
 				runs=$'101\tbuild-and-test\tsuccess\n102\tnative-runtime (macos-latest)\tsuccess\n103\tnative-runtime (windows-latest)\tsuccess\n104\trestricted-kind\tsuccess'
 				;;
 			newer_failure)
-				runs=$'101\t01 · Build and test (Linux)\tsuccess\n102\t01 · Native runtime (macOS)\tsuccess\n103\t01 · Native runtime (Windows)\tsuccess\n104\t02 · Kubernetes integration (Kind, restricted RBAC)\tsuccess\n205\t01 · Build and test (Linux)\tfailure'
+				runs=$'101\t01 · Native runtime (Linux)\tsuccess\n102\t01 · Native runtime (macOS)\tsuccess\n103\t01 · Native runtime (Windows)\tsuccess\n104\t02 · Kubernetes integration (Kind, restricted RBAC)\tsuccess\n205\t01 · Native runtime (Linux)\tfailure'
 				;;
 			timeout)
-				runs=$'101\t01 · Build and test (Linux)\tpending'
+				runs=$'101\t01 · Native runtime (Linux)\tpending'
 				;;
 		esac
 		local state status

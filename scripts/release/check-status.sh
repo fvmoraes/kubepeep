@@ -5,7 +5,7 @@ set -eu
 
 awk -F '\t' '
 BEGIN {
-	required[1] = "01 · Build and test (Linux)"
+	required[1] = "01 · Native runtime (Linux)"
 	required[2] = "02 · Kubernetes integration (Kind, restricted RBAC)"
 	required[3] = "01 · Native runtime (macOS)"
 	required[4] = "01 · Native runtime (Windows)"
