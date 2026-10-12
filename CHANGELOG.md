@@ -7,6 +7,21 @@ versions follow [Semantic Versioning](https://semver.org/) **without the `v`
 prefix** (official tags: `1.4.2`, `1.4.3`, …), and entries are generated
 automatically from Conventional Commits by `.github/workflows/release.yml`.
 
+## [0.12.0] - 2026-10-12
+
+## Added
+- feat: refine resource workflows and port forwarding for 0.12
+
+## Changed
+- Merge pull request #34 from fvmoraes/V0.12.0
+
+## Download
+
+Permanently-updated links: https://github.com/fvmoraes/kubepeep/blob/main/docs/download.md
+
+## Full Changelog
+**Full Changelog**: https://github.com/fvmoraes/kubepeep/compare/0.11.0...0.12.0
+
 ## [0.11.0] - 2026-10-09
 
 ## Added
@@ -783,3 +798,4 @@ Permanently-updated links: https://github.com/fvmoraes/kubepeep/blob/main/docs/d
 [0.9.0]: https://github.com/fvmoraes/kubepeep/releases/tag/0.9.0
 [0.10.0]: https://github.com/fvmoraes/kubepeep/releases/tag/0.10.0
 [0.11.0]: https://github.com/fvmoraes/kubepeep/releases/tag/0.11.0
+[0.12.0]: https://github.com/fvmoraes/kubepeep/releases/tag/0.12.0
