@@ -79,7 +79,7 @@ function SettingsForm({ initial }: { initial: Preferences }) {
           // Settings owns UI/log/dashboard values. Filter management only
           // removes IDs explicitly deleted from this draft, preserving filters
           // that another writer appended after the form was opened.
-          next.ui = structuredClone(value.ui)
+          next.ui = { ...current.ui, language: 'en' }
           next.logs = structuredClone(value.logs)
           next.dashboard = structuredClone(value.dashboard)
           next.filters = structuredClone(current.filters)
@@ -129,7 +129,7 @@ function SettingsForm({ initial }: { initial: Preferences }) {
       <section className="grid gap-3 md:grid-cols-2">
         <Card><CardContent className="grid content-start gap-3 p-4">
           <h2 className="m-0 text-heading text-kp-text">Interface</h2>
-          <label className="grid gap-1"><span className="text-column uppercase tracking-wider text-kp-overlay-text">Language</span><Select value={draft.ui.language} onChange={(event) => update({ ...draft, ui: { language: event.target.value as Preferences['ui']['language'] } })}><option value="en">English</option><option value="pt-BR">Português (Brasil)</option></Select></label>
+          <label className="grid gap-1"><span className="text-column uppercase tracking-wider text-kp-overlay-text">Language</span><Select value="en" onChange={() => {}}><option value="en">English</option><option value="pt-BR" disabled>Português (Brasil) (future)</option><option value="es" disabled>Español (future)</option><option value="it" disabled>Italiano (future)</option><option value="fr" disabled>Français (future)</option><option value="de" disabled>Deutsch (future)</option></Select></label>
         </CardContent></Card>
         <Card><CardContent className="grid content-start gap-2.5 p-4">
           <h2 className="m-0 text-heading text-kp-text">Logs</h2>

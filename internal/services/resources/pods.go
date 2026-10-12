@@ -294,7 +294,7 @@ func directOwner(references []metav1.OwnerReference) *OwnerDTO {
 	if selected.Kind == "" || selected.Name == "" {
 		return nil
 	}
-	return &OwnerDTO{Kind: selected.Kind, Name: selected.Name}
+	return &OwnerDTO{Kind: selected.Kind, Name: selected.Name, APIVersion: selected.APIVersion, UID: string(selected.UID)}
 }
 
 func podProblematic(value *corev1.Pod, summary PodDTO) bool {

@@ -7,7 +7,7 @@ import type { CollectionResult, HorizontalPodAutoscaler, HPAResourceTarget, Pod,
 // One shared observation per generation; a stale health badge cannot block it.
 export function useResourceMetrics(generation?: string) {
   const autoRefresh = useAutoRefreshQueryOptions()
-  return useQuery({ queryKey: ['resource-metrics', generation], queryFn: ({ signal }) => getDashboardMetrics(signal, generation), enabled: Boolean(generation), staleTime: 10_000, ...autoRefresh })
+  return useQuery({ queryKey: ['resource-metrics', generation], queryFn: ({ signal }) => getDashboardMetrics(signal, generation), enabled: Boolean(generation), staleTime: 5_000, ...autoRefresh })
 }
 
 async function boundedCatalog<T>(fetchPage: (cursor?: string) => Promise<CollectionResult<T>>) {

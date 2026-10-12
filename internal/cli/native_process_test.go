@@ -31,19 +31,24 @@ func TestNativeBinaryLifecycleBlackBox(t *testing.T) {
 	}
 	build := exec.Command("go", "build", "-trimpath", "-o", executable, "./cmd/kubePeep")
 	build.Dir = repository
-	build.Env = replaceProcessEnvironment(os.Environ(), map[string]string{"CGO_ENABLED": "0", "GOTOOLCHAIN": "go1.26.7"})
+	build.Env = replaceProcessEnvironment(os.Environ(), map[string]string{"CGO_ENABLED": "0"})
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build native binary: %v\n%s", err, output)
 	}
 
 	testHome := t.TempDir()
+	kubeconfig := filepath.Join(testHome, "empty.kubeconfig")
+	if err := os.WriteFile(kubeconfig, []byte("apiVersion: v1\nkind: Config\nclusters: []\ncontexts: []\nusers: []\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	processEnvironment := replaceProcessEnvironment(os.Environ(), map[string]string{
 		"HOME":         testHome,
 		"USERPROFILE":  testHome,
 		"LOCALAPPDATA": testHome,
+		"KUBECONFIG":   kubeconfig,
 	})
 	port := nativeAvailablePort(t)
-	start := exec.Command(executable, "start", "--no-browser", "--port", strconv.Itoa(port))
+	start := exec.Command(executable, "start", "--no-browser", "--port", strconv.Itoa(port), "--kubeconfig", kubeconfig)
 	start.Env = processEnvironment
 	stdout, err := start.StdoutPipe()
 	if err != nil {

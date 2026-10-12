@@ -65,7 +65,7 @@ function ContextResourceViews({ selection }: { selection: SelectionSummary }) {
   async function change(resource: DynamicResource, action: ViewChange['action']) {
     try {
       await save.mutateAsync({ selection, resource, action })
-      if (action === 'remove' && selected && dynamicCollection(resource) === dynamicCollection(selected)) navigate('/workloads/custom')
+      if (action === 'remove' && selected && dynamicCollection(resource) === dynamicCollection(selected)) navigate('/custom-resources')
     } catch { /* The mutation error remains visible next to the views. */ }
   }
   return <ResourcePage title="Custom resources">

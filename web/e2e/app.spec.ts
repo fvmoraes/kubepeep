@@ -15,7 +15,6 @@ const navCatalog = [
   ['/workloads/kind/statefulsets', 'StatefulSets', 'Workloads'],
   ['/workloads/kind/jobs', 'Jobs', 'Workloads'],
   ['/workloads/kind/cronjobs', 'CronJobs', 'Workloads'],
-  ['/workloads/custom', 'Custom resources', 'Custom resources'],
   ['/helm/releases/secrets', 'Releases', 'Helm Releases'],
   ['/network/services', 'Services', 'Network'],
   ['/network/endpoints', 'Endpoints', 'Network'],
@@ -31,6 +30,7 @@ const navCatalog = [
   ['/configuration/limit-ranges', 'LimitRanges', 'Configuration'],
   ['/configuration/hpas', 'HorizontalPodAutoscalers', 'Configuration'],
   ['/configuration/pdbs', 'PodDisruptionBudgets', 'Configuration'],
+  ['/custom-resources?add=1', 'Add Custom Resource', 'Custom resources'],
   ['/storage/persistent-volumes', 'PersistentVolumes', 'Storage'],
   ['/storage/persistent-volume-claims', 'PersistentVolumeClaims', 'Storage'],
   ['/storage/volume-attachments', 'VolumeAttachments', 'Storage'],
@@ -63,6 +63,9 @@ async function expandSidebarGroups(page: import('@playwright/test').Page) {
 
 test('serves the application shell and preserves History API navigation', async ({ page }) => {
   test.setTimeout(90_000)
+  await page.route('**/api/v1/resource-discovery', (route) => route.fulfill({ json: {
+    data: { resources: [], failures: [], truncated: false }, meta: { generation: 'gen_navigation' },
+  } }))
   // Navigation is exercised with a resolved scope. Resource routes must not
   // mount while the initial status/default-scope decision is still pending.
   await page.route('**/api/v1/status', async (route) => {
@@ -94,7 +97,10 @@ test('serves the application shell and preserves History API navigation', async 
   // Sidebar groups start collapsed (F6 default); expand every group so the
   // full catalog is mounted.
   await expandSidebarGroups(page)
-  const renderedDestinations = await page.getByRole('navigation', { name: 'Primary navigation' }).getByRole('link').evaluateAll((links) => links.map((link) => [new URL((link as HTMLAnchorElement).href).pathname, link.textContent?.trim() ?? '']))
+  const renderedDestinations = await page.getByRole('navigation', { name: 'Primary navigation' }).getByRole('link').evaluateAll((links) => links.map((link) => {
+    const url = new URL((link as HTMLAnchorElement).href)
+    return [url.pathname + url.search, link.textContent?.trim() ?? '']
+  }))
   expect(renderedDestinations).toEqual(navCatalog.map(([path, label]) => [path, label]))
 
   await page.keyboard.press('Control+k')
@@ -120,7 +126,11 @@ test('serves the application shell and preserves History API navigation', async 
   for (const [path, , heading] of navCatalog) {
     await expandSidebarGroups(page)
     await navigation.locator(`a[href="${path}"]`).click()
-    await expect(page).toHaveURL(path === '/' ? /\/$/ : new RegExp(`${path.replace(/\//g, '\\/')}$`))
+    await expect(page).toHaveURL((url) => url.pathname + url.search === path)
+    if (path === '/custom-resources?add=1') {
+      await expect(page.getByRole('dialog', { name: 'Add custom resource' })).toBeVisible()
+      await page.getByRole('button', { name: 'Close resource discovery' }).click()
+    }
     await expect(navigation.locator(`a[href="${path}"]`)).toHaveAttribute('aria-current', 'page')
     await expect(page.getByRole('heading', { name: heading }).first()).toBeVisible()
     await page.reload()

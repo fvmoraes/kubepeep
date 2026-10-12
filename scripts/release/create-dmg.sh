@@ -69,6 +69,12 @@ hdiutil attach -nobrowse -noautoopen -mountpoint "$mountpoint" "$work/writable.d
 mounted=true
 stage=copy
 ditto "$app" "$mountpoint/$(basename "$app")"
+stage=applications-shortcut
+# Finder follows this link when users drag the bundle onto Applications.
+# Keep it beside the app at the volume root, outside the signed bundle.
+ln -s /Applications "$mountpoint/Applications"
+test -L "$mountpoint/Applications"
+test "$(readlink "$mountpoint/Applications")" = /Applications
 stage=detach
 hdiutil detach "$mountpoint"
 mounted=false

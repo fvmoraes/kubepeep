@@ -1,3 +1,5 @@
+import { PortForwardList } from './PortForwardList'
+import { saveForwardRecipe } from '../api/portForwards'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Copy, Minus, Plus } from 'lucide-react'
@@ -548,7 +550,12 @@ export function PodActions({ detail, selection }: { detail: PodDetail; selection
         expectedGeneration: selection.generation,
       }, csrfToken, createIdempotencyKey(), signal)
     }),
-    onSuccess: (result) => {
+    onSuccess: async (result) => {
+      // Keep the actual chosen local port, including automatically assigned ports.
+      try {
+        const saved = await saveForwardRecipe({ clusterProfileId: selection.clusterProfileId, context: selection.context, namespace: detail.metadata.namespace, kind: 'Pod', name: detail.metadata.name, remotePort: result.remotePort, localPort: result.localPort }, selection.generation)
+        queryClient.setQueryData(['preferences'], saved)
+      } catch (error) { toast.error('Port-forward is active but its ports could not be saved', mutationError(error)) }
       toast.success('Port-forward active', `127.0.0.1:${result.localPort} → ${result.namespace}/${result.pod}:${result.remotePort}.`)
       void Promise.all([
         queryClient.invalidateQueries({ queryKey: ['port-forwards'] }),
@@ -666,7 +673,7 @@ export function PodActions({ detail, selection }: { detail: PodDetail; selection
         <Button variant="secondary" disabled={portForwardDecision !== 'allowed' || portForward.isPending || !remotePortValid || !localPortValid} onClick={() => portForward.mutate()}>{portForward.isPending ? 'Starting…' : 'Start port-forward'}</Button>
       </div>
       {!remotePortValid || !localPortValid ? <p className="m-0 text-content text-kp-red">Remote port must be 1–65,535; an explicit local port must be 1,024–65,535.</p> : null}
-      {portForward.data ? <p className="m-0 text-content text-kp-green" role="status">Loopback listener: <strong>{portForward.data.localAddress}:{portForward.data.localPort}</strong> → {portForward.data.namespace}/{portForward.data.pod}:{portForward.data.remotePort}.</p> : null}
+      <PortForwardList selection={selection} target={{ kind: 'Pod', namespace: detail.metadata.namespace, name: detail.metadata.name }} />
       <div className="flex flex-wrap items-end gap-2 border-t border-kp-overlay-0 pt-2.5">
         <label className="grid gap-1 w-36"><span className="text-column uppercase tracking-wider text-kp-overlay-text">Container</span><Select value={container} onChange={(event) => setContainer(event.target.value)}>{detail.containers.map((value) => <option key={value.spec.name}>{value.spec.name}</option>)}</Select></label>
         <label className="grid flex-1 gap-1 min-w-[220px]"><span className="text-column uppercase tracking-wider text-kp-overlay-text">Command argv (one item per line)</span><textarea className="min-h-[76px] w-full rounded-md border border-kp-overlay-0 bg-kp-crust px-2.5 py-1.5 text-content text-kp-text focus:border-kp-mauve focus:shadow-focus focus:outline-none resize-y leading-relaxed" value={command} onChange={(event) => setCommand(event.target.value)} /></label>

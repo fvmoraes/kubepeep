@@ -166,3 +166,12 @@ describe('allowlisted settings', () => {
     expect(reset).toBeDisabled()
   })
 })
+
+
+it('keeps English active and shows future languages without enabling them', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => json({ ...preferences(), ui: { language: 'pt-BR' } })))
+  render(<QueryClientProvider client={queryClient()}><SettingsPage /></QueryClientProvider>)
+  expect(await screen.findByRole('combobox', { name: 'Language' })).toHaveValue('en')
+  expect(screen.getByRole('option', { name: 'English' })).toBeEnabled()
+  for (const language of ['Português (Brasil)', 'Español', 'Italiano', 'Français', 'Deutsch']) expect(screen.getByRole('option', { name: `${language} (future)` })).toBeDisabled()
+})

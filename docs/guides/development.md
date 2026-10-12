@@ -121,21 +121,23 @@ O [empacotador DMG](../../scripts/release/create-dmg.sh) cria uma imagem HFS+
 gravável com capacidade explícita: duas vezes o tamanho contabilizado do bundle
 mais 64 MiB, com mínimo de 128 MiB. A contagem considera bytes lógicos e
 alocados, inclusive arquivos esparsos, e margem por entrada do filesystem.
-Depois de copiar o `.app`, desmonta, converte para UDZO e verifica a imagem.
+Depois de copiar o `.app`, cria ao lado o atalho `Applications` apontando para
+`/Applications`, desmonta, converte para UDZO e verifica a imagem.
 O log informa capacidade, espaço livre e etapa em caso de falha; uma falta de
 espaço no host interrompe o processo antes da criação. Temporários são removidos
 após desmontar o volume e um artefato existente só é substituído após validação.
 Os testes portáveis cobrem capacidade e falhas; o check nativo macOS executa
 [um teste real](../../test/release/dmg.sh) de criação/montagem com um bundle
-esparso de 80 MiB, comparando conteúdo, permissão de execução e links simbólicos.
+esparso de 80 MiB, comparando conteúdo, permissão de execução, links internos
+e o destino do atalho Applications na imagem final.
 
-Para reproduzir uma versão escolhida: `make build build-desktop VERSION=0.11.0-dev`.
+Para reproduzir uma versão escolhida: `make build build-desktop VERSION=0.12.0-dev`.
 CLI e desktop recebem os mesmos ldflags de versão, commit e data. Builds de
 desenvolvimento devem informar `VERSION` explicitamente; o exemplo não publica
 uma release. Evidências de versões anteriores estão no
 [arquivo](../archive/README.md) e não substituem os gates da árvore atual.
 
-### Validação da experiência 0.11
+### Validação da experiência 0.12
 
 A base de build atual usa Go 1.26.9, módulos Kubernetes alinhados em 0.36.5
 e Helm 3.21.4. A matriz da Fase 1 em `docs/research` é histórica e não valida
@@ -153,6 +155,56 @@ refresh e tamanhos de janela. Os cenários `phase02-real`/`phase03-real` são
 opt-in e dependem de origem/cluster preparados; skips devem ser informados,
 nunca apresentados como validação em cluster real. Testes Windows/macOS e
 restricted Kind permanecem gates separados na CI.
+
+### Matriz de cobertura da interface
+
+Os testes abaixo exercitam comportamento visível e limites de autorização; a
+existência de um teste não garante todas as combinações de dados, permissões ou
+plataformas. As fixtures do navegador não substituem Kubernetes nem WebKit nativo.
+
+| Superfície/opções | Cobertura automatizada |
+| --- | --- |
+| Catálogo completo do menu, reload e atalhos | `web/e2e/app.spec.ts`, `phase07.spec.ts` em oito tamanhos de janela e `Sidebar.test.tsx` |
+| Inventários, detalhes e conteúdo das famílias | `resource-workspace.spec.ts`, `features.spec.ts`, `ResourcePages.test.tsx`, `AccessPages.test.tsx` |
+| Tabelas: rolagem, paginação, retenção, filtros e identidade após refresh | `phase03.spec.ts`, `ui/DataTable.test.tsx` |
+| Abas comuns, específicas e ordem alfabética | `ResourcePages.test.tsx`, `workspace/ResourceWorkspace.test.tsx`; conteúdo de Metrics, Investigation, Events, Containers, Rollout, relações, Rules e Backends em `detail-tabs.spec.ts` |
+| YAML: autorização, identidade, conflitos, cores, undo e documento extenso | `workspace/ResourceYamlEditor.test.tsx`, `resource-workspace.spec.ts`, `helm.spec.ts` |
+| Logs: follow, filtros, agregação, download, pausa e cancelamento | `LogsPage.test.tsx`, `workspace/PodLogsPanel.test.tsx`, `workspace/WorkloadLogsPanel.test.tsx`, `resource-workspace.spec.ts` |
+| Ações: permissões, seleção, reinício, exclusão e port-forward | `ResourceActions.test.tsx`, `ResourcePages.test.tsx`, `resource-workspace.spec.ts`, `helm.spec.ts` e testes Go de actions |
+| Pods: última execução por CronJob, histórico, RBAC e cache | `resources_job_runs_test.go`, `pods_test.go`, `resource-workspace.spec.ts` |
+| Port-forward: substituir, abrir, parar, excluir e reativar | `PortForwardList.test.tsx`, `resource-workspace.spec.ts`, `portforward_replacement_test.go`; reabertura SQLite e migration 0005 em `preferences_test.go` |
+| Escopos: criar/editar, reset, defaults, seleção, retry e cancelamento | `NamespaceScopeEditor.test.tsx`, `NamespaceScopeSelector.test.tsx`, `features.spec.ts`, `phase07.spec.ts`, `resource-workspace.spec.ts` |
+| Contexto/cor: persistência, isolamento, respostas atrasadas e latência | `ContextSelector.test.tsx`, `api/selection.test.ts`, `resource-workspace.spec.ts` |
+| Custom Resources: descoberta, salvar, reordenar, remover e links antigos | `dynamic-resources.spec.ts` e testes Go de recursos dinâmicos/preferências |
+| Settings, idioma e preferências | `SettingsPage.test.tsx`, `SavedFilterControls.test.tsx`, `resource/columns.test.tsx` e testes Go de preferences |
+| Events: referências, reconhecimento, seleção e novas ocorrências | `ResourcePages.test.tsx`, `navigation/events.test.ts`, `resource-workspace.spec.ts`, `internal/services/resources/events_test.go` |
+| Aviso de release: versões, cache, falha, tempo e download | `internal/releases/checker_test.go`, `internal/api/handlers/releases_test.go`, `ReleaseNotice.test.tsx`, `resource-workspace.spec.ts` |
+| DMG: capacidade, falhas e atalho Applications | `test/release/test_dmg.py`; montagem do arquivo final em macOS por `test/release/dmg.sh` |
+
+Os testes `.test.tsx` estão em `web/src/components/`, salvo prefixos `api/` e
+`navigation/` relativos a `web/src/`. Os arquivos `.spec.ts` estão em `web/e2e/`.
+
+Para medir sem disputar CPU com outras suítes, execute com um worker:
+
+```sh
+cd web
+npm run test:e2e -- e2e/phase03.spec.ts e2e/resource-workspace.spec.ts --workers=1 --grep '12k synthetic|context switching latency'
+```
+
+Esse ensaio registra linhas no DOM, tempo até a primeira linha, fluidez de
+rolagem e latência de contexto com/sem cor. As respostas são simuladas; não
+representam latência de um cluster real. Os probes reais exigem kubeconfig
+dedicado e datasets isolados conforme [o harness Kind](../../test/kind/README.md).
+
+Na medição local de 12/10/2026 (Chromium, bundle de produção, um worker),
+reutilizar as opções dos filtros e estabilizar as chaves do virtualizador
+elevou a rolagem do cenário sintético de 12 mil Pods de 35,6 para 58,0 FPS.
+O percentil 95 do intervalo entre quadros caiu de 50 para 16,8 ms, com apenas
+18 linhas montadas ao final da amostra. A troca de contexto levou 202–320 ms,
+com resultados equivalentes com/sem cor e nenhuma consulta extra de
+preferências. Esses números são evidência local, não um limite garantido para
+outros equipamentos ou clusters; o teste de 12 mil itens em uma resposta
+excede deliberadamente o limite real de 100 itens por página.
 
 ## O que versionar
 
@@ -192,3 +244,29 @@ Antes de um commit e de um push autorizado, executar
 aprovada em [segurança](../reference/security.md#11-repositório-e-cadeia-de-desenvolvimento).
 Não usar `--no-verify` para contornar falhas. Conferir também que os arquivos
 locais continuam ignorados e que não há referências aos caminhos removidos.
+
+### Evidência local da revisão 0.12 (12/10/2026)
+
+- Go: 1.798 testes aprovados em 42 pacotes com `-race`; `go vet` sem problemas.
+- Frontend: 325 testes Vitest aprovados; build e typecheck aprovados. ESLint sem
+  erros, com dez avisos existentes de organização para Fast Refresh.
+- Navegador: 150 cenários sintéticos aprovados, incluindo os 48 destinos do menu
+  em oito tamanhos de janela. O teste de ordem de colunas foi atualizado para
+  comparar posições relativas após a ordenação alfabética e reexecutado com
+  sucesso; quatro cenários opt-in de cluster real permaneceram desativados.
+- Execução isolada, um worker: tabela com 12 mil Pods manteve 16 linhas no DOM,
+  60,0 FPS e p95 de 16,8 ms por frame. Com outros testes/processos simultâneos,
+  a medição caiu para 21,8 FPS; os números isolados não são garantia de hardware.
+- Contexto com cor: 203/307/301 ms; sem cor: 214/306/318 ms. Ambos fizeram zero
+  leituras adicionais de preferências durante a troca nas fixtures do navegador.
+- Agrupamento local de 10 mil Jobs: mediana 5,50 ms e 1,84 MiB por operação em
+  Linux/amd64, Intel i7-1255U. O benchmark exclui rede, JSON e consulta Kubernetes.
+- SQLite: migração 4→5, preservar preferências, salvar/remover portas e reabrir o
+  banco passaram. Port-forward cobre substituição concorrente, mesma porta,
+  limite global, autorização, cancelamento e fechamento no shutdown.
+- Binário CLI 0.12.0: build e smoke isolado de start/status/HTTP/stop aprovados;
+  instalador Unix, gates de release, empacotamento DMG portável e docs-check passaram.
+
+Este host Linux não executou Finder/WebKit nativo macOS nem o instalador Windows.
+O daemon Docker não estava disponível para os cenários de cluster real; esses
+checks continuam separados na CI. Nenhum cluster pessoal foi usado na revisão.

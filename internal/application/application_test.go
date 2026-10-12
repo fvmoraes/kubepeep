@@ -30,10 +30,12 @@ func composeOptions(t *testing.T) Options {
 		t.Fatal(err)
 	}
 	return Options{
-		Layout:    layout,
-		Config:    productconfig.Default(),
-		Port:      2757,
-		LogOutput: &bytes.Buffer{},
+		Layout:        layout,
+		Config:        productconfig.Default(),
+		Port:          2757,
+		LogOutput:     &bytes.Buffer{},
+		Kubeconfig:    filepath.Join(t.TempDir(), "missing.kubeconfig"),
+		KubeconfigSet: true,
 	}
 }
 
@@ -101,8 +103,8 @@ func TestComposeBuildsServingPlatformAndCleanup(t *testing.T) {
 	if err := json.Unmarshal(recorder.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("health payload: %v", err)
 	}
-	// The overall status legitimately degrades without an ambient kubeconfig
-	// (cluster check), so assert on the local components Compose owns.
+	// The fixture deliberately has no kubeconfig. Assert on the local
+	// components Compose owns without consulting the developer's cluster.
 	if payload.Data.Components["application"].Status != "healthy" {
 		t.Fatalf("application component = %q", payload.Data.Components["application"].Status)
 	}

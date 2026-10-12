@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -183,7 +184,7 @@ func TestContextPreferenceMigrationPreservesCompleteLegacySnapshot(t *testing.T)
 	}
 	legacy := []resources.PreferenceRecord{}
 	for _, record := range validPreferenceRecords() {
-		if record.Key == "ui.context_colors" || record.Key == "columns.order" || record.Key == "custom_views" {
+		if record.Key == "ui.context_colors" || record.Key == "columns.order" || record.Key == "custom_views" || record.Key == "port_forwards" {
 			continue
 		}
 		if record.Key == "ui.language" {
@@ -218,6 +219,155 @@ func TestContextPreferenceMigrationPreservesCompleteLegacySnapshot(t *testing.T)
 	}
 }
 
+func TestSavedPortForwardPreferencesSurviveReopenUpdateAndRemoval(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "port-forwards.db")
+	store, err := Open(t.Context(), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	service := &resources.PreferenceService{Repository: NewPreferenceRepository(store), Detector: resources.DefaultSensitiveDetector{}}
+	value := resources.DefaultPreferences()
+	value.Logs.Wrap = true
+	value.UI.ContextColors = []resources.ContextColor{{ClusterProfileID: 7, Context: "production", Color: "#f87171"}}
+	value.PortForwards = []resources.SavedPortForward{
+		{ClusterProfileID: 7, Context: "production", Namespace: "payments", Kind: "Pod", Name: "api", RemotePort: 8080, LocalPort: 18080},
+		{ClusterProfileID: 7, Context: "production", Namespace: "payments", Kind: "Service", Name: "api", RemotePort: 80, LocalPort: 18081},
+		{ClusterProfileID: 8, Context: "production", Namespace: "payments", Kind: "Pod", Name: "api", RemotePort: 9090, LocalPort: 19090},
+		{ClusterProfileID: 7, Context: "staging", Namespace: "payments", Kind: "Pod", Name: "api", RemotePort: 9091, LocalPort: 19091},
+	}
+	if _, err := service.Put(t.Context(), value); err != nil {
+		t.Fatalf("save recipes: %v", err)
+	}
+	// The recipe is replaced when the user changes the selected ports;
+	// previous ports must not return on the next application launch.
+	value.PortForwards[0].LocalPort = 28080
+	value.PortForwards[0].RemotePort = 8081
+	if _, err := service.Put(t.Context(), value); err != nil {
+		t.Fatalf("update remembered ports: %v", err)
+	}
+	reopen := func() resources.PreferencesDTO {
+		t.Helper()
+		if err := store.Close(); err != nil {
+			t.Fatal(err)
+		}
+		store, err = Open(t.Context(), path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		service = &resources.PreferenceService{Repository: NewPreferenceRepository(store), Detector: resources.DefaultSensitiveDetector{}}
+		loaded, err := service.Get(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return loaded
+	}
+	if loaded := reopen(); !reflect.DeepEqual(loaded, value) {
+		t.Fatalf("recipes or unrelated preferences changed after reopen: %#v", loaded)
+	}
+	var encoded []byte
+	if err := store.SQLDB().QueryRowContext(t.Context(), `SELECT value_json FROM preferences WHERE key = 'port_forwards'`).Scan(&encoded); err != nil {
+		t.Fatal(err)
+	}
+	var stored []map[string]json.RawMessage
+	if err := json.Unmarshal(encoded, &stored); err != nil {
+		t.Fatal(err)
+	}
+	for _, recipe := range stored {
+		if len(recipe) != 7 {
+			t.Fatalf("persisted recipe contains non-metadata fields: %s", encoded)
+		}
+		for _, key := range []string{"clusterProfileId", "context", "namespace", "kind", "name", "remotePort", "localPort"} {
+			if _, ok := recipe[key]; !ok {
+				t.Fatalf("persisted recipe is missing %s", key)
+			}
+		}
+	}
+	value.PortForwards = value.PortForwards[1:]
+	if _, err := service.Put(t.Context(), value); err != nil {
+		t.Fatalf("delete one saved recipe: %v", err)
+	}
+	if loaded := reopen(); !reflect.DeepEqual(loaded, value) {
+		t.Fatalf("deleted recipe reappeared or another target changed: %#v", loaded)
+	}
+	value.PortForwards = nil
+	if _, err := service.Put(t.Context(), value); err != nil {
+		t.Fatal(err)
+	}
+	if loaded := reopen(); !reflect.DeepEqual(loaded, value) {
+		t.Fatalf("cleared recipes reappeared or unrelated preferences changed: %#v", loaded)
+	}
+}
+
+func TestSavedPortForwardMigrationPreservesExistingPreferences(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "legacy-v4.db")
+	database, err := sql.Open("sqlite", dataSourceName(path, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	database.SetMaxOpenConns(MaxOpenConnections)
+	database.SetMaxIdleConns(MaxIdleConnections)
+	store := &Store{db: database, path: path}
+	t.Cleanup(func() { _ = store.Close() })
+	if _, err := database.ExecContext(t.Context(), "PRAGMA journal_mode = WAL"); err != nil {
+		t.Fatal(err)
+	}
+	set, err := migrations.Embedded()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ApplyMigrations(t.Context(), set[:4]); err != nil {
+		t.Fatal(err)
+	}
+	var legacy []resources.PreferenceRecord
+	for _, record := range validPreferenceRecords() {
+		if record.Key == "port_forwards" {
+			continue
+		}
+		if record.Key == "ui.context_colors" {
+			record.ValueJSON = []byte(`[{"clusterProfileId":7,"context":"production","color":"#f87171"}]`)
+		}
+		if record.Key == "logs.wrap" {
+			record.ValueJSON = []byte(`true`)
+		}
+		legacy = append(legacy, record)
+		if _, err := database.ExecContext(t.Context(), `INSERT INTO preferences(key, value_json, schema_version, updated_at) VALUES (?, ?, ?, 1234)`, record.Key, string(record.ValueJSON), record.SchemaVersion); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	// Normal startup applies the new migration automatically to an existing database.
+	store, err = Open(t.Context(), path)
+	if err != nil {
+		t.Fatalf("automatic schema upgrade: %v", err)
+	}
+	loadedRecords, err := NewPreferenceRepository(store).Load(t.Context())
+	if err != nil || !reflect.DeepEqual(loadedRecords, legacy) {
+		t.Fatalf("migration changed existing preference rows: %#v / %v", loadedRecords, err)
+	}
+	var changedTimestamps int
+	if err := store.SQLDB().QueryRowContext(t.Context(), `SELECT count(*) FROM preferences WHERE updated_at <> 1234`).Scan(&changedTimestamps); err != nil || changedTimestamps != 0 {
+		t.Fatalf("migration changed existing timestamps: %d / %v", changedTimestamps, err)
+	}
+	service := &resources.PreferenceService{Repository: NewPreferenceRepository(store), Detector: resources.DefaultSensitiveDetector{}}
+	value, err := service.Get(t.Context())
+	if err != nil || len(value.PortForwards) != 0 || !value.Logs.Wrap || len(value.UI.ContextColors) != 1 {
+		t.Fatalf("legacy preferences were not preserved with empty recipes: %#v / %v", value, err)
+	}
+	value.PortForwards = []resources.SavedPortForward{{ClusterProfileID: 7, Context: "production", Namespace: "payments", Kind: "Service", Name: "api", RemotePort: 80, LocalPort: 18080}}
+	if _, err := service.Put(t.Context(), value); err != nil {
+		t.Fatalf("new recipe rejected after migration: %v", err)
+	}
+	loaded, err := service.Get(t.Context())
+	if err != nil || !reflect.DeepEqual(loaded, value) {
+		t.Fatalf("upgraded preferences could not roundtrip: %#v / %v", loaded, err)
+	}
+}
+
 func validPreferenceRecords() []resources.PreferenceRecord {
 	return []resources.PreferenceRecord{
 		{Key: "columns.hidden", ValueJSON: []byte(`{}`), SchemaVersion: 1},
@@ -234,6 +384,7 @@ func validPreferenceRecords() []resources.PreferenceRecord {
 		{Key: "logs.tail_lines", ValueJSON: []byte(`200`), SchemaVersion: 1},
 		{Key: "logs.timestamps", ValueJSON: []byte(`true`), SchemaVersion: 1},
 		{Key: "logs.wrap", ValueJSON: []byte(`false`), SchemaVersion: 1},
+		{Key: "port_forwards", ValueJSON: []byte(`[]`), SchemaVersion: 1},
 		{Key: "recent", ValueJSON: []byte(`{"version":1,"items":[]}`), SchemaVersion: 1},
 		{Key: "shell.collapsed_groups", ValueJSON: []byte(`[]`), SchemaVersion: 1},
 		{Key: "shell.sidebar_compact", ValueJSON: []byte(`false`), SchemaVersion: 1},

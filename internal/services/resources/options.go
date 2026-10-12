@@ -33,6 +33,7 @@ type ListOptions struct {
 	Node          string
 	Restarts      RestartFilter
 	Problematic   *bool
+	LatestJobRuns bool
 	ObjectKind    string
 	Reason        string
 	AddressType   string
@@ -144,7 +145,7 @@ func NormalizeListOptions(collection Collection, options ListOptions) (ListOptio
 	if options.Order != OrderAscending && options.Order != OrderDescending {
 		return ListOptions{}, validationError("order must be asc or desc")
 	}
-	if collection != CollectionPods && (options.Workload != "" || options.Node != "" || options.Restarts != "" || options.Problematic != nil) {
+	if collection != CollectionPods && (options.Workload != "" || options.Node != "" || options.Restarts != "" || options.Problematic != nil || options.LatestJobRuns) {
 		return ListOptions{}, validationError("pod filters are not supported by this collection")
 	}
 	if options.Restarts != "" && options.Restarts != RestartAny && options.Restarts != RestartGT0 && options.Restarts != RestartGTE3 && options.Restarts != RestartGTE10 {

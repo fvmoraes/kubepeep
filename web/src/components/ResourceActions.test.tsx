@@ -170,17 +170,21 @@ describe('generation-bound authorized actions', () => {
     }
     vi.stubGlobal('WebSocket', MockWebSocket)
     let currentGeneration = 'gen_42'
+    let forward: unknown = null
+    let preferences = { portForwards: [] }
     let portForwardInit: RequestInit | undefined
     let execInit: RequestInit | undefined
     vi.stubGlobal('fetch', vi.fn((input: string | URL | Request, init?: RequestInit) => {
       const path = String(input)
+      if (path === '/api/v1/port-forwards') return Promise.resolve(json(forward ? [forward] : []))
+      if (path === '/api/v1/preferences') { if (init?.method === 'PUT') preferences = JSON.parse(String(init.body)); return Promise.resolve(json(preferences)) }
       if (path.startsWith('/api/v1/permissions?')) return Promise.resolve(json({ generation: currentGeneration, complete: true, truncated: false, errors: [], decisions: [
         { capabilityId: 'pods.delete', decision: 'allowed' }, { capabilityId: 'pods.exec.create', decision: 'allowed' }, { capabilityId: 'pods.portforward.create', decision: 'allowed' },
       ] }))
       if (path === '/api/v1/session') return Promise.resolve(json({ csrfToken: 'csrf-pod', origin: 'http://127.0.0.1:2748', generation: currentGeneration, expiresAt: '2026-08-17T18:00:00Z' }))
       if (path === '/api/v1/pods/payments/api-abc/port-forward') {
         portForwardInit = init
-        return Promise.resolve(json({ id: 'pf_1', clusterProfileId: 1, context: 'development', generation: currentGeneration, namespace: 'payments', pod: 'api-abc', remotePort: 8080, localAddress: '127.0.0.1', localPort: 49152, status: 'active', createdAt: '2026-08-17T10:00:00Z', expiresAt: '2026-08-17T18:00:00Z', endedAt: null, endReason: null }))
+        forward = { id: 'pf_1', clusterProfileId: 1, context: 'development', generation: currentGeneration, namespace: 'payments', pod: 'api-abc', remotePort: 8080, localAddress: '127.0.0.1', localPort: 49152, status: 'active', createdAt: '2026-08-17T10:00:00Z', expiresAt: '2026-08-17T18:00:00Z', endedAt: null, endReason: null }; return Promise.resolve(json(forward))
       }
       if (path === '/api/v1/pods/payments/api-abc/exec') {
         execInit = init

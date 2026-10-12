@@ -37,14 +37,24 @@ continua sujeito ao RBAC de cada recurso e namespace, conforme o
 | Seleção | Profiles de kubeconfig, contexto ativo e escopos `single`, `list` e `all`; importação validada e scope default obrigatório por contexto |
 | Leitura | Paginação estratégica, cursor opaco, cancelamento, cache e watches sob demanda com limites de memória e autorização |
 | Overview | Blocos independentes de saúde, problemas, restarts, workloads, eventos, scan limitado de logs e métricas opcionais |
-| Workloads | Deployments, ReplicaSets, StatefulSets, DaemonSets, Jobs, CronJobs e Pods; visões dinâmicas de recursos nativos e CRDs fixadas por contexto |
+| Workloads | Deployments, ReplicaSets, StatefulSets, DaemonSets, Jobs, CronJobs e Pods |
+| Custom Resources | Menu próprio entre Configuration e Storage; Add Custom Resource no topo e visões dinâmicas de recursos nativos e CRDs fixadas por contexto |
 | Network | Services, Ingresses, Endpoints, EndpointSlices, IngressClasses, NetworkPolicies, Gateway API e sessões de port-forward |
 | Helm | Releases em Secrets/ConfigMaps, histórico, relações, valores/manifesto explícitos, upgrade de valores e rollback |
 | Configuration | ConfigMaps com Data, metadados de Secrets e revelação explícita de Data autorizada; referências de Secret/ConfigMap e env nos detalhes de workloads |
 | Operação | Events, logs atuais/anteriores/follow, editor YAML nativo autorizado, ações por kind, seleção em massa e exclusão em massa somente de Pods, exec e port-forward |
 | Investigação | Problems Engine, relações locais, logs agregados por workload, busca local e diagnósticos de performance/cluster/namespace |
-| Interface | Menus sincronizados, busca local/global, colunas iniciais compactas e personalização persistente, Auto fixo em 10 s, cinco inventários recentes em memória, tabelas virtualizadas e detalhes sobrepostos em 70% da altura da janela |
+| Interface | Menus sincronizados, busca local/global, colunas iniciais compactas e personalização persistente, Auto fixo em 5 s, cinco inventários recentes em memória, tabelas virtualizadas e detalhes sobrepostos em 70% da altura da janela |
 | Uso de recursos | Barras de CPU/memória com valor atual/configurado e percentual; alvo de HPA quando disponível, fallback de 80% e indisponibilidade explícita sem Metrics API |
+| Eventos | Links para os objetos envolvidos e reconhecimento individual/em lote por sessão; novas ocorrências reaparecem |
+| Atualizações | Consulta de release estável do GitHub a cada duas horas, aviso no rodapé e link para download no site |
+
+As abas de detalhe aplicáveis seguem **Overview → Logs → YAML → Metrics →
+Containers → Events → Data / Env**, depois as específicas em ordem alfabética,
+com **Actions** por último. O editor mantém cores de sintaxe durante a edição.
+Inglês é o único idioma ativo; as demais opções previstas aparecem como
+**(future)**. O cabeçalho permite trocar escopos do contexto ativo e escolher
+Blue, Yellow, Red, Green ou uma cor personalizada para as divisórias.
 
 O código de referência é a árvore de navegação em
 [`web/src/navigation/tree.tsx`](../../web/src/navigation/tree.tsx), com rotas em

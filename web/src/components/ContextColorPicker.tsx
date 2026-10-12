@@ -10,9 +10,10 @@ export function contextColor(preferences: Preferences | undefined, selection: Se
 }
 
 const presets = [
-  { label: 'Development — blue', color: '#38bdf8' },
-  { label: 'Staging — yellow', color: '#facc15' },
-  { label: 'Production — red', color: '#f87171' },
+  { label: 'Blue', color: '#38bdf8' },
+  { label: 'Yellow', color: '#facc15' },
+  { label: 'Red', color: '#f87171' },
+  { label: 'Green', color: '#4ade80' },
 ]
 
 export function ContextColorPicker({ selection }: { selection: SelectionSummary | null }) {

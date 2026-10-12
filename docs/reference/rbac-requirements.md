@@ -110,7 +110,7 @@ para requisições canceladas. Uma revisão `unknown` pode ser resolvida por uma
 leitura real limitada do mesmo recurso e escopo; isso não autoriza mutações.
 Uma decisão negada explicitamente não recebe esse fallback. Falhas transitórias
 têm tentativas limitadas com backoff, e listas/dashboard voltam a consultar a
-cada 10 s enquanto Auto estiver ligado. Autenticação expirada pode recuperar
+cada 5 s enquanto Auto estiver ligado. Autenticação expirada pode recuperar
 a identidade e tentar novamente; negação 403 e mudança de geração interrompem
 a consulta antiga. Dados sem leitura autorizada confirmada permanecem ocultos.
 Mensagens distinguem autenticação/plugin, DNS, TLS, conexão, timeout e

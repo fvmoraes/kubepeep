@@ -933,6 +933,7 @@ func decodeResourceListQuery(r *http.Request, collection resourcecore.Collection
 		allowed["node"] = true
 		allowed["restarts"] = true
 		allowed["problematic"] = true
+		allowed["latestJobRuns"] = true
 	case resourcecore.CollectionEvents:
 		allowed["objectKind"] = true
 		allowed["reason"] = true
@@ -983,6 +984,12 @@ func decodeResourceListQuery(r *http.Request, collection resourcecore.Collection
 			return resourcecore.ListOptions{}, validationHTTPError("problematic must be true or false.", nil)
 		}
 		options.Problematic = &parsed
+	}
+	if raw := first(values, "latestJobRuns"); raw != "" {
+		if raw != "true" && raw != "false" {
+			return resourcecore.ListOptions{}, validationHTTPError("latestJobRuns must be true or false.", nil)
+		}
+		options.LatestJobRuns = raw == "true"
 	}
 	normalized, normalizeErr := resourcecore.NormalizeListOptions(collection, options)
 	if normalizeErr != nil {

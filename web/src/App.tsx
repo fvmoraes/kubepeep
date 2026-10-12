@@ -1,10 +1,10 @@
+import { ReleaseNotice } from './components/ReleaseNotice'
 import { ResourceListFocus } from './components/resource/ResourceListFocus'
 import { WarmInventoryCache } from './components/resource/WarmInventoryCache'
 import { AutoRefreshProvider, AutoRefreshToggle } from './components/resource/AutoRefreshProvider'
 import { ResourceFamilyNav } from './components/resource/ResourceFamilyNav'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
-import { Waypoints } from 'lucide-react'
 import { Outlet, Route, Routes, useLocation, useNavigate } from 'react-router'
 
 import { recordPath, recentTargets } from './recent/recent'
@@ -18,6 +18,7 @@ import type { CSSProperties } from 'react'
 import { ContextSelector } from './components/ContextSelector'
 import { DefaultScopeGate } from './components/DefaultScopeGate'
 import { GlobalNamespaceSelect } from './components/GlobalNamespaceSelect'
+import { NamespaceScopeSelector } from './components/NamespaceScopeSelector'
 import { Sidebar } from './components/Sidebar'
 import { MobileNavigation } from './components/MobileNavigation'
 import { LoadingState } from './components/ui/LoadingState'
@@ -30,6 +31,7 @@ import { ToastProvider } from './components/ui/Toast'
 import { useAppVersion } from './hooks/useAppVersion'
 import { navGroups, settingsNavItem } from './navigation/tree'
 import { resourceDetailPath } from './navigation/paths'
+import { customViewNavItems } from './navigation/customViews'
 import { desktopPlatform } from './api/desktop'
 import { recordShellReady } from './observability/uxMetrics'
 
@@ -187,18 +189,6 @@ function isSafeGlobalRefreshQuery(query: { queryKey: readonly unknown[] }) {
   return typeof root === 'string' && safeGlobalRefreshRoots.has(root)
 }
 
-function scopeLabel(selection: {
-  context: string
-  cluster: string
-  scopeName: string | null
-  scopeMode: string | null
-} | null): string {
-  if (!selection) return 'No Kubernetes context selected'
-  if (selection.scopeName) return `${selection.context} / ${selection.scopeName}`
-  if (selection.scopeMode === 'all') return `${selection.context} / All namespaces`
-  return `${selection.context} / No namespace scope selected`
-}
-
 function StatusBadge() {
   const status = useQuery({
     queryKey: ['local-status'],
@@ -283,6 +273,7 @@ function Shell() {
     staleTime: 60_000,
   })
   const preferencesData = preferences.data
+  const customViews = customViewNavItems(preferencesData, selection)
   const [, setHydrationError] = useState(false)
   const workspace = useResourceWorkspace()
   const inspectedPath = workspace.open && workspace.active ? resourceDetailPath(workspace.active) : null
@@ -379,22 +370,14 @@ function Shell() {
   return (
     <div className={`app-shell ${compact ? 'app-shell--compact' : ''}`} data-context-color={contextColor(preferencesData, selection)} style={{ '--context-color': contextColor(preferencesData, selection) } as CSSProperties}>
       <a className="skip-link" href="#main-content">Skip to main content</a>
-      {!mobile ? <Sidebar version={version} compact={compact} onToggleCompact={toggleCompact} collapsedGroups={collapsedGroups} onToggleGroup={toggleGroup} /> : null}
+      {!mobile ? <Sidebar version={version} compact={compact} onToggleCompact={toggleCompact} collapsedGroups={collapsedGroups} onToggleGroup={toggleGroup} customViews={customViews} /> : null}
       <div className="workspace">
         <header className="topbar">
-          {mobile ? <div className="mobile-navigation-trigger"><MobileNavigation version={version} compact={false} onToggleCompact={toggleCompact} collapsedGroups={collapsedGroups} onToggleGroup={toggleGroup} /></div> : null}
+          {mobile ? <div className="mobile-navigation-trigger"><MobileNavigation version={version} compact={false} onToggleCompact={toggleCompact} collapsedGroups={collapsedGroups} onToggleGroup={toggleGroup} customViews={customViews} /></div> : null}
           <div className="topbar-controls topbar-selection">
             <ContextSelector selection={selection} />
             <GlobalNamespaceSelect />
-            <button
-              type="button"
-              onClick={() => navigate('/namespaces')}
-              title={selection ? `${selection.cluster} · ${selection.namespaceCount} namespace${selection.namespaceCount === 1 ? '' : 's'} in scope` : 'Select a namespace scope to browse resources'}
-              className="control flex min-w-0 max-w-[15rem] items-center gap-1.5 border border-kp-overlay-0 bg-kp-surface-0 px-2 text-menu text-kp-subtext hover:border-kp-accent-border hover:text-kp-text"
-            >
-              <Waypoints size={14} strokeWidth={1.8} className="shrink-0 text-kp-mauve" aria-hidden="true" />
-              <span className="truncate">{scopeLabel(selection)}</span>
-            </button>
+            <NamespaceScopeSelector key={selection?.generation} selection={selection} />
           </div>
             <div className="topbar-controls topbar-actions">
               <AutoRefreshToggle />
@@ -414,6 +397,7 @@ function Shell() {
                 } } : null}><Outlet key={`${location.pathname}|${new URLSearchParams(location.search).get('focus') ?? ''}`} /></ResourceListFocus.Provider></Suspense>}
             </DefaultScopeGate>
           </ResourceSplitView>
+          <ReleaseNotice />
         </main>
       </div>
     </div>
@@ -479,6 +463,9 @@ function WorkspaceRoutes() {
           <Route path="workloads" element={<WorkloadsPage />} />
           <Route path="workloads/kind/:kind" element={<WorkloadsPage />} />
           <Route path="workloads/custom" element={<DynamicResourcePage />} />
+          <Route path="custom-resources" element={<DynamicResourcePage />} />
+          <Route path="custom-resources/:group/:version/:resource/:scope" element={<DynamicResourcePage />} />
+          <Route path="custom-resources/:group/:version/:resource/:scope/:namespace/:name" element={<DynamicResourcePage />} />
           <Route path="workloads/custom/:group/:version/:resource/:scope" element={<DynamicResourcePage />} />
           <Route path="workloads/custom/:group/:version/:resource/:scope/:namespace/:name" element={<DynamicResourcePage />} />
           <Route path="workloads/:kind/:namespace/:name" element={<WorkloadsPage />} />

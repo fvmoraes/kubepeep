@@ -17,16 +17,17 @@ const maximumPreferenceJSONBytes = 64 << 10
 var dashboardSectionIDs = []string{"summary", "problems", "restarts", "workloads", "events", "logScan", "metrics"}
 
 type PreferencesDTO struct {
-	Version     int                  `json:"version"`
-	UI          UIPreferences        `json:"ui"`
-	Logs        LogPreferences       `json:"logs"`
-	Dashboard   DashboardPreferences `json:"dashboard"`
-	Filters     FilterPreferences    `json:"filters"`
-	Favorites   FavoriteSet          `json:"favorites"`
-	Shell       ShellPreferences     `json:"shell"`
-	Columns     ColumnPreferences    `json:"columns"`
-	Recent      RecentSet            `json:"recent"`
-	CustomViews []CustomViewContext  `json:"customViews,omitempty"`
+	PortForwards []SavedPortForward   `json:"portForwards,omitempty"`
+	Version      int                  `json:"version"`
+	UI           UIPreferences        `json:"ui"`
+	Logs         LogPreferences       `json:"logs"`
+	Dashboard    DashboardPreferences `json:"dashboard"`
+	Filters      FilterPreferences    `json:"filters"`
+	Favorites    FavoriteSet          `json:"favorites"`
+	Shell        ShellPreferences     `json:"shell"`
+	Columns      ColumnPreferences    `json:"columns"`
+	Recent       RecentSet            `json:"recent"`
+	CustomViews  []CustomViewContext  `json:"customViews,omitempty"`
 }
 
 // favoriteKindAllowlist bounds favorite targets to resources whose detail
@@ -188,6 +189,9 @@ func (service *PreferenceService) Put(ctx context.Context, value PreferencesDTO)
 }
 
 func ValidatePreferences(value PreferencesDTO) error {
+	if err := validateSavedPortForwards(value.PortForwards); err != nil {
+		return err
+	}
 	if err := validateCustomViews(value.CustomViews); err != nil {
 		return err
 	}
@@ -466,6 +470,7 @@ func preferenceRecords(value PreferencesDTO) ([]PreferenceRecord, error) {
 	pairs := map[string]any{"ui.language": value.UI.Language, "ui.context_colors": value.UI.ContextColors, "logs.wrap": value.Logs.Wrap, "logs.timestamps": value.Logs.Timestamps, "logs.tail_lines": value.Logs.TailLines, "dashboard.log_scan_window": value.Dashboard.LogScanWindow, "dashboard.section_order": value.Dashboard.SectionOrder, "dashboard.hidden_sections": value.Dashboard.HiddenSections, "filters.workloads": value.Filters.Workloads, "filters.pods": value.Filters.Pods, "filters.events": value.Filters.Events, "filters.logs": value.Filters.Logs, "favorites": favoritesOrDefault(value.Favorites), "shell.sidebar_compact": value.Shell.SidebarCompact, "shell.collapsed_groups": value.Shell.CollapsedGroups, "columns.hidden": value.Columns.Hidden, "columns.order": value.Columns.Order, "recent": recentOrDefault(value.Recent)}
 	keys := make([]string, 0, len(pairs))
 	pairs["custom_views"] = value.CustomViews
+	pairs["port_forwards"] = value.PortForwards
 	for key := range pairs {
 		keys = append(keys, key)
 	}
@@ -483,6 +488,8 @@ func preferenceRecords(value PreferencesDTO) ([]PreferenceRecord, error) {
 
 func applyPreferenceRecord(value *PreferencesDTO, record PreferenceRecord) error {
 	switch record.Key {
+	case "port_forwards":
+		return json.Unmarshal(record.ValueJSON, &value.PortForwards)
 	case "custom_views":
 		return json.Unmarshal(record.ValueJSON, &value.CustomViews)
 	case "ui.language":

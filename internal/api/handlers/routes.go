@@ -8,6 +8,7 @@ import (
 	"github.com/fvmoraes/ginger/pkg/router"
 
 	"github.com/fvmoraes/kubepeep/internal/api"
+	"github.com/fvmoraes/kubepeep/internal/releases"
 	actionservice "github.com/fvmoraes/kubepeep/internal/services/actions"
 	"github.com/fvmoraes/kubepeep/internal/services/resourcecatalog"
 )
@@ -51,6 +52,7 @@ func Register(applicationRouter *router.Router, dependencies Dependencies) {
 	status := NewStatus(dependencies.Snapshots, dependencies.Build, dependencies.Port, dependencies.Generation)
 	session := NewSession(dependencies.Sessions, dependencies.Generation, dependencies.Origin)
 	apiRouter.GET("/status", status.ServeHTTP)
+	apiRouter.GET("/releases/latest", releaseCheck(releases.New(dependencies.Build.Version)))
 	apiRouter.GET("/session", session.ServeHTTP)
 	if dependencies.Profiles != nil {
 		profiles := NewClusterProfiles(dependencies.Profiles)
@@ -279,7 +281,7 @@ func allowedMethods(path string) (string, bool) {
 		}
 	}
 	switch path {
-	case statusPath, sessionPath, profilesPath, profilePath,
+	case statusPath, sessionPath, profilesPath, profilePath, apiPrefix + "/releases/latest",
 		apiPrefix + "/contexts", apiPrefix + "/namespaces", apiPrefix + "/permissions",
 		apiPrefix + "/dashboard/summary", apiPrefix + "/dashboard/namespace-health",
 		apiPrefix + "/dashboard/problems",

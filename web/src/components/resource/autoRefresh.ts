@@ -3,7 +3,7 @@ import { isGatewayCollection } from '../../navigation/gateway'
 import { isHelmCollection } from '../../navigation/helm'
 import { parseDynamicCollection } from '../../navigation/dynamic'
 
-export const autoRefreshInterval = 10_000
+export const autoRefreshInterval = 5_000
 
 const inventories = new Set(['pods', 'workloads', 'events', 'nodes', 'services', 'endpoints', 'ingresses', 'ingress-classes', 'endpoint-slices', 'network-policies', 'configmaps', 'secrets', 'leases', 'persistent-volumes', 'persistent-volume-claims', 'volume-attachments', 'storage-classes', 'csi-nodes', 'csi-drivers', 'service-accounts', 'resource-quotas', 'limit-ranges', 'hpas', 'pdbs', 'roles', 'role-bindings', 'cluster-roles', 'cluster-role-bindings', 'customresourcedefinitions', 'priority-classes', 'runtime-classes', 'mutating-webhook-configurations', 'validating-webhook-configurations'])
 

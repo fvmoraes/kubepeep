@@ -23,7 +23,7 @@ export function useAutoRefreshQueryOptions() {
 
 export function AutoRefreshToggle() {
   const { enabled, toggle } = useAutoRefresh()
-  return <button type="button" className={`control inline-flex items-center gap-2 px-2 ${enabled ? 'text-kp-green' : 'text-kp-overlay-text'}`} aria-label="Automatic refresh every 10 seconds" aria-pressed={enabled} title={enabled ? 'Disable automatic refresh' : 'Enable automatic refresh every 10 seconds'} onClick={toggle}>
-    <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-current" />Auto · {enabled ? '10s' : 'off'}
+  return <button type="button" className={`control inline-flex items-center gap-2 px-2 ${enabled ? 'text-kp-green' : 'text-kp-overlay-text'}`} aria-label="Automatic refresh every 5 seconds" aria-pressed={enabled} title={enabled ? 'Disable automatic refresh' : 'Enable automatic refresh every 5 seconds'} onClick={toggle}>
+    <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-current" />Auto · {enabled ? '5s' : 'off'}
   </button>
 }

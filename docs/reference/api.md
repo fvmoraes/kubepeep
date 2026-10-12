@@ -150,6 +150,17 @@ Se o cliente fechar a conexão, pode não existir resposta. O servidor registra 
 
 Parâmetros são case-sensitive, URL-decoded uma vez e únicos, exceto
 `namespace`, `status` e `kind` quando a tabela abaixo os declara repetíveis.
+`GET /api/v1/pods` também aceita `latestJobRuns=true|false` (default false).
+A UI principal envia true, enquanto navegação exata e leitura por workload
+mantêm o histórico. A projeção conserva apenas os Pods do Job mais recente de
+cada controller CronJob identificado por UID. Só oculta owners batch/v1 Job com
+UID comprovadamente histórico; owners ambíguos permanecem. Consulta auxiliar de
+Jobs é autorizada, paginada e limitada a 10 mil itens por namespace, com quatro
+workers e espera máxima de 2 s por página. O cache retém resumos por 4 s, até
+64 namespaces e 40 mil UIDs, isolados por geração. Falhas preservam Pods e
+sinalizam `meta.page.jobRunsPartial=true`. Cursors nativos permanecem válidos:
+uma página filtrada vazia ainda pode ter próxima página.
+
 Repetição não declarada, valor vazio e query desconhecida retornam
 `VALIDATION_FAILED`. `namespace` aceita no máximo 100 valores distintos, todos
 dentro do scope ativo; funciona como interseção, nunca amplia o scope.
@@ -1544,7 +1555,7 @@ Schemas fechados de lista:
 
 | DTO | Campos e regras |
 | --- | --- |
-| `EventDTO` | `timestamp: RFC3339|null`, `namespace`, `objectKind`, `objectName`, `reason`, `message` sanitizada até 4 KiB, `count` não negativo, `source: string|null`, `type` (`Normal`, `Warning` ou `Unknown`) |
+| `EventDTO` | `name`, `uid`, `timestamp: RFC3339|null` da ocorrência mais recente, `namespace`, `objectAPIVersion`, `objectNamespace`, `objectKind`, `objectName`, `reason`, `message` sanitizada até 4 KiB, `count` não negativo, `source: string|null`, `type` (`Normal`, `Warning` ou `Unknown`) |
 | `ServiceDTO` | `namespace`, `name`, `type` (`ClusterIP`, `NodePort`, `LoadBalancer`, `ExternalName` ou `Unknown`), `clusterIPs: string[]`, `ports: ServicePortDTO[]`, `selector` map limitado ou null e `externalEndpoints: ExternalEndpointDTO[]` |
 | `IngressDTO` | `namespace`, `name`, `className: string|null`, `hosts: string[]`, `paths: IngressPathDTO[]` e `tlsHosts: string[]`; nenhum conteúdo ou nome de Secret TLS |
 | `EndpointSliceDTO` | `namespace`, `name`, `addressType` (`IPv4`, `IPv6`, `FQDN` ou `Unknown`), `ports: EndpointSlicePortDTO[]` e `endpoints: EndpointDTO[]` |
@@ -1718,6 +1729,24 @@ a interface utiliza as rotas compartilhadas acima.
 
 ## 17. Port-forwards
 
+Há no máximo uma sessão ativa por origem (geração, kind Pod/Service, namespace,
+nome). Criação com nova chave idempotente substitui a anterior: valida e autoriza,
+reserva capacidade, fecha o listener antigo e só então cria o novo. Requisições
+concorrentes da mesma origem são serializadas. Pods e Services com mesmo nome
+são origens distintas; um Service pode escolher outro Pod ao ser reativado.
+`sourceKind`, `sourceName` e `sourcePort` no DTO identificam a origem solicitada;
+`pod` e `remotePort` continuam identificando o destino efetivamente resolvido.
+
+Preferências aceitam `portForwards`: até 100 receitas (64 KiB), contendo somente
+`clusterProfileId`, `context`, `namespace`, `kind` (Pod/Service), `name`,
+`remotePort` e `localPort`. O alvo é único por profile/contexto/kind/namespace/nome.
+A migration 0005 inclui a chave SQLite `port_forwards` preservando preferências
+existentes. Ler receitas não abre listeners; a UI exige reativação explícita via
+POST normal. Excluir a receita usa PUT de preferências; se ativa, a UI encerra
+primeiro a sessão via DELETE. Falha ao salvar informa que a sessão atual permanece
+ativa, mas suas portas não foram persistidas.
+
+
 | Método/rota | Classe | Request | Response | Autorização | Erros |
 | --- | --- | --- | --- | --- | --- |
 | `GET /api/v1/port-forwards` | MVP | vazio | `PortForwardDTO[]`, 200; geração atual, sem payload/contadores de tráfego | Host/origin local; sem RBAC adicional | `GENERATION_CHANGED` |
@@ -1763,6 +1792,9 @@ Exige `Idempotency-Key`. O backend escolhe porta quando null e retorna somente a
     "generation": "gen_42",
     "namespace": "payments",
     "pod": "api-abc",
+    "sourceKind": "Pod",
+    "sourceName": "api-abc",
+    "sourcePort": 8080,
     "remotePort": 8080,
     "localAddress": "127.0.0.1",
     "localPort": 49152,
@@ -1864,7 +1896,7 @@ Guards/erros antes de `200 text/event-stream` usam envelope HTTP normal. Depois
 dos headers, `error` ou `end` é o último evento, seguido de flush/close. O
 frontend usa parser incremental para enviar `X-KubePeep-CSRF` sem token na URL;
 reconexão respeita generation ID. Nos painéis de Pod/Workload e nos agregados
-da lista de Pods, ela é automática, por alvo, com espera de 1–10 segundos.
+da lista de Pods, ela é automática, por alvo, com espera de 1–5 segundos.
 O cliente retoma com `since` a partir do último timestamp e remove a
 sobreposição já recebida; isso não garante recuperar logs rotacionados nem
 intervalos que ultrapassem o tail máximo. Uma conexão sem atividade por 45 s
@@ -2050,7 +2082,7 @@ Após JSON estrito, limites, confirmação, alvo, geração e SAR, o servidor
 canonicaliza método, path, namespace, pod e `ExecInit` e liga seu hash ao
 ticket. Alterar qualquer parâmetro exige outro POST e outra confirmação.
 
-Resposta 201 de criação do ticket, cujo TTL é exatamente 10 segundos:
+Resposta 201 de criação do ticket, cujo TTL é exatamente 5 segundos:
 
 ```json
 {
@@ -2131,7 +2163,7 @@ enviado depois de `exit`.
 
 ### 19.2 Heartbeat, backpressure e close
 
-- Ping de transporte a cada 15 segundos e Pong em até 10 segundos;
+- Ping de transporte a cada 15 segundos e Pong em até 5 segundos;
 - depois de `ready`, o backend também inicia heartbeat de aplicação a cada 15
   segundos com nonce novo; o browser ecoa exatamente o mesmo objeto em até 10
   segundos, não inicia nonce próprio e nonce ausente/repetido/divergente é
@@ -2368,7 +2400,7 @@ Falha na SelfSubjectAccessReview não equivale a 403. Quando a decisão é
 indeterminada, uma leitura real e limitada do mesmo recurso pode comprovar
 acesso; negação explícita permanece bloqueada. Mutações continuam exigindo
 decisão autorizada. Falhas transitórias de leitura têm tentativas limitadas
-com backoff; o Auto da interface retoma a cada 10 s enquanto estiver ligado.
+com backoff; o Auto da interface retoma a cada 5 s enquanto estiver ligado.
 As mensagens diferenciam permissão, autenticação/plugin, DNS, TLS, conexão,
 timeout, throttling e indisponibilidade, sem expor credenciais nem payloads.
 Resultados parciais identificam namespace, código e causa de cada falha.
@@ -2384,6 +2416,29 @@ Resultados parciais identificam namespace, código e causa de cada falha.
 
 O grupo core usa `_`; scope é `n` (namespaced) ou `c` (cluster), e o namespace de objetos cluster usa `_`. A identidade é verificada na descoberta do cluster ativo; subresources e URLs arbitrárias não são aceitos. Estas rotas não expõem mutações. O Kubernetes decide permissões de descoberta; LIST e GET passam pela autorização e recuperação de leitura comuns. Catálogo incompleto não é tratado como prova de recurso ausente.
 
-A descoberta usa até quatro requisições simultâneas, 512 versões, 4.096 recursos projetados e respostas de até 2 MiB; o cache é isolado por seleção/geração, com 5 minutos para resultados completos e 10 segundos para parciais. Table requests incluem somente metadata junto das células escalares, com fallback para PartialObjectMetadata quando o servidor não oferece Table. Secrets core usam metadata na lista/detalhe. Cada linha limita 24 colunas e 2.048 bytes por célula. O documento YAML limita a resposta antes da decodificação e o resultado a 2 MiB; não entra no cache de inventário.
+A descoberta usa até quatro requisições simultâneas, 512 versões, 4.096 recursos projetados e respostas de até 2 MiB; o cache é isolado por seleção/geração, com 5 minutos para resultados completos e 5 segundos para parciais. Table requests incluem somente metadata junto das células escalares, com fallback para PartialObjectMetadata quando o servidor não oferece Table. Secrets core usam metadata na lista/detalhe. Cada linha limita 24 colunas e 2.048 bytes por célula. O documento YAML limita a resposta antes da decodificação e o resultado a 2 MiB; não entra no cache de inventário.
 
 `preferences.customViews` guarda até 100 entradas `{clusterProfileId, context, cluster, items}`, cada uma com até 32 identidades `{group, version, resource, kind, namespaced, shortNames?}`, e limite total de 64 KiB. `columns.hidden` e `columns.order` aceitam a identidade `dynamic:{group|_}:{version}:{resource}:{n|c}` além dos recursos nativos. Remover uma visão não remove recursos Kubernetes.
+
+
+### Aviso de nova versão
+
+`GET /api/v1/releases/latest` retorna `{ currentVersion, latestVersion?, available }`
+no envelope padrão. A versão instalada vem dos metadados de build, e `available`
+exige uma release estável publicada com versão SemVer maior. Builds sem versão
+SemVer, drafts e prereleases não geram aviso.
+
+A consulta pública a `api.github.com/repos/fvmoraes/kubepeep/releases/latest`
+usará um cache por processo de duas horas, também para falhas, timeout de cinco
+segundos e resposta limitada a 1 MiB. Não recebe URL do cliente nem encaminha
+credenciais ou informações do cluster. Falhas retornam 503; o frontend mantém o
+aviso silencioso e tenta novamente no próximo intervalo. O frontend usa a mesma
+API no browser e no desktop e verifica em segundo plano a cada duas horas.
+O link do aviso abre `https://kubepeep.online/download`; não instala atualizações.
+
+Na lista de Events, reconhecer uma linha ou a seleção oculta somente as
+ocorrências carregadas na sessão da interface. Não envia DELETE ao Kubernetes.
+O registro fica limitado a 2.000 ocorrências por perfil/contexto/cluster; mudanças
+na contagem ou no horário fazem uma nova ocorrência reaparecer. A referência ao
+objeto usa seu namespace e API group; CRDs são resolvidos pelo catálogo de recursos,
+sem exigir que uma visualização tenha sido salva previamente.

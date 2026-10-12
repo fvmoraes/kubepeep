@@ -32,6 +32,18 @@ type portForwardSession struct {
 	stopOnce sync.Once
 }
 
+type portForwardOrigin struct {
+	generation string
+	kind       string
+	namespace  string
+	name       string
+}
+
+type portForwardGate struct {
+	token chan struct{}
+	users int
+}
+
 type portForwardStart struct {
 	generation string
 	cancel     context.CancelFunc
@@ -63,11 +75,12 @@ type PortForwardManager struct {
 	setupLimit  time.Duration
 	rootCtx     context.Context
 
-	mu        sync.Mutex
-	sessions  map[string]*portForwardSession
-	starts    map[uint64]portForwardStart
-	nextStart uint64
-	shutdown  bool
+	mu          sync.Mutex
+	sessions    map[string]*portForwardSession
+	starts      map[uint64]portForwardStart
+	nextStart   uint64
+	shutdown    bool
+	targetGates map[portForwardOrigin]*portForwardGate
 }
 
 func NewPortForwardService(rootCtx context.Context, authorizer AuthorizationService, generations GenerationReader, adapter PortForwardAdapter, audit AuditSink) (*PortForwardManager, error) {
@@ -127,7 +140,7 @@ func (m *PortForwardManager) Create(ctx context.Context, binding namespaces.Sele
 		BodyHash:         bodyHash,
 	}
 	dto, replayed, err := m.idempotency.Do(ctx, idempotencyKey, identity, func() (PortForwardDTO, error) {
-		return m.createOnce(ctx, binding, request)
+		return m.createOnce(ctx, binding, request, request)
 	})
 	return copyPortForwardDTO(dto), replayed, err
 }
@@ -174,12 +187,18 @@ func (m *PortForwardManager) CreateService(ctx context.Context, binding namespac
 		podRequest.Target.Namespace = resolved.Target.Namespace
 		podRequest.Target.Kind = "Pod"
 		podRequest.Target.Name = resolved.Target.Name
-		return m.createOnce(ctx, binding, podRequest)
+		return m.createOnce(ctx, binding, podRequest, request)
 	})
 	return copyPortForwardDTO(dto), replayed, err
 }
 
-func (m *PortForwardManager) createOnce(ctx context.Context, binding namespaces.SelectionBinding, request PortForwardCreateRequest) (dto PortForwardDTO, returnedErr error) {
+func (m *PortForwardManager) createOnce(ctx context.Context, binding namespaces.SelectionBinding, request PortForwardCreateRequest, source PortForwardCreateRequest) (dto PortForwardDTO, returnedErr error) {
+	origin := portForwardOrigin{binding.Generation, source.Target.Kind, source.Target.Namespace, source.Target.Name}
+	release, err := m.acquireTarget(ctx, origin)
+	if err != nil {
+		return dto, translateError(err)
+	}
+	defer release()
 	target := mutationTarget(binding, request.Target)
 	started := m.clock.Now().UTC()
 	defer func() { recordAudit(ctx, m.audit, m.clock, started, "port_forward_start", target, returnedErr) }()
@@ -189,26 +208,42 @@ func (m *PortForwardManager) createOnce(ctx context.Context, binding namespaces.
 	}
 
 	var (
-		operationErr error
-		listener     net.Listener
-		handle       PortForwardHandle
-		lifetimeCtx  context.Context
-		cancel       context.CancelFunc
-		identifier   string
-		reserved     bool
-		startID      uint64
+		operationErr            error
+		listener                net.Listener
+		handle                  PortForwardHandle
+		lifetimeCtx             context.Context
+		cancel                  context.CancelFunc
+		identifier              string
+		reserved                bool
+		startID                 uint64
+		stopRequestCancellation func() bool
 	)
+	defer func() {
+		if stopRequestCancellation != nil {
+			stopRequestCancellation()
+		}
+	}()
 	guardResult, guardErr := m.authorizer.Guard(ctx, key, authorization.OperationUpgrade, func(context.Context) error {
 		if err := ctx.Err(); err != nil {
 			operationErr = err
 			return err
 		}
-		startID, operationErr = m.reserve(binding.Generation)
+		// Only replace after validation and the exact Kubernetes authorization.
+		// The per-object gate covers close, bind and publication together.
+		if currentErr := m.requireCurrent(binding.Generation); currentErr != nil {
+			operationErr = currentErr
+			return currentErr
+		}
+		startID, operationErr = m.reserve(origin)
 		if operationErr != nil {
 			return operationErr
 		}
 		reserved = true
+		m.closeTarget(origin)
 		lifetimeCtx, cancel = context.WithCancel(m.rootCtx)
+		// Request cancellation owns setup until a successful session is handed
+		// to the manager. Established tunnels then outlive the HTTP request.
+		stopRequestCancellation = context.AfterFunc(ctx, cancel)
 		if err := m.attachReservation(startID, cancel); err != nil {
 			operationErr = err
 			return err
@@ -297,6 +332,9 @@ func (m *PortForwardManager) createOnce(ctx context.Context, binding namespaces.
 		Generation:       binding.Generation,
 		Namespace:        target.Namespace,
 		Pod:              target.Name,
+		SourceKind:       source.Target.Kind,
+		SourceName:       source.Target.Name,
+		SourcePort:       source.RemotePort,
 		RemotePort:       request.RemotePort,
 		LocalAddress:     "127.0.0.1",
 		LocalPort:        address.Port,
@@ -308,10 +346,23 @@ func (m *PortForwardManager) createOnce(ctx context.Context, binding namespaces.
 	m.mu.Lock()
 	start := m.starts[startID]
 	delete(m.starts, startID)
-	if m.shutdown || start.stale || m.generations.CurrentGeneration() != binding.Generation {
+	if m.shutdown {
+		m.mu.Unlock()
+		session.stop()
+		return PortForwardDTO{}, publicError(CodeServerShutdown, http.StatusServiceUnavailable, true, nil)
+	}
+	if start.stale || m.generations.CurrentGeneration() != binding.Generation {
 		m.mu.Unlock()
 		session.stop()
 		return PortForwardDTO{}, publicError(CodeGenerationChanged, http.StatusConflict, false, nil)
+	}
+	// Detach before publishing so normal request completion cannot cancel the
+	// persistent tunnel, but a cancellation that already started cannot win late.
+	stopRequestCancellation()
+	if requestErr := ctx.Err(); requestErr != nil {
+		m.mu.Unlock()
+		session.stop()
+		return PortForwardDTO{}, translateError(requestErr)
 	}
 	if _, collision := m.sessions[identifier]; collision {
 		m.mu.Unlock()
@@ -325,7 +376,59 @@ func (m *PortForwardManager) createOnce(ctx context.Context, binding namespaces.
 	return copyPortForwardDTO(dto), nil
 }
 
-func (m *PortForwardManager) reserve(generation string) (uint64, error) {
+// acquireTarget serializes replacement only for the same selected object.
+// Other objects can establish tunnels concurrently; cancellation never waits
+// for another upstream connection to finish setting up.
+func (m *PortForwardManager) acquireTarget(ctx context.Context, origin portForwardOrigin) (func(), error) {
+	m.mu.Lock()
+	if m.targetGates == nil {
+		m.targetGates = make(map[portForwardOrigin]*portForwardGate)
+	}
+	gate := m.targetGates[origin]
+	if gate == nil {
+		gate = &portForwardGate{token: make(chan struct{}, 1)}
+		m.targetGates[origin] = gate
+	}
+	gate.users++
+	m.mu.Unlock()
+	releaseRef := func() {
+		m.mu.Lock()
+		gate.users--
+		if gate.users == 0 {
+			delete(m.targetGates, origin)
+		}
+		m.mu.Unlock()
+	}
+	select {
+	case gate.token <- struct{}{}:
+		return func() { <-gate.token; releaseRef() }, nil
+	case <-ctx.Done():
+		releaseRef()
+		return nil, ctx.Err()
+	case <-m.rootCtx.Done():
+		releaseRef()
+		return nil, m.rootCtx.Err()
+	}
+}
+
+func (m *PortForwardManager) closeTarget(origin portForwardOrigin) {
+	m.mu.Lock()
+	previous := make([]*portForwardSession, 0, 1)
+	for _, session := range m.sessions {
+		value := session.dto
+		if value.Generation == origin.generation && value.SourceKind == origin.kind && value.Namespace == origin.namespace && value.SourceName == origin.name {
+			previous = append(previous, session)
+		}
+	}
+	m.mu.Unlock()
+	for _, session := range previous {
+		m.finish(session.dto.ID, PortForwardClosed)
+		// Also join a concurrent Close/expiry before rebinding the local port.
+		session.stop()
+	}
+}
+
+func (m *PortForwardManager) reserve(origin portForwardOrigin) (uint64, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.pruneLocked(m.clock.Now())
@@ -333,17 +436,25 @@ func (m *PortForwardManager) reserve(generation string) (uint64, error) {
 		return 0, publicError(CodeServerShutdown, http.StatusServiceUnavailable, true, nil)
 	}
 	active := len(m.starts)
+	replacing := false
 	for _, session := range m.sessions {
 		if session.dto.Status == PortForwardActive {
 			active++
+			value := session.dto
+			if value.Generation == origin.generation && value.SourceKind == origin.kind && value.Namespace == origin.namespace && value.SourceName == origin.name {
+				replacing = true
+			}
 		}
 	}
-	if active >= MaximumPortForwardSessions {
+	// Hold the old object's slot throughout close/bind. The per-object gate
+	// guarantees only one replacement can borrow it, and the old upstream is
+	// stopped before starting the new one, so live tunnels stay within the limit.
+	if active >= MaximumPortForwardSessions && !replacing {
 		return 0, publicError(CodeLimitExceeded, http.StatusTooManyRequests, false, nil)
 	}
 	m.nextStart++
 	identifier := m.nextStart
-	m.starts[identifier] = portForwardStart{generation: generation}
+	m.starts[identifier] = portForwardStart{generation: origin.generation}
 	return identifier, nil
 }
 

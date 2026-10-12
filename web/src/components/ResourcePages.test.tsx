@@ -77,12 +77,12 @@ describe('read-only resource pages', () => {
 
   it('publishes the complete workspace tab catalog for each actionable kind', () => {
     const labels = (collection: string, kind: string | null = null) => tabsFor({ collection, kind, namespace: 'payments', name: 'api', tab: 'overview' }).map((tab) => tab.label)
-    expect(labels('pods', 'Pod')).toEqual(['Overview', 'Investigation', 'Logs', 'YAML', 'Events', 'Metrics', 'Containers', 'Data / Env', 'Actions'])
-    expect(labels('workloads', 'Deployment')).toEqual(['Overview', 'Investigation', 'Logs', 'Metrics', 'Data / Env', 'Pods', 'ReplicaSets', 'YAML', 'Events', 'Rollout', 'Actions'])
-    expect(labels('workloads', 'StatefulSet')).toEqual(['Overview', 'Investigation', 'Logs', 'Metrics', 'Data / Env', 'Pods', 'PVCs', 'YAML', 'Events', 'Actions'])
-    expect(labels('workloads', 'CronJob')).toEqual(['Overview', 'Investigation', 'Logs', 'Metrics', 'Data / Env', 'Jobs', 'YAML', 'Events', 'Actions'])
-    expect(labels('services', 'Service')).toEqual(['Overview', 'Endpoints', 'YAML', 'Events', 'Actions'])
-    expect(labels('ingresses', 'Ingress')).toEqual(['Overview', 'Rules', 'Backends', 'YAML', 'Events', 'Actions'])
+    expect(labels('pods', 'Pod')).toEqual(['Overview', 'Logs', 'YAML', 'Metrics', 'Containers', 'Events', 'Data / Env', 'Investigation', 'Actions'])
+    expect(labels('workloads', 'Deployment')).toEqual(['Overview', 'Logs', 'YAML', 'Metrics', 'Events', 'Data / Env', 'Investigation', 'Pods', 'ReplicaSets', 'Rollout', 'Actions'])
+    expect(labels('workloads', 'StatefulSet')).toEqual(['Overview', 'Logs', 'YAML', 'Metrics', 'Events', 'Data / Env', 'Investigation', 'Pods', 'PVCs', 'Actions'])
+    expect(labels('workloads', 'CronJob')).toEqual(['Overview', 'Logs', 'YAML', 'Metrics', 'Events', 'Data / Env', 'Investigation', 'Jobs', 'Actions'])
+    expect(labels('services', 'Service')).toEqual(['Overview', 'YAML', 'Events', 'Endpoints', 'Actions'])
+    expect(labels('ingresses', 'Ingress')).toEqual(['Overview', 'YAML', 'Events', 'Backends', 'Rules', 'Actions'])
   })
 
   it('starts a Service port-forward only after all prerequisite permissions are allowed', async () => {
@@ -668,4 +668,35 @@ describe('read-only resource pages', () => {
     fireEvent.change(screen.getByLabelText('Search resources'), { target: { value: '' } })
     await waitFor(() => expect(screen.getByRole('button', { name: 'Close loopback session' })).toBeEnabled())
   })
+})
+
+
+it('acknowledges loaded events individually and in bulk, while new occurrences reappear', async () => {
+  let count = 1
+  const writes: string[] = []
+  vi.stubGlobal('fetch', vi.fn(async (input: unknown, init?: RequestInit) => {
+    const path = String(input)
+    if (init?.method && init.method !== 'GET') writes.push(path)
+    if (path === '/api/v1/status') return json(selectedStatus())
+    if (path === '/api/v1/preferences') return json(preferences())
+    if (path === '/api/v1/namespace-scopes/7') return json({ namespaces: ['payments'], defaultNamespace: 'payments' })
+    if (path.startsWith('/api/v1/events?')) return json(['api', 'worker'].map(name => ({ uid: name, namespace: 'payments', objectKind: 'Pod', objectAPIVersion: 'v1', objectName: name, timestamp: '2026-10-12T12:00:00Z', reason: 'Failed', type: 'Warning', count: name === 'api' ? count : 1, message: 'Image pull failed' })), page())
+    return json([])
+  }))
+  const { client } = renderPage(<EventsPage />)
+  fireEvent.click(await screen.findByRole('button', { name: 'Acknowledge Failed for api' }))
+  await waitFor(() => expect(screen.queryByRole('button', { name: 'Open Pod api' })).not.toBeInTheDocument())
+  expect(screen.getByRole('button', { name: 'Open Pod worker' })).toBeInTheDocument()
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Select all loaded rows' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Acknowledge selected' }))
+  await waitFor(() => expect(screen.queryByRole('button', { name: 'Open Pod worker' })).not.toBeInTheDocument())
+  expect(screen.getByText('2 acknowledged')).toBeVisible()
+  count = 2
+  await act(async () => { await client.invalidateQueries({ queryKey: ['resources', 'events'] }) })
+  expect(await screen.findByRole('button', { name: 'Open Pod api' })).toBeVisible()
+  expect(screen.queryByRole('button', { name: 'Open Pod worker' })).not.toBeInTheDocument()
+  fireEvent.click(screen.getByRole('button', { name: 'Show acknowledged' }))
+  expect(await screen.findByRole('button', { name: 'Open Pod worker' })).toBeVisible()
+  expect(writes).toEqual([])
+  client.clear()
 })

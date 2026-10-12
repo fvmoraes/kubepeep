@@ -143,7 +143,7 @@ export function ResourceLiveUpdates({ generation, topics, queryKeys, autoStart =
         const contentType = response.headers.get('content-type')?.toLowerCase() ?? ''
         const payload = contentType.startsWith('application/json') ? await response.json() as APIErrorPayload : { code: 'INVALID_RESPONSE', message: 'The stream guard returned an invalid response.' }
         if (response.status === 403 || response.status === 503) {
-          fallbackToPolling(`${payload.code ?? response.status}: live watch is unavailable. Refreshing automatically every 10 seconds.`)
+          fallbackToPolling(`${payload.code ?? response.status}: live watch is unavailable. Refreshing automatically every 5 seconds.`)
           return
         }
         throw new APIError(response.status, payload)
@@ -200,13 +200,13 @@ export function ResourceLiveUpdates({ generation, topics, queryKeys, autoStart =
             onPreviewResetRef.current?.()
             await invalidate()
             if (payload.reason === 'generation_changed') throw new APIError(409, { code: 'GENERATION_CHANGED', message: 'The active selection changed.' })
-            fallbackToPolling(`Stream reset (${String(payload.reason ?? 'state_lost')}). Refreshing automatically every 10 seconds.`)
+            fallbackToPolling(`Stream reset (${String(payload.reason ?? 'state_lost')}). Refreshing automatically every 5 seconds.`)
             return
           } else if (event.event === 'error') {
             onPreviewResetRef.current?.()
             const code = String(payload.code ?? 'STREAM_ERROR')
             if (code === 'FORBIDDEN' || code === 'AUTHORIZATION_UNAVAILABLE') {
-              fallbackToPolling(`${code}: live watch is unavailable. Refreshing automatically every 10 seconds.`)
+              fallbackToPolling(`${code}: live watch is unavailable. Refreshing automatically every 5 seconds.`)
               return
             }
             throw new APIError(502, { code, message: String(payload.message ?? 'The resource stream ended.') })
@@ -214,13 +214,13 @@ export function ResourceLiveUpdates({ generation, topics, queryKeys, autoStart =
         }
       }
       if (controller.signal.aborted || !mountedRef.current) return
-      fallbackToPolling('The live stream closed. Refreshing automatically every 10 seconds.')
+      fallbackToPolling('The live stream closed. Refreshing automatically every 5 seconds.')
     } catch (error) {
       if (controller.signal.aborted || !mountedRef.current) return
       if (error instanceof APIError && error.code === 'GENERATION_CHANGED') {
         setState({ mode: 'error', message: `${error.code}: ${error.message}` })
       } else {
-        fallbackToPolling(`${error instanceof APIError ? error.code : 'STREAM_UNAVAILABLE'}: live updates failed. Refreshing automatically every 10 seconds.`)
+        fallbackToPolling(`${error instanceof APIError ? error.code : 'STREAM_UNAVAILABLE'}: live updates failed. Refreshing automatically every 5 seconds.`)
       }
     } finally {
       controller.signal.removeEventListener('abort', cancelReader)
@@ -273,6 +273,6 @@ export function ResourceLiveUpdates({ generation, topics, queryKeys, autoStart =
 
   return <span aria-label="Resource live updates" title={state.message} className={`resource-live-status text-content ${enabled && state.mode === 'live' ? 'text-kp-green' : 'text-kp-overlay-text'}`}>
     <span aria-hidden="true" className="h-1.5 w-1.5 rounded-full bg-current" />
-    {!enabled ? 'Paused' : state.mode === 'live' ? 'Live' : state.mode === 'error' ? state.message.includes('GENERATION_CHANGED') ? 'Selection changed' : 'Auto · 10s' : 'Connecting…'}
+    {!enabled ? 'Paused' : state.mode === 'live' ? 'Live' : state.mode === 'error' ? state.message.includes('GENERATION_CHANGED') ? 'Selection changed' : 'Auto · 5s' : 'Connecting…'}
   </span>
 }

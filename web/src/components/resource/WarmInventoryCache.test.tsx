@@ -24,7 +24,7 @@ it('keeps five visited inventories warm, reuses rows, and stops with auto refres
   await settle()
   expect(screen.getByText('pods:1')).toBeVisible()
   view.rerender(<Tree name="workloads" />); await settle()
-  await act(async () => { await vi.advanceTimersByTimeAsync(10_100) })
+  await act(async () => { await vi.advanceTimersByTimeAsync(5_100) })
   expect(counts.get('pods')).toBe(2)
   view.rerender(<Tree name="pods" />)
   expect(screen.getByText('pods:2')).toBeVisible()
@@ -33,7 +33,7 @@ it('keeps five visited inventories warm, reuses rows, and stops with auto refres
   const inventories = client.getQueryCache().findAll({ queryKey: ['resources'] })
   expect(inventories).toHaveLength(5)
   expect(inventories.some((query) => query.queryKey[1] === 'workloads')).toBe(false)
-  fireEvent.click(screen.getByRole('button', { name: 'Automatic refresh every 10 seconds' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Automatic refresh every 5 seconds' }))
   const before = [...counts]
   await act(async () => { await vi.advanceTimersByTimeAsync(30_000) })
   expect([...counts]).toEqual(before)

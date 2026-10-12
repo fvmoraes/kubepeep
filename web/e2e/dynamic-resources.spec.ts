@@ -43,6 +43,7 @@ test('discover, pin and inspect CRDs with printer columns and a fixed overlay', 
   await dialog.getByRole('button', { name: 'Pin SQLDatabase sql.cnrm.cloud.google.com v1beta1' }).click()
   await expect(page.getByRole('button', { name: 'Open SQLDatabase billing' })).toBeVisible()
   expect(state.preferences.customViews?.[0].items).toEqual([sql])
+  await expect(page.getByRole('region', { name: 'Custom Resources', exact: true }).getByRole('link')).toHaveText(['Add Custom Resource', 'SQLDatabase'])
   expect(state.inventory.at(-1)?.searchParams.get('namespace')).toBe('payments')
   await expect(page.getByRole('columnheader', { name: 'Status', exact: true })).toBeVisible()
   await expect(page.getByRole('columnheader', { name: 'Message', exact: true })).toHaveCount(0)

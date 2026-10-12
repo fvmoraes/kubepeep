@@ -97,7 +97,7 @@ describe('application shell', () => {
 
     expect(await screen.findByRole('heading', { name: 'Cluster overview' })).toBeInTheDocument()
     expect(screen.getByText('development / Finance')).toBeInTheDocument()
-    expect(screen.getByText('development / Finance').closest('button')).toHaveAttribute('title', expect.stringContaining('dev-cluster'))
+    expect(screen.getByRole('combobox', { name: 'Namespace scope' })).toHaveAttribute('title', expect.stringContaining('dev-cluster'))
     expect(window.localStorage).toHaveLength(0)
     expect(window.sessionStorage).toHaveLength(0)
   })
@@ -143,7 +143,6 @@ describe('application shell', () => {
       expect.stringContaining('StatefulSets'),
       expect.stringContaining('Jobs'),
       expect.stringContaining('CronJobs'),
-      expect.stringContaining('Custom resources'),
       expect.stringContaining('Releases'),
       expect.stringContaining('Services'),
       expect.stringContaining('Endpoints'),
@@ -159,6 +158,7 @@ describe('application shell', () => {
       expect.stringContaining('LimitRanges'),
       expect.stringContaining('HorizontalPodAutoscalers'),
       expect.stringContaining('PodDisruptionBudgets'),
+      expect.stringContaining('Add Custom Resource'),
       expect.stringContaining('PersistentVolumes'),
       expect.stringContaining('PersistentVolumeClaims'),
       expect.stringContaining('VolumeAttachments'),

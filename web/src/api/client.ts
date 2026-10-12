@@ -260,6 +260,7 @@ function resourceQuery(options: ResourceListQuery = {}): string {
     ['node', options.node],
     ['restarts', options.restarts],
     ['problematic', options.problematic],
+    ['latestJobRuns', options.latestJobRuns],
     ['objectKind', options.objectKind],
     ['reason', options.reason],
     ['addressType', options.addressType],
@@ -394,6 +395,18 @@ export async function getDefaultNamespaceScope(signal?: AbortSignal): Promise<{ 
     continueToken = result.meta?.page?.next ?? ''
   } while (continueToken)
   return { scope: null, hasScopes }
+}
+
+export async function getNamespaceScopeOptions(signal?: AbortSignal): Promise<NamespaceScope[]> {
+  const scopes: NamespaceScope[] = []
+  let continueToken = ''
+  do {
+    const query = queryString([['limit', 100], ['continue', continueToken || undefined]])
+    const result = await requestEnvelope<NamespaceScope[]>(`/api/v1/namespace-scopes${query}`, { method: 'GET', signal })
+    scopes.push(...result.data)
+    continueToken = result.meta?.page?.next ?? ''
+  } while (continueToken)
+  return scopes
 }
 
 export function getNamespaceScope(id: number, signal?: AbortSignal): Promise<NamespaceScope> {
@@ -930,3 +943,7 @@ export function applyHelmRelease(driver: HelmDriver, namespace: string, name: st
 }
 import type { DynamicResource, DynamicRow, ResourceDiscovery } from './types'
 import { dynamicResourceSegments } from '../navigation/dynamic'
+
+export function getReleaseUpdate(signal?: AbortSignal): Promise<{ currentVersion: string; latestVersion?: string; available: boolean }> {
+  return request('/api/v1/releases/latest', { signal })
+}
