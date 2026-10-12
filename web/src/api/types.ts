@@ -429,6 +429,7 @@ export interface APIErrorPayload {
 }
 
 export interface CollectionPageMeta {
+  jobRunsPartial?: boolean
   limit: number
   next: string
   complete: boolean
@@ -463,6 +464,7 @@ export interface ResourceListQuery extends PageQuery {
   node?: string
   restarts?: 'any' | 'gt0' | 'gte3' | 'gte10'
   problematic?: boolean
+  latestJobRuns?: boolean
   objectKind?: string
   reason?: string
   addressType?: string
@@ -616,6 +618,9 @@ export interface PodDetail {
 
 export interface EventResource {
 	name?: string
+  uid?: string
+  objectAPIVersion?: string
+  objectNamespace?: string
   timestamp: string | null
   namespace: string
   objectKind: string
@@ -1126,7 +1131,18 @@ export interface SavedFilterSet {
   items: SavedFilter[]
 }
 
+export interface SavedPortForward {
+  clusterProfileId: number
+  context: string
+  namespace: string
+  kind: 'Pod' | 'Service'
+  name: string
+  remotePort: number
+  localPort: number
+}
+
 export interface Preferences {
+  portForwards?: SavedPortForward[]
   customViews?: CustomViewContext[]
   version: 1
   ui: { language: 'en' | 'pt-BR'; contextColors?: Array<{ clusterProfileId: number; context: string; color: string }> }
@@ -1294,6 +1310,9 @@ export interface ActionAccepted {
 }
 
 export interface PortForward {
+  sourceKind?: 'Pod' | 'Service'
+  sourceName?: string
+  sourcePort?: number
   id: string
   clusterProfileId: number
   context: string

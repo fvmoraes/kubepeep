@@ -293,6 +293,9 @@ const (
 )
 
 type PortForwardDTO struct {
+	SourceKind       string            `json:"sourceKind"`
+	SourceName       string            `json:"sourceName"`
+	SourcePort       int               `json:"sourcePort"`
 	ID               string            `json:"id"`
 	ClusterProfileID int64             `json:"clusterProfileId"`
 	Context          string            `json:"context"`

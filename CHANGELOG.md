@@ -27,7 +27,7 @@ Permanently-updated links: https://github.com/fvmoraes/kubepeep/blob/main/docs/d
 
 ### Added
 
-- Dynamic Resource Views under Workloads: discover native APIs and CRDs, search
+- Dynamic Resource Views: discover native APIs and CRDs, search
   by name/kind/short name/group, and pin, reorder or remove views per context.
   Lists use Kubernetes printer columns and provide explicit read-only YAML.
 - Helm releases backed by Secrets or ConfigMaps, with history, resource links,
@@ -37,12 +37,21 @@ Permanently-updated links: https://github.com/fvmoraes/kubepeep/blob/main/docs/d
   colors on subtle shell dividers.
 - Optional Pod container count/state dots and quantitative usage bars including
   HPA replica capacity; client load diagnostics in Settings.
+- Direct namespace-scope switching from the header, and individual/bulk Event
+  acknowledgment with links to built-in or discovered custom objects.
+- Background GitHub release checks every two hours and a footer download link.
+- Object Actions list active and saved Pod/Service port forwards, with browser
+  links, stop, delete and explicit re-enable on the saved local port after restart.
+  Starting another connection replaces the previous one for that object.
 
 ### Changed
 
 - All inventories fill the available content area; details overlay the bottom
   70% of the window without shrinking the list. Closing restores full access.
-- Automatic inventory refresh defaults to enabled at a fixed 10 seconds, with
+- Pods inventory shows only the latest Job execution per CronJob, retaining
+  retries/parallel Pods. Jobs retains available history and exact Pod navigation
+  stays accessible. Unknown Job history is reported without hiding ambiguous Pods.
+- Automatic inventory refresh defaults to enabled at a fixed 5 seconds, with
   one global toggle. Five recent inventory queries remain warm in memory.
 - Initial columns follow a compact common order and adapt to narrow viewports.
   User visibility and drag/button ordering preferences persist without expiry.
@@ -50,6 +59,14 @@ Permanently-updated links: https://github.com/fvmoraes/kubepeep/blob/main/docs/d
   default namespace before other authorized origins.
 - Only Pods expose bulk deletion; other resource tables retain compatible
   selection/actions without bulk delete.
+- Custom Resources has its own sidebar group between Configuration and Storage,
+  with Add Custom Resource first and saved views below it.
+- Common detail tabs have a consistent order; resource-specific tabs follow
+  alphabetically and Actions stays last. YAML keeps syntax colors while editing.
+- Table columns keep common fields first, then additional fields alphabetically
+  by their displayed labels. Explicit custom orders continue to take precedence.
+- Context colors use Blue, Yellow, Red and Green presets and a full-width header
+  divider. English is the active language; planned translations show `(future)`.
 
 ### Fixed
 
@@ -63,6 +80,16 @@ Permanently-updated links: https://github.com/fvmoraes/kubepeep/blob/main/docs/d
   network and timeout failures, with bounded retries and partial coverage.
 - SQLite migration 0004 preserves existing preferences and enables context
   colors, column ordering and custom views across application restarts.
+- SQLite migration 0005 preserves existing settings and adds bounded saved
+  port-forward recipes, isolated by profile, context and source object.
+- Port-forward setup cancellation closes the listener; concurrent replacements
+  are serialized per source object and keep the global session limit.
+- Successful scope saves clear their inputs. Context switches do not wait for
+  auxiliary reads or allow delayed responses to replace newer selections.
+- Virtualized tables reuse filter choices and row measurements while scrolling,
+  avoiding repeated work across every loaded row.
+- macOS DMGs include an Applications shortcut beside the app for drag-and-drop
+  installation, verified by the native packaging test.
 
 ### Security
 

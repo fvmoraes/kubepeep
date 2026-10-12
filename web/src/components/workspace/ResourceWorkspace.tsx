@@ -1,3 +1,5 @@
+import { PortForwardList } from '../PortForwardList'
+import { saveForwardRecipe } from '../../api/portForwards'
 import { QuantityUsage, QuotaUsage, WorkloadProgress } from '../resource/QuantityUsage'
 import { helmDriver, isHelmCollection } from '../../navigation/helm'
 import { getHelmRelease } from '../../api/client'
@@ -89,6 +91,13 @@ const HelmHistory = lazy(() => import('./HelmDetails').then((module) => ({ defau
 const refToWorkspaceRef = resourceRefForKind
 
 export function tabsFor(entry: WorkspaceEntry): ResourceTab[] {
+  const order = ['overview', 'logs', 'yaml', 'metrics', 'containers', 'events', 'data']
+  const rank = (id: string) => id === 'actions' ? Number.MAX_SAFE_INTEGER : order.includes(id) ? order.indexOf(id) : order.length
+  // Keep common tabs fixed, sort resource-specific labels alphabetically, and leave Actions last.
+  return availableTabsFor(entry).sort((left, right) => rank(left.id) - rank(right.id) || left.label.localeCompare(right.label, 'en'))
+}
+
+function availableTabsFor(entry: WorkspaceEntry): ResourceTab[] {
   if (parseDynamicCollection(entry.collection)) return [{ id: 'overview', label: 'Overview' }, { id: 'yaml', label: 'YAML' }]
   if (isHelmCollection(entry.collection)) return [{id:'overview',label:'Overview'},{id:'values',label:'Values'},{id:'manifest',label:'Manifest'},{id:'history',label:'History'}]
   const tabs: ResourceTab[] = [{ id: 'overview', label: 'Overview' }]
@@ -465,7 +474,11 @@ function ServiceActions({ entry, detail, selection, setTab }: { entry: Workspace
         expectedGeneration: selection.generation,
       }, csrfToken, createIdempotencyKey())
     },
-    onSuccess: (session) => {
+    onSuccess: async (session) => {
+      try {
+        const saved = await saveForwardRecipe({ clusterProfileId: selection.clusterProfileId, context: selection.context, namespace: entry.namespace!, kind: 'Service', name: entry.name, remotePort: session.sourcePort ?? servicePort, localPort: session.localPort }, selection.generation)
+        queryClient.setQueryData(['preferences'], saved)
+      } catch (error) { toast.error('Port-forward is active but its ports could not be saved', errorMessage(error)) }
       toast.success('Service port-forward active', `127.0.0.1:${session.localPort} → ${entry.namespace}/${entry.name}:${servicePort} through Pod ${session.pod}.`)
       void queryClient.invalidateQueries({ queryKey: ['port-forwards'] })
     },
@@ -487,6 +500,7 @@ function ServiceActions({ entry, detail, selection, setTab }: { entry: Workspace
       <Button disabled={!canStart || portForward.isPending} disabledReason={disabledReason} onClick={() => portForward.mutate()}>{portForward.isPending ? 'Starting…' : 'Start port-forward'}</Button>
     </div>
     {!localValid ? <p className="m-0 text-content text-kp-red" role="alert">An explicit local port must be 1,024–65,535.</p> : null}
+    <PortForwardList selection={selection} target={{ kind: 'Service', namespace: entry.namespace!, name: entry.name }} />
     <p className="m-0 text-content text-kp-overlay-text" role="note">KubePeep resolves one ready backing Pod, rechecks exact Pod port-forward permission, and binds only to 127.0.0.1.</p>
   </div>
 }

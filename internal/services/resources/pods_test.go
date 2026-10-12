@@ -55,6 +55,23 @@ func TestPodInventoryContainerStatesAndStartup(t *testing.T) {
 	}
 }
 
+func TestPodOwnerRetainsAPIIdentity(t *testing.T) {
+	t.Parallel()
+	controller := true
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{OwnerReferences: []metav1.OwnerReference{
+		{APIVersion: "example.com/v1", Kind: "Job", Name: "same-name", UID: "not-controller"},
+		{APIVersion: "batch/v1", Kind: "Job", Name: "same-name", UID: "batch-job-uid", Controller: &controller},
+	}}}
+	owner := ConvertPod(pod, time.Now()).Owner
+	if owner == nil || owner.APIVersion != "batch/v1" || owner.UID != "batch-job-uid" || owner.Name != "same-name" || owner.Kind != "Job" {
+		t.Fatalf("controller identity was lost: %+v", owner)
+	}
+	encoded, err := json.Marshal(OwnerDTO{Kind: "Job", Name: "legacy"})
+	if err != nil || string(encoded) != `{"kind":"Job","name":"legacy"}` {
+		t.Fatalf("optional owner identity changed legacy wire shape: %s %v", encoded, err)
+	}
+}
+
 func TestPodDetailRelatedEventsJSON(t *testing.T) {
 	t.Parallel()
 	for _, tt := range []struct {

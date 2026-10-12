@@ -21,10 +21,14 @@ interface SidebarProps {
   collapsedGroups: string[]
   onToggleGroup: (id: string) => void
   onNavigate?: () => void
+  customViews?: NavItem[]
 }
 
-export function Sidebar({ version, compact, onToggleCompact, collapsedGroups, onToggleGroup, onNavigate }: SidebarProps) {
+export function Sidebar({ version, compact, onToggleCompact, collapsedGroups, onToggleGroup, onNavigate, customViews = [] }: SidebarProps) {
   const location = useLocation()
+  const groups = navGroups.map(group => group.id === 'custom-resources' ? { ...group, items: [...group.items, ...customViews] } : group)
+  const selectedView = customViews.find(item => location.pathname === item.path || location.pathname.startsWith(`${item.path}/`))
+  const activeId = selectedView?.id ?? activeNavItem(location.pathname)?.id
 
   // The group owning the active route is always rendered expanded (derived,
   // never stored, so navigation can never hide the active item).
@@ -60,9 +64,9 @@ export function Sidebar({ version, compact, onToggleCompact, collapsedGroups, on
           onClick={(event) => { if (event.button === 0 && !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) { beginViewNavigation(item.path!); onNavigate?.() } }}
           end={item.path === '/' || item.path === '/workloads'}
           data-tip={compact ? item.tip ?? item.label : undefined}
-          aria-current={activeNavItem(location.pathname)?.id === item.id ? 'page' : false}
+          aria-current={activeId === item.id ? 'page' : false}
           className={() => `control flex items-center gap-2.5 px-2.5 text-menu transition-colors ${
-            activeNavItem(location.pathname)?.id === item.id
+            activeId === item.id
               ? 'bg-kp-accent-bg text-kp-mauve font-bold'
               : 'text-kp-subtext hover:bg-kp-surface-3 hover:text-kp-text'
           } ${compact ? 'justify-center px-0' : ''}`}
@@ -72,13 +76,13 @@ export function Sidebar({ version, compact, onToggleCompact, collapsedGroups, on
         </NavLink>
       )
     }
-  }, [compact, location.pathname, onNavigate])
+  }, [compact, activeId, onNavigate])
 
   return (
     <aside
       className={`flex h-full flex-col border-r border-kp-overlay-0 bg-kp-mantle ${compact ? 'w-[var(--sidebar-width-compact)]' : 'w-[var(--sidebar-width)]'}`}
     >
-      <div className={`flex h-[var(--header-height)] shrink-0 items-center gap-2.5 border-b border-kp-overlay-0 px-3 ${compact ? 'justify-center px-0' : ''}`}>
+      <div className={`sidebar-brand flex h-[var(--header-height)] shrink-0 items-center gap-2.5 border-b border-kp-overlay-0 px-3 ${compact ? 'justify-center px-0' : ''}`}>
         <BrandLogo size={28} />
         {!compact ? (
           <div className="min-w-0 leading-tight">
@@ -92,11 +96,11 @@ export function Sidebar({ version, compact, onToggleCompact, collapsedGroups, on
         <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-2 py-2">
           {compact ? (
             <div className="grid gap-0.5">
-              {navGroups.flatMap((group) => group.items.map(renderItem))}
+              {groups.flatMap((group) => group.items.map(renderItem))}
             </div>
           ) : (
             <div className="grid gap-3">
-              {navGroups.map((group) => {
+              {groups.map((group) => {
                 const isCollapsed = collapsedGroups.includes(group.id) && group.id !== activeGroupId
                 return (
                   <section key={group.id} aria-label={group.label}>

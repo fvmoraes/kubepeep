@@ -70,12 +70,12 @@ test('Helm values remain encoded and require confirmation; conflicts preserve th
  await page.getByRole('button',{name:'Load authorized YAML',exact:true}).click()
  await page.getByRole('button',{name:'Edit values',exact:true}).click()
  const editor=page.getByRole('textbox',{name:'Helm values YAML · revision 4'})
- await expect(editor).toHaveValue(values)
+ await expect(editor).toContainText('replicaCount: 2')
  const edited=values.replace('replicaCount: 2','replicaCount: 3')+'# editor scroll fixture\n'.repeat(100)
  await editor.fill(edited)
  for(const viewport of [{width:1440,height:900},{width:390,height:844}]){
   await page.setViewportSize(viewport)
-  await expect(editor).toBeInViewport({ratio:.99})
+  await expect(page.locator('.yaml-editor')).toBeInViewport({ratio:.99})
   await expect(page.getByRole('button',{name:'Review and apply values'})).toBeInViewport()
  }
  await page.screenshot({path:testInfo.outputPath('helm-values-mobile.png')})
@@ -85,7 +85,8 @@ test('Helm values remain encoded and require confirmation; conflicts preserve th
  await confirm.getByRole('checkbox').check()
  await confirm.getByRole('button',{name:'Apply values',exact:true}).click()
  await expect(page.getByRole('alert')).toContainText('draft is preserved')
- await expect(editor).toHaveValue(edited)
+ await editor.press('Control+Home')
+ await expect(editor).toContainText('replicaCount: 3')
  expect(requests[0]).toEqual({confirmed:true,action:'values',expectedGeneration:generation,expectedRevision:4,expectedUid:release.uid,expectedResourceVersion:release.resourceVersion,values:edited})
  conflict=false
  await page.getByRole('button',{name:'Review and apply values'}).click()

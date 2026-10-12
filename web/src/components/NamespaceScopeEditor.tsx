@@ -191,10 +191,18 @@ export function NamespaceScopeForm({ selection, csrfToken, sessionError, onSessi
       }, csrfToken!)
       : createNamespaceScope({ ...requestBody(), name: effectiveName }, csrfToken!),
     onSuccess: (scope) => {
+      inFlightRef.current?.abort()
+      payloadRef.current = ''
+      setName('')
+      setRawInput('')
+      setDefaultNamespace('')
+      setPickerFilter('')
+      setServerValidation(null)
+      setAutoCheckState('idle')
+      setModeSwitched(false)
+      setMode('single')
+      validation.reset()
       onSaved?.(scope)
-      if (!editing) {
-        setName('')
-      }
     },
   })
 
@@ -215,13 +223,13 @@ export function NamespaceScopeForm({ selection, csrfToken, sessionError, onSessi
       void (async () => {
         try {
           const report = await validateNamespaceScope(payload, csrfToken, controller.signal)
-          if (payloadRef.current !== JSON.stringify(payload)) return
+          if (controller.signal.aborted || payloadRef.current !== JSON.stringify(payload)) return
           if (isValidationReport(report)) {
             setServerValidation(report)
             setAutoCheckState('idle')
           }
         } catch (cause) {
-          if ((cause as Error)?.name === 'AbortError') return
+          if (controller.signal.aborted || (cause as Error)?.name === 'AbortError') return
           setAutoCheckState('error')
         }
       })()
@@ -240,6 +248,7 @@ export function NamespaceScopeForm({ selection, csrfToken, sessionError, onSessi
   // forbids empty names, so this can only help.
   const effectiveName = name !== '' ? name : (shownValidation.valid[0] ?? '')
   const nameError = effectiveName.trim() === '' ? 'Scope name is required — for example: Finance workloads.' : null
+  const hasInput = name.trim() !== '' || rawInput.trim() !== '' || mode === 'all'
 
   const canContactServer = csrfToken !== null && !validation.isPending && !save.isPending
   const canValidate = canContactServer && shownModeError === null && mode !== 'all' && parsed.validation.valid.length > 0
@@ -265,7 +274,7 @@ export function NamespaceScopeForm({ selection, csrfToken, sessionError, onSessi
         <div className="grid gap-3 md:grid-cols-[minmax(100px,0.6fr)_minmax(160px,1fr)_minmax(180px,1.4fr)]" aria-label="Scope origin">
           <label className="grid gap-1"><span className="text-column uppercase tracking-wider text-kp-overlay-text">Profile</span><Input aria-label="Scope cluster profile" value={String(selection.clusterProfileId)} readOnly /></label>
           <label className="grid gap-1"><span className="text-column uppercase tracking-wider text-kp-overlay-text">Context</span><Input aria-label="Scope context" value={selection.context} readOnly /></label>
-          <label className="grid gap-1"><span className="text-column uppercase tracking-wider text-kp-overlay-text">Name <span aria-hidden="true" className="text-kp-red">*</span></span><Input aria-label="Scope name" aria-invalid={nameError !== null} value={effectiveName} maxLength={120} onChange={(event) => setName(event.target.value)} placeholder="Finance workloads" /></label>
+          <label className="grid gap-1"><span className="text-column uppercase tracking-wider text-kp-overlay-text">Name <span aria-hidden="true" className="text-kp-red">*</span></span><Input aria-label="Scope name" aria-invalid={hasInput && nameError !== null} value={effectiveName} maxLength={120} onChange={(event) => setName(event.target.value)} placeholder="Finance workloads" /></label>
         </div>
 
         <fieldset className="m-0 flex flex-wrap items-center gap-2 border-0 p-0">
@@ -396,13 +405,13 @@ export function NamespaceScopeForm({ selection, csrfToken, sessionError, onSessi
         {save.isError ? <p className="m-0 text-content text-kp-red" role="alert">{messageFor(save.error)}</p> : null}
         {save.isSuccess ? <p className="m-0 text-content text-kp-green" role="status">Scope “{save.data.name}” was {editing ? 'updated' : 'saved'}.</p> : null}
 
-        {shownModeError ? <p className="m-0 text-content text-kp-red" role="alert">{shownModeError}</p> : null}
+        {hasInput && shownModeError ? <p className="m-0 text-content text-kp-red" role="alert">{shownModeError}</p> : null}
         {allModeBlocked ? (
           <p className="m-0 rounded-r-md border-l-2 border-kp-yellow-border bg-kp-yellow-bg px-3 py-2 text-content leading-relaxed text-kp-yellow" role="alert">
             All mode requires namespace listing, which is denied for this identity on this cluster — the save would always fail. Use <strong>list</strong> mode and type the namespace names manually.
           </p>
         ) : null}
-        {nameError ? <p className="m-0 text-content text-kp-red" role="alert">{nameError}</p> : null}
+        {hasInput && nameError ? <p className="m-0 text-content text-kp-red" role="alert">{nameError}</p> : null}
         {shownValidation.invalid.some((entry) => entry.code === 'NAMESPACE_NOT_FOUND') ? (
           <p className="m-0 rounded-r-md border-l-2 border-kp-yellow-border bg-kp-yellow-bg px-3 py-2 text-content leading-relaxed text-kp-yellow" role="note">
             Names marked <strong>not found</strong> do not exist in the cluster above — click their chips to remove them, or switch to the right cluster. Saving stays blocked while they are listed.

@@ -218,6 +218,12 @@ func TestResourceQueryGrammarIsClosedAndNormalized(t *testing.T) {
 		{"sort=name&sort=age", resourcecore.CollectionPods, false},
 		{"unknown=x", resourcecore.CollectionPods, false},
 		{"problematic=1", resourcecore.CollectionPods, false},
+		{"latestJobRuns=true", resourcecore.CollectionPods, true},
+		{"latestJobRuns=false", resourcecore.CollectionPods, true},
+		{"latestJobRuns=1", resourcecore.CollectionPods, false},
+		{"latestJobRuns=", resourcecore.CollectionPods, false},
+		{"latestJobRuns=true&latestJobRuns=false", resourcecore.CollectionPods, false},
+		{"latestJobRuns=false", resourcecore.CollectionWorkloads, false},
 		{"addressType=IPv4", resourcecore.CollectionServices, false},
 	}
 	for _, test := range tests {

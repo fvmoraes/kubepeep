@@ -12,7 +12,7 @@ import { resourceRefreshInterval } from './autoRefresh'
 function RecoveryNote({ error }: { error?: unknown }) {
   const { enabled } = useAutoRefresh()
   if (error && resourceRefreshInterval(error) === false) return null
-  return <small className="block mt-2 text-kp-overlay-text">{enabled ? 'Automatic retry every 10 seconds while this view is active.' : 'Automatic refresh is off. Enable Auto · 10s or retry the collection to check again.'}</small>
+  return <small className="block mt-2 text-kp-overlay-text">{enabled ? 'Automatic retry every 5 seconds while this view is active.' : 'Automatic refresh is off. Enable Auto · 5s or retry the collection to check again.'}</small>
 }
 
 function EmptySelection() {

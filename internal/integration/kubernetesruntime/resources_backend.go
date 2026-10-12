@@ -63,12 +63,17 @@ type CursorMemoryStore interface {
 // credentials: every operation obtains a generation-bound lease from Runtime
 // and exposes only resource DTOs or a bounded YAML document.
 type ResourceBackend struct {
-	runtime       *Runtime
-	clients       resourceClientProvider
-	authorizer    resources.AuthorizationChecker
-	redactor      resources.TextRedactor
-	now           func() time.Time
-	viewDiscovery resourceDiscoveryCache
+	runtime           *Runtime
+	clients           resourceClientProvider
+	authorizer        resources.AuthorizationChecker
+	redactor          resources.TextRedactor
+	now               func() time.Time
+	viewDiscovery     resourceDiscoveryCache
+	jobRunsMu         sync.Mutex
+	jobRuns           map[jobRunCacheKey]jobRunCacheEntry
+	jobRunsEpoch      uint64
+	jobRunsGeneration string
+	jobRunsClosed     bool
 
 	listWindowTimeout      time.Duration
 	metrics                *observability.Registry
@@ -143,6 +148,11 @@ func NewResourceBackendWithOptions(runtime *Runtime, authorizer resources.Author
 }
 
 func (backend *ResourceBackend) OnGeneration(next string) {
+	backend.jobRunsMu.Lock()
+	backend.jobRunsEpoch++
+	backend.jobRunsGeneration = next
+	clear(backend.jobRuns)
+	backend.jobRunsMu.Unlock()
 	backend.collectionCache.SwitchGeneration(next)
 	backend.watchMu.Lock()
 	previous := backend.watchGeneration
@@ -168,6 +178,11 @@ func (backend *ResourceBackend) Close() {
 		manager.Close()
 	}
 	backend.requestCoalescer().Close()
+	backend.jobRunsMu.Lock()
+	backend.jobRunsEpoch++
+	backend.jobRunsClosed = true
+	clear(backend.jobRuns)
+	backend.jobRunsMu.Unlock()
 }
 
 func (backend *ResourceBackend) activeWatchManager() *resources.WatchManager {
@@ -772,9 +787,16 @@ func (backend *ResourceBackend) ListWorkloads(ctx context.Context, binding names
 }
 
 func (backend *ResourceBackend) ListPods(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, options resources.ListOptions, cursor *resources.CompositeCursor[resources.PodDTO]) (resources.ListResult[resources.PodDTO], error) {
-	return collectFilteredResource(ctx, backend, binding, resolution, resources.CollectionPods, options, cursor, podIdentityLess, func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[resources.PodDTO], error) {
+	result, err := collectFilteredResource(ctx, backend, binding, resolution, resources.CollectionPods, options, cursor, podIdentityLess, func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[resources.PodDTO], error) {
 		return backend.listPodPage(ctx, binding, page)
 	}, filterSortPods)
+	if err == nil && options.LatestJobRuns && options.Workload == "" && options.FieldSelector == "" {
+		result.Items, result.Page.JobRunsPartial = backend.latestJobRunPods(ctx, binding, result.Items)
+		if ctx.Err() != nil {
+			return resources.ListResult[resources.PodDTO]{}, ctx.Err()
+		}
+	}
+	return result, err
 }
 
 func (backend *ResourceBackend) ListEvents(ctx context.Context, binding namespaces.SelectionBinding, resolution namespaces.ScopeResolution, options resources.ListOptions, cursor *resources.CompositeCursor[resources.EventDTO]) (resources.ListResult[resources.EventDTO], error) {

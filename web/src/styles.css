@@ -148,11 +148,13 @@ kbd {
   overflow: hidden;
   display: grid;
   grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
 }
 .app-shell--compact { grid-template-columns: var(--sidebar-width-compact) minmax(0, 1fr); }
-.app-shell > aside { height: 100dvh; position: sticky; top: 0; }
+.app-shell > aside { height: 100dvh; position: sticky; top: 0; display: grid; grid-template-rows: subgrid; grid-row: 1 / -1; }
+.app-shell > aside > .sidebar-brand { height: auto; min-height: var(--header-height); }
 
-.workspace { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+.workspace { min-width: 0; min-height: 0; display: grid; grid-template-rows: subgrid; grid-row: 1 / -1; }
 
 .topbar {
   flex-shrink: 0;
@@ -326,7 +328,10 @@ main > .resource-family-nav { flex-shrink: 0; }
 .resource-usage-track > span { display: block; height: 100%; background: var(--color-kp-green); }
 .resource-usage[data-tone="warning"] .resource-usage-track > span { background: var(--color-kp-yellow); }
 .resource-usage[data-tone="danger"] .resource-usage-track > span { background: var(--color-kp-red); }
-.yaml-editor { width: 100%; min-height: 400px; resize: vertical; tab-size: 2; padding: 16px; font-family: var(--font-mono); font-size: var(--text-content); line-height: 1.6; color: var(--color-kp-text); background: var(--color-kp-crust); border: 1px solid var(--color-kp-overlay-1); border-radius: var(--radius-md); }
+.yaml-editor { width: 100%; min-height: 400px; height: 50vh; overflow: hidden; border: 1px solid var(--color-kp-overlay-1); border-radius: var(--radius-md); }
+.yaml-editor:focus-within { border-color: var(--color-kp-mauve); }
+.release-notice { flex-shrink: 0; padding-top: 6px; text-align: right; font-size: var(--text-content); color: var(--color-kp-sky); }
+.release-notice a:hover { text-decoration: underline; }
 
 
 /* Dense inventory: one line per cell, with controls in the column headers. */
@@ -441,7 +446,8 @@ main :where(dd, p) { overflow-wrap: anywhere; }
 
 /* A quiet, persistent context cue at the shell dividers. */
 .app-shell[data-context-color] > aside { border-right-color: color-mix(in srgb, var(--context-color) 65%, var(--color-kp-overlay-0)); }
-.app-shell[data-context-color] .topbar { border-bottom-color: color-mix(in srgb, var(--context-color) 65%, var(--color-kp-overlay-0)); }
+.app-shell[data-context-color] .topbar,
+.app-shell[data-context-color] .sidebar-brand { border-bottom-color: color-mix(in srgb, var(--context-color) 65%, var(--color-kp-overlay-0)); }
 
 .kubeconfig-dialog { width: min(38rem, calc(100vw - 2rem)); max-height: calc(100dvh - 2rem); overflow: auto; margin: auto; padding: 1rem; border: 1px solid var(--color-kp-overlay-1); border-radius: var(--control-radius); background: var(--color-kp-surface-0); color: var(--color-kp-text); }
 .kubeconfig-dialog::backdrop { background: rgb(0 0 0 / 65%); }

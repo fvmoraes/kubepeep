@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { ContextSelector } from './ContextSelector'
@@ -134,5 +134,39 @@ describe('context selector cancellation and states', () => {
 
     await waitFor(() => expect(firstSelectionAborted).toBe(true))
     await waitFor(() => expect(selectionCalls).toBe(2))
+  })
+
+  it('does not roll back a newer status when an older context response arrives late', async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+    const initial = { clusterProfileId: 1, context: 'alpha', cluster: 'dev', scopeId: null, scopeName: null, scopeMode: null, scopeSource: 'none' as const, defaultNamespace: null, namespaceCount: 0, generation: 'gen_1' }
+    client.setQueryData(['local-status'], { selection: initial, components: {} })
+    let resolveSelection: ((response: Response) => void) | undefined
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const url = String(input)
+      if (url === '/api/v1/cluster/profiles') return Promise.resolve(json([{ id: 1, name: 'Development', context: 'alpha', isDefault: true, kubeconfigFiles: [] }]))
+      if (url.startsWith('/api/v1/contexts?')) return Promise.resolve(json([
+        { clusterProfileId: 1, name: 'alpha', cluster: 'dev', selected: true },
+        { clusterProfileId: 1, name: 'beta', cluster: 'dev', selected: false },
+      ]))
+      if (url === '/api/v1/session') return Promise.resolve(json({ csrfToken: 'nonce', generation: 'gen_1' }))
+      if (url === '/api/v1/contexts/select') return new Promise<Response>(resolve => { resolveSelection = resolve })
+      return Promise.resolve(json([]))
+    }))
+    render(<QueryClientProvider client={client}><ContextSelector selection={initial} /></QueryClientProvider>)
+    const contexts = await screen.findByRole('combobox', { name: 'Kubernetes context' })
+    await waitFor(() => expect(contexts).toBeEnabled())
+    fireEvent.change(contexts, { target: { value: 'beta' } })
+    await waitFor(() => expect(resolveSelection).toBeDefined())
+
+    // The selection committed, then a newer scope/context was published by a
+    // status read before the older POST response crossed the local bridge.
+    const latest = { ...initial, context: 'beta', scopeId: 2, scopeName: 'Latest scope', generation: 'gen_3' }
+    await act(async () => {
+      client.setQueryData(['local-status'], { selection: latest, components: {} })
+      resolveSelection?.(json({ ...initial, context: 'beta', generation: 'gen_2' }))
+    })
+    await waitFor(() => expect(contexts).toBeEnabled())
+    expect(client.getQueryData(['local-status'])).toMatchObject({ selection: latest })
+    client.clear()
   })
 })

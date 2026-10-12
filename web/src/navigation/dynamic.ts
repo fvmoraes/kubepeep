@@ -13,7 +13,7 @@ export function parseDynamicCollection(collection: string): DynamicResource | nu
 export function dynamicResourceSegments(resource: DynamicResource): string {
   return [resource.group || '_', resource.version, resource.resource, resource.namespaced ? 'n' : 'c'].map(encodeURIComponent).join('/')
 }
-export function dynamicListPath(resource: DynamicResource): string { return `/workloads/custom/${dynamicResourceSegments(resource)}` }
+export function dynamicListPath(resource: DynamicResource): string { return `/custom-resources/${dynamicResourceSegments(resource)}` }
 
 /** Printer order may change when a CRD is updated; keep saved columns tied to their definition. */
 export function dynamicColumnKey(column: DynamicColumn): string {

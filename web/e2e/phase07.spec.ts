@@ -15,13 +15,14 @@ const navigationInventory = [
   '/', '/nodes', '/events', '/namespaces', '/leases', '/workloads',
   '/workloads/kind/deployments', '/pods', '/workloads/kind/replicasets',
   '/workloads/kind/daemonsets', '/workloads/kind/statefulsets',
-  '/workloads/kind/jobs', '/workloads/kind/cronjobs', '/workloads/custom', '/network/services',
+  '/workloads/kind/jobs', '/workloads/kind/cronjobs', '/network/services',
   '/network/endpoints', '/network/endpoint-slices', '/network/ingresses',
   '/network/ingress-classes', '/network/network-policies', '/network/port-forwards',
   '/network/gateway-api/gateways',
   '/helm/releases/secrets',
   '/config/configmaps', '/config/secrets', '/configuration/resource-quotas',
   '/configuration/limit-ranges', '/configuration/hpas', '/configuration/pdbs',
+  '/custom-resources?add=1',
   '/storage/persistent-volumes', '/storage/persistent-volume-claims',
   '/storage/volume-attachments', '/storage/storage-classes', '/storage/csi-nodes',
   '/storage/csi-drivers', '/service-accounts', '/access/roles',
@@ -70,6 +71,7 @@ test.beforeEach(async ({ context }) => {
       defaultNamespace: 'payments', namespaceCount: 2, generation,
     })
     else if (url.pathname === '/api/v1/preferences') data = preferences
+    else if (url.pathname === '/api/v1/resource-discovery') data = { resources: [], failures: [], truncated: false }
     else if (url.pathname === '/api/v1/session') data = { csrfToken: 'csrf_phase07', origin: 'http://127.0.0.1:4173', generation, expiresAt: '2026-09-30T18:00:00Z' }
     else if (url.pathname === '/api/v1/stream' || url.pathname.endsWith('/logs/stream')) {
       await route.fulfill({ status: 200, contentType: 'text/event-stream', body: `event: complete\ndata: ${JSON.stringify({ generation, topic: url.searchParams.get('topic'), completedNamespaces: 2, requestedNamespaces: 2 })}\n\n` })
@@ -94,9 +96,15 @@ for (const viewport of viewports) {
       const link = navigation.locator(`a[href="${path}"]`)
       await expect(link).toBeVisible()
       await link.click()
-      await expect(page).toHaveURL(path === '/' ? /\/$/ : new RegExp(`${path.replace(/\//g, '\\/')}$`))
+      await expect(page).toHaveURL((url) => url.pathname + url.search === path)
       await expect(link).toHaveAttribute('aria-current', 'page')
-      await expect(page.locator('.resource-family-nav a[aria-current="page"]')).toBeInViewport({ ratio: 0.95 })
+      if (path === '/custom-resources?add=1') {
+        await expect(page.getByRole('dialog', { name: 'Add custom resource' })).toBeVisible()
+        await page.getByRole('button', { name: 'Close resource discovery' }).click()
+        await expect(page.getByRole('heading', { name: 'Custom resources', exact: true })).toBeVisible()
+      } else {
+        await expect(page.locator('.resource-family-nav a[aria-current="page"]')).toBeInViewport({ ratio: 0.95 })
+      }
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
       expect(overflow, `${path} overflow at ${viewport.name}`).toBeLessThanOrEqual(1)
     }

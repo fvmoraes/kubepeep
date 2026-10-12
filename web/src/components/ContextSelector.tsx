@@ -12,9 +12,11 @@ import {
   type SelectionData,
   type SelectionSummary,
 } from '../api/client'
+import type { StatusData } from '../api/types'
 import { Select } from './ui'
 import { KubeconfigImport } from './KubeconfigImport'
 import { ContextColorPicker } from './ContextColorPicker'
+import { publishSelection } from '../api/selection'
 
 interface ContextSelectorProps {
   selection: SelectionSummary | null
@@ -84,42 +86,39 @@ export function ContextSelector({ selection, onSelected }: ContextSelectorProps)
     ?? contextList[0]
   const effectiveContextName = contextName === '' && effectiveProfileId !== selection?.clusterProfileId ? '' : preferredContext?.name ?? contextName
 
-  const session = useQuery({
-    queryKey: ['session'],
-    queryFn: ({ signal }) => getSession(signal),
-    enabled: effectiveProfileId !== null,
-    staleTime: 5 * 60_000,
-    retry: false,
-  })
-
   const contextSelection = useMutation({
     mutationFn: async ({ intent, controller, context }: { intent: number; controller: AbortController; context: string }) => {
-      if (effectiveProfileId === null || context === '' || !session.data) {
+      if (effectiveProfileId === null || context === '') {
         throw new Error('Context selection is not ready.')
       }
+      // The nonce rotates on every switch. Fetch it for this intent instead of
+      // holding the selector disabled while unrelated lists refresh.
+      const previousGeneration = queryClient.getQueryData<StatusData>(['local-status'])?.selection?.generation
+      const session = await getSession(controller.signal)
       const selected = await selectContext({
         clusterProfileId: effectiveProfileId,
         context,
         setDefault: true,
-        expectedGeneration: session.data.generation,
-      }, session.data.csrfToken, controller.signal)
-      return { selected, intent }
+        expectedGeneration: session.generation,
+      }, session.csrfToken, controller.signal)
+      return { selected, intent, previousGeneration }
     },
-    onSuccess: async ({ selected, intent }) => {
+    onSuccess: async ({ selected, intent, previousGeneration }) => {
       if (intent !== selectionIntent.current) {
         return
       }
       setSelectionError(null)
+      const published = await publishSelection(queryClient, selected, previousGeneration, () => intent === selectionIntent.current)
+      if (!published || intent !== selectionIntent.current) return
       onSelected?.(selected)
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ['local-status'] }),
+      void Promise.all([
         queryClient.invalidateQueries({ queryKey: ['cluster-profiles'] }),
         queryClient.invalidateQueries({ queryKey: ['contexts'] }),
       ])
       queryClient.removeQueries({ queryKey: ['session'] })
-      await queryClient.prefetchQuery({ queryKey: ['session'], queryFn: ({ signal }) => getSession(signal), staleTime: 5 * 60_000 })
     },
-    onError: (error) => {
+    onError: (error, { intent }) => {
+      if (intent !== selectionIntent.current) return
       if (error instanceof DOMException && error.name === 'AbortError') {
         return
       }
@@ -127,7 +126,7 @@ export function ContextSelector({ selection, onSelected }: ContextSelectorProps)
     },
   })
 
-  useEffect(() => () => selectionController.current?.abort(), [])
+  useEffect(() => () => { selectionIntent.current += 1; selectionController.current?.abort() }, [])
 
   const submitSelection = (context: string) => {
     selectionController.current?.abort()
@@ -140,6 +139,7 @@ export function ContextSelector({ selection, onSelected }: ContextSelectorProps)
 
   const importControl = <KubeconfigImport onImported={(profile) => {
     selectionController.current?.abort()
+    selectionIntent.current += 1
     setProfileId(profile.id)
     setContextName('')
     setSelectionError(null)
@@ -166,6 +166,7 @@ export function ContextSelector({ selection, onSelected }: ContextSelectorProps)
           value={effectiveProfileId ?? ''}
           onChange={(event) => {
             selectionController.current?.abort()
+            selectionIntent.current += 1
             setProfileId(Number(event.target.value))
             setContextName('')
             setSelectionError(null)
@@ -213,7 +214,6 @@ export function ContextSelector({ selection, onSelected }: ContextSelectorProps)
       {contextSelection.isPending ? <span className="text-content text-kp-overlay-text" role="status">Switching…</span> : null}
       {contexts.isError ? <span className="text-content text-kp-red" role="status">{queryError(contexts.error)}</span> : null}
       {contexts.data && contextList.length === 0 ? <span className="text-content text-kp-red" role="status">No contexts exist in this kubeconfig.</span> : null}
-      {session.isError ? <span className="text-content text-kp-red" role="status">Session bootstrap is unavailable.</span> : null}
       {selectionError ? <span className="text-content text-kp-red" role="alert">{selectionError}</span> : null}
     </div>
   )

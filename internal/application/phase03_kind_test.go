@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"testing"
 	"time"
 
@@ -26,6 +27,24 @@ func TestPhase03KindBrowser(t *testing.T) {
 	if os.Getenv("KUBEPEEP_PHASE03_KIND") != "1" {
 		t.Skip("opt-in Kind/browser performance probe")
 	}
+	kubeconfig := os.Getenv("KUBEPEEP_KIND_KUBECONFIG")
+	if kubeconfig == "" {
+		t.Fatal("set KUBEPEEP_KIND_KUBECONFIG to a dedicated Kind kubeconfig; ambient kubeconfigs are never used")
+	}
+	kubeconfig, err := filepath.Abs(kubeconfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(kubeconfig); err != nil || !info.Mode().IsRegular() {
+		t.Fatal("KUBEPEEP_KIND_KUBECONFIG must name an existing regular file")
+	}
+	cluster := os.Getenv("KUBEPEEP_KIND_CLUSTER")
+	if cluster == "" {
+		cluster = "kubepeep-f4"
+	}
+	if len(cluster) > 63 || !regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$`).MatchString(cluster) {
+		t.Fatal("KUBEPEEP_KIND_CLUSTER must be a lowercase DNS label")
+	}
 	root := t.TempDir()
 	layout, err := userdirs.ForRoot(root)
 	if err != nil {
@@ -39,14 +58,10 @@ func TestPhase03KindBrowser(t *testing.T) {
 		t.Fatal(err)
 	}
 	port := listener.Addr().(*net.TCPAddr).Port
-	home, err := os.UserHomeDir()
-	if err != nil {
-		t.Fatal(err)
-	}
 	platform, err := application.Compose(context.Background(), application.Options{
 		Layout: layout, Config: productconfig.Default(), Port: port,
-		Kubeconfig: filepath.Join(home, ".kube", "config"), KubeconfigSet: true,
-		Context: "kind-kubepeep-f4", ContextSet: true, LogOutput: io.Discard,
+		Kubeconfig: kubeconfig, KubeconfigSet: true,
+		Context: "kind-" + cluster, ContextSet: true, LogOutput: io.Discard,
 	})
 	if err != nil {
 		_ = listener.Close()

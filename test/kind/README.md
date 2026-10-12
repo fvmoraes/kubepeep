@@ -228,3 +228,50 @@ adotar um homônimo surgido entre a leitura e a recuperação.
 
 Para outro cluster Kind dedicado, defina `KUBEPEEP_KIND_CLUSTER`. Não existe
 comando de destruição automática; remover o cluster é sempre decisão manual.
+
+## Probes reais de navegador
+
+`web/e2e/phase02-real.spec.ts` e `phase03-real.spec.ts` são opt-in; o Playwright
+normal os ignora. `test/kind/phase02_browser.py` prepara um processo isolado
+para o dataset **200 namespaces × 10 Pods**, e `phase03_browser.py` usa
+**50 namespaces × 10 Pods**. Não aplicar os dois datasets no mesmo cluster:
+eles compartilham nomes de objetos. A fase 2 também requer Linux para medir
+RSS em `/proc`. Esses probes são distintos do gate de RBAC/API executado pela CI.
+
+Ambos exigem `KUBEPEEP_KIND_KUBECONFIG`, apontando para um arquivo dedicado,
+e aceitam `KUBEPEEP_KIND_CLUSTER` (default `kubepeep-f4`). Nenhum probe consulta
+implicitamente `~/.kube/config` ou `KUBECONFIG`. Cada chamada de `kubectl`
+recebe o arquivo e contexto explicitamente. O binário recebe um novo kubeconfig
+temporário com token de leitura de uma hora; credenciais administrativas não
+são copiadas para a instância do produto. HOME, diretórios de estado e perfis
+da instância também são temporários.
+
+Com Docker disponível, depois de construir `dist/kubePeep` e instalar as
+dependências do Playwright, um laboratório novo da fase 3 pode ser preparado
+assim, sem modificar o kubeconfig pessoal:
+
+```sh
+probe_dir=$(mktemp -d)
+probe_cluster=kubepeep-phase03
+kind create cluster --name "$probe_cluster" \
+  --kubeconfig "$probe_dir/kubeconfig" \
+  --image kindest/node:v1.35.0@sha256:4613778f3cfcd10e615029370f5786704559103cf27bef934597ba562b269661 \
+  --config test/kind/cluster.yaml --wait 120s
+python3 test/kind/benchmark/dataset.py --namespaces 50 --pods-per-namespace 10 > "$probe_dir/dataset.yaml"
+kubectl --kubeconfig "$probe_dir/kubeconfig" --context "kind-$probe_cluster" apply -f "$probe_dir/dataset.yaml"
+KUBEPEEP_KIND_KUBECONFIG="$probe_dir/kubeconfig" \
+KUBEPEEP_KIND_CLUSTER="$probe_cluster" \
+  python3 test/kind/phase03_browser.py
+```
+
+Para a fase 2, usar outro cluster, gerar `--namespaces 200` e executar
+`phase02_browser.py`. Os scripts encerram a instância local ao terminar, mas
+preservam o cluster para inspeção. Remover somente o laboratório criado para
+essa execução, quando não for mais necessário. O servidor de teste Go com a
+tag `phase03kind` exige o mesmo arquivo/contexto explícitos e continua
+desabilitado sem `KUBEPEEP_PHASE03_KIND=1`.
+
+Os testes de isolamento e diagnóstico são offline:
+`python3 -m unittest discover -s test/kind -p 'test_*.py'`. Eles verificam a
+recusa de kubeconfig ambiente, arquivo/contexto explícitos, rejeição de dataset
+incompleto e exportação exclusiva da credencial restrita.

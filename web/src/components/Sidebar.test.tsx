@@ -6,7 +6,7 @@ import { Sidebar } from './Sidebar'
 import { navGroups, settingsNavItem } from '../navigation/tree'
 
 function LocationProbe() {
-  return <output aria-label="Current path">{useLocation().pathname}</output>
+  return <output aria-label="Current path">{useLocation().pathname}{useLocation().search}</output>
 }
 
 afterEach(cleanup)

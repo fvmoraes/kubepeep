@@ -69,7 +69,7 @@ output while capture continues; Resume shows the latest captured lines.
 Closing the panel, changing targets/tabs or changing generation cancels all
 active requests.
 Container access and log reads still pass through exact backend authorization.
-Inventory refresh is a separate global Auto toggle fixed at 10 seconds. It
+Inventory refresh is a separate global Auto toggle fixed at 5 seconds. It
 does not replace the log reader's own follow/pause controls.
 
 ## Workload logs

@@ -9,16 +9,19 @@ import (
 type EventDTO struct {
 	// Name identifies the Event itself, not the involved object. It lets a
 	// deleted watch event remove the exact item from a cached snapshot.
-	Name       string  `json:"name"`
-	Timestamp  *string `json:"timestamp"`
-	Namespace  string  `json:"namespace"`
-	ObjectKind string  `json:"objectKind"`
-	ObjectName string  `json:"objectName"`
-	Reason     string  `json:"reason"`
-	Message    string  `json:"message"`
-	Count      int64   `json:"count"`
-	Source     *string `json:"source"`
-	Type       string  `json:"type"`
+	Name             string  `json:"name"`
+	UID              string  `json:"uid"`
+	ObjectAPIVersion string  `json:"objectAPIVersion"`
+	ObjectNamespace  string  `json:"objectNamespace"`
+	Timestamp        *string `json:"timestamp"`
+	Namespace        string  `json:"namespace"`
+	ObjectKind       string  `json:"objectKind"`
+	ObjectName       string  `json:"objectName"`
+	Reason           string  `json:"reason"`
+	Message          string  `json:"message"`
+	Count            int64   `json:"count"`
+	Source           *string `json:"source"`
+	Type             string  `json:"type"`
 }
 
 func (EventDTO) resourceListItem() {}
@@ -31,6 +34,9 @@ func ConvertEvent(value *corev1.Event, redactor TextRedactor) EventDTO {
 	message = sanitizeText(message, maximumMessageBytes)
 	reason := sanitizeText(value.Reason, maximumMessageBytes)
 	count := int64(value.Count)
+	if value.Series != nil && int64(value.Series.Count) > count {
+		count = int64(value.Series.Count)
+	}
 	if count < 0 {
 		count = 0
 	}
@@ -39,7 +45,8 @@ func ConvertEvent(value *corev1.Event, redactor TextRedactor) EventDTO {
 		typeName = "Unknown"
 	}
 	return EventDTO{
-		Name:      value.Name,
+		Name: value.Name, UID: string(value.UID),
+		ObjectAPIVersion: value.InvolvedObject.APIVersion, ObjectNamespace: value.InvolvedObject.Namespace,
 		Timestamp: eventTimestamp(value), Namespace: value.Namespace,
 		ObjectKind: value.InvolvedObject.Kind, ObjectName: value.InvolvedObject.Name,
 		Reason: reason, Message: message, Count: count,
@@ -50,12 +57,12 @@ func ConvertEvent(value *corev1.Event, redactor TextRedactor) EventDTO {
 func eventTimestamp(value *corev1.Event) *string {
 	var timestamp time.Time
 	switch {
-	case !value.EventTime.IsZero():
-		timestamp = value.EventTime.Time
 	case value.Series != nil && !value.Series.LastObservedTime.IsZero():
 		timestamp = value.Series.LastObservedTime.Time
 	case !value.LastTimestamp.IsZero():
 		timestamp = value.LastTimestamp.Time
+	case !value.EventTime.IsZero():
+		timestamp = value.EventTime.Time
 	case !value.FirstTimestamp.IsZero():
 		timestamp = value.FirstTimestamp.Time
 	case !value.CreationTimestamp.IsZero():

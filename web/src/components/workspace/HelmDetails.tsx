@@ -1,3 +1,4 @@
+import { YamlCodeEditor } from '../YamlCodeEditor'
 import { useEffect, useId, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { parseDocument } from 'yaml'
@@ -67,8 +68,8 @@ export function HelmDocumentEditor({driver,namespace,name,format,selection}:{dri
   {saved?<p role="status" className="text-content text-kp-green">Helm revision {saved} applied. Load YAML to inspect the new values.</p>:null}
   {!editing?<YamlViewer value={document?.document} pending={pending} error={error?new Error(helmError(error)):null} onLoad={()=>void load()} actions={document&&format==='values'?<Button disabled={pending} onClick={()=>{setDraft(document.document);setEditing(true);setError(undefined)}}>Edit values</Button>:undefined}/>:<>
    <div className="flex flex-wrap gap-2"><Button disabled={pending||draft===document?.document} onClick={review}>Review and apply values</Button><Button variant="secondary" disabled={pending} onClick={()=>{setEditing(false);setDraft('');setError(undefined)}}>Cancel editing</Button></div>
-   <label className="text-content font-bold" htmlFor={id}>Helm values YAML · revision {document?.revision}</label>
-   <textarea id={id} className="yaml-editor" spellCheck={false} autoComplete="off" autoCapitalize="off" value={draft} disabled={pending} onChange={event=>setDraft(event.target.value)}/>
+   <label id={`${id}-label`} className="text-content font-bold" htmlFor={id}>Helm values YAML · revision {document?.revision}</label>
+   <YamlCodeEditor id={id} value={draft} disabled={pending} onChange={setDraft}/>
    {error?<p role="alert" className="text-content text-kp-red">{helmError(error)}</p>:null}
   </>}
   <ConfirmDialog open={confirming} severity="warning" title="Apply Helm values" description={`Context ${selection.context} · namespace ${namespace}. Helm will apply the chart resources and run its upgrade hooks, creating a new revision after ${document?.revision}.`} resources={[{kind:'HelmRelease',namespace,name}]} acknowledgementLabel="I understand Helm will apply the release resources and hooks." confirmLabel="Apply values" pending={pending} onCancel={()=>{if(!pending)setConfirming(false)}} onConfirm={()=>void save()}/>

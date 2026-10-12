@@ -41,6 +41,8 @@ mounted=true
 cmp "$app/Contents/MacOS/kubePeep" "$test_root/mounted/kubePeep.app/Contents/MacOS/kubePeep"
 test -x "$test_root/mounted/kubePeep.app/Contents/MacOS/kubePeep"
 test "$(readlink "$test_root/mounted/kubePeep.app/Contents/Resources/runtime")" = '../MacOS/kubePeep'
+test -L "$test_root/mounted/Applications"
+test "$(readlink "$test_root/mounted/Applications")" = /Applications
 hdiutil detach "$test_root/mounted"
 mounted=false
-echo 'DMG round trip passed: content, executable mode, symlinks, and sparse payload'
+echo 'DMG round trip passed: app content, executable mode, Applications shortcut, symlinks, and sparse payload'

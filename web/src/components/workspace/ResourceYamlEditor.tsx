@@ -6,9 +6,11 @@ import type { SelectionSummary } from '../../api/types'
 import { csrfForGeneration } from '../../actions/csrf'
 import { Button } from '../ui'
 import { errorMessage } from '../resource/errors'
+import { YamlCodeEditor } from '../YamlCodeEditor'
 import { YamlViewer } from '../YamlViewer'
 
 const diffCollections = new Set(['pods', 'deployments', 'statefulsets', 'daemonsets', 'jobs', 'cronjobs', 'replicasets', 'services', 'ingresses', 'endpoint-slices', 'configmaps'])
+const podEditingHelp = 'To change CPU or memory, edit resources in the owning workload’s Pod template (for example, a Deployment or StatefulSet). This editor does not perform in-place Pod resize.'
 
 function identity(value: string) {
   const document = parseDocument(value, { uniqueKeys: true })
@@ -27,11 +29,13 @@ function identity(value: string) {
   return { apiVersion: data.apiVersion as string, kind: data.kind as string, name: data.metadata.name as string, namespace: (data.metadata.namespace ?? '') as string, uid: data.metadata.uid as string, resourceVersion: data.metadata.resourceVersion as string }
 }
 
-function saveError(error: unknown) {
+function saveError(error: unknown, collection: string) {
   if (error instanceof APIError) {
     if (error.status === 413) return 'This YAML document exceeds the 2 MiB editor limit.'
     if (error.status === 409) return 'Version changed. Your draft is preserved; copy it before reloading.'
-    if (error.status === 400 || error.status === 422) return 'Invalid YAML or immutable field. Your draft is preserved.'
+    if (error.status === 400 || error.status === 422) return collection === 'pods'
+      ? `Kubernetes rejected this Pod update. Check field values and fields that cannot change after creation. ${podEditingHelp} Your draft is preserved.`
+      : 'Kubernetes rejected this update. Check field values and fields that cannot change after creation. Your draft is preserved.'
   }
   return errorMessage(error)
 }
@@ -39,6 +43,8 @@ function saveError(error: unknown) {
 export function ResourceYamlEditor({ collection, namespace, name, selection }: { collection: string; namespace: string | null; name: string; selection: SelectionSummary }) {
   const client = useQueryClient()
   const editorId = useId()
+  const helpId = `${editorId}-help`
+  const errorId = `${editorId}-error`
   const [original, setOriginal] = useState<ResourceYAMLDocument>()
   const [draft, setDraft] = useState('')
   const [editing, setEditing] = useState(false)
@@ -93,17 +99,18 @@ export function ResourceYamlEditor({ collection, namespace, name, selection }: {
     {saved ? <p role="status" className="text-content text-kp-green">{saved} saved. Load YAML to inspect the new version.</p> : null}
     {!editing ? <>
       {collection === 'secrets' && !original ? <p className="m-0 text-content text-kp-overlay-text">Load YAML to reveal this Secret’s full document. It is kept only while this tab is open.</p> : null}
-      <YamlViewer value={original?.yaml} pending={pending} error={error ? new Error(saveError(error)) : null} onLoad={() => void load()} diffTarget={namespace && diffCollections.has(collection) ? { collection, namespace, name, generation: selection.generation } : undefined} actions={original ? <>
+      <YamlViewer value={original?.yaml} pending={pending} error={error ? new Error(errorMessage(error)) : null} onLoad={() => void load()} diffTarget={namespace && diffCollections.has(collection) ? { collection, namespace, name, generation: selection.generation } : undefined} actions={original ? <>
         <Button disabled={!canEdit || pending} onClick={() => { setDraft(original.yaml); setEditing(true); setError(null) }}>Edit YAML</Button>
         {!canEdit ? <span className="text-content text-kp-overlay-text">{permissions.isPending ? 'Checking update permission…' : permissions.isError ? 'Update permission could not be confirmed.' : 'Read only · update permission required.'}</span> : null}
         {!canEdit && !permissions.isPending ? <Button variant="secondary" disabled={permissions.isFetching} onClick={() => void permissions.refetch()}>Check permission again</Button> : null}
       </> : undefined} />
     </> : <>
       <div className="flex flex-wrap gap-2"><Button disabled={pending || !canEdit || draft === original?.yaml} onClick={() => void save()}>{pending ? 'Saving…' : `Save ${original?.kind}`}</Button><Button variant="secondary" disabled={pending} onClick={() => { setEditing(false); setDraft(''); setError(null) }}>Cancel editing</Button></div>
-      <label htmlFor={editorId} className="text-content font-bold">{original?.kind} YAML</label>
-      <textarea id={editorId} className="yaml-editor" spellCheck={false} autoCapitalize="off" autoComplete="off" value={draft} disabled={pending} onChange={(event) => setDraft(event.target.value)} />
+      {collection === 'pods' && !error ? <p id={helpId} className="m-0 text-content text-kp-subtext">{podEditingHelp}</p> : null}
+      <label id={`${editorId}-label`} htmlFor={editorId} className="text-content font-bold">{original?.kind} YAML</label>
+      <YamlCodeEditor id={editorId} describedBy={error ? errorId : collection === 'pods' ? helpId : undefined} value={draft} disabled={pending} onChange={setDraft} />
       <p className="m-0 text-content text-kp-overlay-text" hidden={Boolean(error)}>Save updates this {original?.kind}.</p>
-      {error ? <p role="alert" className="m-0 text-content text-kp-red">{saveError(error)}</p> : null}
+      {error ? <p id={errorId} role="alert" className="m-0 text-content text-kp-red">{saveError(error, collection)}</p> : null}
 
     </>}
   </section>

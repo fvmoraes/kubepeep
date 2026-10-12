@@ -6,7 +6,8 @@ const slots = [
   ['type', 'kind', 'types', 'class'], ['age', 'created', 'created-at', 'time'],
 ]
 const secondary = ['capacity', 'usage', 'summary', 'target', 'allowed', 'minmax', 'count', 'message', 'rules', 'subjects', 'holder', 'duration', 'renew', 'provisioner', 'binding', 'drivers', 'attach', 'group', 'scope', 'versions', 'value', 'preemption', 'handler', 'chart', 'revision', 'version', 'hosts', 'listeners', 'local', 'remote-port', 'actions', 'items']
-export function initialColumns(columns: readonly InitialColumn[], maximumVisible = 9): { order: string[]; hidden: string[] } {
+const labelCollator = new Intl.Collator('en', { numeric: true, sensitivity: 'base' })
+export function initialColumns<T extends InitialColumn>(columns: readonly T[], maximumVisible = 9, label: (column: T) => string = column => column.key): { order: string[]; hidden: string[] } {
   const role = (column: InitialColumn) => column.initialRole ?? column.key
   const chosen = new Set<string>()
   if (columns.some(column => column.key === 'actions')) chosen.add('actions')
@@ -28,9 +29,14 @@ export function initialColumns(columns: readonly InitialColumn[], maximumVisible
   }
   const rank = (column: InitialColumn) => {
     const index = slots.findIndex(slot => slot.includes(role(column)))
-    return index < 0 ? 7.5 : index
+    return index < 0 ? slots.length : index
   }
-  const order = [...columns].sort((a, b) => rank(a) - rank(b)).map(column => column.key)
-  const visible = order.filter(key => chosen.has(key)).slice(0, maximumVisible)
+  const order = [...columns].sort((a, b) => rank(a) - rank(b)
+    || (rank(a) === slots.length ? labelCollator.compare(label(a), label(b)) : 0)).map(column => column.key)
+  // Keep the existing compact selection of useful fields. Alphabetical display
+  // order must not hide actions or change which fields fit the initial viewport.
+  const visibilityRank = (column: InitialColumn) => rank(column) === slots.length ? slots.length - 1.5 : rank(column)
+  const visible = columns.filter(column => chosen.has(column.key))
+    .sort((a, b) => visibilityRank(a) - visibilityRank(b)).slice(0, maximumVisible).map(column => column.key)
   return { order, hidden: columns.filter(column => !visible.includes(column.key)).map(column => column.key) }
 }

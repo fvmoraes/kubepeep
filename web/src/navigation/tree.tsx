@@ -17,6 +17,7 @@ import {
   Lock,
   Network,
   Package,
+  Plus,
   Rocket,
   Ruler,
   ScrollText,
@@ -79,7 +80,6 @@ export const navGroups: NavGroup[] = [
       { id: 'statefulsets', label: 'StatefulSets', path: '/workloads/kind/statefulsets', icon: Database, tip: 'StatefulSets' },
       { id: 'jobs', label: 'Jobs', path: '/workloads/kind/jobs', icon: Package, tip: 'Jobs' },
       { id: 'cronjobs', label: 'CronJobs', path: '/workloads/kind/cronjobs', icon: CalendarClock, tip: 'CronJobs' },
-      { id: 'custom-resources', label: 'Custom resources', path: '/workloads/custom', icon: Layers, tip: 'Pinned resource views for this context', keywords: ['CRD', 'dynamic', 'custom', 'resources'] },
     ],
   },
   {
@@ -113,6 +113,13 @@ export const navGroups: NavGroup[] = [
       { id: 'limit-ranges', label: 'LimitRanges', path: '/configuration/limit-ranges', icon: Ruler, tip: 'LimitRanges' },
       { id: 'hpa', label: 'HorizontalPodAutoscalers', path: '/configuration/hpas', icon: TrendingUp, tip: 'Horizontal Pod Autoscalers' },
       { id: 'pdb', label: 'PodDisruptionBudgets', path: '/configuration/pdbs', icon: ShieldCheck, tip: 'Pod Disruption Budgets' },
+    ],
+  },
+  {
+    id: 'custom-resources',
+    label: 'Custom Resources',
+    items: [
+      { id: 'custom-resources-add', label: 'Add Custom Resource', path: '/custom-resources?add=1', icon: Plus, tip: 'Add a resource view for this context', keywords: ['CRD', 'dynamic', 'custom', 'resources'] },
     ],
   },
   {
@@ -172,8 +179,9 @@ export const settingsNavItem: NavItem = {
 export function activeNavItem(pathname: string): NavItem | undefined {
   const defaultRoutes: Record<string, string> = { '/network': '/network/services', '/config': '/config/configmaps', '/storage': '/storage/persistent-volumes', '/configuration': '/configuration/resource-quotas', '/administration': '/administration/customresourcedefinitions' }
   const workloadDetail = pathname.match(/^\/workloads\/(deployments|statefulsets|daemonsets|replicasets|jobs|cronjobs)\//)
-  const path = workloadDetail ? `/workloads/kind/${workloadDetail[1]}` : defaultRoutes[pathname] ?? pathname
+  const path = workloadDetail ? `/workloads/kind/${workloadDetail[1]}` : pathname.replace(/^\/workloads\/custom(?=\/|$)/, '/custom-resources').split('?')[0]
+  const resolved = defaultRoutes[path] ?? path
   return [...navGroups.flatMap((group) => group.items), settingsNavItem]
-    .filter((item) => item.path && (path === item.path || (item.path !== '/' && path.startsWith(`${item.path}/`))))
+    .filter((item) => { const target = item.path?.split('?')[0]; return target && (resolved === target || (target !== '/' && resolved.startsWith(`${target}/`))) })
     .sort((left, right) => right.path!.length - left.path!.length)[0]
 }

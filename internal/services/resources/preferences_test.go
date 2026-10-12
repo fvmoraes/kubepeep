@@ -69,7 +69,7 @@ func TestPreferencePutValidatesAndReplacesAllKeysTransactionally(t *testing.T) {
 	}
 	// 11 legacy keys + favorites, shell, columns and recent sections with the
 	// same schema v1.
-	if saved.UI.Language != "pt-BR" || len(repository.replaced) != 19 {
+	if saved.UI.Language != "pt-BR" || len(repository.replaced) != 20 {
 		t.Fatalf("saved=%#v records=%d", saved, len(repository.replaced))
 	}
 	for index := 1; index < len(repository.replaced); index++ {

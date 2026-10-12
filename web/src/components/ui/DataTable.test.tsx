@@ -41,3 +41,43 @@ it('sorts numbers in either direction while keeping Job Pods last, and filters v
   fireEvent.click(screen.getByRole('button', { name: 'Reset columns' }))
   expect(screen.getByRole('columnheader', { name: /Restarts/ })).toBeInTheDocument()
 })
+
+it('refreshes filter choices and row identities when a loaded page changes', () => {
+  type Row = { name: string; status: string }
+  const columns = [
+    { key: 'name', header: 'Name', cell: (row: Row) => row.name },
+    { key: 'status', header: 'Status', cell: (row: Row) => row.status },
+  ]
+  const getRowKey = (row: Row) => row.name
+  const toggle = vi.fn()
+  const props = { columns, getRowKey, selectable: true, onToggleRow: toggle }
+  const { rerender } = render(<DataTable {...props} rows={[{ name: 'api', status: 'Running' }, { name: 'worker', status: 'Pending' }]} />)
+  fireEvent.click(screen.getByRole('button', { name: 'Filter Status' }))
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Pending' }))
+  expect(screen.queryByRole('checkbox', { name: 'Select row worker' })).not.toBeInTheDocument()
+
+  rerender(<DataTable {...props} rows={[{ name: 'web', status: 'Failed' }, { name: 'api', status: 'Running' }]} />)
+  expect(screen.queryByRole('checkbox', { name: 'Pending' })).not.toBeInTheDocument()
+  expect(screen.getByRole('checkbox', { name: 'Failed' })).toBeChecked()
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Failed' }))
+  expect(screen.queryByRole('checkbox', { name: 'Select row web' })).not.toBeInTheDocument()
+  fireEvent.keyDown(document, { key: 'Escape' })
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Select row api' }))
+  expect(toggle).toHaveBeenLastCalledWith('api', true)
+})
+
+it('orders extra columns by displayed header after common columns and honors a custom order', () => {
+  const columns = [
+    { key: 'first-extra', header: <span>Zulu</span>, cell: () => 'z' },
+    { key: 'age', header: 'Age', cell: () => '1h' },
+    { key: 'second-extra', header: <strong>Alpha</strong>, cell: () => 'a' },
+    { key: 'name', header: 'Name', cell: () => 'api' },
+    { key: 'third-extra', header: 'beta', cell: () => 'b' },
+  ]
+  const props = { columns, rows: [{ name: 'api' }] }
+  const { rerender } = render(<DataTable {...props} />)
+  const headers = () => screen.getAllByRole('columnheader').map(header => header.getAttribute('aria-label')).filter(Boolean)
+  expect(headers()).toEqual(['Name', 'Age', 'Alpha', 'beta', 'Zulu'])
+  rerender(<DataTable {...props} columnVisibility={{ hidden: [], order: ['first-extra', 'name', 'age', 'third-extra', 'second-extra'], toggle: vi.fn(), reset: vi.fn() }} />)
+  expect(headers()).toEqual(['Zulu', 'Name', 'Age', 'beta', 'Alpha'])
+})

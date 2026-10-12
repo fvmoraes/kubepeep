@@ -633,7 +633,7 @@ function DashboardContent({ selection, cluster }: { selection: SelectionSummary;
 	const restarts = useQuery({ queryKey: ['dashboard', 'restarts', selection.generation, 10], queryFn: ({ signal }) => getDashboardRestarts(10, signal, selection.generation), ...dashboardQueryDefaults, ...autoRefresh })
 	const events = useQuery({ queryKey: ['dashboard', 'events', selection.generation], queryFn: ({ signal }) => getDashboardEvents(signal, selection.generation), ...dashboardQueryDefaults, ...autoRefresh })
 	// Tier 2 cannot occupy network capacity before the core overview settles.
-	const metrics = useQuery({ queryKey: ['dashboard', 'metrics', selection.generation], queryFn: ({ signal }) => getDashboardMetrics(signal, selection.generation), ...dashboardQueryDefaults, ...autoRefresh, enabled: summary.isSuccess, staleTime: 10_000 })
+	const metrics = useQuery({ queryKey: ['dashboard', 'metrics', selection.generation], queryFn: ({ signal }) => getDashboardMetrics(signal, selection.generation), ...dashboardQueryDefaults, ...autoRefresh, enabled: summary.isSuccess, staleTime: 5_000 })
 	const namespaceHealth = useQuery({ queryKey: ['dashboard', 'namespace-health', selection.generation], queryFn: ({ signal }) => getDashboardNamespaceHealth(signal, selection.generation), ...dashboardQueryDefaults, ...autoRefresh, enabled: summary.isSuccess })
 	const infrastructure = useQuery({
 		queryKey: ['dashboard', 'infrastructure', selection.generation],

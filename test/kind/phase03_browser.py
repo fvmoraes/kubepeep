@@ -17,31 +17,27 @@ import time
 from pathlib import Path
 
 from app_e2e import Client, create_scope, select_context, select_scope
+from probe_environment import KindSource, read_kind_source
 
 
 ROOT = Path(__file__).resolve().parents[2]
-CONTEXT = "kind-kubepeep-f4"
 NAMESPACES = [f"kp-bench-{index:04d}" for index in range(50)]
 
 
-def command(*args: str) -> str:
-    return subprocess.check_output(args, text=True, stderr=subprocess.DEVNULL).strip()
-
-
-def require_dataset() -> None:
-    raw = command("kubectl", "--context", CONTEXT, "get", "namespaces", "-l", "kubepeep.dev/dataset=50x10", "-o", "json")
+def require_dataset(source: KindSource) -> None:
+    raw = source.command("get", "namespaces", "-l", "kubepeep.dev/dataset=50x10", "-o", "json")
     names = {item["metadata"]["name"] for item in json.loads(raw)["items"]}
     if names != set(NAMESPACES + ["kp-benchmark-system"]):
         raise RuntimeError("the dedicated 50x10 dataset is incomplete or differs from the probe contract")
 
 
-def write_restricted_kubeconfig(path: Path) -> None:
-    source = json.loads(command("kubectl", "config", "view", "--raw", "--minify", "--context", CONTEXT, "-o", "json"))
-    token = command("kubectl", "--context", CONTEXT, "-n", "kp-benchmark-system", "create", "token", "global-viewer", "--duration=1h")
+def write_restricted_kubeconfig(path: Path, source: KindSource) -> None:
+    config_source = json.loads(source.command("config", "view", "--raw", "--minify", "-o", "json"))
+    token = source.command("-n", "kp-benchmark-system", "create", "token", "global-viewer", "--duration=1h")
     config = {
-        "apiVersion": "v1", "kind": "Config", "current-context": CONTEXT,
-        "clusters": [{"name": CONTEXT, "cluster": source["clusters"][0]["cluster"]}],
-        "contexts": [{"name": CONTEXT, "context": {"cluster": CONTEXT, "user": "phase03-global-viewer"}}],
+        "apiVersion": "v1", "kind": "Config", "current-context": source.context,
+        "clusters": [{"name": source.context, "cluster": config_source["clusters"][0]["cluster"]}],
+        "contexts": [{"name": source.context, "context": {"cluster": source.context, "user": "phase03-global-viewer"}}],
         "users": [{"name": "phase03-global-viewer", "user": {"token": token}}],
     }
     path.write_text(json.dumps(config), encoding="utf-8")
@@ -69,7 +65,8 @@ def command_with_environment(environment: dict[str, str], *args: str) -> str:
 
 
 def main() -> None:
-    require_dataset()
+    source = read_kind_source()
+    require_dataset(source)
     binary = (ROOT / "dist/kubePeep").resolve()
     if not binary.is_file():
         raise RuntimeError("build dist/kubePeep before running the Phase 3 probe")
@@ -86,12 +83,12 @@ def main() -> None:
             location.mkdir(mode=0o700)
             environment[name] = str(location)
         kubeconfig = temporary_path / "kubeconfig"
-        write_restricted_kubeconfig(kubeconfig)
+        write_restricted_kubeconfig(kubeconfig, source)
         environment["KUBECONFIG"] = str(kubeconfig)
 
         with (temporary_path / "process.log").open("wb") as log:
             process = subprocess.Popen(
-                [str(binary), "start", "--no-browser", "--kubeconfig", str(kubeconfig), "--context", CONTEXT, "--namespace", NAMESPACES[0]],
+                [str(binary), "start", "--no-browser", "--kubeconfig", str(kubeconfig), "--context", source.context, "--namespace", NAMESPACES[0]],
                 env=environment, stdout=log, stderr=subprocess.STDOUT,
             )
             try:

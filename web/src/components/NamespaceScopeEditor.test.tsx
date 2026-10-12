@@ -60,6 +60,28 @@ afterEach(() => {
 })
 
 describe('namespace scope editor', () => {
+  it.each([true, false])('clears a newly saved scope only after a successful save (%s)', async success => {
+    vi.stubGlobal('fetch', vi.fn(async (input: unknown) => {
+      if (String(input) === '/api/v1/namespaces?limit=500') return apiJSON([])
+      if (String(input) === '/api/v1/namespace-scopes/validate') return apiJSON({ valid: ['payments'], validCount: 1, duplicateCount: 0, discardedEmptyCount: 0, invalid: [], invalidCount: 0, existence: { checked: false, reasonCode: 'NAMESPACE_LIST_FORBIDDEN' } })
+      return success ? apiJSON({ ...otherScope, name: 'New scope' }) : apiJSON({ code: 'CONFLICT', message: 'Scope already exists' }, 409)
+    }))
+    renderForm('csrf')
+    fireEvent.change(screen.getByRole('textbox', { name: 'Namespace input' }), { target: { value: 'payments' } })
+    fireEvent.change(screen.getByRole('textbox', { name: 'Scope name' }), { target: { value: 'New scope' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save scope' }))
+    if (success) {
+      await screen.findByText('Scope “New scope” was saved.')
+      expect(screen.getByRole('textbox', { name: 'Namespace input' })).toHaveValue('')
+      expect(screen.getByRole('textbox', { name: 'Scope name' })).toHaveValue('')
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    } else {
+      await screen.findByRole('alert')
+      expect(screen.getByRole('textbox', { name: 'Namespace input' })).toHaveValue('payments')
+      expect(screen.getByRole('textbox', { name: 'Scope name' })).toHaveValue('New scope')
+    }
+  })
+
   it('shows profile/context, chips, and all four independent counters', () => {
     renderForm()
     fireEvent.change(screen.getByRole('textbox', { name: 'Namespace input' }), {
@@ -169,6 +191,9 @@ describe('namespace scope editor', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Update scope' }))
 
     expect(await screen.findByText('Scope “Updated” was updated.')).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: 'Namespace input' })).toHaveValue('')
+    expect(screen.getByRole('textbox', { name: 'Scope name' })).toHaveValue('')
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     const putCall = fetch.mock.calls.find(([input, init]) => String(input) === '/api/v1/namespace-scopes/1' && (init as RequestInit | undefined)?.method === 'PUT') as
       | [string, RequestInit]
       | undefined

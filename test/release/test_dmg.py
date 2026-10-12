@@ -35,6 +35,10 @@ class DmgPackagingTests(unittest.TestCase):
         self.stub("hdiutil", '''
 printf '%s\\n' "$*" >> "$DMG_TEST_LOG"
 if [ "$1" = "${DMG_FAIL_STAGE:-}" ]; then exit 1; fi
+if [ "$1" = detach ] && [ "${DMG_REQUIRE_SHORTCUT:-}" = 1 ]; then
+    test -L "$2/Applications"
+    test "$(readlink "$2/Applications")" = /Applications
+fi
 if [ "$1" = convert ]; then
     while [ "$1" != -o ]; do shift; done
     printf 'compressed image' > "$2"
@@ -55,7 +59,7 @@ if [ "${DMG_FAIL_STAGE:-}" = copy ]; then exit 1; fi
                               env=dict(self.env, **env), capture_output=True, text=True)
 
     def test_sparse_payload_gets_explicit_capacity_and_verified_output(self):
-        result = self.run_packager()
+        result = self.run_packager(DMG_REQUIRE_SHORTCUT="1")
         self.assertEqual(result.returncode, 0, result.stderr)
         commands = self.log.read_text().splitlines()
         create = commands[0].split()
@@ -67,6 +71,16 @@ if [ "${DMG_FAIL_STAGE:-}" = copy ]; then exit 1; fi
         self.assertEqual([line.split()[0] for line in commands],
                          ["create", "attach", "copy", "detach", "convert", "verify"])
         self.assertEqual(self.output.read_text(), "compressed image")
+        self.assertEqual(list(self.tmp.iterdir()), [])
+
+    def test_missing_applications_shortcut_rejects_artifact_and_detaches(self):
+        # Reproduce a filesystem failure without needing a macOS host.
+        self.stub("ln", "exit 1\n")
+        result = self.run_packager()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("stage=applications-shortcut", result.stderr)
+        self.assertIn("detach ", self.log.read_text())
+        self.assertEqual(self.output.read_text(), "existing artifact")
         self.assertEqual(list(self.tmp.iterdir()), [])
 
     def test_failures_preserve_previous_output_and_clean_temporary_files(self):

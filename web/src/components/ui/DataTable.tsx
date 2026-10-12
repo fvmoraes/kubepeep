@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, isValidElement, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, isValidElement, type ReactNode } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 
 import { recordFirstRowRendered, recordRenderedRowCount, recordVisibleRowRendered } from '../../observability/uxMetrics'
@@ -77,15 +77,16 @@ export function DataTable<T>({
     const observer = new ResizeObserver(measure); observer.observe(element); measure()
     return () => observer.disconnect()
   }, [])
-  const identifier = allColumns.find((column) => column.key === 'name')?.key ?? allColumns[0]?.key
+  const identifier = allColumns.find((column) => column.key === 'name')?.key ?? allColumns.find((column) => column.key === 'object')?.key ?? allColumns[0]?.key
   const initial = Boolean(columnVisibility?.useInitialVisibility)
-  const defaults = initialColumns(allColumns, initial ? initialColumnCount : 9)
+  const defaults = initialColumns(allColumns, initial ? initialColumnCount : 9, column => textContent(column.header) || column.key)
   const baseVisibility = columnVisibility ?? { hidden, toggle: (key: string) => setHidden((current) => current.includes(key) ? current.filter((item) => item !== key) : [...current, key]), reset: () => setHidden([]) }
   const effectiveHidden = initial ? defaults.hidden : baseVisibility.hidden
   const visibility = { ...baseVisibility, hidden: effectiveHidden, toggle: (key: string) => columnVisibility?.setHidden ? columnVisibility.setHidden(effectiveHidden.includes(key) ? effectiveHidden.filter(item => item !== key) : [...effectiveHidden, key]) : baseVisibility.toggle(key) }
-  const order = columnVisibility ? columnVisibility.order?.length ? columnVisibility.order : defaults.order : localOrder
+  const preferredOrder = columnVisibility ? columnVisibility.order : localOrder
+  const order = preferredOrder?.length ? preferredOrder : defaults.order
   const orderedColumns = [...allColumns].sort((left, right) => {
-    const position = (key: string) => { const index = order.indexOf(key); return index < 0 ? order.length : index }
+    const position = (key: string) => { const index = order.indexOf(key); return index < 0 ? order.length + defaults.order.indexOf(key) : index }
     return position(left.key) - position(right.key)
   })
   const columns = orderedColumns.filter((column) => column.key === identifier || !visibility.hidden.includes(column.key))
@@ -101,6 +102,10 @@ export function DataTable<T>({
     else setLocalOrder(next)
   }
   const values = useMemo(() => sourceRows.map((row, index) => new Map(allColumns.map((column) => [column.key, columnValue(column, row, index)]))), [sourceRows, allColumns])
+  // Scroll updates only change the visible slice, not the available filters.
+  const filterValues = useMemo(() => new Map(allColumns.map((column) => [column.key,
+    [...new Set(values.map((row) => String(row.get(column.key) ?? '—')))].sort(collator.compare),
+  ])), [allColumns, values])
   const rows = useMemo(() => sourceRows.map((row, index) => ({ row, index })).filter(({ index }) =>
     allColumns.every((column) => !excluded[column.key]?.includes(String(values[index].get(column.key) ?? '—'))))
     .sort((a, b) => {
@@ -116,13 +121,15 @@ export function DataTable<T>({
   // A normal resource page contains 100 rows. Give that page its own scroll
   // viewport so reaching 75% can request the next bounded page.
   const virtualized = virtualize ?? true
+  // A new key extractor invalidates TanStack's measurements of every loaded row.
+  const itemKey = useCallback((index: number) => getRowKey ? getRowKey(rows[index], index) : index, [getRowKey, rows])
   // TanStack owns mutable scroll measurements; React Compiler must not memoize this hook.
   // eslint-disable-next-line react-hooks/incompatible-library
   const rowVirtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => compact ? 32 : 40,
-    getItemKey: (index) => getRowKey ? getRowKey(rows[index], index) : index,
+    getItemKey: itemKey,
     overscan: 2,
     enabled: virtualized,
     initialRect: { width: 800, height: 440 },
@@ -234,7 +241,7 @@ export function DataTable<T>({
                   <TableMenu label={`Filter ${textContent(column.header)}`} icon={<ChevronDown size={12} />} active={Boolean(excluded[column.key]?.length)}>
                     <button type="button" onClick={() => setSort({ key: column.key, descending: false })}>Sort ascending</button>
                     <button type="button" onClick={() => setSort({ key: column.key, descending: true })}>Sort descending</button>
-                    <ColumnValues values={[...new Set(values.map((row) => String(row.get(column.key) ?? '—')))].sort(collator.compare)} excluded={excluded[column.key] ?? []} onChange={(next) => { onToggleAll?.(false, rows); setExcluded((current) => ({ ...current, [column.key]: next })) }} />
+                    <ColumnValues values={filterValues.get(column.key) ?? []} excluded={excluded[column.key] ?? []} onChange={(next) => { onToggleAll?.(false, rows); setExcluded((current) => ({ ...current, [column.key]: next })) }} />
                     {column.key !== identifier ? <button type="button" onClick={() => visibility.toggle(column.key)}>Hide column</button> : null}
                   </TableMenu>
                 </div>

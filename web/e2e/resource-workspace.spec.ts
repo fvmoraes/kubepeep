@@ -394,7 +394,7 @@ for (const [status, code] of [[503, 'AUTHORIZATION_UNAVAILABLE'], [401, 'AUTHENT
     }
     await expect(page.getByText(code, { exact: true })).toBeVisible()
     await expect(table).toHaveCount(0)
-    await expect(page.getByLabel('Resource live updates')).toHaveText('Auto · 10s')
+    await expect(page.getByLabel('Resource live updates')).toHaveText('Auto · 5s')
     // A cached unknown decision can outlive the first interval. Keep retrying
     // without displaying cached rows or issuing an immediate retry burst.
     for (let attempt = 0; attempt < 2; attempt++) {
@@ -455,9 +455,10 @@ test('Deployment YAML saves with unchanged identity, version and CSRF', async ({
   await page.getByRole('button', { name: 'Edit YAML', exact: true }).click()
   const editor = page.getByLabel('Deployment YAML', { exact: true })
   await editor.fill(yaml + '# editable line\n'.repeat(200))
-  await editor.evaluate((element) => { element.scrollTop = element.scrollHeight })
-  expect(await editor.evaluate((element) => element.scrollTop)).toBeGreaterThan(0)
-  await expect(editor).toBeInViewport({ ratio: 0.99 })
+  const scroller = page.locator('.yaml-editor .cm-scroller')
+  await scroller.evaluate((element) => { element.scrollTop = element.scrollHeight })
+  await expect.poll(() => scroller.evaluate((element) => element.scrollTop)).toBeGreaterThan(0)
+  await expect(page.locator('.yaml-editor')).toBeInViewport({ ratio: 0.99 })
   await expect(page.getByRole('button', { name: 'Save Deployment', exact: true })).toBeInViewport()
   await expectFixedSplit(page)
   await editor.fill(yaml.replace('replicas: 1', 'replicas: 2'))
@@ -473,6 +474,44 @@ test('Deployment YAML saves with unchanged identity, version and CSRF', async ({
   await expect(page).toHaveURL(/\/workloads\/deployments\/payments\/api$/)
   await expect(page.getByRole('region', { name: 'Deployment api' })).toBeVisible()
   await expect(page.getByRole('table', { name: 'Authorized workload pages' })).toBeVisible()
+})
+
+test('YAML editing preserves syntax colors, undo and the full document beyond the viewport', async ({ page }) => {
+  await page.goto('/workloads/deployments/payments/api')
+  await page.getByRole('tab', { name: 'YAML', exact: true }).click()
+  await page.getByRole('button', { name: 'Load authorized YAML' }).click()
+  await page.getByRole('button', { name: 'Edit YAML', exact: true }).click()
+  const editor = page.getByLabel('Deployment YAML', { exact: true })
+  const key = editor.locator('span').filter({ hasText: /^apiVersion$/ })
+  const value = editor.locator('span').filter({ hasText: /^apps\/v1$/ })
+  await expect(key).toHaveCSS('color', 'rgb(206, 145, 120)')
+  await expect(value).toHaveCSS('color', 'rgb(86, 156, 214)')
+  await editor.focus()
+  await page.keyboard.press('Control+End')
+  await page.keyboard.insertText('# editable comment')
+  await expect(editor.locator('span').filter({ hasText: /^# editable comment$/ })).toHaveCSS('color', 'rgb(106, 153, 85)')
+  await expect(page.getByRole('button', { name: 'Save Deployment', exact: true })).toBeEnabled()
+  await page.keyboard.press('Control+z')
+  await expect(page.getByRole('button', { name: 'Save Deployment', exact: true })).toBeDisabled()
+  await expect(editor).not.toContainText('# editable comment')
+
+  const document = yaml + Array.from({ length: 5000 }, (_, index) => `# comment ${index}`).join('\n')
+  await editor.focus()
+  await page.keyboard.press('Control+a')
+  // Exercise the editor's real paste handler; fill() edits the raw DOM directly.
+  await editor.evaluate((element, text) => {
+    const clipboardData = new DataTransfer()
+    clipboardData.setData('text/plain', text)
+    element.dispatchEvent(new ClipboardEvent('paste', { clipboardData, bubbles: true, cancelable: true }))
+  }, document)
+  await expect.poll(() => editor.locator('.cm-line').count()).toBeLessThan(300)
+  const scroller = page.locator('.yaml-editor .cm-scroller')
+  await scroller.evaluate(element => { element.scrollTop = element.scrollHeight })
+  await expect(editor).toContainText('# comment 4999')
+  const saved = page.waitForRequest(request => request.method() === 'PUT' && request.url().endsWith('/yaml'))
+  await page.getByRole('button', { name: 'Save Deployment', exact: true }).click()
+  expect((await saved).postDataJSON().yaml).toBe(document)
+  await expect(page.getByText('Deployment saved. Load YAML to inspect the new version.')).toBeVisible()
 })
 
 test('shows exact Pod logs and selected aggregates below the inventory on the same page', async ({ page }) => {
@@ -761,14 +800,15 @@ for (const target of [
     const save = page.getByRole('button', { name: `Save ${target.kind}`, exact: true })
     await save.click()
     await expect(page.getByRole('alert')).toContainText('draft is preserved')
-    await expect(editor).toHaveValue(draft)
+    await editor.press('Control+Home')
+    await expect(editor).toContainText('after')
     await expectFixedSplit(page)
     await expect(save).toBeInViewport()
     if (target.kind === 'Pod') {
       await page.screenshot({ path: testInfo.outputPath('yaml-editor-desktop.png') })
       await page.setViewportSize({ width: 390, height: 844 })
       await expectFixedSplit(page)
-      await expect(editor).toBeInViewport({ ratio: 0.99 })
+      await expect(page.locator('.yaml-editor')).toBeInViewport({ ratio: 0.99 })
       await expect(save).toBeInViewport()
       await page.screenshot({ path: testInfo.outputPath('yaml-editor-mobile.png') })
     }
@@ -927,9 +967,12 @@ test('Pods show starting separately and container state dots; column order survi
   await expect(cell.locator('[title^="sidecar (regular)"]')).toHaveClass(/bg-kp-yellow/)
   await expect(cell.locator('[title^="setup (init)"]')).toHaveClass(/bg-kp-overlay/)
   await page.getByRole('button', { name: 'Choose visible columns', exact: true }).click()
-  for (let index = 0; index < 5; index++) {
+  const orderButtons = await page.getByRole('button', { name: /^Move .* left$/ }).evaluateAll(buttons => buttons.map(button => button.getAttribute('aria-label')))
+  const initialPosition = orderButtons.indexOf('Move Containers left')
+  const desiredPosition = orderButtons.indexOf('Move Ready left') - 1
+  for (let position = initialPosition - 1; position >= desiredPosition; position--) {
     await page.getByRole('button', { name: 'Move Containers left', exact: true }).click()
-    await expect.poll(() => (prefs.columns.order as Record<string, string[]>).pods?.indexOf('containers')).toBe(7 - index)
+    await expect.poll(() => (prefs.columns.order as Record<string, string[]>).pods?.indexOf('containers')).toBe(position)
   }
   await expect.poll(() => Object.keys(prefs.columns.order)).toContain('pods')
   await page.keyboard.press('Escape')
@@ -940,7 +983,7 @@ test('Pods show starting separately and container state dots; column order survi
   await expect.poll(() => table.getByRole('columnheader').allTextContents()).toEqual(before)
 })
 
-test('automatic refresh defaults to ten seconds, stops globally, and resumes on enable', async ({ page }) => {
+test('automatic refresh defaults to five seconds, stops globally, and resumes on enable', async ({ page }) => {
   await page.clock.install()
   let reads = 0
   await page.route('**/api/v1/pods?*', (route) => {
@@ -949,10 +992,10 @@ test('automatic refresh defaults to ten seconds, stops globally, and resumes on 
   })
   await page.goto('/pods')
   await expect(page.getByRole('table', { name: 'Authorized Pod pages' })).toBeVisible()
-  const toggle = page.getByRole('button', { name: 'Automatic refresh every 10 seconds' })
+  const toggle = page.getByRole('button', { name: 'Automatic refresh every 5 seconds' })
   await expect(toggle).toHaveAttribute('aria-pressed', 'true')
   expect(reads).toBe(1)
-  await page.clock.fastForward(9_000)
+  await page.clock.fastForward(4_000)
   expect(reads).toBe(1)
   await page.clock.fastForward(1_000)
   await expect.poll(() => reads).toBe(2)
@@ -961,7 +1004,7 @@ test('automatic refresh defaults to ten seconds, stops globally, and resumes on 
   await page.clock.fastForward(30_000)
   expect(reads).toBe(2)
   await toggle.click()
-  await page.clock.fastForward(10_000)
+  await page.clock.fastForward(5_000)
   await expect.poll(() => reads).toBe(3)
   await page.reload()
   await expect(toggle).toHaveAttribute('aria-pressed', 'true')
@@ -1023,7 +1066,7 @@ test('context colors persist and isolate identical names in different sources', 
   await page.goto('/pods')
   const shell = page.locator('.app-shell')
   await page.getByRole('button', { name: 'Context color', exact: true }).click()
-  await page.getByRole('button', { name: 'Development — blue' }).click()
+  await page.getByRole('button', { name: 'Blue' }).click()
   await expect(shell).toHaveAttribute('data-context-color', '#38bdf8')
   await page.keyboard.press('Escape')
   await page.reload()
@@ -1032,12 +1075,201 @@ test('context colors persist and isolate identical names in different sources', 
   await page.getByLabel('Kubernetes context', { exact: true }).selectOption('development')
   await expect(shell).not.toHaveAttribute('data-context-color')
   await page.getByRole('button', { name: 'Context color', exact: true }).click()
-  await page.getByRole('button', { name: 'Production — red' }).click()
+  await page.getByRole('button', { name: 'Red' }).click()
   await expect(shell).toHaveAttribute('data-context-color', '#f87171')
   await page.keyboard.press('Escape')
+  for (const width of [1920, 1280, 900]) {
+    await page.setViewportSize({ width, height: 900 })
+    const brand = page.locator('.sidebar-brand')
+    const header = page.locator('.topbar')
+    await expect.poll(async () => {
+      const a = (await brand.boundingBox())!, b = (await header.boundingBox())!
+      return Math.abs(a.y + a.height - b.y - b.height)
+    }).toBeLessThan(1)
+    expect(await brand.evaluate(element => getComputedStyle(element).borderBottomColor)).toBe(await header.evaluate(element => getComputedStyle(element).borderBottomColor))
+  }
   await page.screenshot({ path: testInfo.outputPath('context-red-desktop.png') })
   expect(prefs.ui.contextColors).toHaveLength(2)
   await page.getByLabel('Kubeconfig source', { exact: true }).selectOption('1')
   await page.getByLabel('Kubernetes context', { exact: true }).selectOption('development')
   await expect(shell).toHaveAttribute('data-context-color', '#38bdf8')
+})
+
+for (const colored of [false, true]) {
+  test(`context switching latency with ${colored ? 'saved colors' : 'no color'}`, async ({ page }, testInfo) => {
+    let context = 'development'
+    let revision = 0
+    let preferenceRequests = 0
+    const selected = () => ({ clusterProfileId: 1, context, cluster: context, scopeId: 1, scopeName: 'Payments', scopeMode: 'list', scopeSource: 'saved', defaultNamespace: 'payments', namespaceCount: 1, generation: `gen_latency_${revision}` })
+    await page.route('**/api/v1/preferences', (route) => {
+      preferenceRequests++
+      return route.fulfill({ json: { data: { version: 1, ui: { language: 'en', contextColors: colored ? ['development', 'staging'].map((name) => ({ clusterProfileId: 1, context: name, color: name === 'development' ? '#38bdf8' : '#f87171' })) : [] } } } })
+    })
+    await page.route('**/api/v1/status', async (route) => {
+      const selection = selected()
+      if (revision) await new Promise(resolve => setTimeout(resolve, 250))
+      await route.fulfill({ json: { data: { version: 'test', selection, components: Object.fromEntries(['application', 'sqlite', 'kubeconfig', 'context', 'cluster', 'metrics'].map((key) => [key, { status: 'healthy' }])) } } })
+    })
+    await page.route('**/api/v1/cluster/profiles', async (route) => {
+      if (revision) await new Promise(resolve => setTimeout(resolve, 500))
+      await route.fulfill({ json: { data: [{ id: 1, name: 'Local', context, isDefault: true, kubeconfigFiles: [{ position: 0, displayPath: '~/.kube/config' }] }] } })
+    })
+    await page.route('**/api/v1/contexts?*', async (route) => {
+      if (revision) await new Promise(resolve => setTimeout(resolve, 500))
+      await route.fulfill({ json: { data: ['development', 'staging'].map((name) => ({ clusterProfileId: 1, name, cluster: name, selected: name === context })) } })
+    })
+    await page.route('**/api/v1/session', async (route) => {
+      if (revision) await new Promise(resolve => setTimeout(resolve, 100))
+      await route.fulfill({ json: { data: { csrfToken: 'csrf', generation: selected().generation } } })
+    })
+    await page.route('**/api/v1/contexts/select', async (route) => {
+      await new Promise(resolve => setTimeout(resolve, 100))
+      context = route.request().postDataJSON().context
+      revision++
+      await route.fulfill({ json: { data: selected() } })
+    })
+    await page.goto('/namespaces')
+    const selector = page.getByRole('combobox', { name: 'Kubernetes context', exact: true })
+    await expect(selector).toBeEnabled()
+    await expect(page.getByLabel('Scope context', { exact: true })).toHaveValue('development')
+    if (colored) await expect(page.locator('.app-shell')).toHaveAttribute('data-context-color', '#38bdf8')
+    const samples: number[] = []
+    preferenceRequests = 0
+    for (const next of ['staging', 'development', 'staging']) {
+      const started = performance.now()
+      await selector.selectOption(next)
+      await expect(page.getByLabel('Scope context', { exact: true })).toHaveValue(next)
+      await expect(selector).toBeEnabled()
+      samples.push(Math.round(performance.now() - started))
+      if (colored) await expect(page.locator('.app-shell')).toHaveAttribute('data-context-color', next === 'staging' ? '#f87171' : '#38bdf8')
+    }
+    expect(preferenceRequests).toBe(0)
+    const metrics = { colored, samplesMs: samples, preferenceRequests }
+    console.log(`context-switch-latency ${JSON.stringify(metrics)}`)
+    await testInfo.attach('context-switch-latency.json', { body: JSON.stringify(metrics), contentType: 'application/json' })
+  })
+}
+
+
+test('events link to built-in and custom objects and can be acknowledged without deleting them', async ({ page }, testInfo) => {
+  const writes: string[] = []
+  page.on('request', request => { if (request.method() !== 'GET') writes.push(new URL(request.url()).pathname) })
+  const events = [
+    { name: 'pod-warning', uid: 'e1', namespace: 'payments', objectNamespace: 'payments', objectAPIVersion: 'v1', objectKind: 'Pod', objectName: pod.name, type: 'Warning', reason: 'Failed', count: 1, timestamp: '2026-10-12T12:00:00Z', message: 'Pod health check failed' },
+    { name: 'sql-warning', uid: 'e2', namespace: 'payments', objectNamespace: 'payments', objectAPIVersion: 'sql.example.com/v1', objectKind: 'SQLInstance', objectName: 'database', type: 'Warning', reason: 'UpdateFailed', count: 2, timestamp: '2026-10-12T12:00:00Z', message: 'Database reconciliation failed' },
+  ]
+  await page.route('**/api/v1/events?*', route => route.fulfill({ json: { data: events, meta: { generation, page: { limit: 100, next: '', complete: true }, coverage: null } } }))
+  await page.route('**/api/v1/resource-discovery', route => route.fulfill({ json: { data: { resources: [{ group: 'sql.example.com', version: 'v1', resource: 'sqlinstances', kind: 'SQLInstance', namespaced: true }], failures: [], truncated: false }, meta: { generation } } }))
+  await page.route('**/api/v1/dynamic-resources/**', route => route.fulfill({ json: { data: { name: 'database', namespace: 'payments', kind: 'SQLInstance', uid: 'sql', resourceVersion: '2', columns: [], cells: [] }, meta: { generation } } }))
+  await page.route('**/api/v1/releases/latest', route => route.fulfill({ json: { data: { currentVersion: '0.11.0', latestVersion: '0.12.0', available: true } } }))
+  await page.goto('/events')
+  await page.getByRole('button', { name: `Open Pod ${pod.name}`, exact: true }).click()
+  await expect(page.getByRole('region', { name: `Pod ${pod.name}`, exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Close resource workspace' }).click()
+  await page.getByRole('button', { name: 'Open SQLInstance database', exact: true }).click()
+  await expect(page.getByRole('region', { name: 'SQLInstance database', exact: true })).toBeVisible()
+  await expect(page).toHaveURL(/custom-resources\/sql.example.com\/v1\/sqlinstances\/n\/payments\/database/)
+  await page.getByRole('button', { name: 'Close resource workspace' }).click()
+  const download = page.getByRole('link', { name: 'KubePeep 0.12.0 available · Download' })
+  await expect(download).toHaveAttribute('href', 'https://kubepeep.online/download')
+  for (const width of [1440, 900, 390]) {
+    await page.setViewportSize({ width, height: 900 })
+    await expect(download).toBeInViewport()
+    await expect(page.getByRole('button', { name: 'Open SQLInstance database' })).toBeVisible()
+    await page.screenshot({ path: testInfo.outputPath(`events-${width}.png`) })
+  }
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.getByRole('button', { name: `Acknowledge Failed for ${pod.name}` }).click()
+  await expect(page.getByRole('button', { name: `Open Pod ${pod.name}` })).toHaveCount(0)
+  await page.getByRole('checkbox', { name: 'Select all loaded rows' }).check()
+  await page.getByRole('button', { name: 'Acknowledge selected' }).click()
+  await expect(page.getByText('2 acknowledged', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: 'Show acknowledged' }).click()
+  await expect(page.getByRole('button', { name: 'Open SQLInstance database' })).toBeVisible()
+  expect(writes.every(path => path === '/api/v1/preferences')).toBe(true)
+})
+
+test('switches saved scopes directly from the topbar', async ({ page }) => {
+  let active = 1
+  const selected = () => ({ clusterProfileId: 1, context: 'development', cluster: 'dev', scopeId: active, scopeName: active === 1 ? 'Payments' : 'Infra', scopeMode: 'list', scopeSource: 'saved', defaultNamespace: active === 1 ? 'payments' : 'infra', namespaceCount: 1, generation: active === 1 ? generation : 'gen-infra' })
+  await page.route('**/api/v1/status', route => route.fulfill({ json: { data: { version: 'test', selection: selected(), components: Object.fromEntries(['application', 'sqlite', 'kubeconfig', 'context', 'cluster', 'metrics'].map(key => [key, { status: 'healthy' }])) } } }))
+  await page.route('**/api/v1/namespace-scopes?*', route => route.fulfill({ json: { data: [1, 2].map(id => ({ id, clusterProfileId: 1, context: 'development', name: id === 1 ? 'Payments' : 'Infra', mode: 'list', namespaces: [id === 1 ? 'payments' : 'infra'], version: 1 })), meta: { page: { next: '' } } } }))
+  await page.route('**/api/v1/namespace-scopes/2', route => route.fulfill({ json: { data: { namespaces: ['infra'], defaultNamespace: 'infra' } } }))
+  await page.route('**/api/v1/namespace-scopes/2/select', route => {
+    expect(route.request().postDataJSON()).toEqual({ expectedGeneration: generation })
+    active = 2
+    return route.fulfill({ json: { data: selected() } })
+  })
+  await page.goto('/namespaces')
+  await page.getByRole('combobox', { name: 'Namespace scope', exact: true }).selectOption('2')
+  await expect(page.getByRole('combobox', { name: 'Namespace scope', exact: true })).toHaveValue('2')
+  await expect(page.getByRole('combobox', { name: 'Global namespace', exact: true })).toHaveValue('infra')
+  await expect(page.getByRole('textbox', { name: 'Namespace input', exact: true })).toHaveValue('')
+})
+
+for (const kind of ['Pod', 'Service'] as const) {
+  test(`${kind} Actions keeps one saved port forward and restores its exact port after restart`, async ({ page }, testInfo) => {
+    const name = kind === 'Pod' ? pod.name : 'api'
+    const collectionPath = kind === 'Pod' ? 'pods' : 'services'
+    const routePath = kind === 'Pod' ? `/pods/payments/${name}` : '/network/services/payments/api'
+    const service = { ...metadata, type: 'ClusterIP', clusterIPs: ['10.0.0.25'], ports: [{ name: 'http', protocol: 'TCP', port: 8080, targetPort: { value: 8080, isInt: true } }], selector: { app: 'api' }, ageSeconds: 60 }
+    const errors: string[] = []; page.on('pageerror', error => errors.push(error.message))
+    let saved: Record<string, unknown> = { version: 1, ui: { language: 'en' }, logs: { wrap: false, timestamps: true, tailLines: 200 }, dashboard: { logScanWindow: '15m', sectionOrder: ['summary'], hiddenSections: [] }, filters: Object.fromEntries(['pods', 'workloads', 'events', 'logs'].map(name => [name, { version: 1, items: [] }])) }
+    let sessions: Array<Record<string, unknown>> = []
+    const starts: Array<Record<string, unknown>> = []
+    await page.route('**/api/v1/preferences', async route => {
+      if (route.request().method() === 'PUT') saved = route.request().postDataJSON()
+      await route.fulfill({ json: { data: saved } })
+    })
+    await page.route('**/api/v1/services?*', route => route.fulfill({ json: { data: [service], meta: { generation, page: collection } } }))
+    await page.route('**/api/v1/services/payments/api', route => route.fulfill({ json: { data: { metadata, summary: service }, meta: { generation } } }))
+    await page.route(`**/api/v1/${collectionPath}/payments/${name}/port-forward`, async route => {
+      const body = route.request().postDataJSON(); starts.push(body)
+      sessions = [{ id: `pf_${starts.length}`, clusterProfileId: 1, context: 'development', generation, namespace: 'payments', pod: pod.name, sourceKind: kind, sourceName: name, sourcePort: body.remotePort, remotePort: body.remotePort, localAddress: '127.0.0.1', localPort: body.localPort ?? 33155, status: 'active', createdAt: '2026-10-12T10:00:00Z', expiresAt: '2026-10-12T18:00:00Z', endedAt: null, endReason: null }]
+      await route.fulfill({ json: { data: sessions[0] } })
+    })
+    await page.route('**/api/v1/port-forwards', route => route.fulfill({ json: { data: sessions } }))
+    await page.route('**/api/v1/port-forwards/pf_*', async route => { sessions = []; await route.fulfill({ status: 204 }) })
+    await page.goto(routePath)
+    await page.getByRole('tab', { name: 'Actions', exact: true }).click()
+    await page.getByRole('button', { name: 'Start port-forward', exact: true }).click()
+    const list = page.getByRole('region', { name: 'Object port forwards' })
+    await expect(list.getByRole('link', { name: 'Open http://127.0.0.1:33155 in browser' })).toBeVisible()
+    await expect.poll(() => (saved.portForwards as unknown[]).length).toBe(1)
+    const local = page.getByRole('textbox', { name: kind === 'Service' ? 'Service local port' : 'Local port (optional)' })
+    await local.fill('33156')
+    await page.getByRole('button', { name: 'Start port-forward', exact: true }).click()
+    await expect(list.getByRole('listitem')).toHaveCount(1)
+    await expect(list.getByRole('link')).toHaveAttribute('href', 'http://127.0.0.1:33156')
+    await expect.poll(() => (saved.portForwards as Array<{ localPort: number }>)[0]?.localPort).toBe(33156)
+    await expectFixedSplit(page)
+    await page.screenshot({ path: testInfo.outputPath(`${kind.toLowerCase()}-port-forward.png`), fullPage: true })
+    sessions = [] // Process shutdown closes listeners; preferences remain in SQLite.
+    await page.reload()
+    await page.getByRole('tab', { name: 'Actions', exact: true }).click()
+    await expect(list.getByText('Inactive', { exact: true })).toBeVisible()
+    expect(starts).toHaveLength(2)
+    await list.getByRole('button', { name: 'Re-enable' }).click()
+    await expect(list.getByText('Active', { exact: true })).toBeVisible()
+    expect(starts.at(-1)).toMatchObject({ localPort: 33156, remotePort: 8080, target: { kind, name } })
+    await list.getByRole('button', { name: `Delete port-forward for ${kind} ${name}` }).click()
+    await expect(list.getByText('No port forwards for this object.')).toBeVisible()
+    expect(saved.portForwards).toEqual([])
+    expect(sessions).toEqual([])
+    expect(errors).toEqual([])
+  })
+}
+
+test('Pods requests latest Job runs and exact historical Pod navigation remains unfiltered', async ({ page }) => {
+  const queries: URL[] = []
+  page.on('request', request => { const url = new URL(request.url()); if (url.pathname === '/api/v1/pods') queries.push(url) })
+  await page.goto('/pods')
+  await expect(page.getByRole('table', { name: 'Authorized Pod pages' })).toBeVisible()
+  expect(queries.some(url => url.searchParams.get('latestJobRuns') === 'true')).toBe(true)
+  await expect(page.getByRole('link', { name: 'History in Jobs' })).toHaveAttribute('href', '/workloads/kind/jobs')
+  queries.length = 0
+  await page.goto(`/pods/payments/${pod.name}?focus=${pod.name}&namespace=payments`)
+  await expect(page.getByRole('tab', { name: 'Overview', exact: true })).toBeVisible()
+  await expect.poll(() => queries.some(url => url.searchParams.get('fieldSelector') === `metadata.name=${pod.name}`)).toBe(true)
+  expect(queries.filter(url => url.searchParams.has('fieldSelector')).every(url => !url.searchParams.has('latestJobRuns'))).toBe(true)
 })

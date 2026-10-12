@@ -108,11 +108,12 @@ type CoverageDTO struct {
 }
 
 type PageDTO struct {
-	Limit       int         `json:"limit"`
-	Next        string      `json:"next"`
-	Complete    bool        `json:"complete"`
-	Truncated   bool        `json:"truncated"`
-	FilterScope FilterScope `json:"filterScope"`
+	JobRunsPartial bool        `json:"jobRunsPartial,omitempty"`
+	Limit          int         `json:"limit"`
+	Next           string      `json:"next"`
+	Complete       bool        `json:"complete"`
+	Truncated      bool        `json:"truncated"`
+	FilterScope    FilterScope `json:"filterScope"`
 }
 
 // ListItem and DetailItem are sealed so adapters can only return DTOs owned by
@@ -175,8 +176,10 @@ type ReadyDTO struct {
 }
 
 type OwnerDTO struct {
-	Kind string `json:"kind"`
-	Name string `json:"name"`
+	Kind       string `json:"kind"`
+	Name       string `json:"name"`
+	APIVersion string `json:"apiVersion,omitempty"`
+	UID        string `json:"uid,omitempty"`
 }
 
 type PodContainerDTO struct {

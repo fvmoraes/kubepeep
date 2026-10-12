@@ -4,6 +4,9 @@ import { afterEach, expect, it, vi } from 'vitest'
 import type { SelectionSummary } from '../../api/types'
 import { ResourceYamlEditor } from './ResourceYamlEditor'
 
+// These tests isolate save authorization and draft preservation; browser tests exercise the real editor.
+vi.mock('../YamlCodeEditor', () => ({ YamlCodeEditor: ({ id, value, disabled, onChange, describedBy }: { id: string; value: string; disabled: boolean; onChange: (value: string) => void; describedBy?: string }) => <textarea id={id} aria-describedby={describedBy} value={value} disabled={disabled} onChange={event => onChange(event.target.value)} /> }))
+
 const selection = { clusterProfileId: 1, context: 'dev', generation: 'gen_yaml' } as SelectionSummary
 const json = (data: unknown, status = 200) => new Response(JSON.stringify(status === 200 ? { data } : data), { status, headers: { 'Content-Type': 'application/json' } })
 function setup(collection = 'pods', kind = 'Pod', namespace: string | null = 'payments', allowed = true, saveStatus = 200) {

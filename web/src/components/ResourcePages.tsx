@@ -1,3 +1,6 @@
+import { PortForwardList, PortForwardLink } from './PortForwardList'
+import { EventObjectLink } from './resource/EventObjectLink'
+import { eventOccurrence, useEventAcknowledgements } from './resource/eventAcknowledgements'
 import { WorkloadProgress } from './resource/QuantityUsage'
 import { useAutoRefreshQueryOptions } from './resource/AutoRefreshProvider'
 import { ResourceUsage } from './resource/ResourceUsage'
@@ -467,11 +470,12 @@ export function PodsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- only react to route param changes
   }, [paramNamespace, paramName, generation])
 
+  const latestJobRuns = !paramName && !applied.workload
   const rowKey = useCallback((item: Pod) => `${item.namespace}/${item.name}`, [])
   const collection = useInfiniteCollection<Pod>({
-    identity: ['resources', 'pods', selection?.clusterProfileId, selection?.context, selection?.scopeId, generation, globalNamespace.value, applied.namespace],
+    identity: ['resources', 'pods', selection?.clusterProfileId, selection?.context, selection?.scopeId, generation, globalNamespace.value, applied.namespace, latestJobRuns],
     filters: applied,
-    fetchPage: (cursor, signal, prefetch, focus) => getPods({ ...focus, limit: 100, prefetch, uxInteractionId: listInteractionFor(applied), search: applied.search || undefined, namespaces: effectiveNamespaces(globalNamespace.value, namespaceValues(applied.namespace)), statuses: applied.podStatus ? [applied.podStatus] : undefined, workload: applied.workload || undefined, node: applied.node || undefined, restarts: applied.restarts as 'any' | 'gt0' | 'gte3' | 'gte10', problematic: applied.problematic === '' ? undefined : applied.problematic === 'true', ...optionalSort(applied.sort, applied.order, 'identity', 'asc'), continueToken: cursor || undefined }, signal, generation),
+    fetchPage: (cursor, signal, prefetch, focus) => getPods({ ...focus, latestJobRuns: latestJobRuns && !focus.fieldSelector ? true : undefined, limit: 100, prefetch, uxInteractionId: listInteractionFor(applied), search: applied.search || undefined, namespaces: effectiveNamespaces(globalNamespace.value, namespaceValues(applied.namespace)), statuses: applied.podStatus ? [applied.podStatus] : undefined, workload: applied.workload || undefined, node: applied.node || undefined, restarts: applied.restarts as 'any' | 'gt0' | 'gte3' | 'gte10', problematic: applied.problematic === '' ? undefined : applied.problematic === 'true', ...optionalSort(applied.sort, applied.order, 'identity', 'asc'), continueToken: cursor || undefined }, signal, generation),
     enabled: Boolean(selection),
   })
   const list = collection.query
@@ -481,9 +485,15 @@ export function PodsPage() {
   const snapshotRenewed = collection.snapshotRenewed
   const authorizationFailed = collection.authorizationFailed
   useEffect(() => { if (authorizationFailed) setSelectedKeys(new Set()) }, [authorizationFailed, setSelectedKeys])
-  const seedItems = seedPreview.data?.items.filter((item) => item.namespace === previewNamespace) ?? []
-  const previewActive = !collection.focused && list.isPending && !authorizationFailed && sameListState(applied, defaultPodList) && Boolean(preview.preview?.items.length || seedItems.length)
-  const visibleItems = previewActive ? preview.preview?.items.length ? preview.preview.items : seedItems : listItems
+  const seedItems = useMemo(() => seedPreview.data?.items.filter((item) => item.namespace === previewNamespace) ?? [], [seedPreview.data, previewNamespace])
+  const streamItems = preview.preview?.items
+  // Unfiltered previews cannot establish the latest CronJob run yet.
+  const previewItems = useMemo(() => {
+    const items = streamItems?.length ? streamItems : seedItems
+    return latestJobRuns ? items.filter(item => item.owner?.kind !== 'Job') : items
+  }, [streamItems, seedItems, latestJobRuns])
+  const previewActive = !collection.focused && list.isPending && !authorizationFailed && sameListState(applied, defaultPodList) && Boolean(previewItems.length)
+  const visibleItems = previewActive ? previewItems : listItems
   const selectedItems = useMemo(() => listItems.filter((item) => selectedKeys.has(rowKey(item))), [listItems, selectedKeys, rowKey])
   const bulkPermissions = useQuery({
     queryKey: ['bulk-action-permissions', generation, 'pods.delete', selectedItems.map(rowKey).join('|')],
@@ -617,6 +627,8 @@ export function PodsPage() {
                 <div className="text-content text-kp-overlay-text">
                   <span className="block text-kp-subtext">{listItems.length} Pods loaded · {list.data?.pages.length ?? 0} page{list.data?.pages.length === 1 ? '' : 's'} retained</span>
                   <small className="block">{listData.page.complete ? 'Collection complete' : `Bounded ${listData.page.filterScope} result`}</small>
+                  {latestJobRuns ? <small className="block">Latest Job run per CronJob · <Link className="text-kp-sky" to="/workloads/kind/jobs">History in Jobs</Link></small> : null}
+                  {list.data?.pages.some(page => page.page.jobRunsPartial) ? <small className="block text-kp-yellow" role="note">Job history is unavailable for part of this scope; older Job Pods may be shown.</small> : null}
                   {snapshotRenewed ? <small className="block text-kp-yellow" role="status">The list snapshot expired and was renewed from the first page.</small> : null}
                   <CollectionCoverage coverage={listData.coverage} />
                 </div>
@@ -665,13 +677,15 @@ export function EventsPage() {
   const [applied, setApplied] = useState<EventListState>(() => eventsStateFromParams(params))
   const queryClient = useQueryClient()
   const eventColumnState = usePreferenceColumnVisibility('events')
+  const acknowledgements = useEventAcknowledgements(selection)
   const eventColumns: DataTableColumn<EventResource>[] = [
     { key: 'time', header: 'Time', value: (item) => item.timestamp, cell: (item) => dateTime(item.timestamp) },
     { key: 'namespace', header: 'Namespace', cell: (item) => item.namespace },
-    { key: 'object', header: 'Object', cell: (item) => `${item.objectKind}/${item.objectName}` },
+    { key: 'object', header: 'Object', value: item => `${item.objectKind}/${item.objectName}`, cell: item => <EventObjectLink event={item} generation={generation} /> },
     { key: 'type', header: 'Type / reason', cell: (item) => <><Badge variant={eventBadgeVariant(item.type)}>{item.type}</Badge><small className="mt-0.5 block text-content text-kp-overlay-text">{item.reason}</small></> },
     { key: 'count', header: 'Count', cell: (item) => item.count },
     { key: 'message', header: 'Message', cell: (item) => <span className="block max-w-[480px] break-words text-content leading-snug">{item.message}</span> },
+    { key: 'actions', header: 'Actions', sortable: false, cell: item => <Button variant="ghost" disabled={previewActive} aria-label={`Acknowledge ${item.reason} for ${item.objectName}`} onClick={() => acknowledgements.acknowledge([item])}>Acknowledge</Button> },
   ]
   const collection = useInfiniteCollection<EventResource>({
     identity: ['resources', 'events', selection?.clusterProfileId, selection?.context, selection?.scopeId, generation, globalNamespace.value, applied.namespace],
@@ -682,7 +696,9 @@ export function EventsPage() {
   const list = collection.query
   const preview = useResourceStreamPreview<EventResource>({ identity: [selection?.clusterProfileId, selection?.context, selection?.scopeId, generation, globalNamespace.value], topic: 'events', namespace: globalNamespace.value, isItem: isEventPreview, itemKey: eventPreviewKey, compare: compareEventPreview })
   const previewActive = !collection.focused && list.isPending && !collection.authorizationFailed && sameListState(applied, defaultEventList) && Boolean(preview.preview?.items.length)
-  const visibleItems = previewActive ? preview.preview!.items : collection.items
+  const loadedItems = previewActive ? preview.preview!.items : collection.items
+  const visibleItems = loadedItems.filter(item => !acknowledgements.isAcknowledged(item))
+  const hiddenCount = loadedItems.length - visibleItems.length
   return (
     <ResourcePage
       title="Events"
@@ -691,8 +707,9 @@ export function EventsPage() {
     >
       <ResourceListControls search={draft.search} appliedSearch={applied.search} onSearchChange={(value) => setDraft((current) => ({ ...current, search: value }))} onApply={(interactionId) => { setApplied(bindListInteraction({ ...draft }, interactionId)) }} />
 
+      <p className="m-0 flex flex-wrap items-center gap-2 text-content text-kp-overlay-text">Acknowledged events are hidden for this session. New occurrences reappear.{hiddenCount > 0 ? <><span role="status">{hiddenCount} acknowledged</span><Button variant="ghost" onClick={acknowledgements.restore}>Show acknowledged</Button></> : null}</p>
       <SelectionGate pending={status.isPending} error={status.error} selected={Boolean(selection)}>
-        <QueryState pending={list.isPending && !previewActive} error={!list.data || collection.authorizationFailed ? list.error : null} empty={visibleItems.length === 0 && !list.hasNextPage}>
+        <QueryState pending={list.isPending && !previewActive} error={!list.data || collection.authorizationFailed ? list.error : null} empty={loadedItems.length === 0 && !list.hasNextPage}>
           <div className="resource-collection min-w-0 rounded-xl border border-kp-overlay-0 bg-kp-surface-0">
 
             {previewActive ? <p className="px-3 py-1.5 text-content text-kp-sky" role="status">Receiving events · ✓ {preview.preview!.completed}/{preview.preview!.requested} namespaces · partial preview</p> : null}
@@ -701,7 +718,8 @@ export function EventsPage() {
               caption="Authorized event pages"
               rows={visibleItems}
               onScrollProgress={collection.onScrollProgress}
-              getRowKey={(item, index) => `${item.namespace}/${item.objectKind}/${item.objectName}/${item.timestamp ?? index}`}
+              getRowKey={eventOccurrence}
+              bulkActions={(rows, clear) => <Button variant="secondary" onClick={() => { acknowledgements.acknowledge(rows); clear() }}>Acknowledge selected</Button>}
               columns={eventColumns} columnVisibility={eventColumnState}
               stickyHeader
             />
@@ -833,7 +851,7 @@ export function NetworkPage() {
       {tab !== 'port-forwards' ? <ResourceListControls search={draft.search} appliedSearch={applied.search} onSearchChange={(value) => setDrafts((current) => ({ ...current, [resourceTab]: { ...current[resourceTab], search: value } }))} onApply={(interactionId) => { setAppliedLists((current) => ({ ...current, [resourceTab]: bindListInteraction({ ...draft }, interactionId) })) }} /> : <ResourceListControls search={forwardSearch} appliedSearch={forwardSearch} onSearchChange={setForwardSearch} onApply={() => {}} />}
       <div id="network-panel" className="resource-page-content">
         <SelectionGate pending={status.isPending} error={status.error} selected={Boolean(selection)}>
-          {tab === 'port-forwards' ? <QueryState pending={forwards.isPending} error={forwards.error ?? close.error} empty={forwards.data?.length === 0}>
+          {tab === 'port-forwards' ? <QueryState pending={forwards.isPending} error={forwards.error ?? close.error} empty={false}>
             {stopAllState !== 'idle' ? (
               <div role="alertdialog" aria-labelledby="stop-all-title" className="grid gap-2 rounded-lg border border-kp-red-border bg-kp-red-bg/50 p-3.5">
                 <strong id="stop-all-title" className="text-content text-kp-text">Close all active loopback sessions?</strong>
@@ -859,8 +877,9 @@ export function NetworkPage() {
               { key: 'expires-at', sortKey: 'expiresAt', header: 'Expires', cell: (item) => dateTime(item.expiresAt) },
               { key: 'ended-at', sortKey: 'endedAt', header: 'Ended', cell: (item) => item.endedAt ? dateTime(item.endedAt) : '—' },
               { key: 'end-reason', sortKey: 'endReason', header: 'End reason', cell: (item) => item.endReason ?? '—' },
-              { key: 'actions', header: 'Actions', cell: (item) => item.status === 'active' ? <Button variant="danger" onClick={() => close.mutate(item.id)}>Close loopback session</Button> : '—' },
+              { key: 'actions', header: 'Actions', cell: (item) => item.status === 'active' ? <div className="flex flex-wrap gap-2"><PortForwardLink session={item} /><Button variant="danger" onClick={() => close.mutate(item.id)}>Close loopback session</Button></div> : '—' },
             ]} stickyHeader />
+            {selection ? <PortForwardList selection={selection} inactiveOnly /> : null}
           </QueryState> : <QueryState pending={activeQuery.isPending && !previewActive} error={!activeQuery.data || collection.authorizationFailed ? activeQuery.error : null} empty={visibleItems.length === 0 && !activeQuery.hasNextPage}>
             <div className="resource-collection min-w-0 rounded-xl border border-kp-overlay-0 bg-kp-surface-0">
 

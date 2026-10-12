@@ -56,6 +56,13 @@ canônica: Linux em contêiner Ubuntu 22.04 para o baseline de glibc,
 Windows em runner nativo com NSIS e macOS em runners nativos. Os arquivos de
 empacotamento ficam em `build/` e `packaging/`; somente saídas ficam fora do Git.
 
+O DMG de macOS inclui `kubePeep.app` e um atalho `Applications` na raiz do
+volume para instalação por arrastar e soltar. O atalho aponta para
+`/Applications`, fica fora do bundle e não altera sua assinatura. O script
+`scripts/release/create-dmg.sh` exige a criação do atalho antes de comprimir a
+imagem. `test/release/dmg.sh`, executado no runner macOS, remonta o DMG final
+somente para leitura e valida o app, suas permissões e o destino desse atalho.
+
 Após compilar, validar `version` e `--help` usando o caminho do binário gerado.
 O smoke isolado de CLI é `make smoke`; uma janela desktop exige também
 validação visual no ambiente gráfico, streams e encerramento das sessões.
