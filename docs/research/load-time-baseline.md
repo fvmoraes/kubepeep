@@ -14,6 +14,12 @@ Medido nesta data, nesta máquina:
   relatório do Vite.
 - Grafo eager extraído do `index.html` gerado: a tag `script type="module"` e
   as entradas `modulepreload`.
+- Custo de re-render do `DataTable` real, 100 linhas e 13 colunas de Pods, 60
+  re-renders em jsdom via Vitest, comparando array de colunas literal contra
+  memoizado. Harness temporário, não versionado conforme a política de
+  `research/`; números em C1. jsdom não tem layout real, então custos de
+  medição do virtualizador ficam fora.
+- `npm test`: 54 arquivos, 325 testes, verde antes de qualquer alteração.
 
 Lido no código, não medido em execução: cadeia de bootstrap, gates de
 renderização, políticas de cache, exclusões de topic e caminho dinâmico. Cada
@@ -124,21 +130,36 @@ envelope de status.
 
 ### C. Telas default
 
-**C1. `DataTable` recomputa tudo a cada render do pai.**
-`web/src/components/ui/DataTable.tsx:104-120` tem três `useMemo` dependentes
-de `allColumns`: `values` (linhas × todas as colunas, inclusive ocultas),
-`filterValues` (únicos + `Intl.Collator` por coluna) e `rows` (filtro +
-ordenação do conjunto carregado). Os arrays de coluna são literais criados no
-corpo dos componentes de página (`ResourcePages.tsx:519` e equivalentes para
-workloads, events, network, config), então a identidade de `allColumns` muda
-em todo render e os três memos invalidam. Pior: `columnValue`
-(`DataTable.tsx:292-299`) cai em `textContent(column.cell(row, index))` quando
-a coluna não tem `value()`, isto é, **renderiza a árvore React da célula e a
-percorre** para extrair string de ordenação, para toda linha e toda coluna.
-`renderRow` chama `columnValue` de novo só para montar o `title`
-(`:183`). Com 100 linhas e ~15 colunas, e auto refresh de 5 s, isso repete
-milhares de renders de célula. Memoizar os arrays de coluna nas páginas é
-contido e de alto retorno.
+**C1. `DataTable` recomputa tudo a cada render do pai — medido, e menor do que
+parecia.** `web/src/components/ui/DataTable.tsx:104-120` tem três `useMemo`
+dependentes de `allColumns`: `values` (linhas × todas as colunas, inclusive
+ocultas), `filterValues` (únicos + `Intl.Collator` por coluna) e `rows`
+(filtro + ordenação). Os arrays de coluna são literais criados no corpo dos
+componentes de página (`ResourcePages.tsx:519` e equivalentes para workloads,
+events, network, config), então a identidade de `allColumns` muda em todo
+render e os três memos invalidam. `renderRow` ainda chama `columnValue` de
+novo só para montar o `title` (`:183`), fora de qualquer memo.
+
+Medido em 29/10/2026 com o componente real, 100 linhas e 13 colunas de Pods,
+60 re-renders em jsdom: **5,54 ms por re-render com array literal contra
+3,41 ms com array memoizado, diferença de 2,13 ms, ou 38% do custo do
+re-render.** Só a aritmética dos três memos, isolada em Node sem React, custa
+0,180 ms; o resto é reconciliação e invocação de `cell()`.
+
+Duas correções a uma versão anterior deste documento, que superestimava o
+achado: o fallback `textContent(column.cell(...))` em `columnValue`
+(`DataTable.tsx:292-299`) atinge **4 de 13 colunas** de Pods (`ready`, `node`,
+`owner`, `ip`), não todas — as demais têm `value()` ou resolvem por campo
+escalar; e dessas quatro só `owner` constrói JSX de verdade.
+
+Consequência para o escopo deste plano: 2,13 ms por re-render é ganho de
+**interação e estado estável**, não de carregamento. O primeiro render não é
+beneficiado, porque não há nada memoizado para reaproveitar. jsdom também não
+tem layout real, então o custo de re-medição do virtualizador causado por
+`getRowKey` instável (`DataTable.tsx:128`, com comentário explícito no código:
+"A new key extractor invalidates TanStack's measurements of every loaded row")
+**não** entra nessa medição e permanece não quantificado. Este item sai da
+frente da fila: não serve ao objetivo de tempo de carregamento.
 
 **C2. Nenhuma tela aquece a própria primeira página.**
 `internal/api/handlers/resources.go:958-970` rejeita `likely-next` sem cursor,
@@ -203,20 +224,26 @@ hook compartilhado `useInfiniteCollection`.
 
 Cada item é verificável isoladamente. Nada aqui está implementado.
 
-| # | Item | Escopo | Por quê primeiro |
-| --- | --- | --- | --- |
-| 0 | Baseline medida de `time_to_first_row` e `time_to_shell_ready`, default e custom, em cluster real | Medição | Nenhum ganho é demonstrável sem isso |
-| 1 | Memoizar arrays de coluna das páginas; evitar `columnValue` duplicado no `title` | C1 | Contido, sem mudança de contrato, afeta toda tela default |
-| 2 | Resolver alvo dinâmico por GVR antes da varredura completa; cache de discovery por GVR | D1 | Maior custo isolado das telas custom |
-| 3 | Pré-compressão de assets no build + negociação no handler | A1 | Alto ganho no modo navegador; preserva política immutable |
-| 4 | Preload dos `woff2` primários; subsets secundários fora da entrada | A2 | Barato, encurta o caminho crítico do texto |
-| 5 | Disparar `import()` da seção em paralelo com os gates | B1 | Remove serialização sem dependência de dado |
-| 6 | Scope default no envelope de `/api/v1/status` | B2, B3 | Colapsa quatro saltos em um; muda contrato de API |
-| 7 | Análise de bundle e extração do que não pinta do entry chunk | A3 | Precisa de medição antes de decidir o corte |
-| 8 | Stream preview para coleções dinâmicas | D3 | Percepção imediata; menor que cobertura de topic |
+Ordem revisada em 29/10/2026 depois de medir C1 e constatar que ele não serve
+ao objetivo de carregamento.
 
-Itens 6 e 8 alteram contrato ou estrutura e exigem decisão registrada antes da
-implementação. Os itens 1 a 5 são locais e reversíveis.
+| # | Item | Escopo | Por quê nesta posição |
+| --- | --- | --- | --- |
+| 0 | Baseline medida de `time_to_first_row` e `time_to_shell_ready`, default e custom, em cluster real | Medição | Nenhum ganho de carregamento é demonstrável sem isso |
+| 1 | Resolver alvo dinâmico por GVR antes da varredura completa; cache de discovery por GVR | D1 | Maior custo isolado de carregamento das telas custom |
+| 2 | Pré-compressão de assets no build + negociação no handler | A1 | 491 kB crus medidos; alto ganho no modo navegador, preserva política immutable |
+| 3 | Preload dos `woff2` primários; subsets secundários fora da entrada | A2 | Barato, encurta o caminho crítico do texto em duas etapas para uma |
+| 4 | Disparar `import()` da seção em paralelo com os gates | B1 | Remove serialização que não tem dependência de dado |
+| 5 | Scope default no envelope de `/api/v1/status` | B2, B3 | Colapsa quatro saltos em um; muda contrato de API |
+| 6 | Análise de bundle e extração do que não pinta do entry chunk | A3 | Precisa de medição de composição antes de decidir o corte |
+| 7 | Stream preview para coleções dinâmicas | D3 | Percepção imediata; menor que cobertura de topic |
+| 8 | Memoizar arrays de coluna e estabilizar `getRowKey` nas páginas | C1, C4 | 2,13 ms por re-render medidos: ganho de interação, não de carregamento |
+
+Itens 5 e 7 alteram contrato ou estrutura e exigem decisão registrada antes da
+implementação. Os itens 1 a 4 são locais e reversíveis. O item 8 só se
+justifica junto a uma medição de responsividade de interação em navegador
+real, que ainda não existe; a parcela de `getRowKey` permanece não
+quantificada.
 
 ## Restrições herdadas
 
