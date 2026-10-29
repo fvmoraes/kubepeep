@@ -10,7 +10,11 @@ import { defineConfig } from 'vitest/config'
 // handler negotiate them without paying CPU per request, and keeps the
 // single-binary deployment: no runtime compressor and no extra dependency,
 // since Node already ships zlib.
-const compressibleAsset = /\.(?:js|css|html|svg|json|map)$/
+// index.html is served by a dedicated handler that never negotiates encoding,
+// so compressing it would only embed an unreachable file. Sourcemaps are off,
+// and if they are ever enabled they should be reviewed before shipping
+// compressed: Go has no MIME entry for .map.
+const compressibleAsset = /\.(?:js|css|svg|json)$/
 // Below roughly one KiB the encoded sibling stops paying for itself and only
 // adds files to the embedded filesystem.
 const minimumCompressedBytes = 1024

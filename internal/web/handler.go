@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io/fs"
+	"mime"
 	"net/http"
 	"path"
 	"regexp"
@@ -56,14 +57,6 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Encoded siblings exist only to answer negotiation. Serving one directly
-	// would hand compressed bytes labelled as the sibling's own type, with no
-	// Content-Encoding for the client to act on.
-	if encodedSibling(r.URL.Path) {
-		http.NotFound(w, r)
-		return
-	}
-
 	requestPath := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
 	// The root path is the canonical SPA entry: plain HTTP health probes
 	// (systemd, curl, container checks) request it without an Accept header
@@ -74,6 +67,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if requestPath != "." && fs.ValidPath(requestPath) {
 		if info, err := fs.Stat(h.frontend, requestPath); err == nil && !info.IsDir() {
+			// Encoded siblings exist only to answer negotiation. Serving one
+			// directly would hand compressed bytes labelled as the sibling's
+			// own type, with no Content-Encoding for the client to act on.
+			// This check belongs here, after the path resolved to a real file:
+			// a Kubernetes object name is a DNS subdomain and may legally end
+			// in ".gz", so a client-side route like
+			// /config/web/archive.tar.gz must still reach the SPA shell.
+			if encodedSibling(requestPath) {
+				http.NotFound(w, r)
+				return
+			}
 			// Cache policy is derived from the asset the client asked for.
 			// An encoded sibling is named "<asset>.br", which does not match
 			// the versioned-asset pattern, so deriving it from the file that
@@ -145,9 +149,17 @@ func (h *Handler) serveEncoded(w http.ResponseWriter, r *http.Request, assetPath
 		if err != nil {
 			continue
 		}
+		// ServeContent falls back to sniffing the body when an extension has
+		// no MIME entry, and the body here is the compressed sibling. Declare
+		// the requested asset's type so the client never sees the encoding's.
+		if contentType := mime.TypeByExtension(path.Ext(assetPath)); contentType != "" {
+			w.Header().Set("Content-Type", contentType)
+		}
 		w.Header().Set("Content-Encoding", sibling.encoding)
-		// ServeContent derives the content type from this name, so the client
-		// still sees the asset's type rather than the sibling's extension.
+		// ServeContent declines to set Content-Length once Content-Encoding is
+		// present, and a HEAD writes no body for net/http to measure, so the
+		// header would vanish for exactly the method that only wants it.
+		w.Header().Set("Content-Length", strconv.Itoa(len(encoded)))
 		http.ServeContent(w, r, assetPath, time.Time{}, bytes.NewReader(encoded))
 		return true
 	}
@@ -155,11 +167,13 @@ func (h *Handler) serveEncoded(w http.ResponseWriter, r *http.Request, assetPath
 }
 
 // acceptsEncoding reports whether the client allows one content coding. A
-// "q=0" qualifier is an explicit refusal, so matching the token is not enough.
+// "q=0" qualifier is an explicit refusal, so matching the token is not enough,
+// and "*" offers every coding the server has.
 func acceptsEncoding(header, encoding string) bool {
 	for _, element := range strings.Split(header, ",") {
 		fields := strings.Split(strings.TrimSpace(element), ";")
-		if !strings.EqualFold(strings.TrimSpace(fields[0]), encoding) {
+		token := strings.TrimSpace(fields[0])
+		if !strings.EqualFold(token, encoding) && token != "*" {
 			continue
 		}
 		for _, parameter := range fields[1:] {

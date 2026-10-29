@@ -2,11 +2,14 @@ import { describe, expect, it } from 'vitest'
 
 import { sectionChunkFor } from './sectionChunks'
 
-// Every path below is a real entry in App's route table, paired with the
-// component that route renders. Warming the wrong chunk is silent: the lazy
-// boundary still imports the right one, so nothing breaks and nothing is
-// gained. This asserts the mapping instead of trusting the patterns.
-describe('sectionChunkFor matches the route table', () => {
+// Each path below was transcribed from App's route table and paired with the
+// component that route renders. This is a hand-maintained mirror, not a
+// derivation: re-pointing a route at a different lazy module keeps these
+// green while the warm targets the wrong chunk. It still earns its place,
+// because warming the wrong chunk is otherwise completely silent — the lazy
+// boundary imports the right module anyway, so nothing breaks and nothing is
+// gained.
+describe('sectionChunkFor mirrors the route table', () => {
   it.each([
     ['/', 'Dashboard'],
     ['/events', 'ResourcePages'],

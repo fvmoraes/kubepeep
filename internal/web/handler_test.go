@@ -181,6 +181,78 @@ func TestEncodedSiblingIsNotAddressableOnItsOwn(t *testing.T) {
 	}
 }
 
+// A Kubernetes object name is a DNS subdomain and may legally end in ".gz" or
+// ".br". The sibling guard must reject real sibling files, not every client
+// route that happens to share the suffix.
+func TestClientRouteEndingInAnEncodingSuffixStillReachesTheShell(t *testing.T) {
+	handler := testHandler(t)
+	for _, route := range []string{"/config/web/archive.tar.gz", "/pods/web/backup.br"} {
+		t.Run(route, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodGet, route, nil)
+			r.Header.Set("Accept", "text/html")
+			r.Header.Set("Accept-Encoding", "br, gzip")
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, r)
+			if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "kubePeep shell") {
+				t.Fatalf("deep link was captured by the sibling guard: status=%d body=%q", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
+// http.ServeContent declines to set Content-Length once Content-Encoding is
+// present, and a HEAD writes no body for net/http to measure, so the header
+// would vanish for exactly the method that only wants it.
+func TestHeadOnNegotiatedAssetReportsTheEncodedLength(t *testing.T) {
+	handler := testHandler(t)
+	for _, test := range []struct {
+		name     string
+		accept   string
+		encoding string
+		length   string
+	}{
+		{name: "encoded", accept: "br", encoding: "br", length: "12"},
+		{name: "identity", accept: "", encoding: "", length: "10"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodHead, "/assets/app-AbCd1234.js", nil)
+			if test.accept != "" {
+				r.Header.Set("Accept-Encoding", test.accept)
+			}
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, r)
+			if w.Code != http.StatusOK {
+				t.Fatalf("status=%d", w.Code)
+			}
+			if got := w.Header().Get("Content-Encoding"); got != test.encoding {
+				t.Fatalf("content-encoding=%q, want %q", got, test.encoding)
+			}
+			if got := w.Header().Get("Content-Length"); got != test.length {
+				t.Fatalf("content-length=%q, want %q", got, test.length)
+			}
+			if w.Body.Len() != 0 {
+				t.Fatalf("HEAD wrote a body of %d bytes", w.Body.Len())
+			}
+		})
+	}
+}
+
+// A client offering the wildcard accepts any coding the server has, so it must
+// not silently fall back to identity.
+func TestWildcardAcceptEncodingNegotiatesTheBestAvailableCoding(t *testing.T) {
+	handler := testHandler(t)
+	r := httptest.NewRequest(http.MethodGet, "/assets/app-AbCd1234.js", nil)
+	r.Header.Set("Accept-Encoding", "*")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, r)
+	if got := w.Header().Get("Content-Encoding"); got != "br" {
+		t.Fatalf("content-encoding=%q, want br for a wildcard offer", got)
+	}
+	if got := w.Body.String(); got != "brotli-bytes" {
+		t.Fatalf("body=%q", got)
+	}
+}
+
 func TestRootServesIndexRegardlessOfAccept(t *testing.T) {
 	handler := testHandler(t)
 	r := httptest.NewRequest(http.MethodGet, "/", nil)

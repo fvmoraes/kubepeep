@@ -207,10 +207,12 @@ ordem nativa, então o padrão vale para as demais; só o filtro precisa ler o
 namespace do item, hoje feito por asserção de tipo para `PodDTO`, porque
 `ListItem` é interface marcadora sem acessor (`types.go:122`).
 
-Generalizar levaria Workloads de 6×N para 6 requisições e as coleções de GVR
-único de N para 1, preservando DTO, cursor, paginação, autorização e fronteira
-de geração. A contagem de requisições é certa a partir do código; o tempo de
-parede depende da latência por requisição do cluster, que não foi medida.
+Generalizar levaria as coleções de GVR único de N para 1 requisição,
+preservando DTO, cursor, paginação, autorização e fronteira de geração.
+Workloads, por ser multi-GVR, e Events, por ordenar por tempo, não cabem: ver
+[Revisão](#revisão-e-correções). A contagem de requisições é certa a partir do
+código; o tempo de parede depende da latência por requisição do cluster, que
+não foi medida.
 
 **C2. Nenhuma tela aquece a própria primeira página.**
 `internal/api/handlers/resources.go:958-970` rejeita `likely-next` sem cursor,
@@ -286,7 +288,7 @@ dominam parse de bundle e saltos locais por ordem de magnitude.
 | # | Item | Escopo | Requisições no caminho crítico |
 | --- | --- | --- | --- |
 | 0 | Baseline medida de `time_to_first_row`, default e custom, em cluster real | Medição | Nenhum ganho de carregamento é demonstrável sem isso |
-| 1 | ✅ Generalizar o LIST global em escopo para além de Pods | C0 | Workloads de 6×N para 6; GVR único de N para 1 |
+| 1 | ✅ Generalizar o LIST global em escopo para além de Pods | C0 | GVR único de N para 1 em quatro coleções; Workloads e Events ficaram fora |
 | 2 | ✅ Resolver alvo dinâmico por GVR antes da varredura completa de discovery | D1 | De 2+N group-versions para 1, antes de todo LIST custom frio |
 | 3 | ✅ Pré-compressão de assets e negociação no handler | A1 | Nenhuma; 491 kB para 127 kB de fio, só relevante no modo navegador |
 | 4 | ✅ Preload dos `woff2` primários | A2 | Nenhuma; duas etapas para uma no caminho do texto |
@@ -312,18 +314,35 @@ default, porque a mesma coleta mediu p95 3,9% pior em Kind local.
 
 Concluído em 29/10/2026.
 
-`globalScopeFilterEligible` (`resources_backend.go`) passou a autorizar a
-estratégia para Pods, Workloads, Events, Services, Ingresses, EndpointSlices e
-ConfigMaps. `listGlobalPodPageInScope` virou `listGlobalPageInScope` e filtra
-por `resources.NamespacedListItem`, interface exportada com `ListNamespace()`
+`globalScopeFilterEligible` (`resources_backend.go`) autoriza a estratégia
+para Pods, Services, Ingresses, EndpointSlices e ConfigMaps.
+`listGlobalPodPageInScope` virou `listGlobalPageInScope` e filtra por
+`resources.NamespacedListItem`, interface exportada com `ListNamespace()`
 implementada pelos sete DTOs namespaced, em vez de asserção de tipo para
 `PodDTO`. A assinatura de `collectFilteredResource` e dos 24 call sites não
 mudou.
 
-Secrets ficam de fora para não ampliar o alcance de uma leitura cluster-wide
-no recurso mais sensível. Coleções dinâmicas e CRD ficam de fora porque a
-parada antecipada da varredura depende de ordenação namespace-major, que um
-API Server agregado não precisa preservar.
+**Correção após revisão:** Workloads e Events foram retirados da lista. A
+primeira versão deste passo os incluía, e com isso a afirmação de que
+"Workloads vai de 6×N para 6" era o ganho principal anunciado. Ela não se
+sustentou, e o motivo de cada exclusão está em
+[Revisão](#revisão-e-correções). Em escopo explícito, Workloads e Events
+mantêm a fan-out por namespace.
+
+Exclusões e seus motivos:
+
+| Coleção | Por que fica fora |
+| --- | --- |
+| Secrets | Uma leitura cluster-wide ampliaria o alcance no recurso mais sensível |
+| Dinâmicas e CRD | API Server agregado não garante a ordenação namespace-major de que a parada antecipada depende |
+| Events | Ordenação default é `timestamp desc`, não `identity asc`; a varredura admite em ordem namespace-major |
+| Workloads | Multi-GVR: cai em `LazyMerge`, que re-entra no lister e desfaz o limite de varredura |
+
+A elegibilidade só é segura enquanto a coleção tem **uma** origem global, que
+é o que mantém a estratégia em `GlobalNative`, que chama o lister uma vez por
+janela. Isso agora é imposto estruturalmente: o ramo verifica
+`len(origins) == 1` antes de engajar e cai na fan-out caso contrário, e o teste
+de elegibilidade afirma a invariante em vez de confiar na lista.
 
 O limiar de largura de escopo que eu havia anunciado **não** foi adicionado, e
 a condição `len(resolution.Namespaces) > 1` permaneceu intacta. Três motivos:
@@ -555,6 +574,86 @@ nada. O ganho fica em `FamilyPages`, `ConfigurationPages`, `AccessPages`,
 `GatewayPage`, `HelmPage` e `DynamicResourcePage`, uma vez por seção por
 sessão, e vale dezenas de milissegundos de leitura local mais parse. Não
 medido em navegador real.
+
+## Revisão e correções
+
+Revisão comportamental independente em 29/10/2026, depois dos cinco passos.
+Ela encontrou quatro defeitos que a implementação havia introduzido e dois
+problemas de honestidade de cobertura. Todos corrigidos; a lista completa fica
+no artefato de revisão, fora do Git.
+
+### Defeitos corrigidos
+
+**O limite de varredura não sobrevivia ao `LazyMerge`.** `globalScopeScanPages`
+limita a cinco páginas brutas **por chamada** do lister. Isso só limita a
+requisição enquanto a estratégia chama o lister uma vez por janela, o que vale
+para `GlobalNative`. O `LazyMerge`, usado por coleções multi-GVR, re-entra no
+lister a cada rodada enquanto qualquer origem avançou — e uma página que
+filtrou todas as linhas fora de escopo ainda conta como avanço. Um escopo
+esparso em cluster grande varreria sem limite de requisição até a janela de 30 s
+expirar, trocando "página mais lenta" por "requisição falha". Corrigido
+excluindo Workloads e impondo `len(origins) == 1` estruturalmente.
+
+**Events mudava a composição da primeira página.** Ordenação default de Events
+é `timestamp desc`, mas a varredura admite linhas em ordem namespace-major. A
+fan-out tirava um pedaço de cada namespace do escopo; a varredura preencheria a
+página a partir dos namespaces alfabeticamente primeiros, podendo não mostrar
+nada de nove de dez namespaces e deixar o evento mais recente arbitrariamente
+fundo no cursor. A tela ainda ordenaria por tempo o que mostrasse, então a
+mudança seria silenciosa. Corrigido excluindo Events.
+
+**`HEAD` em asset negociado perdia `Content-Length`.** `http.ServeContent` não
+define o cabeçalho quando `Content-Encoding` está presente, e um `HEAD` não
+escreve corpo para o `net/http` medir. Medido em servidor real: `HEAD` com
+brotli devolvia `-1` e identidade devolvia o tamanho. `httptest.NewRecorder`
+esconde isso, e foi por isso que os testes iniciais não pegaram. Corrigido
+definindo `Content-Length` a partir do irmão já lido em memória.
+
+**Deep link terminando em `.gz` ou `.br` devolvia 404.** O guard de irmão
+rodava antes de o caminho ser resolvido no filesystem, então aplicava a toda
+URL e não só a assets. Nome de objeto Kubernetes é DNS subdomain e pode
+terminar nesses sufixos, logo `/config/web/archive.tar.gz` deixava de alcançar
+o shell. Corrigido movendo o guard para dentro do ramo que já provou que o
+arquivo existe.
+
+### Honestidade de cobertura
+
+`list.go` reportava `CompletedNamespaces = RequestedNamespaces` quando
+**qualquer** origem global tinha sucesso autoritativo. Com uma origem global
+por GVR, um 403 ao vivo em Jobs renderizaria Deployments com rodapé alegando
+cobertura completa. Agora o override exige também que nada tenha falhado.
+
+Uma denegação por origem global registrava namespace `""` em
+`DeniedNamespaces`. Uma denegação que cobre todas as origens já curto-circuita
+em 403 antes de a cobertura ser montada, então a entrada vazia só poderia
+aparecer ao lado de um sucesso parcial, nomeando nada que o operador possa
+agir. Agora é suprimida.
+
+### Ajustes menores
+
+`.html` e `.map` saíram da regex de pré-compressão: `index.html` é servido por
+um handler que nunca negocia, então seus irmãos eram arquivos inalcançáveis
+embutidos no binário, e Go não tem entrada MIME para `.map`, o que faria
+`ServeContent` farejar os bytes comprimidos e rotular um sourcemap como gzip.
+`Accept-Encoding: *` passou a negociar em vez de cair para identidade.
+`Content-Type` agora é declarado a partir da extensão pedida.
+
+E uma correção de documentação: o teste de mapeamento de chunks afirmava
+derivar da tabela de rotas do `App`. Não deriva, é um espelho mantido à mão. O
+comentário passou a dizer isso.
+
+### Custo conhecido que permanece
+
+Os irmãos comprimidos somam 914.717 bytes ao binário, e o runtime desktop
+**não os usa**: o Wails resolve assets do próprio FS embutido e só cai no
+handler Go quando há miss, então `serveEncoded` é inalcançável para requisição
+de asset no desktop. O peso é pago nas duas distribuições para beneficiar
+apenas o modo navegador.
+
+Nenhum dos dois caminhos emite validador: `serveEncoded` passa
+`time.Time{}` e o FS embutido tem modtime zero, então não há `Last-Modified`
+nem `ETag` e requisição condicional nunca produz 304. Isso vale igualmente
+antes e depois da mudança.
 
 ## Restrições herdadas
 

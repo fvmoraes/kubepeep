@@ -604,38 +604,47 @@ func collectResource[T resources.ListItem](
 		if originsErr != nil {
 			return resources.ListResult[T]{}, originsErr
 		}
-		decision := globalListDecision(ctx, backend.authorizer, binding.Generation, origins)
-		if decision == authorization.DecisionAllowed || decision == authorization.DecisionUnknown && cursorGlobal {
-			allowed := make(map[string]struct{}, len(names))
-			for _, name := range names {
-				allowed[name] = struct{}{}
+		// listGlobalPageInScope bounds its raw scan per call, which only bounds
+		// the request while the strategy calls the lister once per window.
+		// That holds for GlobalNative, and GlobalNative is selected only for a
+		// single origin. A multi-GVR collection would land on LazyMerge, which
+		// re-enters the lister every round while any origin advanced, so it
+		// falls through to the per-namespace fan-out below rather than scanning
+		// without a request-level bound.
+		if len(origins) == 1 {
+			decision := globalListDecision(ctx, backend.authorizer, binding.Generation, origins)
+			if decision == authorization.DecisionAllowed || decision == authorization.DecisionUnknown && cursorGlobal {
+				allowed := make(map[string]struct{}, len(names))
+				for _, name := range names {
+					allowed[name] = struct{}{}
+				}
+				selection := resourceSelection(binding, resolution)
+				selection.Namespaces = []string{""}
+				var received atomic.Int64
+				counted := countingLister(list, &received, backend, binding)
+				started := time.Now()
+				result, collectErr := resources.Collect(ctx, resources.CollectionRequest[T]{
+					ReadThroughUnknown: true,
+					Selection:          selection, Options: options, Origins: origins, Cursor: cursor,
+					Lister: originListerFunc[T](func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[T], error) {
+						return listGlobalPageInScope(ctx, page, counted, allowed)
+					}),
+					Authorizer: backend.authorizer, Less: less, Timeout: backend.listWindowTimeout,
+					RequestedNamespaces: len(names), Fanout: backend.listFanout, NativeIdentityOrder: true,
+					Retry: backend.listRetryPolicy(),
+				})
+				observeListDuration(backend.metrics, collection, "global", started)
+				if collectErr == nil {
+					backend.observeList(collection, int(received.Load()), len(result.Items))
+				}
+				return result, collectErr
 			}
-			selection := resourceSelection(binding, resolution)
-			selection.Namespaces = []string{""}
-			var received atomic.Int64
-			counted := countingLister(list, &received, backend, binding)
-			started := time.Now()
-			result, collectErr := resources.Collect(ctx, resources.CollectionRequest[T]{
-				ReadThroughUnknown: true,
-				Selection:          selection, Options: options, Origins: origins, Cursor: cursor,
-				Lister: originListerFunc[T](func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[T], error) {
-					return listGlobalPageInScope(ctx, page, counted, allowed)
-				}),
-				Authorizer: backend.authorizer, Less: less, Timeout: backend.listWindowTimeout,
-				RequestedNamespaces: len(names), Fanout: backend.listFanout, NativeIdentityOrder: true,
-				Retry: backend.listRetryPolicy(),
-			})
-			observeListDuration(backend.metrics, collection, "global", started)
-			if collectErr == nil {
-				backend.observeList(collection, int(received.Load()), len(result.Items))
+			if cursorGlobal {
+				if decision == authorization.DecisionDenied {
+					return resources.ListResult[T]{}, resourceDomain(resources.CodeForbidden, "The global list grant required by this cursor is unavailable.", nil)
+				}
+				return resources.ListResult[T]{}, resourceDomain(resources.CodeAuthorizationUnavailable, "Authorization could not be confirmed.", nil)
 			}
-			return result, collectErr
-		}
-		if cursorGlobal {
-			if decision == authorization.DecisionDenied {
-				return resources.ListResult[T]{}, resourceDomain(resources.CodeForbidden, "The global list grant required by this cursor is unavailable.", nil)
-			}
-			return resources.ListResult[T]{}, resourceDomain(resources.CodeAuthorizationUnavailable, "Authorization could not be confirmed.", nil)
 		}
 	}
 	if len(options.Namespaces) == 0 && len(resolution.Namespaces) > resources.MaximumNamespaces {
@@ -683,28 +692,47 @@ func preferredListNamespace(resolution namespaces.ScopeResolution, options resou
 	return *resolution.DefaultNamespace
 }
 
-// globalScopeScanPages bounds the raw pages one global-in-scope window may
-// scan before yielding whatever it already filtered.
+// globalScopeScanPages bounds the raw pages one call of listGlobalPageInScope
+// may scan. It is a per-call bound, and that is only a per-request bound while
+// the strategy calls the lister once per window.
+//
+// GlobalNative does exactly one fetch per window and is selected only for a
+// single origin. LazyMerge, which serves several origins, re-enters the lister
+// every round while any origin advanced, and a page that filtered every row
+// out still counts as advancing: a sparse scope would scan this many pages per
+// origin per round until the collection window times out. So the caller
+// requires a single global origin before engaging, which keeps the strategy on
+// GlobalNative and keeps this bound meaningful.
 const globalScopeScanPages = 5
 
 // globalScopeFilterEligible reports whether a collection may answer an
 // explicit namespace scope with one cluster-wide LIST filtered back to that
-// scope, instead of one LIST per namespace per GVR. Three properties are
-// required:
+// scope, instead of one LIST per namespace. Four properties are required:
 //
 //   - rows are namespaced, so resources.NamespacedListItem can filter them;
 //   - the collection is a Kubernetes built-in, whose native LIST order is
 //     namespace-major, which the scan's early exit depends on;
+//   - the collection's default sort is identity ascending, which *is*
+//     namespace-major order, so the bounded scan admits rows in the order the
+//     caller asked for;
 //   - a cluster-wide read does not widen sensitivity beyond the fan-out it
 //     replaces.
 //
-// Secrets are excluded by the third property. Dynamic and CRD collections are
-// excluded by the second: an aggregated API server need not preserve
-// namespace-major ordering, so the early exit could drop rows.
+// Secrets fail the fourth property. Dynamic and CRD collections fail the
+// second: an aggregated API server need not preserve namespace-major
+// ordering, so the early exit could drop rows.
+//
+// Events fail the third. Their default sort is timestamp descending
+// (options.go rulesByCollection), so a scan that fills the page from the
+// alphabetically-first namespaces would change which rows reach page one:
+// fan-out draws a chunk from every namespace in the scope, and the newest
+// event could otherwise sit arbitrarily deep in the cursor.
+//
+// Workloads fail a bound rather than a property, and the guard below enforces
+// it structurally: see globalScopeScanPages.
 func globalScopeFilterEligible(collection resources.Collection) bool {
 	switch collection {
-	case resources.CollectionPods, resources.CollectionWorkloads, resources.CollectionEvents,
-		resources.CollectionServices, resources.CollectionIngresses,
+	case resources.CollectionPods, resources.CollectionServices, resources.CollectionIngresses,
 		resources.CollectionEndpointSlices, resources.CollectionConfigMaps:
 		return true
 	default:

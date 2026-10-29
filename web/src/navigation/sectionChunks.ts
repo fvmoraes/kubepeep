@@ -26,8 +26,9 @@ const sectionChunks: Array<{ pattern: RegExp; chunk: string; load: () => Promise
 
 /**
  * sectionChunkFor names the chunk a route will mount, without importing it.
- * A wrong answer here warms the wrong module: it costs parse and delivers
- * nothing, so the route table asserts this mapping directly.
+ * A wrong answer warms the wrong module: it costs parse and delivers nothing,
+ * and the lazy boundary still imports the right one, so the mistake is
+ * silent. sectionChunks.test.ts mirrors App's route table to catch it.
  */
 export function sectionChunkFor(pathname: string): string | null {
   return sectionChunks.find((entry) => entry.pattern.test(pathname))?.chunk ?? null

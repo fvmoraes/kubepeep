@@ -464,52 +464,114 @@ func TestExplicitPodScopeGlobalPageClosesExactLimitWithoutEmptyCursorPage(t *tes
 	}
 }
 
-// A multi-GVR collection is where per-namespace fan-out costs the most: one
-// LIST per namespace per kind. With a proven cluster-wide grant the scope must
-// cost one LIST per kind instead, and still exclude namespaces outside it.
-func TestExplicitWorkloadScopeUsesOneGlobalListPerKindInsteadOfNamespaceFanout(t *testing.T) {
+// A collection other than Pods must reach the namespace filter, so the filter
+// cannot silently depend on PodDTO. Services drive ServiceDTO.ListNamespace
+// through the whole strategy.
+func TestExplicitServiceScopeUsesOneGlobalListAndExcludesOutsideNamespaces(t *testing.T) {
 	client := kubefake.NewSimpleClientset(
-		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Namespace: "alpha", Name: "api"}},
-		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Namespace: "beta", Name: "worker"}},
-		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Namespace: "outside", Name: "hidden"}},
-		&appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{Namespace: "alpha", Name: "db"}},
+		&corev1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: "alpha", Name: "api"}, Spec: corev1.ServiceSpec{Type: corev1.ServiceTypeClusterIP}},
+		&corev1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: "beta", Name: "worker"}, Spec: corev1.ServiceSpec{Type: corev1.ServiceTypeClusterIP}},
+		&corev1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: "outside", Name: "hidden"}, Spec: corev1.ServiceSpec{Type: corev1.ServiceTypeClusterIP}},
 	)
-	listsByResource := map[string][]string{}
-	client.PrependReactor("list", "*", func(action k8stesting.Action) (bool, runtime.Object, error) {
-		resource := action.GetResource().Resource
-		listsByResource[resource] = append(listsByResource[resource], action.GetNamespace())
+	requestNamespaces := []string{}
+	client.PrependReactor("list", "services", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		requestNamespaces = append(requestNamespaces, action.GetNamespace())
 		return false, nil, nil
 	})
 	backend := &ResourceBackend{clients: fixedResourceClientProvider{set: resourceClientSet{kubernetes: client}}, authorizer: &allowResourceAuthorization{}, now: time.Now}
-	result, err := backend.ListWorkloads(
+	result, err := backend.ListServices(
 		t.Context(),
 		namespaces.SelectionBinding{ClusterProfileID: 1, Context: "ctx", Generation: "gen"},
 		namespaces.ScopeResolution{ScopeName: "scope", Namespaces: []string{"alpha", "beta"}},
-		resources.ListOptions{Limit: 100, Kinds: []resources.WorkloadKind{resources.WorkloadDeployments, resources.WorkloadStatefulSets}},
+		resources.ListOptions{Limit: 100},
 		nil,
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Two kinds over two namespaces would be four fan-out LISTs.
-	for resource, namespacesListed := range listsByResource {
-		if len(namespacesListed) != 1 || namespacesListed[0] != "" {
-			t.Fatalf("%s LIST namespaces=%#v, want one global LIST", resource, namespacesListed)
-		}
+	if len(requestNamespaces) != 1 || requestNamespaces[0] != "" {
+		t.Fatalf("LIST namespaces=%#v, want one global LIST instead of per-namespace fan-out", requestNamespaces)
 	}
-	if len(listsByResource) != 2 {
-		t.Fatalf("listed resources=%#v, want deployments and statefulsets only", listsByResource)
-	}
-	if len(result.Items) != 3 {
-		t.Fatalf("items=%#v, want the three workloads inside the scope", result.Items)
+	if len(result.Items) != 2 {
+		t.Fatalf("items=%#v, want only the two Services inside the scope", result.Items)
 	}
 	for _, item := range result.Items {
 		if item.Namespace == "outside" {
-			t.Fatalf("global LIST leaked a workload outside the scope: %#v", item)
+			t.Fatalf("the namespace filter leaked a row outside the scope: %#v", item)
 		}
 	}
 	if result.Coverage.RequestedNamespaces != 2 || result.Coverage.CompletedNamespaces != 2 {
 		t.Fatalf("coverage=%#v, want both scope namespaces reported complete", result.Coverage)
+	}
+}
+
+// Workloads keep the per-namespace fan-out even though their rows are
+// namespaced and sorted by identity. GlobalOriginsFor yields one global origin
+// per kind, which selects LazyMerge, and LazyMerge re-enters the lister every
+// round while any origin advanced. The scan's five-page cap is per call, so a
+// sparse scope would scan with no request-level bound until the collection
+// window times out.
+func TestExplicitWorkloadScopeKeepsNamespaceFanoutBecauseTheScanBoundIsPerCall(t *testing.T) {
+	client := kubefake.NewSimpleClientset(
+		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Namespace: "alpha", Name: "api"}},
+		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Namespace: "beta", Name: "worker"}},
+	)
+	listed := []string{}
+	client.PrependReactor("list", "deployments", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		listed = append(listed, action.GetNamespace())
+		return false, nil, nil
+	})
+	backend := &ResourceBackend{clients: fixedResourceClientProvider{set: resourceClientSet{kubernetes: client}}, authorizer: &allowResourceAuthorization{}, now: time.Now}
+	if _, err := backend.ListWorkloads(
+		t.Context(),
+		namespaces.SelectionBinding{ClusterProfileID: 1, Context: "ctx", Generation: "gen"},
+		namespaces.ScopeResolution{ScopeName: "scope", Namespaces: []string{"alpha", "beta"}},
+		resources.ListOptions{Limit: 100, Kinds: []resources.WorkloadKind{resources.WorkloadDeployments, resources.WorkloadStatefulSets}},
+		nil,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) == 0 {
+		t.Fatal("no Deployment LIST was issued")
+	}
+	for _, namespace := range listed {
+		if namespace == "" {
+			t.Fatalf("Workloads used a cluster-wide LIST: %#v — the per-call scan bound does not survive LazyMerge", listed)
+		}
+	}
+}
+
+// Events keep the per-namespace fan-out: their default sort is timestamp
+// descending while the bounded scan admits rows in namespace-major order. A
+// scan would fill page one from the alphabetically-first namespaces, so the
+// newest event could sit arbitrarily deep in the cursor.
+func TestExplicitEventScopeKeepsNamespaceFanoutBecauseItSortsByTimestamp(t *testing.T) {
+	client := kubefake.NewSimpleClientset(
+		&corev1.Event{ObjectMeta: metav1.ObjectMeta{Namespace: "alpha", Name: "first"}},
+		&corev1.Event{ObjectMeta: metav1.ObjectMeta{Namespace: "beta", Name: "second"}},
+	)
+	listed := []string{}
+	client.PrependReactor("list", "events", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		listed = append(listed, action.GetNamespace())
+		return false, nil, nil
+	})
+	backend := &ResourceBackend{clients: fixedResourceClientProvider{set: resourceClientSet{kubernetes: client}}, authorizer: &allowResourceAuthorization{}, now: time.Now}
+	if _, err := backend.ListEvents(
+		t.Context(),
+		namespaces.SelectionBinding{ClusterProfileID: 1, Context: "ctx", Generation: "gen"},
+		namespaces.ScopeResolution{ScopeName: "scope", Namespaces: []string{"alpha", "beta"}},
+		resources.ListOptions{Limit: 100},
+		nil,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) == 0 {
+		t.Fatal("no Event LIST was issued")
+	}
+	for _, namespace := range listed {
+		if namespace == "" {
+			t.Fatalf("Events used a cluster-wide LIST: %#v — page one would stop sampling every namespace", listed)
+		}
 	}
 }
 
@@ -537,23 +599,37 @@ func TestAllNamespacesScopeListsEveryWorkloadKindWithoutSingleOriginValidation(t
 	}
 }
 
-// The strategy is opt-in per collection. Secrets stay on namespace fan-out so
-// a cluster-wide read never widens their blast radius, and dynamic/CRD
-// collections stay out because an aggregated API server need not preserve the
-// namespace-major ordering the scan's early exit depends on.
-func TestGlobalScopeFilterEligibilityExcludesSecretsAndDynamicCollections(t *testing.T) {
+// The strategy is opt-in per collection and every exclusion has its own
+// reason: Secrets would widen a cluster-wide read on the most sensitive
+// resource; an aggregated API server owes dynamic and CRD collections no
+// namespace-major ordering; Events sort by timestamp rather than identity;
+// Workloads are multi-GVR and would lose the scan's request-level bound.
+//
+// Eligibility is only safe while a collection has exactly one global origin,
+// because that is what keeps the strategy on GlobalNative, which calls the
+// lister once per window. This asserts that invariant rather than trusting
+// the allowlist to stay correct.
+func TestGlobalScopeFilterEligibilityEncodesEveryExclusion(t *testing.T) {
 	t.Parallel()
 	for _, collection := range []resources.Collection{
-		resources.CollectionPods, resources.CollectionWorkloads, resources.CollectionEvents,
-		resources.CollectionServices, resources.CollectionIngresses,
+		resources.CollectionPods, resources.CollectionServices, resources.CollectionIngresses,
 		resources.CollectionEndpointSlices, resources.CollectionConfigMaps,
 	} {
 		if !globalScopeFilterEligible(collection) {
 			t.Fatalf("collection %q must be eligible for the global-in-scope strategy", collection)
 		}
+		origins, err := resources.GlobalOriginsFor(collection, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(origins) != 1 {
+			t.Fatalf("collection %q has %d global origins; the per-call scan bound would not hold", collection, len(origins))
+		}
 	}
 	for _, collection := range []resources.Collection{
 		resources.CollectionSecrets,
+		resources.CollectionEvents,
+		resources.CollectionWorkloads,
 		resources.Collection("dynamic:example.com:v1:widgets:n"),
 	} {
 		if globalScopeFilterEligible(collection) {
