@@ -112,11 +112,11 @@ entry executar.
 
 ### B. Cascata de bootstrap (afeta toda tela de recurso)
 
-**B1. A sequência é estritamente serial.** `local-status` → resolução de scope
-→ universo de namespaces → `import()` do chunk da seção → primeiro LIST. O
-chunk só é pedido depois que `globalNamespace.ready` libera o `Outlet`
-(`App.tsx:391-397`), apesar de não ter dependência de dado nenhuma. Caminho
-imediato: disparar o `import()` da seção em paralelo com os gates.
+**B1. A sequência era estritamente serial.** `local-status` → resolução de
+scope → universo de namespaces → `import()` do chunk da seção → primeiro LIST.
+O chunk só era pedido depois que `globalNamespace.ready` libera o `Outlet`,
+apesar de não ter dependência de dado nenhuma. Corrigido em 29/10/2026;
+resultado em [Passo 5](#passo-5--chunk-da-seção-em-paralelo-com-os-gates).
 
 **B2. Ativar o scope default custa quatro saltos extras, mas eles são
 baratos.** Correção de peso em relação à primeira versão deste documento:
@@ -290,7 +290,7 @@ dominam parse de bundle e saltos locais por ordem de magnitude.
 | 2 | ✅ Resolver alvo dinâmico por GVR antes da varredura completa de discovery | D1 | De 2+N group-versions para 1, antes de todo LIST custom frio |
 | 3 | ✅ Pré-compressão de assets e negociação no handler | A1 | Nenhuma; 491 kB para 127 kB de fio, só relevante no modo navegador |
 | 4 | ✅ Preload dos `woff2` primários | A2 | Nenhuma; duas etapas para uma no caminho do texto |
-| 5 | Disparar `import()` da seção em paralelo com os gates | B1 | Nenhuma; remove serialização local sem dependência de dado |
+| 5 | ✅ Disparar `import()` da seção em paralelo com os gates | B1 | Nenhuma; remove serialização local sem dependência de dado |
 | 6 | Stream preview para coleções dinâmicas | D3 | Nenhuma; antecipa percepção, não reduz trabalho |
 | 7 | Scope default no envelope de `/api/v1/status` | B2, B3 | Quatro saltos locais baratos; muda contrato de API |
 | 8 | Análise de bundle e extração do que não pinta do entry chunk | A3 | Nenhuma; precisa de medição de composição antes do corte |
@@ -511,6 +511,50 @@ dois preloads de fonte, ambos resolvem 200 com `Content-Type: font/woff2` e
 Não medido: ganho em milissegundos de primeira pintura em navegador real. O
 encurtamento do caminho de descoberta de duas etapas para uma é estrutural e
 verificável no HTML; o efeito percebido depende de rede e cache do cliente.
+
+## Passo 5 — Chunk da seção em paralelo com os gates
+
+Concluído em 29/10/2026.
+
+`web/src/navigation/sectionChunks.ts` mapeia cada rota ao módulo que ela vai
+montar, e `Shell` chama `warmSectionChunk(location.pathname)` num efeito
+disparado na montagem e em cada troca de rota. O efeito roda enquanto
+`DefaultScopeGate` e `globalNamespace.ready` ainda resolvem, então a espera do
+gate e o download do chunk passam a se sobrepor.
+
+Nada monta mais cedo: o gate continua impedindo que queries de recurso montem
+antes de o scope resolver, e o componente só aparece quando o `Outlet` é
+liberado. A mudança adianta só o download do código.
+
+O mapa ficou em `navigation/` e não em `App.tsx` por dois motivos: é onde
+`tree.tsx`, `paths.ts`, `customViews.ts` e `dynamic.ts` já vivem, e exportar
+uma função de `App.tsx` acionaria `react-refresh/only-export-components`.
+
+Ordem importa, porque o primeiro padrão que casa vence: `/workloads/custom` é
+visão dinâmica e não lista de workloads, e `/network/gateway-api` é página
+própria e não lista de rede. Ambos precedem o prefixo genérico que os
+capturaria.
+
+### Validação
+
+O risco concreto desta mudança era os especificadores de `navigation/`
+gerarem chunks diferentes dos de `App.tsx`, dobrando o download em vez de
+aquecer. Verificado comparando o bundle antes e depois: 45 chunks nos dois
+casos, lista idêntica, e cada chunk de seção aparece exatamente uma vez.
+
+43 casos novos de teste conferem o mapeamento rota a rota contra a tabela real
+de rotas, incluindo os dois casos que um prefixo genérico capturaria e um
+caminho fora da tabela, que não aquece nada. Um mapeamento errado é silencioso
+— a fronteira lazy importa o módulo certo de todo jeito — então o teste existe
+para que o erro não passe sem ser visto. Frontend em 55 arquivos e 368 testes;
+`go test ./...` com 36 pacotes; `make lint` sem erros; `tsc -b` limpo.
+
+Valor honesto: é o menor dos cinco passos. `ResourcePages` já era aquecido
+pós-pintura, então Pods, Workloads, Network, Config, Events e Nodes não ganham
+nada. O ganho fica em `FamilyPages`, `ConfigurationPages`, `AccessPages`,
+`GatewayPage`, `HelmPage` e `DynamicResourcePage`, uma vez por seção por
+sessão, e vale dezenas de milissegundos de leitura local mais parse. Não
+medido em navegador real.
 
 ## Restrições herdadas
 
