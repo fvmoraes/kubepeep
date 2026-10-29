@@ -90,7 +90,8 @@ preferir o irmão `.br`/`.gz` preservando a política immutable. Restrição: a
 CSP `style-src 'self'` (`handler.go:36`, aplicada em `:115`) proíbe CSS
 crítico inline sem hash ou nonce.
 
-**A2. Oito folhas de fonte no CSS de entrada, sem preload.**
+**A2. Oito folhas de fonte no CSS de entrada, sem preload. Preload adicionado
+em 29/10/2026; resultado em [Passo 4](#passo-4--preload-das-fontes-do-shell).**
 `web/src/styles.css:2-9` faz `@import` de quatro subsets Roboto e quatro
 Roboto Mono. Elas entram no CSS bloqueante e os `@font-face` só são
 descobertos depois do parse: dois saltos até o texto final. `web/index.html`
@@ -288,7 +289,7 @@ dominam parse de bundle e saltos locais por ordem de magnitude.
 | 1 | ✅ Generalizar o LIST global em escopo para além de Pods | C0 | Workloads de 6×N para 6; GVR único de N para 1 |
 | 2 | ✅ Resolver alvo dinâmico por GVR antes da varredura completa de discovery | D1 | De 2+N group-versions para 1, antes de todo LIST custom frio |
 | 3 | ✅ Pré-compressão de assets e negociação no handler | A1 | Nenhuma; 491 kB para 127 kB de fio, só relevante no modo navegador |
-| 4 | Preload dos `woff2` primários | A2 | Nenhuma; duas etapas para uma no caminho do texto |
+| 4 | ✅ Preload dos `woff2` primários | A2 | Nenhuma; duas etapas para uma no caminho do texto |
 | 5 | Disparar `import()` da seção em paralelo com os gates | B1 | Nenhuma; remove serialização local sem dependência de dado |
 | 6 | Stream preview para coleções dinâmicas | D3 | Nenhuma; antecipa percepção, não reduz trabalho |
 | 7 | Scope default no envelope de `/api/v1/status` | B2, B3 | Quatro saltos locais baratos; muda contrato de API |
@@ -462,6 +463,54 @@ fallback para gzip, identidade sem `Accept-Encoding`, recusa por `q=0`,
 preservação da política `immutable` e do `Content-Type` na resposta
 comprimida, `Vary` mesmo servindo identidade, asset sem irmão, e irmão
 inacessível diretamente.
+
+## Passo 4 — Preload das fontes do shell
+
+Concluído em 29/10/2026.
+
+Um segundo plugin em `web/vite.config.ts` injeta `<link rel="preload">` para
+as duas faces que o shell pinta, resolvendo o nome com hash a partir do bundle
+em `transformIndexHtml`. Antes, a descoberta da fonte exigia baixar o CSS de
+entrada, parseá-lo e só então buscar o arquivo: duas etapas seriais antes de o
+texto assentar na face final.
+
+Escolha das faces, verificada no código: `--font-sans` é Roboto em `:root` e
+`body` (`tokens.css:116`), logo latin-400 é a face de primeira pintura; o peso
+700 é `--text-title`, `--text-heading` e `--text-column` (`tokens.css:123-131`)
+mais `font-bold` na Sidebar e no cabeçalho do `DataTable`, logo também pinta no
+primeiro frame. `latin-ext` cobre caracteres que a interface, hoje só em
+inglês, raramente pinta. Roboto Mono pertence a YAML, logs e terminal, que são
+rotas lazy: preloadar qualquer um dos dois cobraria banda de quem nunca chega
+lá.
+
+Três detalhes que decidiram a forma final:
+
+- `crossorigin` é obrigatório. Um fetch de `@font-face` é sempre modo CORS; sem
+  o atributo o preload cai em outra entrada de cache e a fonte é baixada duas
+  vezes.
+- As tags são anexadas ao fim do `head`, não prefixadas. Prefixar colocava os
+  links antes de `<meta charset>`, e a declaração de charset precisa continuar
+  primeiro. O preload scanner tokeniza o `head` inteiro antes de buscar, então
+  a posição dentro dele não atrasa a fonte.
+- Nenhum subset foi removido do CSS de entrada. `styles.css:24` define
+  `font-synthesis: none`, então tirar o peso 700 renderizaria negrito em 400 em
+  vez de sintetizar: regressão visível no design system, não otimização.
+
+Se o `@fontsource` renomear um subset, o build **falha** com mensagem
+explícita, em vez de seguir sem o preload. Verificado trocando o padrão por um
+inexistente: `RolldownError: no emitted font matched ...: the shell font
+preload would be dropped`.
+
+### Validação
+
+Verificação física pelo handler real: o `index.html` servido contém exatamente
+dois preloads de fonte, ambos resolvem 200 com `Content-Type: font/woff2` e
+`public, max-age=31536000, immutable`. `go test ./...` com 36 pacotes;
+`make lint` sem erros; `tsc -b` limpo; 325 testes de frontend verdes.
+
+Não medido: ganho em milissegundos de primeira pintura em navegador real. O
+encurtamento do caminho de descoberta de duas etapas para uma é estrutural e
+verificável no HTML; o efeito percebido depende de rede e cache do cliente.
 
 ## Restrições herdadas
 

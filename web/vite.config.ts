@@ -1,5 +1,6 @@
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
+import { basename } from 'node:path'
 import { constants as zlibConstants, brotliCompressSync, gzipSync } from 'node:zlib'
 import type { Plugin } from 'vite'
 import { defineConfig } from 'vitest/config'
@@ -44,8 +45,67 @@ function precompressAssets(): Plugin {
   }
 }
 
+// The entry CSS declares every @font-face, so the browser cannot discover a
+// font file until it has downloaded and parsed that stylesheet: two serial
+// hops before text settles into its final face. Preloading the faces the shell
+// actually paints collapses that into one.
+//
+// Only Roboto latin 400 and 700 are preloaded. 400 is --font-sans on :root and
+// body; 700 is --text-title, --text-heading and --text-column, so the sidebar,
+// headings and table headers need it on first paint. latin-ext covers
+// characters the English-only UI rarely paints, and Roboto Mono belongs to
+// YAML, logs and the terminal, which are lazy routes: preloading either would
+// spend bandwidth for users who never reach them.
+//
+// No subset is removed from the entry CSS. styles.css sets font-synthesis:
+// none, so a missing 700 would render bold text at 400 instead of synthesizing
+// it, which is a visible regression rather than an optimization.
+const preloadedShellFonts = [
+  /^roboto-latin-400-normal-[^.]+\.woff2$/,
+  /^roboto-latin-700-normal-[^.]+\.woff2$/,
+]
+
+function preloadShellFonts(): Plugin {
+  let base = '/'
+  return {
+    name: 'kubepeep-preload-shell-fonts',
+    apply: 'build',
+    enforce: 'post',
+    configResolved(config) {
+      base = config.base
+    },
+    transformIndexHtml: {
+      order: 'post',
+      handler(html, context) {
+        const emitted = Object.keys(context.bundle ?? {})
+        const tags = preloadedShellFonts.flatMap((pattern) => {
+          const file = emitted.find((name) => pattern.test(basename(name)))
+          if (!file) {
+            // Losing a preload silently would quietly restore the two-hop
+            // critical path. If @fontsource renames a subset, that is a human
+            // decision, so stop the build instead of shipping the regression.
+            this.error(`no emitted font matched ${pattern}: the shell font preload would be dropped`)
+          }
+          return [{
+            tag: 'link',
+            // A @font-face fetch is always CORS mode. Without crossorigin the
+            // preload lands in a different cache entry and the font is
+            // downloaded twice.
+            attrs: { rel: 'preload', as: 'font', type: 'font/woff2', crossorigin: '', href: `${base}${file}` },
+            // Appended rather than prepended: the charset declaration must
+            // stay first, and the preload scanner tokenizes the whole head
+            // before fetching, so position inside head does not delay this.
+            injectTo: 'head' as const,
+          }]
+        })
+        return { html, tags }
+      },
+    },
+  }
+}
+
 export default defineConfig({
-  plugins: [react(), tailwindcss(), precompressAssets()],
+  plugins: [react(), tailwindcss(), precompressAssets(), preloadShellFonts()],
   build: {
     outDir: '../internal/web/dist',
     emptyOutDir: true,
