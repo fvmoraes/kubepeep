@@ -6,6 +6,7 @@ as validações, consultar o [guia de desenvolvimento](../guides/development.md)
 
 | Documento | Contexto |
 | --- | --- |
+| [Baseline de carregamento](load-time-baseline.md) | Bundle medido em 29/10/2026, achados de caminho crítico e ordem de trabalho; nada implementado |
 | [Benchmark Aptakube](aptakube-ux-benchmark.md) | Referência de experiência operacional; requisitos não implicam implementação |
 | [Ginger v1.4.4](ginger-v1.4.4.md) | Pesquisa histórica de bootstrap, transportes e scaffolds |
 | [Matriz F1](compatibility-matrix.md) | Compatibilidade observada no spike, sem substituir CI ou smoke de release atuais |
