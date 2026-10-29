@@ -116,7 +116,16 @@ chunk só é pedido depois que `globalNamespace.ready` libera o `Outlet`
 (`App.tsx:391-397`), apesar de não ter dependência de dado nenhuma. Caminho
 imediato: disparar o `import()` da seção em paralelo com os gates.
 
-**B2. Ativar o scope default custa quatro saltos extras.**
+**B2. Ativar o scope default custa quatro saltos extras, mas eles são
+baratos.** Correção de peso em relação à primeira versão deste documento:
+`namespace_scopes` é tabela SQLite local
+(`internal/adapters/sqlite/namespace_scopes.go`, migração
+`internal/migrations/sql/0003_namespace_scope_defaults.sql`), não recurso
+Kubernetes. Os quatro saltos são loopback mais SQLite, da ordem de poucos
+milissegundos cada, não centenas. O problema é arquitetural e de ciclos de
+render, não de latência. O único salto desta cadeia que toca o cluster é
+`getNamespaces({ limit: 500 })` em `GlobalNamespaceProvider`, usado quando
+`scopeMode === 'all'`.
 `web/src/components/DefaultScopeGate.tsx:20-44` encadeia por `enabled`:
 `namespace-scopes` → `session` → POST `select` → invalidação que **refaz**
 `local-status`. Tudo atrás de um painel de loading, com as queries de recurso
@@ -160,6 +169,45 @@ tem layout real, então o custo de re-medição do virtualizador causado por
 "A new key extractor invalidates TanStack's measurements of every loaded row")
 **não** entra nessa medição e permanece não quantificado. Este item sai da
 frente da fila: não serve ao objetivo de tempo de carregamento.
+
+**C0. O LIST global em escopo existe, é provado, e atende só Pods.** Este é o
+maior custo de carregamento das telas default e não estava na primeira versão
+deste documento.
+
+Com um escopo de namespaces explícito — que é o caminho normal do produto,
+porque a aplicação exige um default explícito por contexto —
+`originsFor` (`internal/services/resources/service.go:43-76`) devolve **uma
+origem por namespace por GVR**. Workloads tem seis GVRs
+(`service.go:26`: deployments, statefulsets, daemonsets, jobs, cronjobs,
+replicasets), então a primeira página de Workloads num escopo de N namespaces
+emite 6×N LISTs. Services, ConfigMaps, Events, Ingresses e EndpointSlices
+emitem N cada.
+
+Com `Fanout` 4 (`resources_backend.go:45`) e QPS/Burst 10/20
+(`client_factory.go:103-107`), depois de gastar os 20 tokens de burst a vazão
+fica em 10 requisições por segundo. Um escopo de 20 namespaces custa, só em
+admissão no rate limiter, cerca de 120 LISTs para a primeira página de
+Workloads.
+
+`collectResource` já resolve exatamente isso, mas apenas para Pods
+(`resources_backend.go:598`):
+
+```go
+if preferredNamespace == "" && collection == resources.CollectionPods && !resolution.PreferGlobal && ...
+```
+
+Provada a concessão `list` cluster-wide, ele troca a fan-out por um LIST global
+e filtra as linhas pelos namespaces do escopo em `listGlobalPodPageInScope`
+(`:689`), com limite de cinco páginas nativas e parada antecipada que se
+apoia na ordem nativa namespace/name. Toda coleção namespaced tem a mesma
+ordem nativa, então o padrão vale para as demais; só o filtro precisa ler o
+namespace do item, hoje feito por asserção de tipo para `PodDTO`, porque
+`ListItem` é interface marcadora sem acessor (`types.go:122`).
+
+Generalizar levaria Workloads de 6×N para 6 requisições e as coleções de GVR
+único de N para 1, preservando DTO, cursor, paginação, autorização e fronteira
+de geração. A contagem de requisições é certa a partir do código; o tempo de
+parede depende da latência por requisição do cluster, que não foi medida.
 
 **C2. Nenhuma tela aquece a própria primeira página.**
 `internal/api/handlers/resources.go:958-970` rejeita `likely-next` sem cursor,
@@ -227,23 +275,34 @@ Cada item é verificável isoladamente. Nada aqui está implementado.
 Ordem revisada em 29/10/2026 depois de medir C1 e constatar que ele não serve
 ao objetivo de carregamento.
 
-| # | Item | Escopo | Por quê nesta posição |
-| --- | --- | --- | --- |
-| 0 | Baseline medida de `time_to_first_row` e `time_to_shell_ready`, default e custom, em cluster real | Medição | Nenhum ganho de carregamento é demonstrável sem isso |
-| 1 | Resolver alvo dinâmico por GVR antes da varredura completa; cache de discovery por GVR | D1 | Maior custo isolado de carregamento das telas custom |
-| 2 | Pré-compressão de assets no build + negociação no handler | A1 | 491 kB crus medidos; alto ganho no modo navegador, preserva política immutable |
-| 3 | Preload dos `woff2` primários; subsets secundários fora da entrada | A2 | Barato, encurta o caminho crítico do texto em duas etapas para uma |
-| 4 | Disparar `import()` da seção em paralelo com os gates | B1 | Remove serialização que não tem dependência de dado |
-| 5 | Scope default no envelope de `/api/v1/status` | B2, B3 | Colapsa quatro saltos em um; muda contrato de API |
-| 6 | Análise de bundle e extração do que não pinta do entry chunk | A3 | Precisa de medição de composição antes de decidir o corte |
-| 7 | Stream preview para coleções dinâmicas | D3 | Percepção imediata; menor que cobertura de topic |
-| 8 | Memoizar arrays de coluna e estabilizar `getRowKey` nas páginas | C1, C4 | 2,13 ms por re-render medidos: ganho de interação, não de carregamento |
+O critério de ordenação é número de requisições Kubernetes removidas do
+caminho da primeira linha, porque numa tela de recurso essas requisições
+dominam parse de bundle e saltos locais por ordem de magnitude.
 
-Itens 5 e 7 alteram contrato ou estrutura e exigem decisão registrada antes da
-implementação. Os itens 1 a 4 são locais e reversíveis. O item 8 só se
-justifica junto a uma medição de responsividade de interação em navegador
-real, que ainda não existe; a parcela de `getRowKey` permanece não
-quantificada.
+| # | Item | Escopo | Requisições no caminho crítico |
+| --- | --- | --- | --- |
+| 0 | Baseline medida de `time_to_first_row`, default e custom, em cluster real | Medição | Nenhum ganho de carregamento é demonstrável sem isso |
+| 1 | Generalizar o LIST global em escopo para além de Pods | C0 | Workloads de 6×N para 6; GVR único de N para 1 |
+| 2 | Resolver alvo dinâmico por GVR antes da varredura completa de discovery | D1 | De 2+N group-versions para 1, antes de todo LIST custom frio |
+| 3 | Pré-compressão de assets e negociação no handler | A1 | Nenhuma; 491 kB para ~148 kB de fio, só relevante no modo navegador |
+| 4 | Preload dos `woff2` primários | A2 | Nenhuma; duas etapas para uma no caminho do texto |
+| 5 | Disparar `import()` da seção em paralelo com os gates | B1 | Nenhuma; remove serialização local sem dependência de dado |
+| 6 | Stream preview para coleções dinâmicas | D3 | Nenhuma; antecipa percepção, não reduz trabalho |
+| 7 | Scope default no envelope de `/api/v1/status` | B2, B3 | Quatro saltos locais baratos; muda contrato de API |
+| 8 | Análise de bundle e extração do que não pinta do entry chunk | A3 | Nenhuma; precisa de medição de composição antes do corte |
+| 9 | Memoizar arrays de coluna e estabilizar `getRowKey` | C1, C4 | Nenhuma; 2,13 ms por re-render, interação e não carregamento |
+
+Itens 1, 2, 3, 4 e 5 preservam design system, usabilidade e funcionamento:
+nenhum altera componente, layout, DTO, semântica de paginação, fronteira de
+autorização ou geração. O item 7 altera contrato de API e o 6 altera
+estrutura; ambos exigem decisão registrada antes da implementação. O item 9 só
+se justifica com medição de responsividade em navegador real, que ainda não
+existe.
+
+Explicitamente fora da fila, com motivo: elevar QPS/Burst para 20/40, porque
+[protocolo e tuning](../reference/protocol-tuning.md) já avaliou e recusou por
+não provar segurança sob API Server compartilhado; e ligar `compression` por
+default, porque a mesma coleta mediu p95 3,9% pior em Kind local.
 
 ## Restrições herdadas
 
