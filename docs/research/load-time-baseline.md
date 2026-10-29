@@ -225,7 +225,8 @@ Afeta fluidez, não primeira linha.
 
 ### D. Telas custom (maior diferença)
 
-**D1. Todo LIST custom frio paga uma varredura completa de discovery antes.**
+**D1. Todo LIST custom frio pagava uma varredura completa de discovery antes.
+Corrigido em 29/10/2026; resultado em [Passo 2](#passo-2--resolução-dinâmica-por-group-version).**
 `internal/integration/kubernetesruntime/dynamic_views.go:25` chama
 `resolveDynamicResource`, que em `resource_discovery.go:212` chama
 `DiscoverResources`: `GET /api` + `GET /apis` + um `GET /apis/{gv}` por
@@ -284,7 +285,7 @@ dominam parse de bundle e saltos locais por ordem de magnitude.
 | --- | --- | --- | --- |
 | 0 | Baseline medida de `time_to_first_row`, default e custom, em cluster real | Medição | Nenhum ganho de carregamento é demonstrável sem isso |
 | 1 | ✅ Generalizar o LIST global em escopo para além de Pods | C0 | Workloads de 6×N para 6; GVR único de N para 1 |
-| 2 | Resolver alvo dinâmico por GVR antes da varredura completa de discovery | D1 | De 2+N group-versions para 1, antes de todo LIST custom frio |
+| 2 | ✅ Resolver alvo dinâmico por GVR antes da varredura completa de discovery | D1 | De 2+N group-versions para 1, antes de todo LIST custom frio |
 | 3 | Pré-compressão de assets e negociação no handler | A1 | Nenhuma; 491 kB para ~148 kB de fio, só relevante no modo navegador |
 | 4 | Preload dos `woff2` primários | A2 | Nenhuma; duas etapas para uma no caminho do texto |
 | 5 | Disparar `import()` da seção em paralelo com os gates | B1 | Nenhuma; remove serialização local sem dependência de dado |
@@ -359,6 +360,51 @@ globais múltiplas, e a regressão de todos os namespaces em Workloads.
 Não medido: tempo de parede contra cluster real. A redução de requisições é
 verificável pelos testes e pela métrica de estratégia; milissegundos dependem
 da latência por requisição do cluster.
+
+## Passo 2 — Resolução dinâmica por group-version
+
+Concluído em 29/10/2026.
+
+`resolveDynamicResource` (`resource_discovery.go`) deixou de abrir com
+`DiscoverResources`. A ordem agora é: catálogo quente em memória, depois o
+group-version que a própria identidade do alvo nomeia, e só então a varredura
+completa como fallback. O código do caminho direto foi extraído para
+`resolveFromServedGroupVersion` e `servedGroupVersionPath`; o casamento com o
+catálogo virou `matchDiscoveredResource`. `resourceDiscoveryCache` ganhou
+`cached`, uma leitura que nunca dispara carga, e `DiscoverResources` passou a
+usá-la em vez de repetir a verificação de expiração.
+
+Custo de resolução antes de um LIST custom frio, por cenário:
+
+| Cenário | Antes | Depois |
+| --- | ---: | ---: |
+| Catálogo quente na seleção | 0 | 0 |
+| Catálogo frio, alvo servido | 2 + N group-versions | **1** |
+| Catálogo frio, alvo não servido | 2 + N, depois 1 | 1, depois 2 + N |
+
+O fallback é obrigatório e não foi removido: um group-version que não lista o
+alvo não prova que a API esteja ausente, porque um servidor agregado pode
+expô-la pela visão do catálogo. O erro devolvido continua sendo o do
+group-version do alvo, não o da varredura, para a mensagem seguir apontando a
+causa que o usuário pode agir.
+
+O risco anunciado se confirmou: o diálogo "Add custom resource" perde o
+aquecimento do catálogo como efeito colateral e passa a pagar a varredura
+completa com mais frequência. É ação explícita, com estado de carregamento
+próprio, e o teste de catálogo quente fixa que a enumeração continua
+acontecendo quando é ela que foi pedida.
+
+### Validação
+
+`go test ./...` com 36 pacotes aprovados; race detector aprovado em
+`internal/integration/kubernetesruntime`; `gofmt` e `go vet` limpos. Três
+testes novos, todos contando requisições HTTP reais contra um servidor de
+teste: LIST frio pede exatamente o group-version do alvo e zero caminhos de
+varredura; catálogo quente não gasta requisição nenhuma; alvo não servido
+ainda consulta a varredura antes de recusar com `FEATURE_UNAVAILABLE`.
+
+Não medido: tempo de parede contra cluster real. A contagem de requisições
+está provada por teste.
 
 ## Restrições herdadas
 

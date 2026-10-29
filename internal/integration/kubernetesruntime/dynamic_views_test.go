@@ -209,3 +209,85 @@ func TestDynamicViewsAuthorizationScopeMetadataFallbackAndLimits(t *testing.T) {
 		})
 	}
 }
+
+// A cold dynamic LIST used to sweep the whole API surface before it started:
+// GET /api, GET /apis and one request per served group-version. The target
+// names its own group-version, so resolution must cost exactly that one path.
+func TestColdDynamicListResolvesTargetWithoutSweepingEveryGroupVersion(t *testing.T) {
+	t.Parallel()
+	var sweepRequests, targetRequests atomic.Int32
+	backend := viewBackend(t, func(w http.ResponseWriter, r *http.Request) {
+		if viewDiscovery(w, r) {
+			if r.URL.Path == "/apis/example.test/v1" {
+				targetRequests.Add(1)
+			} else {
+				sweepRequests.Add(1)
+			}
+			return
+		}
+		viewJSON(w, viewTable("web", "first", ""))
+	})
+	result, err := backend.ListDynamicResources(t.Context(), viewBinding, viewScope, viewFixture, resources.ListOptions{Limit: 10}, nil)
+	if err != nil || len(result.Items) != 1 {
+		t.Fatalf("cold dynamic list: %#v / %v", result, err)
+	}
+	if got := sweepRequests.Load(); got != 0 {
+		t.Fatalf("sweep requests=%d, want none: the target already names its group-version", got)
+	}
+	if got := targetRequests.Load(); got != 1 {
+		t.Fatalf("target group-version requests=%d, want exactly one", got)
+	}
+}
+
+// A warm catalog answers resolution from memory, so a second screen opened in
+// the same selection spends no discovery request at all.
+func TestWarmCatalogResolvesDynamicTargetWithoutAnyDiscoveryRequest(t *testing.T) {
+	t.Parallel()
+	var discoveryRequests atomic.Int32
+	backend := viewBackend(t, func(w http.ResponseWriter, r *http.Request) {
+		if viewDiscovery(w, r) {
+			discoveryRequests.Add(1)
+			return
+		}
+		viewJSON(w, viewTable("web", "first", ""))
+	})
+	if _, err := backend.DiscoverResources(t.Context(), viewBinding, false); err != nil {
+		t.Fatal(err)
+	}
+	warmed := discoveryRequests.Load()
+	if warmed == 0 {
+		t.Fatal("the catalog dialog must still enumerate the cluster")
+	}
+	result, err := backend.ListDynamicResources(t.Context(), viewBinding, viewScope, viewFixture, resources.ListOptions{Limit: 10}, nil)
+	if err != nil || len(result.Items) != 1 {
+		t.Fatalf("warm dynamic list: %#v / %v", result, err)
+	}
+	if got := discoveryRequests.Load(); got != warmed {
+		t.Fatalf("discovery requests grew from %d to %d on a warm catalog", warmed, got)
+	}
+}
+
+// A served group-version that does not list the target is not proof the API is
+// absent, so the full sweep stays as the fallback before refusing.
+func TestUnservedDynamicTargetFallsBackToTheCatalogBeforeRefusing(t *testing.T) {
+	t.Parallel()
+	var sweepRequests atomic.Int32
+	backend := viewBackend(t, func(w http.ResponseWriter, r *http.Request) {
+		if viewDiscovery(w, r) {
+			if r.URL.Path == "/api" || r.URL.Path == "/apis" {
+				sweepRequests.Add(1)
+			}
+			return
+		}
+		t.Errorf("unexpected list for an unserved resource: %s", r.URL.Path)
+		http.NotFound(w, r)
+	})
+	absent := resources.DynamicResource{Group: "example.test", Version: "v1", Resource: "gadgets", Kind: "Gadget", Namespaced: true}
+	_, err := backend.ListDynamicResources(t.Context(), viewBinding, viewScope, absent, resources.ListOptions{Limit: 10}, nil)
+	if resources.ErrorCodeOf(err) != resources.CodeFeatureUnavailable {
+		t.Fatalf("error=%v, want the feature-unavailable refusal", err)
+	}
+	if got := sweepRequests.Load(); got == 0 {
+		t.Fatal("the sweep fallback was skipped, so an aggregated API could be refused wrongly")
+	}
+}
