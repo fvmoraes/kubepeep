@@ -1,6 +1,7 @@
 package web
 
 import (
+	"bytes"
 	"fmt"
 	"io/fs"
 	"net/http"
@@ -8,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 )
 
 var versionedAsset = regexp.MustCompile(`-[A-Za-z0-9_-]{8,}\.[A-Za-z0-9]+$`)
@@ -54,6 +56,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Encoded siblings exist only to answer negotiation. Serving one directly
+	// would hand compressed bytes labelled as the sibling's own type, with no
+	// Content-Encoding for the client to act on.
+	if encodedSibling(r.URL.Path) {
+		http.NotFound(w, r)
+		return
+	}
+
 	requestPath := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
 	// The root path is the canonical SPA entry: plain HTTP health probes
 	// (systemd, curl, container checks) request it without an Accept header
@@ -64,7 +74,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	if requestPath != "." && fs.ValidPath(requestPath) {
 		if info, err := fs.Stat(h.frontend, requestPath); err == nil && !info.IsDir() {
+			// Cache policy is derived from the asset the client asked for.
+			// An encoded sibling is named "<asset>.br", which does not match
+			// the versioned-asset pattern, so deriving it from the file that
+			// is actually written would downgrade immutable assets.
 			setAssetCache(w.Header(), requestPath)
+			if h.serveEncoded(w, r, requestPath) {
+				return
+			}
 			h.files.ServeHTTP(w, r)
 			return
 		}
@@ -90,6 +107,70 @@ func (h *Handler) serveIndex(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		_, _ = w.Write(index)
 	}
+}
+
+// encodedSiblings are the build-time compressed variants, best first. The
+// frontend build emits them next to each text asset so this handler never
+// compresses per request.
+var encodedSiblings = []struct {
+	encoding string
+	suffix   string
+}{
+	{encoding: "br", suffix: ".br"},
+	{encoding: "gzip", suffix: ".gz"},
+}
+
+func encodedSibling(value string) bool {
+	for _, sibling := range encodedSiblings {
+		if strings.HasSuffix(value, sibling.suffix) {
+			return true
+		}
+	}
+	return false
+}
+
+// serveEncoded answers with a compressed sibling when the client accepts its
+// encoding and the build produced one. It reports whether it wrote the
+// response. Vary is set either way: the same URL legitimately has different
+// bodies per Accept-Encoding, and a cache that ignores that would hand a
+// brotli body to a client that cannot read it.
+func (h *Handler) serveEncoded(w http.ResponseWriter, r *http.Request, assetPath string) bool {
+	w.Header().Set("Vary", "Accept-Encoding")
+	accept := r.Header.Get("Accept-Encoding")
+	for _, sibling := range encodedSiblings {
+		if !acceptsEncoding(accept, sibling.encoding) {
+			continue
+		}
+		encoded, err := fs.ReadFile(h.frontend, assetPath+sibling.suffix)
+		if err != nil {
+			continue
+		}
+		w.Header().Set("Content-Encoding", sibling.encoding)
+		// ServeContent derives the content type from this name, so the client
+		// still sees the asset's type rather than the sibling's extension.
+		http.ServeContent(w, r, assetPath, time.Time{}, bytes.NewReader(encoded))
+		return true
+	}
+	return false
+}
+
+// acceptsEncoding reports whether the client allows one content coding. A
+// "q=0" qualifier is an explicit refusal, so matching the token is not enough.
+func acceptsEncoding(header, encoding string) bool {
+	for _, element := range strings.Split(header, ",") {
+		fields := strings.Split(strings.TrimSpace(element), ";")
+		if !strings.EqualFold(strings.TrimSpace(fields[0]), encoding) {
+			continue
+		}
+		for _, parameter := range fields[1:] {
+			parameter = strings.ToLower(strings.Join(strings.Fields(parameter), ""))
+			if parameter == "q=0" || strings.HasPrefix(parameter, "q=0.0") {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }
 
 func reservedPath(value string) bool {

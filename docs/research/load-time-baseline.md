@@ -79,7 +79,8 @@ com ganho já medido em [protocolo e tuning](../reference/protocol-tuning.md)
 
 ### A. Boot e primeira pintura (afeta toda tela)
 
-**A1. Nenhuma compressão HTTP no servidor de assets.**
+**A1. Não havia compressão HTTP no servidor de assets. Corrigido em
+29/10/2026; resultado em [Passo 3](#passo-3--pré-compressão-de-assets).**
 `internal/web/handler.go:32` é um `http.FileServer` puro: não inspeciona
 `Accept-Encoding`, não define `Content-Encoding`, e o build não emite `.br`
 nem `.gz`. Os 491 kB eager vão crus pela rede. Em loopback desktop o custo
@@ -286,7 +287,7 @@ dominam parse de bundle e saltos locais por ordem de magnitude.
 | 0 | Baseline medida de `time_to_first_row`, default e custom, em cluster real | Medição | Nenhum ganho de carregamento é demonstrável sem isso |
 | 1 | ✅ Generalizar o LIST global em escopo para além de Pods | C0 | Workloads de 6×N para 6; GVR único de N para 1 |
 | 2 | ✅ Resolver alvo dinâmico por GVR antes da varredura completa de discovery | D1 | De 2+N group-versions para 1, antes de todo LIST custom frio |
-| 3 | Pré-compressão de assets e negociação no handler | A1 | Nenhuma; 491 kB para ~148 kB de fio, só relevante no modo navegador |
+| 3 | ✅ Pré-compressão de assets e negociação no handler | A1 | Nenhuma; 491 kB para 127 kB de fio, só relevante no modo navegador |
 | 4 | Preload dos `woff2` primários | A2 | Nenhuma; duas etapas para uma no caminho do texto |
 | 5 | Disparar `import()` da seção em paralelo com os gates | B1 | Nenhuma; remove serialização local sem dependência de dado |
 | 6 | Stream preview para coleções dinâmicas | D3 | Nenhuma; antecipa percepção, não reduz trabalho |
@@ -405,6 +406,62 @@ ainda consulta a varredura antes de recusar com `FEATURE_UNAVAILABLE`.
 
 Não medido: tempo de parede contra cluster real. A contagem de requisições
 está provada por teste.
+
+## Passo 3 — Pré-compressão de assets
+
+Concluído em 29/10/2026.
+
+O build emite irmãos `.br` e `.gz` de cada asset de texto acima de 1 KiB, por
+um plugin em `web/vite.config.ts` que usa o `zlib` do Node em `generateBundle`
+com `order: 'post'`. Sem dependência nova e sem compressor em tempo de
+execução: o binário continua único e o handler só escolhe arquivo.
+
+`internal/web/handler.go` ganhou `serveEncoded`, que negocia por
+`Accept-Encoding` preferindo brotli, e `acceptsEncoding`, que trata `q=0` como
+recusa explícita em vez de casar só o token. `Vary: Accept-Encoding` é
+definido em toda resposta de asset, comprimida ou não, porque a mesma URL tem
+corpos diferentes por codificação e um cache que ignorasse isso entregaria
+brotli a quem não lê brotli.
+
+A armadilha confirmada antes da implementação foi evitada: `setAssetCache`
+continua recebendo o caminho **pedido**, não o do irmão. O regex
+`versionedAsset` não casa com `index-DUqVtkYy.js.br`, então derivar a política
+do arquivo escrito trocaria `immutable` por `no-cache` e destruiria em silêncio
+o cache de um ano que já funcionava.
+
+Irmãos comprimidos deixaram de ser endereçáveis: um pedido direto a `.br` ou
+`.gz` responde 404, porque servi-lo entregaria bytes comprimidos rotulados com
+o tipo do irmão e sem `Content-Encoding` para o cliente agir.
+
+### Medição física, servidor real sobre o dist real
+
+| Asset | Identidade | brotli | gzip |
+| --- | ---: | ---: | ---: |
+| `index-*.js` | 375.890 | 99.557 (−74%) | 115.742 |
+| `index-*.css` | 57.482 | 10.483 (−82%) | 11.763 |
+| **Carga eager total** | **491.351** | **127.030 (−75%)** | — |
+
+Round-trip verificado nos 38 assets comprimidos com o `zlib` do Node: zero
+divergências entre `brotliDecompress(.br)`, `gunzip(.gz)` e o byte original.
+No conjunto comprimível, 1.634.493 bytes viram 425.150.
+
+Custo aceito: os irmãos adicionam 914.717 bytes ao binário, porque o `go:embed`
+carrega as duas representações. Build do frontend passou de 469 ms para 2,21 s,
+por causa da qualidade máxima do brotli.
+
+Permanece válido o que eu disse antes de executar: **em desktop sobre loopback
+esse ganho é quase nulo**, porque a transferência local já é irrelevante e o
+custo restante é parse. O passo serve o modo navegador.
+
+### Validação
+
+`go test ./...` com 36 pacotes; race detector aprovado em `internal/web`;
+`gofmt`, `go vet` e `make lint` sem erros; `tsc -b` limpo; 54 arquivos e 325
+testes de frontend verdes. Testes novos cobrem preferência por brotli,
+fallback para gzip, identidade sem `Accept-Encoding`, recusa por `q=0`,
+preservação da política `immutable` e do `Content-Type` na resposta
+comprimida, `Vary` mesmo servindo identidade, asset sem irmão, e irmão
+inacessível diretamente.
 
 ## Restrições herdadas
 

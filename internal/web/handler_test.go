@@ -84,15 +84,101 @@ func TestFrontendDistributionIsEmbedded(t *testing.T) {
 func testHandler(t *testing.T) *Handler {
 	t.Helper()
 	frontend := fstest.MapFS{
-		"index.html":             &fstest.MapFile{Data: []byte("<html>kubePeep shell</html>"), Mode: fs.FileMode(0o444)},
-		"assets/app-AbCd1234.js": &fstest.MapFile{Data: []byte("export {};"), Mode: fs.FileMode(0o444)},
-		"assets/logo.svg":        &fstest.MapFile{Data: []byte("<svg></svg>"), Mode: fs.FileMode(0o444)},
+		"index.html":                &fstest.MapFile{Data: []byte("<html>kubePeep shell</html>"), Mode: fs.FileMode(0o444)},
+		"assets/app-AbCd1234.js":    &fstest.MapFile{Data: []byte("export {};"), Mode: fs.FileMode(0o444)},
+		"assets/app-AbCd1234.js.br": &fstest.MapFile{Data: []byte("brotli-bytes"), Mode: fs.FileMode(0o444)},
+		"assets/app-AbCd1234.js.gz": &fstest.MapFile{Data: []byte("gzip-bytes"), Mode: fs.FileMode(0o444)},
+		"assets/logo.svg":           &fstest.MapFile{Data: []byte("<svg></svg>"), Mode: fs.FileMode(0o444)},
 	}
 	handler, err := New(frontend, 2748)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return handler
+}
+
+func TestAssetEncodingNegotiationPrefersBrotliAndFallsBackHonestly(t *testing.T) {
+	handler := testHandler(t)
+	for _, test := range []struct {
+		name     string
+		accept   string
+		encoding string
+		body     string
+	}{
+		{name: "both offered prefers brotli", accept: "gzip, deflate, br", encoding: "br", body: "brotli-bytes"},
+		{name: "only gzip offered", accept: "gzip, deflate", encoding: "gzip", body: "gzip-bytes"},
+		{name: "no accept-encoding stays identity", accept: "", encoding: "", body: "export {};"},
+		{name: "brotli refused by qualifier", accept: "br;q=0, gzip", encoding: "gzip", body: "gzip-bytes"},
+		{name: "every encoding refused stays identity", accept: "br;q=0, gzip;q=0", encoding: "", body: "export {};"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodGet, "/assets/app-AbCd1234.js", nil)
+			if test.accept != "" {
+				r.Header.Set("Accept-Encoding", test.accept)
+			}
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, r)
+			if w.Code != http.StatusOK {
+				t.Fatalf("status=%d", w.Code)
+			}
+			if got := w.Header().Get("Content-Encoding"); got != test.encoding {
+				t.Fatalf("content-encoding=%q, want %q", got, test.encoding)
+			}
+			if got := w.Body.String(); got != test.body {
+				t.Fatalf("body=%q, want %q", got, test.body)
+			}
+			// A cache that ignores Accept-Encoding would hand a brotli body
+			// to a client that cannot read it.
+			if got := w.Header().Get("Vary"); got != "Accept-Encoding" {
+				t.Fatalf("vary=%q, want Accept-Encoding", got)
+			}
+			// The sibling is named app-AbCd1234.js.br, which does not match
+			// the versioned-asset pattern. Deriving the policy from the file
+			// written instead of the file requested would silently drop a
+			// year of caching.
+			if got := w.Header().Get("Cache-Control"); got != "public, max-age=31536000, immutable" {
+				t.Fatalf("cache=%q, want the immutable policy of the requested asset", got)
+			}
+			if got := w.Header().Get("Content-Type"); !strings.Contains(got, "javascript") {
+				t.Fatalf("content-type=%q, want the asset's type and not the sibling's", got)
+			}
+		})
+	}
+}
+
+func TestAssetWithoutEncodedSiblingStillServesIdentity(t *testing.T) {
+	handler := testHandler(t)
+	r := httptest.NewRequest(http.MethodGet, "/assets/logo.svg", nil)
+	r.Header.Set("Accept-Encoding", "br, gzip")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, r)
+	if w.Code != http.StatusOK || w.Body.String() != "<svg></svg>" {
+		t.Fatalf("status=%d body=%q", w.Code, w.Body.String())
+	}
+	if got := w.Header().Get("Content-Encoding"); got != "" {
+		t.Fatalf("content-encoding=%q, want identity when the build emitted no sibling", got)
+	}
+	if got := w.Header().Get("Vary"); got != "Accept-Encoding" {
+		t.Fatalf("vary=%q, want Accept-Encoding even when serving identity", got)
+	}
+}
+
+// The encoded siblings exist only to answer negotiation. Addressing one
+// directly would hand compressed bytes labelled as the sibling's own type,
+// with no Content-Encoding for the client to act on.
+func TestEncodedSiblingIsNotAddressableOnItsOwn(t *testing.T) {
+	handler := testHandler(t)
+	for _, path := range []string{"/assets/app-AbCd1234.js.br", "/assets/app-AbCd1234.js.gz"} {
+		t.Run(path, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodGet, path, nil)
+			r.Header.Set("Accept-Encoding", "br, gzip")
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, r)
+			if w.Code != http.StatusNotFound {
+				t.Fatalf("status=%d, want 404 for a sibling addressed directly", w.Code)
+			}
+		})
+	}
 }
 
 func TestRootServesIndexRegardlessOfAccept(t *testing.T) {
