@@ -263,7 +263,14 @@ func selectPaginationStrategy[T ListItem](request CollectionRequest[T], origins 
 		return NamespacePriority[T]{}
 	}
 	if globalOrigins(origins) {
-		return GlobalNative[T]{}
+		// Native continuation is a single-origin contract. A multi-GVR
+		// cluster-wide LIST (every workload kind, for example) has one global
+		// origin per GVR and must merge them, exactly as the namespaced
+		// multi-GVR fan-out does.
+		if len(origins) == 1 {
+			return GlobalNative[T]{}
+		}
+		return LazyMerge[T]{}
 	}
 	if request.NativeIdentityOrder && request.Options.Sort == "identity" && request.Options.Order == OrderAscending && singleGVR(origins) {
 		return NamespaceSequential[T]{}

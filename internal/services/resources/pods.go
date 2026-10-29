@@ -43,6 +43,8 @@ type PodContainerSummaryDTO struct {
 
 func (PodDTO) resourceListItem() {}
 
+func (dto PodDTO) ListNamespace() string { return dto.Namespace }
+
 type PodDetailDTO struct {
 	Metadata            ResourceMetadataDTO `json:"metadata"`
 	Summary             PodDTO              `json:"summary"`

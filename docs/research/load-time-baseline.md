@@ -170,9 +170,10 @@ tem layout real, então o custo de re-medição do virtualizador causado por
 **não** entra nessa medição e permanece não quantificado. Este item sai da
 frente da fila: não serve ao objetivo de tempo de carregamento.
 
-**C0. O LIST global em escopo existe, é provado, e atende só Pods.** Este é o
-maior custo de carregamento das telas default e não estava na primeira versão
-deste documento.
+**C0. O LIST global em escopo atendia só Pods. Implementado em 29/10/2026.**
+Era o maior custo de carregamento das telas default e não estava na primeira
+versão deste documento. O que segue descreve o estado anterior; o resultado
+está em [Passo 1](#passo-1--list-global-em-escopo-generalizado).
 
 Com um escopo de namespaces explícito — que é o caminho normal do produto,
 porque a aplicação exige um default explícito por contexto —
@@ -282,7 +283,7 @@ dominam parse de bundle e saltos locais por ordem de magnitude.
 | # | Item | Escopo | Requisições no caminho crítico |
 | --- | --- | --- | --- |
 | 0 | Baseline medida de `time_to_first_row`, default e custom, em cluster real | Medição | Nenhum ganho de carregamento é demonstrável sem isso |
-| 1 | Generalizar o LIST global em escopo para além de Pods | C0 | Workloads de 6×N para 6; GVR único de N para 1 |
+| 1 | ✅ Generalizar o LIST global em escopo para além de Pods | C0 | Workloads de 6×N para 6; GVR único de N para 1 |
 | 2 | Resolver alvo dinâmico por GVR antes da varredura completa de discovery | D1 | De 2+N group-versions para 1, antes de todo LIST custom frio |
 | 3 | Pré-compressão de assets e negociação no handler | A1 | Nenhuma; 491 kB para ~148 kB de fio, só relevante no modo navegador |
 | 4 | Preload dos `woff2` primários | A2 | Nenhuma; duas etapas para uma no caminho do texto |
@@ -303,6 +304,61 @@ Explicitamente fora da fila, com motivo: elevar QPS/Burst para 20/40, porque
 [protocolo e tuning](../reference/protocol-tuning.md) já avaliou e recusou por
 não provar segurança sob API Server compartilhado; e ligar `compression` por
 default, porque a mesma coleta mediu p95 3,9% pior em Kind local.
+
+## Passo 1 — LIST global em escopo generalizado
+
+Concluído em 29/10/2026.
+
+`globalScopeFilterEligible` (`resources_backend.go`) passou a autorizar a
+estratégia para Pods, Workloads, Events, Services, Ingresses, EndpointSlices e
+ConfigMaps. `listGlobalPodPageInScope` virou `listGlobalPageInScope` e filtra
+por `resources.NamespacedListItem`, interface exportada com `ListNamespace()`
+implementada pelos sete DTOs namespaced, em vez de asserção de tipo para
+`PodDTO`. A assinatura de `collectFilteredResource` e dos 24 call sites não
+mudou.
+
+Secrets ficam de fora para não ampliar o alcance de uma leitura cluster-wide
+no recurso mais sensível. Coleções dinâmicas e CRD ficam de fora porque a
+parada antecipada da varredura depende de ordenação namespace-major, que um
+API Server agregado não precisa preservar.
+
+O limiar de largura de escopo que eu havia anunciado **não** foi adicionado, e
+a condição `len(resolution.Namespaces) > 1` permaneceu intacta. Três motivos:
+a varredura tem três saídas antecipadas e no caso típico gasta uma página, não
+cinco, então o custo não é fixo; o que determina o custo real é onde os
+namespaces do escopo caem na ordem de chaves do cluster e quão densos são, o
+que uma contagem de namespaces não modela e poderia desligar a otimização
+justamente onde ela ajuda; e
+`TestExplicitPodScopeUsesAuthorizedGlobalListAndFiltersOutsideNamespaces` exige
+deliberadamente que um escopo de dois namespaces use um LIST global, decisão já
+medida que não cabia reverter por estimativa. O over-fetch continua instrumentado
+por `observeList` (recebidos contra devolvidos), então o ajuste fica possível
+com dados.
+
+### Defeito pré-existente encontrado e corrigido
+
+Escrever o teste de Workloads revelou que `selectPaginationStrategy`
+(`pagination.go`) encaminhava qualquer conjunto de origens globais para
+`GlobalNative`, que valida exatamente uma origem. Uma coleção multi-GVR tem uma
+origem global por GVR, então **um escopo de todos os namespaces em Workloads
+falhava com `VALIDATION_FAILED: global pagination requires exactly one origin`**
+antes desta mudança, em `main`, sem teste cobrindo o caso. Origens globais
+múltiplas passam a usar `LazyMerge`, como o fan-out multi-GVR namespaced já
+fazia. A mudança só converte erro em resultado, portanto não há regressão
+possível de comportamento que funcionava.
+
+### Validação
+
+`go test ./...` com 36 pacotes aprovados; race detector aprovado em
+`internal/services/resources` e `internal/integration/kubernetesruntime`;
+`gofmt` e `go vet` limpos; `make lint` com zero erros. Quatro testes novos:
+uma LIST global por kind em vez de fan-out por namespace para Workloads, a
+política de elegibilidade por coleção, a seleção de estratégia para origens
+globais múltiplas, e a regressão de todos os namespaces em Workloads.
+
+Não medido: tempo de parede contra cluster real. A redução de requisições é
+verificável pelos testes e pela métrica de estratégia; milissegundos dependem
+da latência por requisição do cluster.
 
 ## Restrições herdadas
 

@@ -42,6 +42,19 @@ func TestSelectPaginationStrategyPreservesOrderingContract(t *testing.T) {
 	if got := selectPaginationStrategy(CollectionRequest[testListItem]{}, global).Name(); got != "global-native" {
 		t.Fatalf("global strategy = %q", got)
 	}
+	// A cluster-wide LIST over several GVRs has one global origin per GVR.
+	// Native continuation is a single-origin contract, so these must merge
+	// instead of failing the window's validation.
+	globalMultiGVR, err := GlobalOriginsFor(CollectionWorkloads, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(globalMultiGVR) < 2 {
+		t.Fatalf("workload global origins = %d, want one per kind", len(globalMultiGVR))
+	}
+	if got := selectPaginationStrategy(CollectionRequest[testListItem]{}, globalMultiGVR).Name(); got != "lazy-merge" {
+		t.Fatalf("multi-GVR global strategy = %q, want lazy-merge", got)
+	}
 }
 
 func TestPreferredNamespacePaginatesBeforeOtherNamespaces(t *testing.T) {

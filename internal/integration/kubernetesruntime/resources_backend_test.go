@@ -422,7 +422,7 @@ func TestExplicitPodScopeGlobalPageSkipsOutsideNamespacesAcrossNativeChunks(t *t
 		}
 		return resources.OriginPage[resources.PodDTO]{Origin: page.Origin, Items: []resources.PodDTO{{Namespace: "beta", Name: "b"}}, ResourceVersion: "rv"}, nil
 	}
-	page, err := listGlobalPodPageInScope(t.Context(), resources.PageRequest{Limit: 2}, lister, map[string]struct{}{"alpha": {}, "beta": {}})
+	page, err := listGlobalPageInScope(t.Context(), resources.PageRequest{Limit: 2}, lister, map[string]struct{}{"alpha": {}, "beta": {}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -437,7 +437,7 @@ func TestExplicitPodScopeGlobalPageDoesNotLookAheadBeforeLastNamespace(t *testin
 		calls++
 		return resources.OriginPage[resources.PodDTO]{Origin: page.Origin, Items: []resources.PodDTO{{Namespace: "alpha", Name: "a"}, {Namespace: "alpha", Name: "b"}}, Continue: "next", ResourceVersion: "rv"}, nil
 	}
-	page, err := listGlobalPodPageInScope(t.Context(), resources.PageRequest{Limit: 2}, lister, map[string]struct{}{"alpha": {}, "beta": {}})
+	page, err := listGlobalPageInScope(t.Context(), resources.PageRequest{Limit: 2}, lister, map[string]struct{}{"alpha": {}, "beta": {}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -455,12 +455,110 @@ func TestExplicitPodScopeGlobalPageClosesExactLimitWithoutEmptyCursorPage(t *tes
 		}
 		return resources.OriginPage[resources.PodDTO]{Origin: page.Origin, Items: []resources.PodDTO{{Namespace: "outside", Name: "hidden"}}, Continue: "later", ResourceVersion: "rv"}, nil
 	}
-	page, err := listGlobalPodPageInScope(t.Context(), resources.PageRequest{Limit: 2}, lister, map[string]struct{}{"alpha": {}})
+	page, err := listGlobalPageInScope(t.Context(), resources.PageRequest{Limit: 2}, lister, map[string]struct{}{"alpha": {}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(page.Items) != 2 || page.Continue != "" || calls != 2 {
 		t.Fatalf("page=%#v calls=%d", page, calls)
+	}
+}
+
+// A multi-GVR collection is where per-namespace fan-out costs the most: one
+// LIST per namespace per kind. With a proven cluster-wide grant the scope must
+// cost one LIST per kind instead, and still exclude namespaces outside it.
+func TestExplicitWorkloadScopeUsesOneGlobalListPerKindInsteadOfNamespaceFanout(t *testing.T) {
+	client := kubefake.NewSimpleClientset(
+		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Namespace: "alpha", Name: "api"}},
+		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Namespace: "beta", Name: "worker"}},
+		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Namespace: "outside", Name: "hidden"}},
+		&appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{Namespace: "alpha", Name: "db"}},
+	)
+	listsByResource := map[string][]string{}
+	client.PrependReactor("list", "*", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		resource := action.GetResource().Resource
+		listsByResource[resource] = append(listsByResource[resource], action.GetNamespace())
+		return false, nil, nil
+	})
+	backend := &ResourceBackend{clients: fixedResourceClientProvider{set: resourceClientSet{kubernetes: client}}, authorizer: &allowResourceAuthorization{}, now: time.Now}
+	result, err := backend.ListWorkloads(
+		t.Context(),
+		namespaces.SelectionBinding{ClusterProfileID: 1, Context: "ctx", Generation: "gen"},
+		namespaces.ScopeResolution{ScopeName: "scope", Namespaces: []string{"alpha", "beta"}},
+		resources.ListOptions{Limit: 100, Kinds: []resources.WorkloadKind{resources.WorkloadDeployments, resources.WorkloadStatefulSets}},
+		nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Two kinds over two namespaces would be four fan-out LISTs.
+	for resource, namespacesListed := range listsByResource {
+		if len(namespacesListed) != 1 || namespacesListed[0] != "" {
+			t.Fatalf("%s LIST namespaces=%#v, want one global LIST", resource, namespacesListed)
+		}
+	}
+	if len(listsByResource) != 2 {
+		t.Fatalf("listed resources=%#v, want deployments and statefulsets only", listsByResource)
+	}
+	if len(result.Items) != 3 {
+		t.Fatalf("items=%#v, want the three workloads inside the scope", result.Items)
+	}
+	for _, item := range result.Items {
+		if item.Namespace == "outside" {
+			t.Fatalf("global LIST leaked a workload outside the scope: %#v", item)
+		}
+	}
+	if result.Coverage.RequestedNamespaces != 2 || result.Coverage.CompletedNamespaces != 2 {
+		t.Fatalf("coverage=%#v, want both scope namespaces reported complete", result.Coverage)
+	}
+}
+
+// Regression: an all-namespaces scope over a multi-GVR collection produces one
+// global origin per kind. Native continuation is a single-origin contract, so
+// this used to fail the window with VALIDATION_FAILED instead of listing.
+func TestAllNamespacesScopeListsEveryWorkloadKindWithoutSingleOriginValidation(t *testing.T) {
+	client := kubefake.NewSimpleClientset(
+		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Namespace: "alpha", Name: "api"}},
+		&appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{Namespace: "beta", Name: "db"}},
+	)
+	backend := &ResourceBackend{clients: fixedResourceClientProvider{set: resourceClientSet{kubernetes: client}}, authorizer: &allowResourceAuthorization{}, now: time.Now}
+	result, err := backend.ListWorkloads(
+		t.Context(),
+		namespaces.SelectionBinding{ClusterProfileID: 1, Context: "ctx", Generation: "gen"},
+		namespaces.ScopeResolution{ScopeName: "all", Namespaces: []string{"alpha", "beta"}, PreferGlobal: true},
+		resources.ListOptions{Limit: 100},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("all-namespaces workload list failed: %v", err)
+	}
+	if len(result.Items) != 2 {
+		t.Fatalf("items=%#v, want the Deployment and the StatefulSet", result.Items)
+	}
+}
+
+// The strategy is opt-in per collection. Secrets stay on namespace fan-out so
+// a cluster-wide read never widens their blast radius, and dynamic/CRD
+// collections stay out because an aggregated API server need not preserve the
+// namespace-major ordering the scan's early exit depends on.
+func TestGlobalScopeFilterEligibilityExcludesSecretsAndDynamicCollections(t *testing.T) {
+	t.Parallel()
+	for _, collection := range []resources.Collection{
+		resources.CollectionPods, resources.CollectionWorkloads, resources.CollectionEvents,
+		resources.CollectionServices, resources.CollectionIngresses,
+		resources.CollectionEndpointSlices, resources.CollectionConfigMaps,
+	} {
+		if !globalScopeFilterEligible(collection) {
+			t.Fatalf("collection %q must be eligible for the global-in-scope strategy", collection)
+		}
+	}
+	for _, collection := range []resources.Collection{
+		resources.CollectionSecrets,
+		resources.Collection("dynamic:example.com:v1:widgets:n"),
+	} {
+		if globalScopeFilterEligible(collection) {
+			t.Fatalf("collection %q must keep namespace fan-out", collection)
+		}
 	}
 }
 

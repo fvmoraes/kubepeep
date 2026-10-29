@@ -26,6 +26,10 @@ type EventDTO struct {
 
 func (EventDTO) resourceListItem() {}
 
+// The Event's own namespace, not ObjectNamespace: the fan-out this filter
+// replaces is keyed by where the Event object lives.
+func (dto EventDTO) ListNamespace() string { return dto.Namespace }
+
 func ConvertEvent(value *corev1.Event, redactor TextRedactor) EventDTO {
 	message := value.Message
 	if redactor != nil {

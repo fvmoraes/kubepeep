@@ -595,7 +595,7 @@ func collectResource[T resources.ListItem](
 			return resources.ListResult[T]{}, resourceDomain(resources.CodeAuthorizationUnavailable, "Authorization could not be confirmed.", nil)
 		}
 	}
-	if preferredNamespace == "" && collection == resources.CollectionPods && !resolution.PreferGlobal && !cursorNamespaced && len(resolution.Namespaces) > 1 && (len(options.Namespaces) != 1 || cursorGlobal) {
+	if preferredNamespace == "" && globalScopeFilterEligible(collection) && !resolution.PreferGlobal && !cursorNamespaced && len(resolution.Namespaces) > 1 && (len(options.Namespaces) != 1 || cursorGlobal) {
 		names, namesErr := resources.ResolveNamespaces(resolution.Namespaces, options.Namespaces)
 		if namesErr != nil {
 			return resources.ListResult[T]{}, namesErr
@@ -619,7 +619,7 @@ func collectResource[T resources.ListItem](
 				ReadThroughUnknown: true,
 				Selection:          selection, Options: options, Origins: origins, Cursor: cursor,
 				Lister: originListerFunc[T](func(ctx context.Context, page resources.PageRequest) (resources.OriginPage[T], error) {
-					return listGlobalPodPageInScope(ctx, page, counted, allowed)
+					return listGlobalPageInScope(ctx, page, counted, allowed)
 				}),
 				Authorizer: backend.authorizer, Less: less, Timeout: backend.listWindowTimeout,
 				RequestedNamespaces: len(names), Fanout: backend.listFanout, NativeIdentityOrder: true,
@@ -683,10 +683,40 @@ func preferredListNamespace(resolution namespaces.ScopeResolution, options resou
 	return *resolution.DefaultNamespace
 }
 
+// globalScopeScanPages bounds the raw pages one global-in-scope window may
+// scan before yielding whatever it already filtered.
+const globalScopeScanPages = 5
+
+// globalScopeFilterEligible reports whether a collection may answer an
+// explicit namespace scope with one cluster-wide LIST filtered back to that
+// scope, instead of one LIST per namespace per GVR. Three properties are
+// required:
+//
+//   - rows are namespaced, so resources.NamespacedListItem can filter them;
+//   - the collection is a Kubernetes built-in, whose native LIST order is
+//     namespace-major, which the scan's early exit depends on;
+//   - a cluster-wide read does not widen sensitivity beyond the fan-out it
+//     replaces.
+//
+// Secrets are excluded by the third property. Dynamic and CRD collections are
+// excluded by the second: an aggregated API server need not preserve
+// namespace-major ordering, so the early exit could drop rows.
+func globalScopeFilterEligible(collection resources.Collection) bool {
+	switch collection {
+	case resources.CollectionPods, resources.CollectionWorkloads, resources.CollectionEvents,
+		resources.CollectionServices, resources.CollectionIngresses,
+		resources.CollectionEndpointSlices, resources.CollectionConfigMaps:
+		return true
+	default:
+		return false
+	}
+}
+
 // A global LIST is safe for an explicit scope only after a global LIST grant.
 // Filter each native page before it reaches the cursor. Bound the raw scan to
-// five pages so a scope sparse in a large cluster cannot monopolize a request.
-func listGlobalPodPageInScope[T resources.ListItem](ctx context.Context, page resources.PageRequest, list originListerFunc[T], allowed map[string]struct{}) (resources.OriginPage[T], error) {
+// globalScopeScanPages so a scope sparse in a large cluster cannot monopolize
+// a request.
+func listGlobalPageInScope[T resources.ListItem](ctx context.Context, page resources.PageRequest, list originListerFunc[T], allowed map[string]struct{}) (resources.OriginPage[T], error) {
 	result := resources.OriginPage[T]{Origin: page.Origin, Items: []T{}}
 	maxNamespace := ""
 	for namespace := range allowed {
@@ -695,7 +725,7 @@ func listGlobalPodPageInScope[T resources.ListItem](ctx context.Context, page re
 		}
 	}
 	next := page
-	for range 5 {
+	for range globalScopeScanPages {
 		if err := ctx.Err(); err != nil {
 			return result, err
 		}
@@ -708,18 +738,22 @@ func listGlobalPodPageInScope[T resources.ListItem](ctx context.Context, page re
 		}
 		lastNamespace := ""
 		for _, item := range fetched.Items {
-			pod, ok := any(item).(resources.PodDTO)
+			// Only a namespaced DTO can be filtered back to an explicit
+			// scope. globalScopeFilterEligible gates which collections reach
+			// this path, so a missing accessor is a wiring defect, not input.
+			scoped, ok := any(item).(resources.NamespacedListItem)
 			if !ok {
-				return result, resourceDomain(resources.CodeClusterUnavailable, "The global Pod list returned an invalid item.", nil)
+				return result, resourceDomain(resources.CodeClusterUnavailable, "The global list returned an item without a namespace.", nil)
 			}
-			lastNamespace = pod.Namespace
-			if _, included := allowed[pod.Namespace]; included {
+			lastNamespace = scoped.ListNamespace()
+			if _, included := allowed[lastNamespace]; included {
 				result.Items = append(result.Items, item)
 			}
 		}
 		result.Continue = fetched.Continue
-		// Native Pod LIST order is namespace/name. Once it passes the last
-		// selected namespace, no later raw page can add an allowed Pod.
+		// Native LIST order is namespace/name for every namespaced built-in
+		// collection. Once it passes the last selected namespace, no later
+		// raw page can add an allowed row.
 		if lastNamespace > maxNamespace {
 			result.Continue = ""
 			return result, nil

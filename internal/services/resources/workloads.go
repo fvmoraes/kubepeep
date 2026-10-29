@@ -42,6 +42,8 @@ type WorkloadDTO struct {
 
 func (WorkloadDTO) resourceListItem() {}
 
+func (dto WorkloadDTO) ListNamespace() string { return dto.Namespace }
+
 type WorkloadDetailDTO struct {
 	ConfigMaps []string            `json:"configMaps"`
 	Secrets    []string            `json:"secrets"`
