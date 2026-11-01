@@ -266,3 +266,58 @@ func TestRootServesIndexRegardlessOfAccept(t *testing.T) {
 		t.Fatalf("root cache=%q", got)
 	}
 }
+
+// Range applies to the selected representation, so a ranged request over a
+// negotiated asset addresses the compressed bytes. httptest.NewRecorder does
+// not exercise the transport, so this runs against a real server: that is how
+// the missing Content-Length on HEAD escaped the first round of tests.
+func TestRangeOverNegotiatedAssetAddressesTheEncodedRepresentation(t *testing.T) {
+	server := httptest.NewServer(testHandler(t))
+	t.Cleanup(server.Close)
+	client := &http.Client{Transport: &http.Transport{DisableCompression: true}}
+
+	ranged := func(acceptEncoding string) *http.Response {
+		request, err := http.NewRequest(http.MethodGet, server.URL+"/assets/app-AbCd1234.js", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Range", "bytes=0-3")
+		if acceptEncoding != "" {
+			request.Header.Set("Accept-Encoding", acceptEncoding)
+		}
+		response, err := client.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { response.Body.Close() })
+		return response
+	}
+
+	encoded := ranged("br")
+	identity := ranged("")
+
+	for name, response := range map[string]*http.Response{"encoded": encoded, "identity": identity} {
+		if response.StatusCode != http.StatusPartialContent {
+			t.Fatalf("%s range status=%d, want 206", name, response.StatusCode)
+		}
+		if response.ContentLength != 4 {
+			t.Fatalf("%s range Content-Length=%d, want the four requested bytes", name, response.ContentLength)
+		}
+		// Without Vary a shared cache could answer a ranged identity request
+		// with bytes taken from the compressed representation.
+		if got := response.Header.Get("Vary"); got != "Accept-Encoding" {
+			t.Fatalf("%s range vary=%q, want Accept-Encoding", name, got)
+		}
+	}
+	if got := encoded.Header.Get("Content-Encoding"); got != "br" {
+		t.Fatalf("encoded range lost its encoding: %q", got)
+	}
+	if got := identity.Header.Get("Content-Encoding"); got != "" {
+		t.Fatalf("identity range advertised an encoding: %q", got)
+	}
+	// The two representations have different sizes, so their ranges must be
+	// reported against different totals.
+	if encoded.Header.Get("Content-Range") == identity.Header.Get("Content-Range") {
+		t.Fatalf("both ranges reported the same total: %q", encoded.Header.Get("Content-Range"))
+	}
+}

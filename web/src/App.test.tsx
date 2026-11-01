@@ -219,3 +219,4 @@ describe('application shell', () => {
     expect(screen.getAllByRole('link', { name: 'Overview' }).length).toBeGreaterThan(0)
   })
 })
+

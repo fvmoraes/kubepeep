@@ -642,6 +642,34 @@ E uma correção de documentação: o teste de mapeamento de chunks afirmava
 derivar da tabela de rotas do `App`. Não deriva, é um espelho mantido à mão. O
 comentário passou a dizer isso.
 
+### Lacunas de teste fechadas
+
+A revisão nomeou doze ramos sem cobertura. Fechados em 29/10/2026, com
+`+2` arquivos e `+20` testes no frontend e três arquivos de teste Go ampliados:
+
+| Lacuna | Como ficou coberta |
+| --- | --- |
+| Honestidade de cobertura em `list.go` | `list_global_coverage_test.go`: resultado misto entre origens globais, com GVR negado e com GVR falhando na leitura ao vivo |
+| Ramo de falha da asserção `NamespacedListItem` | Varredura recebe `NodeDTO` e devolve erro de domínio em vez de panic ou linha perdida |
+| `EventDTO.ListNamespace` | Fixado no namespace do próprio Event contra `ObjectNamespace`, mais os sete DTOs e a garantia de que DTOs cluster-scoped **não** satisfazem a interface |
+| `servedGroupVersionPath` com grupo vazio | Teste unitário das três formas, mais verificação de que nenhum pedido sai sob `/apis//` |
+| Catálogo quente sem o alvo | Prova que o fallback é cache hit e a varredura não roda de novo |
+| Varredura multi-página em coleção real | Reactor que devolve `continue`, exercitando a parada antecipada através de `ListPods` |
+| Round-trip de cursor sobre origem global | Segunda página pelo cursor da primeira, preservando a origem global e o filtro de escopo |
+| `Range` em asset negociado | Servidor real: 206 sobre a representação comprimida, `Vary` presente, totais distintos por codificação |
+| Ramos dos plugins Vite | 17 testes: limiar de 1 KiB, exclusão de fonte/imagem/html/map, round-trip das duas codificações, conjunto exato de preload, e falha do build quando um subset é renomeado |
+| Ordenação de `warmSectionChunk` | Três testes provando que o chunk é pedido com o gate ainda fechado e que nenhuma tabela monta atrás dele |
+
+Os plugins saíram de `vite.config.ts` para `web/build/assetPlugins.ts` para
+ficarem testáveis, e o `include` do Vitest passou a cobrir `build/`. O bundle
+foi comparado antes e depois da extração: 139 arquivos nos dois casos, lista
+idêntica, 38 irmãos de cada codificação, dois preloads de fonte.
+
+Dois testes foram verificados contra o código antigo para provar que pegam a
+regressão: a correção de cobertura em `list.go` e o efeito de warm em
+`App.tsx`. Ambos falham quando a correção é revertida, com exatamente a saída
+errada que a revisão descreveu.
+
 ### Custo conhecido que permanece
 
 Os irmãos comprimidos somam 914.717 bytes ao binário, e o runtime desktop
@@ -654,6 +682,27 @@ Nenhum dos dois caminhos emite validador: `serveEncoded` passa
 `time.Time{}` e o FS embutido tem modtime zero, então não há `Last-Modified`
 nem `ETag` e requisição condicional nunca produz 304. Isso vale igualmente
 antes e depois da mudança.
+
+### O que continua em aberto
+
+Três itens da revisão não foram fechados, e nenhum é lacuna de teste:
+
+O risco de re-entrada sem limite no `LazyMerge` não é testado porque deixou de
+ser alcançável: `globalScopeFilterEligible` só admite coleções de GVR único e o
+ramo exige `len(origins) == 1`. O teste de elegibilidade afirma essa invariante
+por coleção, o que cobre a causa em vez do sintoma.
+
+Deep link de detalhe ainda paga um salto serial pelo chunk
+`ResourceWorkspacePanel`, que é justamente o que o link quer. É melhoria
+pendente, não defeito.
+
+`sectionChunks.test.ts` continua sendo espelho mantido à mão da tabela de
+rotas, não derivação. O comentário diz isso, e re-apontar uma rota para outro
+módulo lazy mantém o teste verde enquanto o warm erra o alvo.
+
+E o que atravessa tudo desde o começo: não existe baseline de
+`time_to_first_row` em cluster real. Os cinco passos provam contagem de
+requisições e bytes de fio; nenhum prova milissegundos percebidos.
 
 ## Restrições herdadas
 
