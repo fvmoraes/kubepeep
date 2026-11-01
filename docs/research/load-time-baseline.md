@@ -1,0 +1,713 @@
+# Baseline de carregamento e plano de otimização
+
+Levantamento de 29/10/2026 sobre o tempo até a primeira linha útil nas telas
+default (Pods, Workloads, Network, Configuration, Storage, Dashboard) e nas
+telas custom (Custom Resources / CRDs / visões salvas). Branch de trabalho:
+`perf/screen-load-time`, a partir de `afdad9a` (0.12.0).
+
+## Método e limitações
+
+Medido nesta data, nesta máquina:
+
+- `npx vite build` em `web/`, saída real em `internal/web/dist` (diretório
+  ignorado pelo Git). Tamanhos brutos por `stat`; tamanhos gzip conforme
+  relatório do Vite.
+- Grafo eager extraído do `index.html` gerado: a tag `script type="module"` e
+  as entradas `modulepreload`.
+- Custo de re-render do `DataTable` real, 100 linhas e 13 colunas de Pods, 60
+  re-renders em jsdom via Vitest, comparando array de colunas literal contra
+  memoizado. Harness temporário, não versionado conforme a política de
+  `research/`; números em C1. jsdom não tem layout real, então custos de
+  medição do virtualizador ficam fora.
+- `npm test`: 54 arquivos, 325 testes, verde antes de qualquer alteração.
+
+Lido no código, não medido em execução: cadeia de bootstrap, gates de
+renderização, políticas de cache, exclusões de topic e caminho dinâmico. Cada
+item abaixo cita arquivo e linha.
+
+**Não executado:** nenhuma medição contra cluster real, nenhum trace de
+navegador, nenhuma execução Wails nativa, nenhum profile de render. Os números
+de bundle são de build local e valem para transferência e parse, não para
+tempo total até a linha. As afirmações sobre latência de rede e de API server
+são inferência a partir do código, não observação.
+
+**Lacuna que precede o trabalho:** `web/src/observability/uxMetrics.ts:179-201`
+já instrumenta `time_to_first_row` e `time_to_shell_ready`, e
+`ClientLoadDiagnostics.tsx` já os expõe, mas não existe nenhuma meta nem
+nenhuma linha de base registrada no repositório. Sem isso, nenhum item deste
+plano pode ser provado. Coletar a baseline é a tarefa zero.
+
+## Baseline de bundle (medido)
+
+Carga eager, pedida antes de qualquer pintura útil:
+
+| Artefato | Bruto | gzip (relatado pelo Vite) |
+| --- | --- | --- |
+| `index-DUqVtkYy.js` (entry) | 375,89 kB | 117,12 kB |
+| `useBaseQuery-*.js` | 23,64 kB | 7,81 kB |
+| `client-*.js` | 25,04 kB | 7,21 kB |
+| `jsx-runtime-*.js` | 8,55 kB | 3,26 kB |
+| `QueryClientProvider-*.js` + `gateway-*.js` | 0,73 kB | 0,49 kB |
+| `index-DQ6TisRw.css` | 57,48 kB | 11,85 kB |
+| **Total eager** | **491,35 kB** | **~148 kB** |
+
+Fontes: 16 arquivos emitidos, 244.716 bytes no total (`woff2` e `woff` por
+subset). O navegador baixa apenas os `woff2`, mas só os descobre depois de
+baixar e parsear o CSS de entrada.
+
+Maiores chunks lazy: `browser-*.js` 412,29 kB (CodeMirror, usado pelo editor
+de YAML), `ExecTerminal-*.js` 334,68 kB (xterm), `YamlViewer-*.js` 53,62 kB
+(PrismLight), `ResourceWorkspace-*.js` 52,28 kB, `ResourcePages-*.js`
+47,14 kB. Nenhum deles está no grafo eager.
+
+## Já otimizado (não mexer sem motivo)
+
+Code splitting por rota completo, 22 `lazy()` em `web/src/App.tsx:39-60`, com
+Suspense independente para o shell e para a seção. `sourcemap: false`. Minify
+esbuild. CSS code splitting. `retry: false` global, sem tempestade de retry em
+bootstrap falho. `refetchOnWindowFocus: false` nos caminhos quentes.
+`['local-status']` deduplicado entre cinco assinantes em uma requisição.
+Prefetch pós-pintura do chunk `ResourcePages` (`App.tsx:238`). Virtualização
+com `@tanstack/react-virtual`. `Cache-Control: public, max-age=31536000,
+immutable` nos assets com hash e `no-store` no `index.html`
+(`internal/web/handler.go:122-133`). `color-scheme: dark` e `theme-color`
+evitando flash branco. PartialObjectMetadata e Protobuf ativos no backend,
+com ganho já medido em [protocolo e tuning](../reference/protocol-tuning.md)
+(p95 50,5% menor, 51,1% menos bytes para metadata-only).
+
+## Achados, por impacto esperado
+
+### A. Boot e primeira pintura (afeta toda tela)
+
+**A1. Não havia compressão HTTP no servidor de assets. Corrigido em
+29/10/2026; resultado em [Passo 3](#passo-3--pré-compressão-de-assets).**
+`internal/web/handler.go:32` é um `http.FileServer` puro: não inspeciona
+`Accept-Encoding`, não define `Content-Encoding`, e o build não emite `.br`
+nem `.gz`. Os 491 kB eager vão crus pela rede. Em loopback desktop o custo
+dominante é parse, não transferência; no modo navegador remoto isso é o maior
+custo de fio do produto. Caminho: pré-comprimir no build e fazer o handler
+preferir o irmão `.br`/`.gz` preservando a política immutable. Restrição: a
+CSP `style-src 'self'` (`handler.go:36`, aplicada em `:115`) proíbe CSS
+crítico inline sem hash ou nonce.
+
+**A2. Oito folhas de fonte no CSS de entrada, sem preload. Preload adicionado
+em 29/10/2026; resultado em [Passo 4](#passo-4--preload-das-fontes-do-shell).**
+`web/src/styles.css:2-9` faz `@import` de quatro subsets Roboto e quatro
+Roboto Mono. Elas entram no CSS bloqueante e os `@font-face` só são
+descobertos depois do parse: dois saltos até o texto final. `web/index.html`
+não tem nenhum `preload`/`preconnect`. Caminho: preload dos dois `woff2`
+primários, subsets `latin-ext` e pesos 700 fora da entrada.
+
+**A3. Entry chunk de 375,89 kB carrega o shell inteiro.**
+`web/src/App.tsx:1-36` importa estaticamente Sidebar, MobileNavigation,
+ContextSelector, CommandCenter, GlobalNamespaceSelect, NamespaceScopeSelector,
+ResourceFamilyNav, ResourceSplitView, a árvore de navegação e os bindings
+Wails. O CommandCenter (paleta de comandos) não participa da primeira
+pintura. Não existe `manualChunks` nem nenhum `rollupOptions` em
+`web/vite.config.ts:6-11`, e não há ferramenta de análise de bundle. Caminho:
+medir primeiro (adicionar análise), depois extrair o que não pinta.
+
+**A4. `#root` vazio.** `web/index.html` não tem esqueleto; nada aparece até o
+entry executar.
+
+### B. Cascata de bootstrap (afeta toda tela de recurso)
+
+**B1. A sequência era estritamente serial.** `local-status` → resolução de
+scope → universo de namespaces → `import()` do chunk da seção → primeiro LIST.
+O chunk só era pedido depois que `globalNamespace.ready` libera o `Outlet`,
+apesar de não ter dependência de dado nenhuma. Corrigido em 29/10/2026;
+resultado em [Passo 5](#passo-5--chunk-da-seção-em-paralelo-com-os-gates).
+
+**B2. Ativar o scope default custa quatro saltos extras, mas eles são
+baratos.** Correção de peso em relação à primeira versão deste documento:
+`namespace_scopes` é tabela SQLite local
+(`internal/adapters/sqlite/namespace_scopes.go`, migração
+`internal/migrations/sql/0003_namespace_scope_defaults.sql`), não recurso
+Kubernetes. Os quatro saltos são loopback mais SQLite, da ordem de poucos
+milissegundos cada, não centenas. O problema é arquitetural e de ciclos de
+render, não de latência. O único salto desta cadeia que toca o cluster é
+`getNamespaces({ limit: 500 })` em `GlobalNamespaceProvider`, usado quando
+`scopeMode === 'all'`.
+`web/src/components/DefaultScopeGate.tsx:20-44` encadeia por `enabled`:
+`namespace-scopes` → `session` → POST `select` → invalidação que **refaz**
+`local-status`. Tudo atrás de um painel de loading, com as queries de recurso
+desmontadas (comentário explícito em `:85-87`). Caminho: devolver o scope
+default no próprio `/api/v1/status` e colapsar a ativação.
+
+**B3. O lookup do scope default é um laço de paginação.**
+`web/src/api/client.ts:386-398` pagina em `limit: 100` até achar `isDefault`,
+sequencialmente. Caminho: filtro `?default=true` na rota, ou incluir no
+envelope de status.
+
+### C. Telas default
+
+**C1. `DataTable` recomputa tudo a cada render do pai — medido, e menor do que
+parecia.** `web/src/components/ui/DataTable.tsx:104-120` tem três `useMemo`
+dependentes de `allColumns`: `values` (linhas × todas as colunas, inclusive
+ocultas), `filterValues` (únicos + `Intl.Collator` por coluna) e `rows`
+(filtro + ordenação). Os arrays de coluna são literais criados no corpo dos
+componentes de página (`ResourcePages.tsx:519` e equivalentes para workloads,
+events, network, config), então a identidade de `allColumns` muda em todo
+render e os três memos invalidam. `renderRow` ainda chama `columnValue` de
+novo só para montar o `title` (`:183`), fora de qualquer memo.
+
+Medido em 29/10/2026 com o componente real, 100 linhas e 13 colunas de Pods,
+60 re-renders em jsdom: **5,54 ms por re-render com array literal contra
+3,41 ms com array memoizado, diferença de 2,13 ms, ou 38% do custo do
+re-render.** Só a aritmética dos três memos, isolada em Node sem React, custa
+0,180 ms; o resto é reconciliação e invocação de `cell()`.
+
+Duas correções a uma versão anterior deste documento, que superestimava o
+achado: o fallback `textContent(column.cell(...))` em `columnValue`
+(`DataTable.tsx:292-299`) atinge **4 de 13 colunas** de Pods (`ready`, `node`,
+`owner`, `ip`), não todas — as demais têm `value()` ou resolvem por campo
+escalar; e dessas quatro só `owner` constrói JSX de verdade.
+
+Consequência para o escopo deste plano: 2,13 ms por re-render é ganho de
+**interação e estado estável**, não de carregamento. O primeiro render não é
+beneficiado, porque não há nada memoizado para reaproveitar. jsdom também não
+tem layout real, então o custo de re-medição do virtualizador causado por
+`getRowKey` instável (`DataTable.tsx:128`, com comentário explícito no código:
+"A new key extractor invalidates TanStack's measurements of every loaded row")
+**não** entra nessa medição e permanece não quantificado. Este item sai da
+frente da fila: não serve ao objetivo de tempo de carregamento.
+
+**C0. O LIST global em escopo atendia só Pods. Implementado em 29/10/2026.**
+Era o maior custo de carregamento das telas default e não estava na primeira
+versão deste documento. O que segue descreve o estado anterior; o resultado
+está em [Passo 1](#passo-1--list-global-em-escopo-generalizado).
+
+Com um escopo de namespaces explícito — que é o caminho normal do produto,
+porque a aplicação exige um default explícito por contexto —
+`originsFor` (`internal/services/resources/service.go:43-76`) devolve **uma
+origem por namespace por GVR**. Workloads tem seis GVRs
+(`service.go:26`: deployments, statefulsets, daemonsets, jobs, cronjobs,
+replicasets), então a primeira página de Workloads num escopo de N namespaces
+emite 6×N LISTs. Services, ConfigMaps, Events, Ingresses e EndpointSlices
+emitem N cada.
+
+Com `Fanout` 4 (`resources_backend.go:45`) e QPS/Burst 10/20
+(`client_factory.go:103-107`), depois de gastar os 20 tokens de burst a vazão
+fica em 10 requisições por segundo. Um escopo de 20 namespaces custa, só em
+admissão no rate limiter, cerca de 120 LISTs para a primeira página de
+Workloads.
+
+`collectResource` já resolve exatamente isso, mas apenas para Pods
+(`resources_backend.go:598`):
+
+```go
+if preferredNamespace == "" && collection == resources.CollectionPods && !resolution.PreferGlobal && ...
+```
+
+Provada a concessão `list` cluster-wide, ele troca a fan-out por um LIST global
+e filtra as linhas pelos namespaces do escopo em `listGlobalPodPageInScope`
+(`:689`), com limite de cinco páginas nativas e parada antecipada que se
+apoia na ordem nativa namespace/name. Toda coleção namespaced tem a mesma
+ordem nativa, então o padrão vale para as demais; só o filtro precisa ler o
+namespace do item, hoje feito por asserção de tipo para `PodDTO`, porque
+`ListItem` é interface marcadora sem acessor (`types.go:122`).
+
+Generalizar levaria as coleções de GVR único de N para 1 requisição,
+preservando DTO, cursor, paginação, autorização e fronteira de geração.
+Workloads, por ser multi-GVR, e Events, por ordenar por tempo, não cabem: ver
+[Revisão](#revisão-e-correções). A contagem de requisições é certa a partir do
+código; o tempo de parede depende da latência por requisição do cluster, que
+não foi medida.
+
+**C2. Nenhuma tela aquece a própria primeira página.**
+`internal/api/handlers/resources.go:958-970` rejeita `likely-next` sem cursor,
+por design, então prefetch especulativo nunca cobre a primeira página. Só o
+Dashboard aquece Pods (`App.tsx:258-267`, 20 linhas, um namespace).
+
+**C3. O cache de página exige cobertura de watch.**
+`internal/integration/kubernetesruntime/resources_backend.go:378-387` só serve
+o cache quando `manager.Covers(...)`, e o WATCH nasce do endpoint de stream,
+não do LIST. Primeira navegação sempre paga LIST real.
+
+**C4. `overscan: 2`** (`DataTable.tsx:133`) é apertado para scroll rápido.
+Afeta fluidez, não primeira linha.
+
+### D. Telas custom (maior diferença)
+
+**D1. Todo LIST custom frio pagava uma varredura completa de discovery antes.
+Corrigido em 29/10/2026; resultado em [Passo 2](#passo-2--resolução-dinâmica-por-group-version).**
+`internal/integration/kubernetesruntime/dynamic_views.go:25` chama
+`resolveDynamicResource`, que em `resource_discovery.go:212` chama
+`DiscoverResources`: `GET /api` + `GET /apis` + um `GET /apis/{gv}` por
+group-version, até 512, com 4 workers. O cache é **um único slot**
+(`resource_discovery.go:19-24`), TTL de 5 min caindo para 10 s se algum grupo
+falhar (`:161-168`), não persistido: perdido a cada restart e a cada troca de
+contexto. Mesmo quando o alvo já é conhecido, a varredura inteira precede o
+LIST. Caminho: resolver o alvo pelo próprio `/apis/{group}/{version}` (uma
+requisição) e só cair na varredura completa se falhar; cache por GVR em vez de
+slot único; aquecer discovery em background depois de shell-ready.
+
+**D2. Um erro de printer pode custar dois LIST upstream na mesma página.**
+`dynamic_views.go:36-61`: tenta Table, e em `IsNotAcceptable` ou
+`ErrTableUnsupported` repete via metadata client, perdendo todas as colunas.
+
+**D3. Custom está fora de quatro otimizações das telas default.**
+`topicForCollection` (`resources_backend.go:321-342`) e `collectionCacheTopic`
+(`internal/services/resources/collection_cache.go:314-333`) têm o mesmo switch
+de sete topics com `default: return "", false`, e `Topic` é enum fechado com
+mapa estático de GVR (`internal/services/resources/watch.go:41-55`). Logo,
+coleções `dynamic:*` não têm cache de página, não têm fast path de snapshot de
+watch, não têm WATCH/live updates e não têm stream preview — este último
+porque `DynamicResourcePage.tsx` não chama `useResourceStreamPreview`, que as
+páginas built-in chamam em `ResourcePages.tsx:323,457,697,813,955`. Resultado
+visível: a tabela custom fica vazia até o HTTP responder, enquanto as default
+já mostram linhas do stream. Caminho: a cobertura de topic dinâmico é mudança
+estrutural; o stream preview e o cache de página são separáveis e mais baratos.
+
+**D4. Custo por linha mais alto.** `dynamic_views.go:102-130` faz um
+`json.Unmarshal` por linha e duplica até 24 structs de coluna em cada linha. No
+cliente, `DynamicResourcePage.tsx:115-121` re-hasha a chave da coluna (FNV-1a,
+`web/src/navigation/dynamic.ts:19-24`) dentro de um `findIndex`, para cada
+célula, e de novo no `value()` das colunas numéricas.
+
+**D5. `/custom-resources` sem parâmetro tem um salto serial a mais**, porque
+`selected = views[0]` depende de `['preferences']`
+(`DynamicResourcePage.tsx:42-44`). Deep link não paga isso.
+
+**D6. O que custom não perde:** coalescing, scheduler de admissão, cursores,
+`GlobalGrantFastPath` (`list.go:106` não exclui CRD), metadata-only, página de
+100 linhas, 30 s/120 s de freshness e prefetch de próxima página — tudo pelo
+hook compartilhado `useInfiniteCollection`.
+
+## Ordem de trabalho proposta
+
+Cada item é verificável isoladamente. Nada aqui está implementado.
+
+Ordem revisada em 29/10/2026 depois de medir C1 e constatar que ele não serve
+ao objetivo de carregamento.
+
+O critério de ordenação é número de requisições Kubernetes removidas do
+caminho da primeira linha, porque numa tela de recurso essas requisições
+dominam parse de bundle e saltos locais por ordem de magnitude.
+
+| # | Item | Escopo | Requisições no caminho crítico |
+| --- | --- | --- | --- |
+| 0 | Baseline medida de `time_to_first_row`, default e custom, em cluster real | Medição | Nenhum ganho de carregamento é demonstrável sem isso |
+| 1 | ✅ Generalizar o LIST global em escopo para além de Pods | C0 | GVR único de N para 1 em quatro coleções; Workloads e Events ficaram fora |
+| 2 | ✅ Resolver alvo dinâmico por GVR antes da varredura completa de discovery | D1 | De 2+N group-versions para 1, antes de todo LIST custom frio |
+| 3 | ✅ Pré-compressão de assets e negociação no handler | A1 | Nenhuma; 491 kB para 127 kB de fio, só relevante no modo navegador |
+| 4 | ✅ Preload dos `woff2` primários | A2 | Nenhuma; duas etapas para uma no caminho do texto |
+| 5 | ✅ Disparar `import()` da seção em paralelo com os gates | B1 | Nenhuma; remove serialização local sem dependência de dado |
+| 6 | Stream preview para coleções dinâmicas | D3 | Nenhuma; antecipa percepção, não reduz trabalho |
+| 7 | Scope default no envelope de `/api/v1/status` | B2, B3 | Quatro saltos locais baratos; muda contrato de API |
+| 8 | Análise de bundle e extração do que não pinta do entry chunk | A3 | Nenhuma; precisa de medição de composição antes do corte |
+| 9 | Memoizar arrays de coluna e estabilizar `getRowKey` | C1, C4 | Nenhuma; 2,13 ms por re-render, interação e não carregamento |
+
+Itens 1, 2, 3, 4 e 5 preservam design system, usabilidade e funcionamento:
+nenhum altera componente, layout, DTO, semântica de paginação, fronteira de
+autorização ou geração. O item 7 altera contrato de API e o 6 altera
+estrutura; ambos exigem decisão registrada antes da implementação. O item 9 só
+se justifica com medição de responsividade em navegador real, que ainda não
+existe.
+
+Explicitamente fora da fila, com motivo: elevar QPS/Burst para 20/40, porque
+[protocolo e tuning](../reference/protocol-tuning.md) já avaliou e recusou por
+não provar segurança sob API Server compartilhado; e ligar `compression` por
+default, porque a mesma coleta mediu p95 3,9% pior em Kind local.
+
+## Passo 1 — LIST global em escopo generalizado
+
+Concluído em 29/10/2026.
+
+`globalScopeFilterEligible` (`resources_backend.go`) autoriza a estratégia
+para Pods, Services, Ingresses, EndpointSlices e ConfigMaps.
+`listGlobalPodPageInScope` virou `listGlobalPageInScope` e filtra por
+`resources.NamespacedListItem`, interface exportada com `ListNamespace()`
+implementada pelos sete DTOs namespaced, em vez de asserção de tipo para
+`PodDTO`. A assinatura de `collectFilteredResource` e dos 24 call sites não
+mudou.
+
+**Correção após revisão:** Workloads e Events foram retirados da lista. A
+primeira versão deste passo os incluía, e com isso a afirmação de que
+"Workloads vai de 6×N para 6" era o ganho principal anunciado. Ela não se
+sustentou, e o motivo de cada exclusão está em
+[Revisão](#revisão-e-correções). Em escopo explícito, Workloads e Events
+mantêm a fan-out por namespace.
+
+Exclusões e seus motivos:
+
+| Coleção | Por que fica fora |
+| --- | --- |
+| Secrets | Uma leitura cluster-wide ampliaria o alcance no recurso mais sensível |
+| Dinâmicas e CRD | API Server agregado não garante a ordenação namespace-major de que a parada antecipada depende |
+| Events | Ordenação default é `timestamp desc`, não `identity asc`; a varredura admite em ordem namespace-major |
+| Workloads | Multi-GVR: cai em `LazyMerge`, que re-entra no lister e desfaz o limite de varredura |
+
+A elegibilidade só é segura enquanto a coleção tem **uma** origem global, que
+é o que mantém a estratégia em `GlobalNative`, que chama o lister uma vez por
+janela. Isso agora é imposto estruturalmente: o ramo verifica
+`len(origins) == 1` antes de engajar e cai na fan-out caso contrário, e o teste
+de elegibilidade afirma a invariante em vez de confiar na lista.
+
+O limiar de largura de escopo que eu havia anunciado **não** foi adicionado, e
+a condição `len(resolution.Namespaces) > 1` permaneceu intacta. Três motivos:
+a varredura tem três saídas antecipadas e no caso típico gasta uma página, não
+cinco, então o custo não é fixo; o que determina o custo real é onde os
+namespaces do escopo caem na ordem de chaves do cluster e quão densos são, o
+que uma contagem de namespaces não modela e poderia desligar a otimização
+justamente onde ela ajuda; e
+`TestExplicitPodScopeUsesAuthorizedGlobalListAndFiltersOutsideNamespaces` exige
+deliberadamente que um escopo de dois namespaces use um LIST global, decisão já
+medida que não cabia reverter por estimativa. O over-fetch continua instrumentado
+por `observeList` (recebidos contra devolvidos), então o ajuste fica possível
+com dados.
+
+### Defeito pré-existente encontrado e corrigido
+
+Escrever o teste de Workloads revelou que `selectPaginationStrategy`
+(`pagination.go`) encaminhava qualquer conjunto de origens globais para
+`GlobalNative`, que valida exatamente uma origem. Uma coleção multi-GVR tem uma
+origem global por GVR, então **um escopo de todos os namespaces em Workloads
+falhava com `VALIDATION_FAILED: global pagination requires exactly one origin`**
+antes desta mudança, em `main`, sem teste cobrindo o caso. Origens globais
+múltiplas passam a usar `LazyMerge`, como o fan-out multi-GVR namespaced já
+fazia. A mudança só converte erro em resultado, portanto não há regressão
+possível de comportamento que funcionava.
+
+### Validação
+
+`go test ./...` com 36 pacotes aprovados; race detector aprovado em
+`internal/services/resources` e `internal/integration/kubernetesruntime`;
+`gofmt` e `go vet` limpos; `make lint` com zero erros. Quatro testes novos:
+uma LIST global por kind em vez de fan-out por namespace para Workloads, a
+política de elegibilidade por coleção, a seleção de estratégia para origens
+globais múltiplas, e a regressão de todos os namespaces em Workloads.
+
+Não medido: tempo de parede contra cluster real. A redução de requisições é
+verificável pelos testes e pela métrica de estratégia; milissegundos dependem
+da latência por requisição do cluster.
+
+## Passo 2 — Resolução dinâmica por group-version
+
+Concluído em 29/10/2026.
+
+`resolveDynamicResource` (`resource_discovery.go`) deixou de abrir com
+`DiscoverResources`. A ordem agora é: catálogo quente em memória, depois o
+group-version que a própria identidade do alvo nomeia, e só então a varredura
+completa como fallback. O código do caminho direto foi extraído para
+`resolveFromServedGroupVersion` e `servedGroupVersionPath`; o casamento com o
+catálogo virou `matchDiscoveredResource`. `resourceDiscoveryCache` ganhou
+`cached`, uma leitura que nunca dispara carga, e `DiscoverResources` passou a
+usá-la em vez de repetir a verificação de expiração.
+
+Custo de resolução antes de um LIST custom frio, por cenário:
+
+| Cenário | Antes | Depois |
+| --- | ---: | ---: |
+| Catálogo quente na seleção | 0 | 0 |
+| Catálogo frio, alvo servido | 2 + N group-versions | **1** |
+| Catálogo frio, alvo não servido | 2 + N, depois 1 | 1, depois 2 + N |
+
+O fallback é obrigatório e não foi removido: um group-version que não lista o
+alvo não prova que a API esteja ausente, porque um servidor agregado pode
+expô-la pela visão do catálogo. O erro devolvido continua sendo o do
+group-version do alvo, não o da varredura, para a mensagem seguir apontando a
+causa que o usuário pode agir.
+
+O risco anunciado se confirmou: o diálogo "Add custom resource" perde o
+aquecimento do catálogo como efeito colateral e passa a pagar a varredura
+completa com mais frequência. É ação explícita, com estado de carregamento
+próprio, e o teste de catálogo quente fixa que a enumeração continua
+acontecendo quando é ela que foi pedida.
+
+### Validação
+
+`go test ./...` com 36 pacotes aprovados; race detector aprovado em
+`internal/integration/kubernetesruntime`; `gofmt` e `go vet` limpos. Três
+testes novos, todos contando requisições HTTP reais contra um servidor de
+teste: LIST frio pede exatamente o group-version do alvo e zero caminhos de
+varredura; catálogo quente não gasta requisição nenhuma; alvo não servido
+ainda consulta a varredura antes de recusar com `FEATURE_UNAVAILABLE`.
+
+Não medido: tempo de parede contra cluster real. A contagem de requisições
+está provada por teste.
+
+## Passo 3 — Pré-compressão de assets
+
+Concluído em 29/10/2026.
+
+O build emite irmãos `.br` e `.gz` de cada asset de texto acima de 1 KiB, por
+um plugin em `web/vite.config.ts` que usa o `zlib` do Node em `generateBundle`
+com `order: 'post'`. Sem dependência nova e sem compressor em tempo de
+execução: o binário continua único e o handler só escolhe arquivo.
+
+`internal/web/handler.go` ganhou `serveEncoded`, que negocia por
+`Accept-Encoding` preferindo brotli, e `acceptsEncoding`, que trata `q=0` como
+recusa explícita em vez de casar só o token. `Vary: Accept-Encoding` é
+definido em toda resposta de asset, comprimida ou não, porque a mesma URL tem
+corpos diferentes por codificação e um cache que ignorasse isso entregaria
+brotli a quem não lê brotli.
+
+A armadilha confirmada antes da implementação foi evitada: `setAssetCache`
+continua recebendo o caminho **pedido**, não o do irmão. O regex
+`versionedAsset` não casa com `index-DUqVtkYy.js.br`, então derivar a política
+do arquivo escrito trocaria `immutable` por `no-cache` e destruiria em silêncio
+o cache de um ano que já funcionava.
+
+Irmãos comprimidos deixaram de ser endereçáveis: um pedido direto a `.br` ou
+`.gz` responde 404, porque servi-lo entregaria bytes comprimidos rotulados com
+o tipo do irmão e sem `Content-Encoding` para o cliente agir.
+
+### Medição física, servidor real sobre o dist real
+
+| Asset | Identidade | brotli | gzip |
+| --- | ---: | ---: | ---: |
+| `index-*.js` | 375.890 | 99.557 (−74%) | 115.742 |
+| `index-*.css` | 57.482 | 10.483 (−82%) | 11.763 |
+| **Carga eager total** | **491.351** | **127.030 (−75%)** | — |
+
+Round-trip verificado nos 38 assets comprimidos com o `zlib` do Node: zero
+divergências entre `brotliDecompress(.br)`, `gunzip(.gz)` e o byte original.
+No conjunto comprimível, 1.634.493 bytes viram 425.150.
+
+Custo aceito: os irmãos adicionam 914.717 bytes ao binário, porque o `go:embed`
+carrega as duas representações. Build do frontend passou de 469 ms para 2,21 s,
+por causa da qualidade máxima do brotli.
+
+Permanece válido o que eu disse antes de executar: **em desktop sobre loopback
+esse ganho é quase nulo**, porque a transferência local já é irrelevante e o
+custo restante é parse. O passo serve o modo navegador.
+
+### Validação
+
+`go test ./...` com 36 pacotes; race detector aprovado em `internal/web`;
+`gofmt`, `go vet` e `make lint` sem erros; `tsc -b` limpo; 54 arquivos e 325
+testes de frontend verdes. Testes novos cobrem preferência por brotli,
+fallback para gzip, identidade sem `Accept-Encoding`, recusa por `q=0`,
+preservação da política `immutable` e do `Content-Type` na resposta
+comprimida, `Vary` mesmo servindo identidade, asset sem irmão, e irmão
+inacessível diretamente.
+
+## Passo 4 — Preload das fontes do shell
+
+Concluído em 29/10/2026.
+
+Um segundo plugin em `web/vite.config.ts` injeta `<link rel="preload">` para
+as duas faces que o shell pinta, resolvendo o nome com hash a partir do bundle
+em `transformIndexHtml`. Antes, a descoberta da fonte exigia baixar o CSS de
+entrada, parseá-lo e só então buscar o arquivo: duas etapas seriais antes de o
+texto assentar na face final.
+
+Escolha das faces, verificada no código: `--font-sans` é Roboto em `:root` e
+`body` (`tokens.css:116`), logo latin-400 é a face de primeira pintura; o peso
+700 é `--text-title`, `--text-heading` e `--text-column` (`tokens.css:123-131`)
+mais `font-bold` na Sidebar e no cabeçalho do `DataTable`, logo também pinta no
+primeiro frame. `latin-ext` cobre caracteres que a interface, hoje só em
+inglês, raramente pinta. Roboto Mono pertence a YAML, logs e terminal, que são
+rotas lazy: preloadar qualquer um dos dois cobraria banda de quem nunca chega
+lá.
+
+Três detalhes que decidiram a forma final:
+
+- `crossorigin` é obrigatório. Um fetch de `@font-face` é sempre modo CORS; sem
+  o atributo o preload cai em outra entrada de cache e a fonte é baixada duas
+  vezes.
+- As tags são anexadas ao fim do `head`, não prefixadas. Prefixar colocava os
+  links antes de `<meta charset>`, e a declaração de charset precisa continuar
+  primeiro. O preload scanner tokeniza o `head` inteiro antes de buscar, então
+  a posição dentro dele não atrasa a fonte.
+- Nenhum subset foi removido do CSS de entrada. `styles.css:24` define
+  `font-synthesis: none`, então tirar o peso 700 renderizaria negrito em 400 em
+  vez de sintetizar: regressão visível no design system, não otimização.
+
+Se o `@fontsource` renomear um subset, o build **falha** com mensagem
+explícita, em vez de seguir sem o preload. Verificado trocando o padrão por um
+inexistente: `RolldownError: no emitted font matched ...: the shell font
+preload would be dropped`.
+
+### Validação
+
+Verificação física pelo handler real: o `index.html` servido contém exatamente
+dois preloads de fonte, ambos resolvem 200 com `Content-Type: font/woff2` e
+`public, max-age=31536000, immutable`. `go test ./...` com 36 pacotes;
+`make lint` sem erros; `tsc -b` limpo; 325 testes de frontend verdes.
+
+Não medido: ganho em milissegundos de primeira pintura em navegador real. O
+encurtamento do caminho de descoberta de duas etapas para uma é estrutural e
+verificável no HTML; o efeito percebido depende de rede e cache do cliente.
+
+## Passo 5 — Chunk da seção em paralelo com os gates
+
+Concluído em 29/10/2026.
+
+`web/src/navigation/sectionChunks.ts` mapeia cada rota ao módulo que ela vai
+montar, e `Shell` chama `warmSectionChunk(location.pathname)` num efeito
+disparado na montagem e em cada troca de rota. O efeito roda enquanto
+`DefaultScopeGate` e `globalNamespace.ready` ainda resolvem, então a espera do
+gate e o download do chunk passam a se sobrepor.
+
+Nada monta mais cedo: o gate continua impedindo que queries de recurso montem
+antes de o scope resolver, e o componente só aparece quando o `Outlet` é
+liberado. A mudança adianta só o download do código.
+
+O mapa ficou em `navigation/` e não em `App.tsx` por dois motivos: é onde
+`tree.tsx`, `paths.ts`, `customViews.ts` e `dynamic.ts` já vivem, e exportar
+uma função de `App.tsx` acionaria `react-refresh/only-export-components`.
+
+Ordem importa, porque o primeiro padrão que casa vence: `/workloads/custom` é
+visão dinâmica e não lista de workloads, e `/network/gateway-api` é página
+própria e não lista de rede. Ambos precedem o prefixo genérico que os
+capturaria.
+
+### Validação
+
+O risco concreto desta mudança era os especificadores de `navigation/`
+gerarem chunks diferentes dos de `App.tsx`, dobrando o download em vez de
+aquecer. Verificado comparando o bundle antes e depois: 45 chunks nos dois
+casos, lista idêntica, e cada chunk de seção aparece exatamente uma vez.
+
+43 casos novos de teste conferem o mapeamento rota a rota contra a tabela real
+de rotas, incluindo os dois casos que um prefixo genérico capturaria e um
+caminho fora da tabela, que não aquece nada. Um mapeamento errado é silencioso
+— a fronteira lazy importa o módulo certo de todo jeito — então o teste existe
+para que o erro não passe sem ser visto. Frontend em 55 arquivos e 368 testes;
+`go test ./...` com 36 pacotes; `make lint` sem erros; `tsc -b` limpo.
+
+Valor honesto: é o menor dos cinco passos. `ResourcePages` já era aquecido
+pós-pintura, então Pods, Workloads, Network, Config, Events e Nodes não ganham
+nada. O ganho fica em `FamilyPages`, `ConfigurationPages`, `AccessPages`,
+`GatewayPage`, `HelmPage` e `DynamicResourcePage`, uma vez por seção por
+sessão, e vale dezenas de milissegundos de leitura local mais parse. Não
+medido em navegador real.
+
+## Revisão e correções
+
+Revisão comportamental independente em 29/10/2026, depois dos cinco passos.
+Ela encontrou quatro defeitos que a implementação havia introduzido e dois
+problemas de honestidade de cobertura. Todos corrigidos; a lista completa fica
+no artefato de revisão, fora do Git.
+
+### Defeitos corrigidos
+
+**O limite de varredura não sobrevivia ao `LazyMerge`.** `globalScopeScanPages`
+limita a cinco páginas brutas **por chamada** do lister. Isso só limita a
+requisição enquanto a estratégia chama o lister uma vez por janela, o que vale
+para `GlobalNative`. O `LazyMerge`, usado por coleções multi-GVR, re-entra no
+lister a cada rodada enquanto qualquer origem avançou — e uma página que
+filtrou todas as linhas fora de escopo ainda conta como avanço. Um escopo
+esparso em cluster grande varreria sem limite de requisição até a janela de 30 s
+expirar, trocando "página mais lenta" por "requisição falha". Corrigido
+excluindo Workloads e impondo `len(origins) == 1` estruturalmente.
+
+**Events mudava a composição da primeira página.** Ordenação default de Events
+é `timestamp desc`, mas a varredura admite linhas em ordem namespace-major. A
+fan-out tirava um pedaço de cada namespace do escopo; a varredura preencheria a
+página a partir dos namespaces alfabeticamente primeiros, podendo não mostrar
+nada de nove de dez namespaces e deixar o evento mais recente arbitrariamente
+fundo no cursor. A tela ainda ordenaria por tempo o que mostrasse, então a
+mudança seria silenciosa. Corrigido excluindo Events.
+
+**`HEAD` em asset negociado perdia `Content-Length`.** `http.ServeContent` não
+define o cabeçalho quando `Content-Encoding` está presente, e um `HEAD` não
+escreve corpo para o `net/http` medir. Medido em servidor real: `HEAD` com
+brotli devolvia `-1` e identidade devolvia o tamanho. `httptest.NewRecorder`
+esconde isso, e foi por isso que os testes iniciais não pegaram. Corrigido
+definindo `Content-Length` a partir do irmão já lido em memória.
+
+**Deep link terminando em `.gz` ou `.br` devolvia 404.** O guard de irmão
+rodava antes de o caminho ser resolvido no filesystem, então aplicava a toda
+URL e não só a assets. Nome de objeto Kubernetes é DNS subdomain e pode
+terminar nesses sufixos, logo `/config/web/archive.tar.gz` deixava de alcançar
+o shell. Corrigido movendo o guard para dentro do ramo que já provou que o
+arquivo existe.
+
+### Honestidade de cobertura
+
+`list.go` reportava `CompletedNamespaces = RequestedNamespaces` quando
+**qualquer** origem global tinha sucesso autoritativo. Com uma origem global
+por GVR, um 403 ao vivo em Jobs renderizaria Deployments com rodapé alegando
+cobertura completa. Agora o override exige também que nada tenha falhado.
+
+Uma denegação por origem global registrava namespace `""` em
+`DeniedNamespaces`. Uma denegação que cobre todas as origens já curto-circuita
+em 403 antes de a cobertura ser montada, então a entrada vazia só poderia
+aparecer ao lado de um sucesso parcial, nomeando nada que o operador possa
+agir. Agora é suprimida.
+
+### Ajustes menores
+
+`.html` e `.map` saíram da regex de pré-compressão: `index.html` é servido por
+um handler que nunca negocia, então seus irmãos eram arquivos inalcançáveis
+embutidos no binário, e Go não tem entrada MIME para `.map`, o que faria
+`ServeContent` farejar os bytes comprimidos e rotular um sourcemap como gzip.
+`Accept-Encoding: *` passou a negociar em vez de cair para identidade.
+`Content-Type` agora é declarado a partir da extensão pedida.
+
+E uma correção de documentação: o teste de mapeamento de chunks afirmava
+derivar da tabela de rotas do `App`. Não deriva, é um espelho mantido à mão. O
+comentário passou a dizer isso.
+
+### Lacunas de teste fechadas
+
+A revisão nomeou doze ramos sem cobertura. Fechados em 29/10/2026, com
+`+2` arquivos e `+20` testes no frontend e três arquivos de teste Go ampliados:
+
+| Lacuna | Como ficou coberta |
+| --- | --- |
+| Honestidade de cobertura em `list.go` | `list_global_coverage_test.go`: resultado misto entre origens globais, com GVR negado e com GVR falhando na leitura ao vivo |
+| Ramo de falha da asserção `NamespacedListItem` | Varredura recebe `NodeDTO` e devolve erro de domínio em vez de panic ou linha perdida |
+| `EventDTO.ListNamespace` | Fixado no namespace do próprio Event contra `ObjectNamespace`, mais os sete DTOs e a garantia de que DTOs cluster-scoped **não** satisfazem a interface |
+| `servedGroupVersionPath` com grupo vazio | Teste unitário das três formas, mais verificação de que nenhum pedido sai sob `/apis//` |
+| Catálogo quente sem o alvo | Prova que o fallback é cache hit e a varredura não roda de novo |
+| Varredura multi-página em coleção real | Reactor que devolve `continue`, exercitando a parada antecipada através de `ListPods` |
+| Round-trip de cursor sobre origem global | Segunda página pelo cursor da primeira, preservando a origem global e o filtro de escopo |
+| `Range` em asset negociado | Servidor real: 206 sobre a representação comprimida, `Vary` presente, totais distintos por codificação |
+| Ramos dos plugins Vite | 17 testes: limiar de 1 KiB, exclusão de fonte/imagem/html/map, round-trip das duas codificações, conjunto exato de preload, e falha do build quando um subset é renomeado |
+| Ordenação de `warmSectionChunk` | Três testes provando que o chunk é pedido com o gate ainda fechado e que nenhuma tabela monta atrás dele |
+
+Os plugins saíram de `vite.config.ts` para `web/build/assetPlugins.ts` para
+ficarem testáveis, e o `include` do Vitest passou a cobrir `build/`. O bundle
+foi comparado antes e depois da extração: 139 arquivos nos dois casos, lista
+idêntica, 38 irmãos de cada codificação, dois preloads de fonte.
+
+Dois testes foram verificados contra o código antigo para provar que pegam a
+regressão: a correção de cobertura em `list.go` e o efeito de warm em
+`App.tsx`. Ambos falham quando a correção é revertida, com exatamente a saída
+errada que a revisão descreveu.
+
+### Custo conhecido que permanece
+
+Os irmãos comprimidos somam 914.717 bytes ao binário, e o runtime desktop
+**não os usa**: o Wails resolve assets do próprio FS embutido e só cai no
+handler Go quando há miss, então `serveEncoded` é inalcançável para requisição
+de asset no desktop. O peso é pago nas duas distribuições para beneficiar
+apenas o modo navegador.
+
+Nenhum dos dois caminhos emite validador: `serveEncoded` passa
+`time.Time{}` e o FS embutido tem modtime zero, então não há `Last-Modified`
+nem `ETag` e requisição condicional nunca produz 304. Isso vale igualmente
+antes e depois da mudança.
+
+### O que continua em aberto
+
+Três itens da revisão não foram fechados, e nenhum é lacuna de teste:
+
+O risco de re-entrada sem limite no `LazyMerge` não é testado porque deixou de
+ser alcançável: `globalScopeFilterEligible` só admite coleções de GVR único e o
+ramo exige `len(origins) == 1`. O teste de elegibilidade afirma essa invariante
+por coleção, o que cobre a causa em vez do sintoma.
+
+Deep link de detalhe ainda paga um salto serial pelo chunk
+`ResourceWorkspacePanel`, que é justamente o que o link quer. É melhoria
+pendente, não defeito.
+
+`sectionChunks.test.ts` continua sendo espelho mantido à mão da tabela de
+rotas, não derivação. O comentário diz isso, e re-apontar uma rota para outro
+módulo lazy mantém o teste verde enquanto o warm erra o alvo.
+
+E o que atravessa tudo desde o começo: não existe baseline de
+`time_to_first_row` em cluster real. Os cinco passos provam contagem de
+requisições e bytes de fio; nenhum prova milissegundos percebidos.
+
+## Restrições herdadas
+
+Compressão do cliente Kubernetes permanece desativada por default e QPS/Burst
+em 10/20, conforme [protocolo e tuning](../reference/protocol-tuning.md);
+nenhum item acima propõe mudar isso. Secrets seguem exclusivamente em metadata.
+A matriz responsiva de aceite (1366x768, 1440x900, 1920x1080, 2560x1440)
+continua valendo para qualquer mudança de layout de tabela.

@@ -38,6 +38,8 @@ type ServiceDTO struct {
 
 func (ServiceDTO) resourceListItem() {}
 
+func (dto ServiceDTO) ListNamespace() string { return dto.Namespace }
+
 type ServiceDetailDTO struct {
 	Metadata              ResourceMetadataDTO `json:"metadata"`
 	Summary               ServiceDTO          `json:"summary"`
@@ -132,6 +134,8 @@ type IngressDTO struct {
 
 func (IngressDTO) resourceListItem() {}
 
+func (dto IngressDTO) ListNamespace() string { return dto.Namespace }
+
 type IngressDetailDTO struct {
 	Metadata              ResourceMetadataDTO `json:"metadata"`
 	Summary               IngressDTO          `json:"summary"`
@@ -220,6 +224,8 @@ type EndpointSliceDTO struct {
 }
 
 func (EndpointSliceDTO) resourceListItem() {}
+
+func (dto EndpointSliceDTO) ListNamespace() string { return dto.Namespace }
 
 type EndpointSliceDetailDTO struct {
 	Metadata ResourceMetadataDTO `json:"metadata"`

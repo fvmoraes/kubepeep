@@ -32,6 +32,7 @@ import { useAppVersion } from './hooks/useAppVersion'
 import { navGroups, settingsNavItem } from './navigation/tree'
 import { resourceDetailPath } from './navigation/paths'
 import { customViewNavItems } from './navigation/customViews'
+import { warmSectionChunk } from './navigation/sectionChunks'
 import { desktopPlatform } from './api/desktop'
 import { recordShellReady } from './observability/uxMetrics'
 
@@ -242,6 +243,11 @@ function Shell() {
   const [compact, setCompact] = useState<boolean>(false)
   const [collapsedGroups, setCollapsedGroups] = useState<string[]>(() => navGroups.map((group) => group.id))
   const location = useLocation()
+  // Runs while the gates below are still resolving, so the chunk arrives
+  // before the Outlet is allowed to mount it.
+  useEffect(() => {
+    warmSectionChunk(location.pathname)
+  }, [location.pathname])
   const status = useQuery({
     queryKey: ['local-status'],
     queryFn: ({ signal }) => getStatus(signal),

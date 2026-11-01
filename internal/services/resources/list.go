@@ -282,11 +282,23 @@ func Collect[T ListItem](ctx context.Context, request CollectionRequest[T]) (_ L
 		return result, domainError(CodeClusterUnavailable, "The Kubernetes API could not complete the request.", nil)
 	}
 	for namespace := range deniedNamespaces {
+		// A cluster-wide origin has no namespace to report. A denial covering
+		// every origin short-circuits to 403 above before coverage is built,
+		// so an empty entry here could only appear beside a partial success,
+		// where it names nothing the operator can act on.
+		if namespace == "" {
+			continue
+		}
 		result.Coverage.DeniedNamespaces = append(result.Coverage.DeniedNamespaces, namespace)
 	}
 	sort.Strings(result.Coverage.DeniedNamespaces)
 	result.Coverage.CompletedNamespaces = len(completedNamespaces)
-	if globalOrigins(origins) && authoritativeSuccesses > 0 && request.RequestedNamespaces > 0 {
+	// A cluster-wide read covers every requested namespace, so it may report
+	// the requested count instead of the single empty-namespace origin it
+	// actually enumerated. It may only do so when nothing failed: with one
+	// global origin per GVR, a success on one kind must not report the whole
+	// scope complete while another kind was denied or unavailable.
+	if globalOrigins(origins) && authoritativeSuccesses > 0 && len(result.Coverage.Failed) == 0 && request.RequestedNamespaces > 0 {
 		result.Coverage.CompletedNamespaces = request.RequestedNamespaces
 	}
 	_, endMerge := observability.StartSpan(ctx, "resources.merge")

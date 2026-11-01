@@ -422,7 +422,7 @@ func TestExplicitPodScopeGlobalPageSkipsOutsideNamespacesAcrossNativeChunks(t *t
 		}
 		return resources.OriginPage[resources.PodDTO]{Origin: page.Origin, Items: []resources.PodDTO{{Namespace: "beta", Name: "b"}}, ResourceVersion: "rv"}, nil
 	}
-	page, err := listGlobalPodPageInScope(t.Context(), resources.PageRequest{Limit: 2}, lister, map[string]struct{}{"alpha": {}, "beta": {}})
+	page, err := listGlobalPageInScope(t.Context(), resources.PageRequest{Limit: 2}, lister, map[string]struct{}{"alpha": {}, "beta": {}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -437,7 +437,7 @@ func TestExplicitPodScopeGlobalPageDoesNotLookAheadBeforeLastNamespace(t *testin
 		calls++
 		return resources.OriginPage[resources.PodDTO]{Origin: page.Origin, Items: []resources.PodDTO{{Namespace: "alpha", Name: "a"}, {Namespace: "alpha", Name: "b"}}, Continue: "next", ResourceVersion: "rv"}, nil
 	}
-	page, err := listGlobalPodPageInScope(t.Context(), resources.PageRequest{Limit: 2}, lister, map[string]struct{}{"alpha": {}, "beta": {}})
+	page, err := listGlobalPageInScope(t.Context(), resources.PageRequest{Limit: 2}, lister, map[string]struct{}{"alpha": {}, "beta": {}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -455,12 +455,186 @@ func TestExplicitPodScopeGlobalPageClosesExactLimitWithoutEmptyCursorPage(t *tes
 		}
 		return resources.OriginPage[resources.PodDTO]{Origin: page.Origin, Items: []resources.PodDTO{{Namespace: "outside", Name: "hidden"}}, Continue: "later", ResourceVersion: "rv"}, nil
 	}
-	page, err := listGlobalPodPageInScope(t.Context(), resources.PageRequest{Limit: 2}, lister, map[string]struct{}{"alpha": {}})
+	page, err := listGlobalPageInScope(t.Context(), resources.PageRequest{Limit: 2}, lister, map[string]struct{}{"alpha": {}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(page.Items) != 2 || page.Continue != "" || calls != 2 {
 		t.Fatalf("page=%#v calls=%d", page, calls)
+	}
+}
+
+// A collection other than Pods must reach the namespace filter, so the filter
+// cannot silently depend on PodDTO. Services drive ServiceDTO.ListNamespace
+// through the whole strategy.
+func TestExplicitServiceScopeUsesOneGlobalListAndExcludesOutsideNamespaces(t *testing.T) {
+	client := kubefake.NewSimpleClientset(
+		&corev1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: "alpha", Name: "api"}, Spec: corev1.ServiceSpec{Type: corev1.ServiceTypeClusterIP}},
+		&corev1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: "beta", Name: "worker"}, Spec: corev1.ServiceSpec{Type: corev1.ServiceTypeClusterIP}},
+		&corev1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: "outside", Name: "hidden"}, Spec: corev1.ServiceSpec{Type: corev1.ServiceTypeClusterIP}},
+	)
+	requestNamespaces := []string{}
+	client.PrependReactor("list", "services", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		requestNamespaces = append(requestNamespaces, action.GetNamespace())
+		return false, nil, nil
+	})
+	backend := &ResourceBackend{clients: fixedResourceClientProvider{set: resourceClientSet{kubernetes: client}}, authorizer: &allowResourceAuthorization{}, now: time.Now}
+	result, err := backend.ListServices(
+		t.Context(),
+		namespaces.SelectionBinding{ClusterProfileID: 1, Context: "ctx", Generation: "gen"},
+		namespaces.ScopeResolution{ScopeName: "scope", Namespaces: []string{"alpha", "beta"}},
+		resources.ListOptions{Limit: 100},
+		nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(requestNamespaces) != 1 || requestNamespaces[0] != "" {
+		t.Fatalf("LIST namespaces=%#v, want one global LIST instead of per-namespace fan-out", requestNamespaces)
+	}
+	if len(result.Items) != 2 {
+		t.Fatalf("items=%#v, want only the two Services inside the scope", result.Items)
+	}
+	for _, item := range result.Items {
+		if item.Namespace == "outside" {
+			t.Fatalf("the namespace filter leaked a row outside the scope: %#v", item)
+		}
+	}
+	if result.Coverage.RequestedNamespaces != 2 || result.Coverage.CompletedNamespaces != 2 {
+		t.Fatalf("coverage=%#v, want both scope namespaces reported complete", result.Coverage)
+	}
+}
+
+// Workloads keep the per-namespace fan-out even though their rows are
+// namespaced and sorted by identity. GlobalOriginsFor yields one global origin
+// per kind, which selects LazyMerge, and LazyMerge re-enters the lister every
+// round while any origin advanced. The scan's five-page cap is per call, so a
+// sparse scope would scan with no request-level bound until the collection
+// window times out.
+func TestExplicitWorkloadScopeKeepsNamespaceFanoutBecauseTheScanBoundIsPerCall(t *testing.T) {
+	client := kubefake.NewSimpleClientset(
+		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Namespace: "alpha", Name: "api"}},
+		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Namespace: "beta", Name: "worker"}},
+	)
+	listed := []string{}
+	client.PrependReactor("list", "deployments", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		listed = append(listed, action.GetNamespace())
+		return false, nil, nil
+	})
+	backend := &ResourceBackend{clients: fixedResourceClientProvider{set: resourceClientSet{kubernetes: client}}, authorizer: &allowResourceAuthorization{}, now: time.Now}
+	if _, err := backend.ListWorkloads(
+		t.Context(),
+		namespaces.SelectionBinding{ClusterProfileID: 1, Context: "ctx", Generation: "gen"},
+		namespaces.ScopeResolution{ScopeName: "scope", Namespaces: []string{"alpha", "beta"}},
+		resources.ListOptions{Limit: 100, Kinds: []resources.WorkloadKind{resources.WorkloadDeployments, resources.WorkloadStatefulSets}},
+		nil,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) == 0 {
+		t.Fatal("no Deployment LIST was issued")
+	}
+	for _, namespace := range listed {
+		if namespace == "" {
+			t.Fatalf("Workloads used a cluster-wide LIST: %#v — the per-call scan bound does not survive LazyMerge", listed)
+		}
+	}
+}
+
+// Events keep the per-namespace fan-out: their default sort is timestamp
+// descending while the bounded scan admits rows in namespace-major order. A
+// scan would fill page one from the alphabetically-first namespaces, so the
+// newest event could sit arbitrarily deep in the cursor.
+func TestExplicitEventScopeKeepsNamespaceFanoutBecauseItSortsByTimestamp(t *testing.T) {
+	client := kubefake.NewSimpleClientset(
+		&corev1.Event{ObjectMeta: metav1.ObjectMeta{Namespace: "alpha", Name: "first"}},
+		&corev1.Event{ObjectMeta: metav1.ObjectMeta{Namespace: "beta", Name: "second"}},
+	)
+	listed := []string{}
+	client.PrependReactor("list", "events", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		listed = append(listed, action.GetNamespace())
+		return false, nil, nil
+	})
+	backend := &ResourceBackend{clients: fixedResourceClientProvider{set: resourceClientSet{kubernetes: client}}, authorizer: &allowResourceAuthorization{}, now: time.Now}
+	if _, err := backend.ListEvents(
+		t.Context(),
+		namespaces.SelectionBinding{ClusterProfileID: 1, Context: "ctx", Generation: "gen"},
+		namespaces.ScopeResolution{ScopeName: "scope", Namespaces: []string{"alpha", "beta"}},
+		resources.ListOptions{Limit: 100},
+		nil,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) == 0 {
+		t.Fatal("no Event LIST was issued")
+	}
+	for _, namespace := range listed {
+		if namespace == "" {
+			t.Fatalf("Events used a cluster-wide LIST: %#v — page one would stop sampling every namespace", listed)
+		}
+	}
+}
+
+// Regression: an all-namespaces scope over a multi-GVR collection produces one
+// global origin per kind. Native continuation is a single-origin contract, so
+// this used to fail the window with VALIDATION_FAILED instead of listing.
+func TestAllNamespacesScopeListsEveryWorkloadKindWithoutSingleOriginValidation(t *testing.T) {
+	client := kubefake.NewSimpleClientset(
+		&appsv1.Deployment{ObjectMeta: metav1.ObjectMeta{Namespace: "alpha", Name: "api"}},
+		&appsv1.StatefulSet{ObjectMeta: metav1.ObjectMeta{Namespace: "beta", Name: "db"}},
+	)
+	backend := &ResourceBackend{clients: fixedResourceClientProvider{set: resourceClientSet{kubernetes: client}}, authorizer: &allowResourceAuthorization{}, now: time.Now}
+	result, err := backend.ListWorkloads(
+		t.Context(),
+		namespaces.SelectionBinding{ClusterProfileID: 1, Context: "ctx", Generation: "gen"},
+		namespaces.ScopeResolution{ScopeName: "all", Namespaces: []string{"alpha", "beta"}, PreferGlobal: true},
+		resources.ListOptions{Limit: 100},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("all-namespaces workload list failed: %v", err)
+	}
+	if len(result.Items) != 2 {
+		t.Fatalf("items=%#v, want the Deployment and the StatefulSet", result.Items)
+	}
+}
+
+// The strategy is opt-in per collection and every exclusion has its own
+// reason: Secrets would widen a cluster-wide read on the most sensitive
+// resource; an aggregated API server owes dynamic and CRD collections no
+// namespace-major ordering; Events sort by timestamp rather than identity;
+// Workloads are multi-GVR and would lose the scan's request-level bound.
+//
+// Eligibility is only safe while a collection has exactly one global origin,
+// because that is what keeps the strategy on GlobalNative, which calls the
+// lister once per window. This asserts that invariant rather than trusting
+// the allowlist to stay correct.
+func TestGlobalScopeFilterEligibilityEncodesEveryExclusion(t *testing.T) {
+	t.Parallel()
+	for _, collection := range []resources.Collection{
+		resources.CollectionPods, resources.CollectionServices, resources.CollectionIngresses,
+		resources.CollectionEndpointSlices, resources.CollectionConfigMaps,
+	} {
+		if !globalScopeFilterEligible(collection) {
+			t.Fatalf("collection %q must be eligible for the global-in-scope strategy", collection)
+		}
+		origins, err := resources.GlobalOriginsFor(collection, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(origins) != 1 {
+			t.Fatalf("collection %q has %d global origins; the per-call scan bound would not hold", collection, len(origins))
+		}
+	}
+	for _, collection := range []resources.Collection{
+		resources.CollectionSecrets,
+		resources.CollectionEvents,
+		resources.CollectionWorkloads,
+		resources.Collection("dynamic:example.com:v1:widgets:n"),
+	} {
+		if globalScopeFilterEligible(collection) {
+			t.Fatalf("collection %q must keep namespace fan-out", collection)
+		}
 	}
 }
 
@@ -859,5 +1033,129 @@ func TestListNodesDeniedIsAuthoritativeNotEmpty(t *testing.T) {
 	_, err = backend.ListNodes(context.Background(), binding, namespaces.ScopeResolution{}, resources.ListOptions{Limit: 10}, nil)
 	if err != nil || len(client.Actions()) == 0 {
 		t.Fatalf("unknown review did not use real list: %v", err)
+	}
+}
+
+// globalScopeFilterEligible gates which collections reach the scan, so a row
+// without a namespace accessor is a wiring defect rather than input. It must
+// still surface as a domain error instead of a panic or a row dropped in
+// silence, because dropping rows would look like an empty namespace.
+func TestGlobalScopeScanRejectsRowsWithoutANamespaceAccessor(t *testing.T) {
+	t.Parallel()
+	lister := func(_ context.Context, page resources.PageRequest) (resources.OriginPage[resources.NodeDTO], error) {
+		return resources.OriginPage[resources.NodeDTO]{Origin: page.Origin, Items: []resources.NodeDTO{{Name: "worker-1"}}, ResourceVersion: "rv"}, nil
+	}
+	page, err := listGlobalPageInScope(t.Context(), resources.PageRequest{Limit: 10}, lister, map[string]struct{}{"alpha": {}})
+	if err == nil {
+		t.Fatalf("a row without ListNamespace was accepted: %#v", page)
+	}
+	if resources.ErrorCodeOf(err) != resources.CodeClusterUnavailable {
+		t.Fatalf("error code = %q, want a cluster-unavailable domain error", resources.ErrorCodeOf(err))
+	}
+	if len(page.Items) != 0 {
+		t.Fatalf("items leaked past the failed assertion: %#v", page.Items)
+	}
+}
+
+// The scan walks several raw pages and stops as soon as native namespace-major
+// order proves no later page can add an in-scope row. Driving it through a
+// real collection matters because kubefake never paginates, so the three
+// direct tests are the only place this behaviour is exercised end to end.
+func TestExplicitPodScopeGlobalScanStopsAfterPassingTheLastScopeNamespace(t *testing.T) {
+	client := kubefake.NewSimpleClientset()
+	pages := 0
+	client.PrependReactor("list", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		pages++
+		list := &corev1.PodList{}
+		switch pages {
+		case 1:
+			list.Items = []corev1.Pod{{ObjectMeta: metav1.ObjectMeta{Namespace: "alpha", Name: "api"}}}
+			list.Continue = "page-2"
+		case 2:
+			list.Items = []corev1.Pod{{ObjectMeta: metav1.ObjectMeta{Namespace: "beta", Name: "worker"}}}
+			list.Continue = "page-3"
+		default:
+			// Past "beta" in namespace-major order: the scan must never ask.
+			list.Items = []corev1.Pod{{ObjectMeta: metav1.ObjectMeta{Namespace: "zulu", Name: "unreachable"}}}
+			list.Continue = "page-4"
+		}
+		return true, list, nil
+	})
+	backend := &ResourceBackend{clients: fixedResourceClientProvider{set: resourceClientSet{kubernetes: client}}, authorizer: &allowResourceAuthorization{}, now: time.Now}
+	result, err := backend.ListPods(
+		t.Context(),
+		namespaces.SelectionBinding{ClusterProfileID: 1, Context: "ctx", Generation: "gen"},
+		namespaces.ScopeResolution{ScopeName: "scope", Namespaces: []string{"alpha", "beta"}},
+		resources.ListOptions{Limit: 100},
+		nil,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Items) != 2 {
+		t.Fatalf("items=%#v, want the Pods from alpha and beta", result.Items)
+	}
+	for _, item := range result.Items {
+		if item.Namespace == "zulu" {
+			t.Fatalf("the scan admitted a row past the last scope namespace: %#v", item)
+		}
+	}
+	// Page three is the one that proves the scan passed "beta"; a fourth would
+	// mean the early exit never fired and the bound was doing the stopping.
+	if pages > 3 {
+		t.Fatalf("raw pages scanned = %d, want the early exit to stop at the first page past the scope", pages)
+	}
+}
+
+// The cursor returned by a global-in-scope page must resume on the same global
+// origin and keep filtering to the scope. Nothing covered the second page, so
+// a cursor that silently changed origin identity would not have been noticed.
+func TestExplicitPodScopeGlobalCursorResumesOnTheSameGlobalOrigin(t *testing.T) {
+	client := kubefake.NewSimpleClientset(
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "alpha", Name: "api"}},
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "beta", Name: "worker"}},
+		&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "outside", Name: "hidden"}},
+	)
+	requestNamespaces := []string{}
+	client.PrependReactor("list", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		requestNamespaces = append(requestNamespaces, action.GetNamespace())
+		return false, nil, nil
+	})
+	backend := &ResourceBackend{clients: fixedResourceClientProvider{set: resourceClientSet{kubernetes: client}}, authorizer: &allowResourceAuthorization{}, now: time.Now}
+	binding := namespaces.SelectionBinding{ClusterProfileID: 1, Context: "ctx", Generation: "gen"}
+	resolution := namespaces.ScopeResolution{ScopeName: "scope", Namespaces: []string{"alpha", "beta"}}
+
+	first, err := backend.ListPods(t.Context(), binding, resolution, resources.ListOptions{Limit: 1}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Items) != 1 || first.Cursor == nil {
+		t.Fatalf("first page=%#v cursor=%#v, want one row and a resumable cursor", first.Items, first.Cursor)
+	}
+	if len(first.Cursor.Origins) != 1 || first.Cursor.Origins[0].Origin.Namespace != "" {
+		t.Fatalf("first cursor did not retain the global origin: %#v", first.Cursor)
+	}
+
+	second, err := backend.ListPods(t.Context(), binding, resolution, resources.ListOptions{Limit: 1}, first.Cursor)
+	if err != nil {
+		t.Fatalf("resuming the global cursor failed: %v", err)
+	}
+	if len(second.Cursor.Origins) != 1 || second.Cursor.Origins[0].Origin.Namespace != "" {
+		t.Fatalf("second cursor lost the global origin: %#v", second.Cursor)
+	}
+	for _, namespace := range requestNamespaces {
+		if namespace != "" {
+			t.Fatalf("resuming fell back to a namespaced LIST: %#v", requestNamespaces)
+		}
+	}
+	seen := map[string]bool{}
+	for _, item := range append(append([]resources.PodDTO{}, first.Items...), second.Items...) {
+		if item.Namespace == "outside" {
+			t.Fatalf("a resumed page leaked a Pod outside the scope: %#v", item)
+		}
+		seen[item.Namespace+"/"+item.Name] = true
+	}
+	if !seen["alpha/api"] {
+		t.Fatalf("the first in-scope Pod never appeared across both pages: %#v", seen)
 	}
 }

@@ -122,6 +122,17 @@ type PageDTO struct {
 type ListItem interface{ resourceListItem() }
 type DetailItem interface{ resourceDetailItem() }
 
+// NamespacedListItem exposes the row's own namespace so a cluster-wide LIST
+// can be filtered back to an explicit scope without the caller knowing the
+// concrete DTO. Only namespaced collections implement it; cluster-scoped DTOs
+// deliberately do not, which keeps the global-in-scope strategy unavailable to
+// them. The accessor is exported because adapters outside this package apply
+// the filter, while ListItem itself stays sealed.
+type NamespacedListItem interface {
+	ListItem
+	ListNamespace() string
+}
+
 type ListResult[T ListItem] struct {
 	Items       []T
 	Cursor      *CompositeCursor[T]

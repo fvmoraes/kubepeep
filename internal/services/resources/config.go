@@ -22,6 +22,8 @@ type ConfigMapListDTO struct {
 
 func (ConfigMapListDTO) resourceListItem() {}
 
+func (dto ConfigMapListDTO) ListNamespace() string { return dto.Namespace }
+
 type ConfigMapEntryDTO struct {
 	Key       string `json:"key"`
 	Field     string `json:"field"`
